@@ -1,0 +1,29 @@
+{
+  "name": "shap",
+  "private": true,
+  "version": "0.1.0",
+  "description": "FOSS job, labour, quoting, invoicing and bookkeeping for small South African contractors.",
+  "license": "AGPL-3.0-or-later",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,magenta \"npm -w @shap/server run dev\" \"npm -w @shap/web run dev\"",
+    "build": "npm -w @shap/web run build && npm -w @shap/server run build",
+    "start": "npm -w @shap/server run start",
+    "db:migrate": "npm -w @shap/server run db:migrate",
+    "db:seed": "npm -w @shap/server run db:seed --",
+    "import": "npm -w @shap/server run import --",
+    "test": "npm -w @shap/server run test",
+    "typecheck": "npm -w @shap/shared run typecheck && npm -w @shap/server run typecheck && npm -w @shap/web run typecheck",
+    "create-owner": "npm -w @shap/server run create-owner --"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

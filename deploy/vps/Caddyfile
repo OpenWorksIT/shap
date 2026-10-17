@@ -1,0 +1,24 @@
+# Shap on the VPS: automatic HTTPS for one hostname (e.g. shap.openworks.co.za).
+# SPDX-License-Identifier: AGPL-3.0-or-later
+{$SHAP_DOMAIN} {
+	encode gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "geolocation=(), microphone=(), payment=(), usb=()"
+		-Server
+	}
+	# Tracker uploads can be a few megabytes.
+	request_body {
+		max_size 40MB
+	}
+	reverse_proxy app:8080
+
+	handle_errors {
+		@down expression {err.status_code} in [502, 503, 504]
+		handle @down {
+			respond "Shap is restarting. Please try again in a minute." 503
+		}
+	}
+}

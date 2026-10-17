@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+*.log
+coverage/
+.DS_Store
+# Never commit a real tracker or exports: they hold the company's figures.
+*.xlsx
+*.csv
+deploy/test/.env
+deploy/vps/.env

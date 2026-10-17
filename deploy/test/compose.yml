@@ -1,0 +1,74 @@
+# Shap test stack for a PC: database, app and a Cloudflare tunnel so your phone can reach it.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Use ./start.sh rather than running this directly; it creates the keys and the demo company.
+#
+#   phone / other PC ──https──> Cloudflare ──tunnel──> app:8080 (API + web app) ──> db
+#
+# Runs next to Steady's and Sorted's test stacks: separate project name, network and ports.
+
+name: shap-test
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: shap
+      POSTGRES_DB: shap
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run ./start.sh to create .env}
+      TZ: Africa/Johannesburg
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U shap']
+      interval: 5s
+      retries: 20
+
+  app:
+    build: ../..
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://shap:${POSTGRES_PASSWORD}@db:5432/shap
+      SECRETS_KEY: ${SECRETS_KEY}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8280}
+      MFA_REQUIRED: ${MFA_REQUIRED:-false}
+      SESSION_TTL_HOURS: '720'
+      # Cloudflare terminates HTTPS and passes the visitor's address along.
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      TRUST_PROXY: 'true'
+      DEMO: ${DEMO:-true}
+      DEMO_PASSWORD: ${DEMO_PASSWORD}
+      SMTP_URL: ${SMTP_URL:-}
+      TZ: Africa/Johannesburg
+    # The fictional demo company loads on first start (the seed refuses once anyone can sign in).
+    command: >
+      sh -c "if [ \"$$DEMO\" = true ]; then node apps/server/dist/db/seed.js --i-know-this-is-demo-data >/dev/null 2>&1 || true; fi;
+             exec node apps/server/dist/main.js"
+    ports:
+      - '127.0.0.1:${LOCAL_PORT:-8280}:8080'
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Named tunnel: a fixed address on your own domain. Needs TUNNEL_TOKEN.
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    depends_on: [app]
+    profiles: [named]
+
+  # Quick tunnel: random trycloudflare.com address, no account, new address each start.
+  quicktunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://app:8080
+    depends_on: [app]
+    profiles: [quick]
+
+volumes:
+  db_data:

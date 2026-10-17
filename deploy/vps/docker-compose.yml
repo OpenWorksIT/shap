@@ -1,0 +1,62 @@
+# Shap on a South African VPS. Your PC and phone reach it over HTTPS.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+#   cp .env.example .env && nano .env
+#   docker compose up -d --build
+#   docker compose exec app node apps/server/dist/db/create-owner.js --email you@company.co.za --name "Your Name" --company "Company (Pty) Ltd"
+#
+#   internet ──https──> caddy ──> app:8080 ──> db (never exposed)
+
+name: shap
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: shap
+      POSTGRES_DB: shap
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      TZ: Africa/Johannesburg
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U shap']
+      interval: 10s
+      retries: 10
+
+  app:
+    build: ../..
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://shap:${POSTGRES_PASSWORD}@db:5432/shap
+      PUBLIC_URL: https://${SHAP_DOMAIN}
+      COOKIE_SECURE: 'true'
+      TRUST_PROXY: 'true'
+      MFA_REQUIRED: ${MFA_REQUIRED:-true}
+      TZ: Africa/Johannesburg
+    expose:
+      - '8080'
+    depends_on:
+      db:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      SHAP_DOMAIN: ${SHAP_DOMAIN:?set SHAP_DOMAIN in .env}
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      - app
+
+volumes:
+  db_data:
+  caddy_data:

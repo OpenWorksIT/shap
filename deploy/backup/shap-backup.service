@@ -1,0 +1,10 @@
+[Unit]
+Description=Shap database backup (restic)
+After=docker.service
+
+[Service]
+Type=oneshot
+Environment=RESTIC_REPOSITORY=
+Environment=RESTIC_PASSWORD_FILE=/root/.restic-password
+Environment=COMPOSE_DIR=/opt/shap/deploy/vps
+ExecStart=/opt/shap/deploy/backup/backup.sh
