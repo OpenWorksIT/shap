@@ -4,15 +4,18 @@ import { PROJECT_STATUS_LABELS, PROJECT_STATUSES, type ProjectStatus } from '@sh
 import { api, ApiError } from '../lib/api';
 import { useApi } from '../lib/hooks';
 import type { ClientRow, ProjectRow } from '../lib/types';
+import { BrandSelect, useHasBrands } from './Pickers';
 import { Drawer, Field, MoneyInput, useToast } from './ui';
 
 export function ProjectDrawer({ project, onClose, onSaved }: { project?: ProjectRow; onClose: () => void; onSaved?: () => void }) {
   const toast = useToast();
   const navigate = useNavigate();
   const clients = useApi<ClientRow[]>('/api/clients');
+  const hasBrands = useHasBrands();
   const [f, setF] = useState({
     name: project?.name ?? '',
     clientId: project?.clientId ?? null,
+    brandId: project?.brandId ?? null,
     status: (project?.status ?? 'active') as ProjectStatus,
     siteAddress: project?.siteAddress ?? '',
     startDate: project?.startDate ?? null,
@@ -75,6 +78,11 @@ export function ProjectDrawer({ project, onClose, onSaved }: { project?: Project
           )}
         </Field>
         {f.clientId === 'new' && <Field label="New client’s name">{(p) => <input {...p} className="input" value={newClient} onChange={(e) => setNewClient(e.target.value)} />}</Field>}
+        {hasBrands && (
+          <Field label="Trading as" hint="The name and logo on this job’s quotes and invoices">
+            {(p) => <BrandSelect {...p} value={f.brandId} onChange={(v) => set('brandId', v)} emptyLabel="The client’s usual (or the default)" />}
+          </Field>
+        )}
         <div className="form-grid">
           <Field label="Status">
             {(p) => (

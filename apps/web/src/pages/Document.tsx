@@ -14,7 +14,7 @@ import {
   type LineCategory,
   type PaymentMethod,
 } from '@shap/shared';
-import { ProjectSelect } from '../components/Pickers';
+import { BrandSelect, ProjectSelect, useHasBrands } from '../components/Pickers';
 import { PageHead } from '../components/Shell';
 import { DocChip, Drawer, ErrorBox, Field, Icon, Loading, Money, MoneyInput, useToast } from '../components/ui';
 import { api, ApiError, apiUrl } from '../lib/api';
@@ -26,6 +26,7 @@ import type { ClientRow, DocDetail, DocLine, ProjectRow } from '../lib/types';
 interface Draft {
   projectId: string | null;
   clientId: string | null;
+  brandId: string | null;
   issueDate: string;
   dueDate: string | null;
   title: string;
@@ -53,6 +54,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
   const toast = useToast();
   const navigate = useNavigate();
   const clients = useApi<ClientRow[]>(isOwner ? '/api/clients' : null);
+  const hasBrands = useHasBrands();
   const doc = detail?.doc;
   const editable = isOwner && doc?.status !== 'void';
   const today = todayIso();
@@ -60,6 +62,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
   const initial = (): Draft => ({
     projectId: doc?.projectId ?? projectFromUrl ?? null,
     clientId: doc?.clientId ?? null,
+    brandId: doc?.brandId ?? null,
     issueDate: doc?.issueDate ?? today,
     dueDate: doc?.dueDate ?? addDays(today, kind === 'invoice' ? settings.paymentDays : settings.quoteValidDays),
     title: doc?.title ?? '',
@@ -80,7 +83,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
   useEffect(() => {
     const p = project.data?.project;
     if (!p) return;
-    setD((x) => ({ ...x, clientId: x.clientId ?? p.clientId, title: x.title || p.name }));
+    setD((x) => ({ ...x, clientId: x.clientId ?? p.clientId, brandId: x.brandId ?? p.brandId, title: x.title || p.name }));
   }, [project.data]);
 
   const vatRate = doc ? doc.vatRateBp : settings.vatRegistered ? settings.vatRateBp : 0;
@@ -105,6 +108,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
   const body = () => ({
     projectId: d.projectId,
     clientId: d.clientId,
+    brandId: d.brandId,
     issueDate: d.issueDate,
     dueDate: d.dueDate,
     title: d.title,
@@ -169,6 +173,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
           doc && (
             <span className="row wrap" style={{ gap: 8 }}>
               <DocChip status={doc.status} paymentState={doc.paymentState} />
+              {hasBrands && doc.brandName && <span className="chip">{doc.brandName}</span>}
               {doc.clientName && <span>{doc.clientName}</span>}
               {doc.projectId && (
                 <Link to={`/jobs/${doc.projectId}`}>
@@ -210,7 +215,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
         <div className="stack-lg">
           <section className="panel panel-pad stack">
             <div className="form-grid">
-              <Field label="Job">{(p) => <ProjectSelect {...p} value={d.projectId} onChange={(v) => (set('projectId', v), v && set('clientId', null))} emptyLabel="Not for a job" />}</Field>
+              <Field label="Job">{(p) => <ProjectSelect {...p} value={d.projectId} onChange={(v) => (set('projectId', v), v && (set('clientId', null), set('brandId', null)))} emptyLabel="Not for a job" />}</Field>
               <Field label="Client">
                 {(p) => (
                   <select {...p} className="select" value={d.clientId ?? ''} onChange={(e) => set('clientId', e.target.value || null)} disabled={!editable}>
@@ -223,6 +228,9 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
                   </select>
                 )}
               </Field>
+              {hasBrands && (
+                <Field label="Trading as">{(p) => <BrandSelect {...p} value={d.brandId} onChange={(v) => set('brandId', v)} emptyLabel="The usual for this job or client" disabled={!editable} />}</Field>
+              )}
             </div>
             <div className="form-grid">
               <Field label={kind === 'invoice' ? 'Invoice date' : 'Quote date'}>{(p) => <input {...p} className="input" type="date" value={d.issueDate} onChange={(e) => set('issueDate', e.target.value)} disabled={!editable} />}</Field>

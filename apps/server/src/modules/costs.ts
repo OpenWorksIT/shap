@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { costInput, vatIncluded } from '@shap/shared';
+import { assignSourceInput, costInput, vatIncluded } from '@shap/shared';
 import { z } from 'zod';
 import { requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -21,12 +21,13 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
     return sql`
       select c.*, k.name as category_name, k.kind as category_kind, src.name as source_name,
         p.name as project_name, p.number as project_number, a.id as asset_id
-      from costs c join cost_categories k on k.id = c.category_id join payment_sources src on src.id = c.source_id
+      from costs c join cost_categories k on k.id = c.category_id left join payment_sources src on src.id = c.source_id
       left join projects p on p.id = c.project_id left join assets a on a.cost_id = c.id
       where (${f}::date is null or c.date >= ${f}::date) and (${t}::date is null or c.date <= ${t}::date)
         and (${category ?? null}::uuid is null or c.category_id = ${category ?? null}::uuid)
         and (${project ?? null}::uuid is null or c.project_id = ${project ?? null}::uuid)
-        and (${source ?? null}::uuid is null or c.source_id = ${source ?? null}::uuid)
+        and (${source && source !== 'none' ? source : null}::uuid is null or c.source_id = ${source && source !== 'none' ? source : null}::uuid)
+        and (${source === 'none'} = false or c.source_id is null)
         and (${kind ?? null}::text is null or k.kind = ${kind ?? null}::text)
         and (${kind === 'materials-unallocated'} = false or (k.kind = 'materials' and c.project_id is null))
         and (${s}::text is null or c.description ilike '%' || ${s} || '%' or c.supplier ilike '%' || ${s} || '%')
@@ -92,6 +93,17 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
       await audit(tx, { userId: user.id, action: 'delete', entity: 'cost', entityId: id, ip: req.ip });
     });
     return { ok: true };
+  });
+
+  /** Say which account or card paid a batch of costs that weren't captured yet. */
+  app.post('/api/costs/assign-source', { preHandler: requireRole('owner') }, async (req) => {
+    const user = userOrThrow(req);
+    const input = parse(assignSourceInput, req.body);
+    const dates = await sql<{ date: string }[]>`select date from costs where id = any(${input.ids}::uuid[])`;
+    await assertOpen(sql, ...dates.map((d) => d.date));
+    const res = await sql`update costs set source_id = ${input.sourceId} where id = any(${input.ids}::uuid[])`;
+    await audit(sql, { userId: user.id, action: 'assign_source', entity: 'cost', ip: req.ip, details: { count: res.count, sourceId: input.sourceId } });
+    return { updated: res.count };
   });
 
   /** Helper for the phone: the VAT inside an amount at the company's rate. */

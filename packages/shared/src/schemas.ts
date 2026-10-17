@@ -61,6 +61,7 @@ export const settingsInput = z.object({
   defaultReceiptSourceId: optionalUuid,
   defaultWageSourceId: optionalUuid,
   defaultCostSourceId: optionalUuid,
+  defaultBrandId: optionalUuid,
   lockDate: isoDate.nullable().optional(),
   markupBp: z.number().int().min(0).max(100000).default(0),
 });
@@ -76,6 +77,7 @@ export const clientInput = z.object({
   vatNumber: text(30).default(''),
   notes: text(2000).default(''),
   active: z.boolean().default(true),
+  brandId: optionalUuid,
 });
 
 export const projectInput = z.object({
@@ -89,6 +91,7 @@ export const projectInput = z.object({
   estMaterialsCents: positiveCents.default(0),
   estDemoCents: positiveCents.default(0),
   notes: text(4000).default(''),
+  brandId: optionalUuid,
 });
 
 export const workerInput = z.object({
@@ -158,7 +161,8 @@ export const costInput = z.object({
   vatCents: cents.default(0),
   supplier: text(120).default(''),
   categoryId: uuid,
-  sourceId: uuid,
+  /** null = not captured yet: you'll say later which account or card paid it. */
+  sourceId: uuid.nullable(),
   projectId: optionalUuid,
   note: text(1000).default(''),
   receiptId: optionalUuid,
@@ -190,6 +194,7 @@ export const documentLineInput = z.object({
 });
 
 export const documentInput = z.object({
+  brandId: optionalUuid,
   projectId: optionalUuid,
   clientId: optionalUuid,
   issueDate: isoDate,
@@ -274,4 +279,50 @@ export const balanceCheckInput = z.object({
   date: isoDate,
   statementBalanceCents: cents,
   note: text(300).default(''),
+});
+
+export const brandInput = z.object({
+  name: text(80).min(1, 'Give the trading name'),
+  legalLine: text(200).default(''),
+  email: z.string().trim().max(150).default(''),
+  phone: text(40).default(''),
+  website: text(120).default(''),
+  address: text(400).default(''),
+  bankDetails: text(600).default(''),
+  accent: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Use a colour like #e8731c').default('#e8731c'),
+  active: z.boolean().default(true),
+});
+
+export const assignSourceInput = z.object({
+  ids: z.array(uuid).min(1).max(5000),
+  sourceId: uuid,
+});
+
+/** Accountant's figures for a closed year: natural signs (income, liabilities and equity positive). */
+export const yearEndInput = z.object({
+  fyEnd: isoDate,
+  note: text(500).default(''),
+  lock: z.boolean().default(true),
+  figures: z.array(z.object({ accountId: uuid, amountCents: cents })).max(500),
+});
+
+export const taxEstimateInput = z.object({
+  fyEnd: isoDate,
+  period: z.number().int().min(1).max(3),
+  asAt: isoDate,
+  note: text(1000).default(''),
+  lines: z
+    .array(
+      z.object({
+        accountId: uuid.nullable(),
+        name: text(120),
+        type: z.enum(['income', 'cost_of_sales', 'expense']),
+        actualCents: cents,
+        projectedCents: cents,
+      }),
+    )
+    .max(300),
+  assessedLossCents: positiveCents.default(0),
+  paidCents: positiveCents.default(0),
+  sbc: z.boolean().default(true),
 });

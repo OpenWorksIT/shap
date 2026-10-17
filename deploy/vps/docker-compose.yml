@@ -6,6 +6,9 @@
 #   docker compose exec app node apps/server/dist/db/create-owner.js --email you@company.co.za --name "Your Name" --company "Company (Pty) Ltd"
 #
 #   internet ──https──> caddy ──> app:8080 ──> db (never exposed)
+#
+# More companies on the same VPS (a friend's business, say): ./add-company.sh friend shap.friend.co.za
+# Each gets its own database, login, keys and address; Postgres and Caddy are shared.
 
 name: shap
 
@@ -27,6 +30,7 @@ services:
 
   app:
     build: ../..
+    image: shap-app:local
     restart: unless-stopped
     env_file: .env
     environment:
@@ -53,6 +57,7 @@ services:
       - '443:443'
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./sites:/etc/caddy/sites:ro
       - caddy_data:/data
     depends_on:
       - app

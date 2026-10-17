@@ -428,7 +428,7 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
     const name = `${what}-${f}-to-${t}.csv`;
     if (what === 'costs') {
       const rows = await sql`select c.date, c.description, c.supplier, k.name as category, s.name as source, p.number, p.name as project, c.amount_cents, c.vat_cents, c.note
-        from costs c join cost_categories k on k.id = c.category_id join payment_sources s on s.id = c.source_id left join projects p on p.id = c.project_id
+        from costs c join cost_categories k on k.id = c.category_id left join payment_sources s on s.id = c.source_id left join projects p on p.id = c.project_id
         where c.date between ${f}::date and ${t}::date order by c.date`;
       return sendCsv(reply, name, toCsv(['Date', 'Description', 'Supplier', 'Category', 'Paid from', 'Job no.', 'Job', 'Amount', 'VAT', 'Note'],
         rows.map((r) => [r.date, r.description, r.supplier, r.category, r.source, r.number, r.project, centsToCsv(r.amountCents), centsToCsv(r.vatCents), r.note])));

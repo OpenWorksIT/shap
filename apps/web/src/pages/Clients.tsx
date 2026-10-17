@@ -1,6 +1,7 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { formatDate, formatPercent } from '@shap/shared';
+import { BrandSelect, useHasBrands } from '../components/Pickers';
 import { PageHead } from '../components/Shell';
 import { DocChip, Drawer, Empty, ErrorBox, Field, Icon, Kpi, Loading, Money, ProjectChip, useToast } from '../components/ui';
 import { api, ApiError } from '../lib/api';
@@ -197,9 +198,11 @@ function ClientDrawer({ client, onClose, onSaved }: { client?: ClientRow; onClos
     vatNumber: client?.vatNumber ?? '',
     notes: client?.notes ?? '',
     active: client?.active ?? true,
+    brandId: client?.brandId ?? null,
   });
+  const hasBrands = useHasBrands();
   const [error, setError] = useState('');
-  const set = (k: keyof typeof f, v: string | boolean) => setF((x) => ({ ...x, [k]: v }));
+  const set = (k: keyof typeof f, v: string | boolean | null) => setF((x) => ({ ...x, [k]: v }));
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     try {
@@ -226,6 +229,11 @@ function ClientDrawer({ client, onClose, onSaved }: { client?: ClientRow; onClos
         <Field label="Email (invoices go here)">{(p) => <input {...p} className="input" type="email" value={f.email} onChange={(e) => set('email', e.target.value)} />}</Field>
         <Field label="Address">{(p) => <textarea {...p} className="textarea" rows={3} value={f.address} onChange={(e) => set('address', e.target.value)} />}</Field>
         <Field label="VAT number">{(p) => <input {...p} className="input" value={f.vatNumber} onChange={(e) => set('vatNumber', e.target.value)} />}</Field>
+        {hasBrands && (
+          <Field label="Usually trading as" hint="New jobs and documents for this client use it unless the job says otherwise">
+            {(p) => <BrandSelect {...p} value={f.brandId} onChange={(v) => set('brandId', v)} emptyLabel="The default" />}
+          </Field>
+        )}
         <Field label="Notes">{(p) => <textarea {...p} className="textarea" rows={2} value={f.notes} onChange={(e) => set('notes', e.target.value)} />}</Field>
         {error && <div className="banner alert small">{error}</div>}
         <button className="btn primary big block">Save</button>
@@ -234,39 +242,174 @@ function ClientDrawer({ client, onClose, onSaved }: { client?: ClientRow; onClos
   );
 }
 
+interface CsvRow {
+  index: number;
+  name: string;
+  contact: string;
+  email: string;
+  phone: string;
+  address: string;
+  vatNumber: string;
+  ref: string;
+  suggestion: { clientId: string; reason: string; score: number } | null;
+}
+interface CsvPreview {
+  rows: CsvRow[];
+  clients: { id: string; code: string | null; name: string; projects: string[] }[];
+  jobsWithoutClient: { id: string; name: string; suggestedRow: number | null }[];
+}
+
+/**
+ * Two steps: read the CSV and suggest which client each row is (tracker clients are named by
+ * code, so the clues are the code, the job names and the street address), then let the owner
+ * confirm or change each one before anything is written.
+ */
 function ImportClients({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const upload = async (file: File | undefined) => {
+  const [csv, setCsv] = useState('');
+  const [preview, setPreview] = useState<CsvPreview | null>(null);
+  const [matches, setMatches] = useState<Record<string, string>>({});
+  const [jobs, setJobs] = useState<Record<string, string>>({});
+
+  const read = async (file: File | undefined) => {
     if (!file) return;
     setBusy(true);
     setError('');
     try {
-      const r = await api<{ updated: number; added: number }>('/api/clients/import-csv', { body: { csv: await file.text() } });
-      toast(`${r.updated} clients updated, ${r.added} added`);
-      onDone();
-      onClose();
+      const text = await file.text();
+      const r = await api<CsvPreview>('/api/clients/import-csv/preview', { body: { csv: text } });
+      setCsv(text);
+      setPreview(r);
+      setMatches(Object.fromEntries(r.rows.map((x) => [String(x.index), x.suggestion?.clientId ?? 'new'])));
+      setJobs(Object.fromEntries(r.jobsWithoutClient.filter((j) => j.suggestedRow != null).map((j) => [j.id, String(j.suggestedRow)])));
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Couldn’t import that file');
+      setError(err instanceof ApiError ? err.message : 'Couldn’t read that file');
     } finally {
       setBusy(false);
     }
   };
+  const apply = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const jobMap = Object.fromEntries(Object.entries(jobs).filter(([, v]) => v !== '').map(([k, v]) => [k, Number(v)]));
+      const r = await api<{ updated: number; added: number; linked: number }>('/api/clients/import-csv', { body: { csv, matches, jobs: jobMap } });
+      toast(`${r.updated} updated, ${r.added} added${r.linked ? `, ${r.linked} jobs linked` : ''}`);
+      onDone();
+      onClose();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Couldn’t import');
+    } finally {
+      setBusy(false);
+    }
+  };
+  // A client can only be matched once.
+  const usedBy = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const [row, id] of Object.entries(matches)) if (id !== 'new' && id !== 'skip') m.set(id, row);
+    return m;
+  }, [matches]);
+
+  if (!preview)
+    return (
+      <Drawer title="Import client details" onClose={onClose}>
+        <div className="stack">
+          <p className="small">
+            In Invoice Ninja, open <strong>Clients</strong>, choose <strong>Export</strong> and save the CSV. Shap suggests which of your clients each row is
+            (from the code, the job names and the street address), and you check the list before anything changes. Any CSV with a “Name” column works.
+          </p>
+          <label className="btn primary big block">
+            <Icon name="upload" size={18} />
+            {busy ? 'Reading…' : 'Choose the CSV file'}
+            <input type="file" accept=".csv,text/csv" hidden onChange={(e) => void read(e.target.files?.[0])} disabled={busy} />
+          </label>
+          {error && <div className="banner alert small">{error}</div>}
+        </div>
+      </Drawer>
+    );
+
+  const counts = Object.values(matches).reduce(
+    (a, v) => (v === 'new' ? { ...a, added: a.added + 1 } : v === 'skip' ? a : { ...a, updated: a.updated + 1 }),
+    { updated: 0, added: 0 },
+  );
+  const rowLabel = (i: number) => preview.rows.find((r) => r.index === i)?.name ?? `Row ${i + 1}`;
   return (
-    <Drawer title="Import client details" onClose={onClose}>
+    <Drawer title="Check the matches" onClose={onClose} wide>
       <div className="stack">
         <p className="small">
-          In Invoice Ninja, open <strong>Clients</strong>, choose <strong>Export</strong> and save the CSV. Shap matches each row on the client number (your
-          codes, like <code>Smith001</code>) or the name, fills in names, emails, phones and addresses, and adds any client it doesn’t have. Any CSV with
-          a “Name” column works.
+          Each row from the file, and the client Shap thinks it is. Change any that are wrong. A matched client takes the file’s name, contact, email, phone,
+          address and VAT number; its code and jobs stay.
         </p>
-        <label className="btn primary big block">
-          <Icon name="upload" size={18} />
-          {busy ? 'Importing…' : 'Choose the CSV file'}
-          <input type="file" accept=".csv,text/csv" hidden onChange={(e) => void upload(e.target.files?.[0])} disabled={busy} />
-        </label>
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>In the file</th>
+                <th>Is client</th>
+              </tr>
+            </thead>
+            <tbody>
+              {preview.rows.map((r) => {
+                const v = matches[String(r.index)] ?? 'new';
+                return (
+                  <tr key={r.index}>
+                    <td>
+                      <strong>{r.name}</strong>
+                      <div className="xs muted">{[r.contact, r.email, r.phone].filter(Boolean).join(' · ')}</div>
+                      {r.address && <div className="xs muted ellipsis">{r.address.replace(/\n/g, ', ')}</div>}
+                    </td>
+                    <td style={{ minWidth: 200 }}>
+                      <select className="select" value={v} onChange={(e) => setMatches((m) => ({ ...m, [String(r.index)]: e.target.value }))} aria-label={`Client for ${r.name}`}>
+                        <option value="new">Add as a new client</option>
+                        <option value="skip">Skip this row</option>
+                        {preview.clients.map((c) => (
+                          <option key={c.id} value={c.id} disabled={usedBy.has(c.id) && usedBy.get(c.id) !== String(r.index)}>
+                            {c.code && c.code !== c.name ? `${c.code} · ` : ''}
+                            {c.name}
+                            {c.projects.length ? ` (${c.projects.slice(0, 2).join(', ')})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                      {r.suggestion && v === r.suggestion.clientId && <div className="xs muted">Suggested: {r.suggestion.reason}</div>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {preview.jobsWithoutClient.length > 0 && (
+          <section className="fieldset stack">
+            <strong>Jobs with no client yet</strong>
+            <p className="xs muted">Link them to a row from the file, so their invoices carry the client’s details.</p>
+            {preview.jobsWithoutClient.map((j) => (
+              <label key={j.id} className="row wrap">
+                <span className="grow small">{j.name}</span>
+                <select className="select auto" value={jobs[j.id] ?? ''} onChange={(e) => setJobs((x) => ({ ...x, [j.id]: e.target.value }))}>
+                  <option value="">Leave without a client</option>
+                  {preview.rows
+                    .filter((r) => matches[String(r.index)] !== 'skip')
+                    .map((r) => (
+                      <option key={r.index} value={String(r.index)}>
+                        {rowLabel(r.index)}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            ))}
+          </section>
+        )}
         {error && <div className="banner alert small">{error}</div>}
+        <div className="row wrap">
+          <button className="btn primary big grow" onClick={() => void apply()} disabled={busy}>
+            {busy ? 'Saving…' : `Update ${counts.updated}, add ${counts.added}`}
+          </button>
+          <button className="btn quiet" onClick={() => setPreview(null)}>
+            Choose another file
+          </button>
+        </div>
       </div>
     </Drawer>
   );

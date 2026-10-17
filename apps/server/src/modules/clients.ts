@@ -95,61 +95,197 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /**
-   * Fill in client details from a CSV (for example an Invoice Ninja client export).
-   * Matches on the client code/number first, then on the name; adds clients it can't match.
+   * Fill in client details from a CSV (an Invoice Ninja client export, or any CSV with a Name
+   * column). Step 1 suggests which existing client each row is; step 2 applies what you confirm.
    */
+  app.post('/api/clients/import-csv/preview', { preHandler: requireRole('owner') }, async (req) => {
+    const { csv } = parse(z.object({ csv: z.string().min(5).max(5_000_000) }), req.body);
+    const rows = readClientCsv(csv);
+    const clients = await sql<MatchClient[]>`
+      select c.id, c.code, c.name, coalesce(array_agg(p.name) filter (where p.id is not null), '{}') as projects
+      from clients c left join projects p on p.client_id = c.id group by c.id order by c.name`;
+    const jobsWithoutClient = await sql<{ id: string; name: string }[]>`select id, name from projects where client_id is null order by number`;
+    const matched = suggestMatches(rows, clients);
+    // Jobs with no client yet: suggest the row whose name appears in the job's name.
+    const jobs = jobsWithoutClient.map((j) => {
+      const jw = new Set(words(j.name));
+      const row = matched.find((r) => words(r.name).filter((w) => w.length >= 4 && !['road', 'body', 'corp', 'ltd'].includes(w)).some((w) => jw.has(w)));
+      return { ...j, suggestedRow: row?.index ?? null };
+    });
+    return { rows: matched, clients: clients.map((c) => ({ id: c.id, code: c.code, name: c.name, projects: c.projects.slice(0, 4) })), jobsWithoutClient: jobs };
+  });
+
   app.post('/api/clients/import-csv', { preHandler: requireRole('owner') }, async (req) => {
     const user = userOrThrow(req);
-    const { csv } = parse(z.object({ csv: z.string().min(5).max(5_000_000) }), req.body);
-    const rows = parseCsv(csv);
-    if (rows.length < 2) throw badRequest('That file has no rows');
-    const header = rows[0]!.map((h) => h.trim().toLowerCase());
-    const col = (...names: string[]) => header.findIndex((h) => names.includes(h));
-    const ix = {
-      name: col('name', 'client', 'client name', 'company'),
-      code: col('number', 'client number', 'code', 'id number', 'client code', 'account'),
-      email: col('email', 'contact email', 'client email'),
-      phone: col('phone', 'work phone', 'contact phone', 'mobile'),
-      contact: col('contact', 'contact name', 'contact first name'),
-      address: col('address', 'address1', 'street', 'billing address'),
-      city: col('city', 'town'),
-      vat: col('vat number', 'vat', 'vat_number', 'tax number'),
-    };
-    if (ix.name < 0) throw badRequest('Couldn’t find a "Name" column');
-    const get = (r: string[], i: number) => (i >= 0 ? (r[i] ?? '').trim() : '');
+    const input = parse(
+      z.object({
+        csv: z.string().min(5).max(5_000_000),
+        // row index → existing client id, 'new' or 'skip'
+        matches: z.record(z.string(), z.union([z.string().uuid(), z.literal('new'), z.literal('skip')])),
+        // job id → client row index: link jobs that had no client
+        jobs: z.record(z.string().uuid(), z.number().int().min(0)).default({}),
+      }),
+      req.body,
+    );
+    const rows = readClientCsv(input.csv);
     let updated = 0;
     let added = 0;
+    let linked = 0;
     await sql.begin(async (tx) => {
-      for (const r of rows.slice(1)) {
-        const name = get(r, ix.name);
-        if (!name) continue;
-        const code = get(r, ix.code);
-        const address = [get(r, ix.address), get(r, ix.city)].filter(Boolean).join(', ');
-        const patch = { email: get(r, ix.email), phone: get(r, ix.phone), contactPerson: get(r, ix.contact), address, vatNumber: get(r, ix.vat) };
-        const [match] = await tx<{ id: string; name: string; code: string | null }[]>`
-          select id, name, code from clients
-          where (${code} <> '' and lower(code) = lower(${code})) or lower(name) = lower(${name}) order by (lower(code) = lower(${code})) desc limit 1
-        `;
-        if (match) {
-          // A client imported from the tracker is named after its code until the real name arrives.
-          const newName = match.name === match.code ? name : match.name;
-          await tx`update clients set name = ${newName},
-            email = case when ${patch.email} <> '' then ${patch.email} else email end,
-            phone = case when ${patch.phone} <> '' then ${patch.phone} else phone end,
-            contact_person = case when ${patch.contactPerson} <> '' then ${patch.contactPerson} else contact_person end,
-            address = case when ${patch.address} <> '' then ${patch.address} else address end,
-            vat_number = case when ${patch.vatNumber} <> '' then ${patch.vatNumber} else vat_number end
-            where id = ${match.id}`;
-          updated++;
-        } else {
-          await tx`insert into clients ${tx({ name, code: code || null, ...patch })}`;
+      const idForRow = new Map<number, string>();
+      for (const r of rows) {
+        const m = input.matches[String(r.index)] ?? 'skip';
+        if (m === 'skip') continue;
+        const fields = { contactPerson: r.contact, email: r.email, phone: r.phone, address: r.address, vatNumber: r.vatNumber };
+        if (m === 'new') {
+          const [row] = await tx<{ id: string }[]>`insert into clients ${tx({ name: r.name, code: null, ...fields, notes: r.ref ? `Invoice Ninja no. ${r.ref}` : '' })} returning id`;
+          idForRow.set(r.index, row!.id);
           added++;
+        } else {
+          await tx`update clients set name = ${r.name},
+            email = case when ${r.email} <> '' then ${r.email} else email end,
+            phone = case when ${r.phone} <> '' then ${r.phone} else phone end,
+            contact_person = case when ${r.contact} <> '' then ${r.contact} else contact_person end,
+            address = case when ${r.address} <> '' then ${r.address} else address end,
+            vat_number = case when ${r.vatNumber} <> '' then ${r.vatNumber} else vat_number end
+            where id = ${m}`;
+          idForRow.set(r.index, m);
+          updated++;
         }
       }
-      await audit(tx, { userId: user.id, action: 'import_csv', entity: 'client', ip: req.ip, details: { updated, added } });
+      for (const [jobId, rowIndex] of Object.entries(input.jobs)) {
+        const clientId = idForRow.get(rowIndex);
+        if (!clientId) continue;
+        const res = await tx`update projects set client_id = ${clientId} where id = ${jobId} and client_id is null`;
+        await tx`update documents set client_id = ${clientId} where project_id = ${jobId} and client_id is null`;
+        linked += res.count;
+      }
+      await audit(tx, { userId: user.id, action: 'import_csv', entity: 'client', ip: req.ip, details: { updated, added, linked } });
     });
-    return { updated, added };
+    return { updated, added, linked };
   });
+}
+
+export interface ClientCsvRow {
+  index: number;
+  name: string;
+  contact: string;
+  email: string;
+  phone: string;
+  address: string;
+  vatNumber: string;
+  ref: string;
+}
+
+/** Reads a client CSV, Invoice Ninja's export or any with a Name column. */
+export function readClientCsv(csv: string): ClientCsvRow[] {
+  const rows = parseCsv(csv);
+  if (rows.length < 2) throw badRequest('That file has no rows');
+  const header = rows[0]!.map((h) => h.trim().toLowerCase());
+  // First heading in the list that exists wins (so "Contact Phone" beats an empty "Client Phone").
+  const col = (...names: string[]) => names.map((n) => header.indexOf(n)).find((i) => i >= 0) ?? -1;
+  const ix = {
+    name: col('name', 'client', 'client name', 'company'),
+    ref: col('number', 'client number', 'code', 'client code', 'account'),
+    email: col('email', 'contact email', 'client email'),
+    phone: col('contact phone', 'client phone', 'phone', 'work phone', 'mobile'),
+    phone2: col('client phone', 'phone'),
+    first: col('first name', 'contact first name'),
+    last: col('last name', 'contact last name'),
+    contact: col('contact', 'contact name'),
+    street: col('street', 'address', 'address1', 'billing address'),
+    suite: col('apt/suite', 'address2'),
+    city: col('city', 'town'),
+    postal: col('postal code', 'postcode', 'zip'),
+    vat: col('vat number', 'vat', 'vat_number', 'tax number'),
+  };
+  if (ix.name < 0 && ix.first < 0) throw badRequest('Couldn’t find a "Name" column');
+  const get = (r: string[], i: number) => (i >= 0 ? (r[i] ?? '').trim() : '');
+  const out: ClientCsvRow[] = [];
+  rows.slice(1).forEach((r, i) => {
+    const contact = get(r, ix.contact) || [get(r, ix.first), get(r, ix.last)].filter(Boolean).join(' ');
+    const name = get(r, ix.name) || contact;
+    if (!name) return;
+    const city = [get(r, ix.city), get(r, ix.postal)].filter(Boolean).join(' ');
+    out.push({
+      index: i,
+      name,
+      contact: contact === name ? '' : contact,
+      email: get(r, ix.email),
+      phone: get(r, ix.phone) || get(r, ix.phone2),
+      address: [get(r, ix.street), get(r, ix.suite), city].filter(Boolean).join('\n'),
+      vatNumber: get(r, ix.vat).replace(/^vat[:\s]*/i, ''),
+      ref: get(r, ix.ref),
+    });
+  });
+  return out;
+}
+
+interface MatchClient {
+  id: string;
+  code: string | null;
+  name: string;
+  projects: string[];
+}
+
+const words = (s: string) => s.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3);
+
+/**
+ * Suggests which existing client a CSV row is. Clients imported from a tracker are named by
+ * code (Naidoo001), so the clues are: the code's letters at the start of the surname or company,
+ * the person's name or street address in the client's job names ("Naidoo patio", "12 Oak Street eaves").
+ */
+export function suggestMatches(rows: ClientCsvRow[], clients: MatchClient[]) {
+  const scored = rows.map((r) => {
+    // The client's own name counts for more than the contact person's (a company's contact may be someone you know from other jobs).
+    const nameWords = words(r.name);
+    const contactWords = words(r.contact).filter((w) => !nameWords.includes(w));
+    // "du Toit" → "dutoit", so a code like Dut001 still lines up.
+    const surname = (n: string) => {
+      const parts = n.toLowerCase().split(/\s+/).filter(Boolean);
+      return parts.length > 1 ? parts.slice(1).join('').replace(/[^a-z]/g, '') : '';
+    };
+    const joined = surname(r.name);
+    const contactJoined = surname(r.contact);
+    const addr = r.address.toLowerCase();
+    const streetNo = addr.match(/^(\d+)\s+([a-z]+)/);
+    let best: { id: string; score: number; reason: string } | null = null;
+    let second = 0;
+    for (const c of clients) {
+      let score = 0;
+      const reasons: string[] = [];
+      if (c.name.toLowerCase() === r.name.toLowerCase()) (score += 10), reasons.push('same name');
+      if (c.code && r.ref && c.code.toLowerCase() === r.ref.toLowerCase()) (score += 10), reasons.push('same number');
+      const prefix = (c.code ?? '').toLowerCase().match(/^[a-z]+/)?.[0];
+      if (prefix && prefix.length >= 3) {
+        if (nameWords.some((w) => w.startsWith(prefix)) || (joined && joined.startsWith(prefix))) (score += 3), reasons.push(`code ${c.code}`);
+        else if (contactWords.some((w) => w.startsWith(prefix)) || (contactJoined && contactJoined.startsWith(prefix))) score += 1;
+      }
+      const jobText = c.projects.join(' ').toLowerCase();
+      const inJobs = (w: string) => new RegExp(`\\b${w}\\b`).test(jobText);
+      const hit = nameWords.find(inJobs);
+      if (hit) (score += 4), reasons.push(`job “${c.projects.find((p) => p.toLowerCase().includes(hit))}”`);
+      else if (contactWords.some(inJobs)) score += 2;
+      if (streetNo && new RegExp(`\\b${streetNo[1]}\\s+${streetNo[2]}`).test(jobText)) (score += 6), reasons.push('street address in a job name');
+      if (score > (best?.score ?? 0)) {
+        second = best?.score ?? 0;
+        best = { id: c.id, score, reason: reasons.join(', ') };
+      } else if (score > second) second = score;
+    }
+    const sure = best && best.score >= 3 && best.score > second;
+    return { ...r, suggestion: sure ? { clientId: best!.id, reason: best!.reason, score: best!.score } : null };
+  });
+  // One client per row: if two rows want the same client, keep the stronger one.
+  const taken = new Map<string, number>();
+  for (const r of scored) {
+    if (!r.suggestion) continue;
+    const prev = taken.get(r.suggestion.clientId);
+    if (prev == null || scored[prev]!.suggestion!.score < r.suggestion.score) {
+      if (prev != null) scored[prev]!.suggestion = null;
+      taken.set(r.suggestion.clientId, scored.indexOf(r));
+    } else r.suggestion = null;
+  }
+  return scored;
 }
 
 /** Minimal RFC 4180 CSV reader (quoted fields, embedded commas and newlines). */

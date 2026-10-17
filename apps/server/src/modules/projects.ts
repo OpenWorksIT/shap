@@ -156,7 +156,7 @@ export function registerProjectRoutes(app: FastifyInstance, ctx: Ctx): void {
       sql`select e.*, w.name as worker_name from labour_entries e join workers w on w.id = e.worker_id
           where e.project_id = ${id} order by e.date desc, w.name`,
       sql`select c.*, k.name as category_name, k.kind as category_kind, s.name as source_name
-          from costs c join cost_categories k on k.id = c.category_id join payment_sources s on s.id = c.source_id
+          from costs c join cost_categories k on k.id = c.category_id left join payment_sources s on s.id = c.source_id
           where c.project_id = ${id} order by c.date desc, c.created_at desc`,
       sql`select d.id, d.kind, d.number, d.status, d.issue_date, d.due_date, d.title, d.subtotal_cents, d.total_cents,
             coalesce((select sum(r.amount_cents) from receipts r where r.invoice_id = d.id), 0)::bigint as paid_cents

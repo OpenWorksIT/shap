@@ -1,6 +1,8 @@
-# Shap on the VPS: automatic HTTPS for one hostname (e.g. shap.openworks.co.za).
+# Shap on the VPS: automatic HTTPS for each hostname (e.g. shap.openworks.co.za).
 # SPDX-License-Identifier: AGPL-3.0-or-later
-{$SHAP_DOMAIN} {
+
+# The settings every Shap site shares. Use: import shap <container>:8080
+(shap) {
 	encode gzip
 	header {
 		Strict-Transport-Security "max-age=31536000"
@@ -13,7 +15,7 @@
 	request_body {
 		max_size 40MB
 	}
-	reverse_proxy app:8080
+	reverse_proxy {args[0]}
 
 	handle_errors {
 		@down expression {err.status_code} in [502, 503, 504]
@@ -22,3 +24,11 @@
 		}
 	}
 }
+
+# Your company.
+{$SHAP_DOMAIN} {
+	import shap app:8080
+}
+
+# Other companies on this VPS (written by add-company.sh).
+import /etc/caddy/sites/*.caddy

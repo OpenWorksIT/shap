@@ -23,7 +23,7 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
     const fy = financialYear(now, settings.fyEndMonth);
     const firstMonth = monthStart(addMonths(now, -11));
 
-    const [series, owing, workers, unallocated, materialsNoJob, balances, projects] = await Promise.all([
+    const [series, owing, workers, unallocated, materialsNoJob, balances, projects, uncaptured] = await Promise.all([
       // Last 12 months: invoiced, cost of sales, running costs
       sql<{ month: string; income: number; cos: number; expenses: number }[]>`
         select to_char(l.date, 'YYYY-MM') as month,
@@ -59,6 +59,7 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
         select p.id, p.number, p.name, p.status, c.name as client_name, s.*
         from projects p left join clients c on c.id = p.client_id join (${projectSummarySql}) s on s.id = p.id
         where p.status in ('active', 'invoiced', 'quoted') order by p.number desc limit 12`),
+      sql<{ n: number; total: number }[]>`select count(*)::int as n, coalesce(sum(amount_cents), 0)::bigint as total from costs where source_id is null`,
     ]);
 
     const months = monthsBetween(firstMonth, now).map((m) => {
@@ -94,6 +95,7 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
       owedToWorkersCents: -bal('wages_payable'),
       unallocatedLabour: unallocated[0],
       materialsWithoutJob: materialsNoJob[0],
+      uncapturedCosts: uncaptured[0],
       bankCents: bal('bank'),
       ownerLoanCents: -bal('owner_loan'),
       projects: projects.map((p) => ({ ...p, ...totals(p as unknown as ProjectSummary) })),

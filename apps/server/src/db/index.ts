@@ -8,6 +8,9 @@ export type Db = Sql | Tx;
 export function createDb(url: string, opts: { max?: number } = {}): Sql {
   return postgres(url, {
     max: opts.max ?? 10,
+    // The ledger is one large view over small tables. Postgres's JIT judges it by the plan's
+    // estimated cost and spends seconds compiling a query that runs in milliseconds.
+    connection: { jit: 'off' },
     // snake_case columns <-> camelCase in JS
     transform: postgres.camel,
     // Return `date` columns as plain YYYY-MM-DD strings rather than local-midnight Date objects.

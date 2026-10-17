@@ -19,8 +19,9 @@ import { api, ApiError, apiUrl } from '../lib/api';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
 import type { Account, StatementLine, Totals } from '../lib/types';
+import { ProvisionalTax, YearEnd } from './YearEnd';
 
-type Tab = 'income' | 'balance' | 'trial' | 'ledger' | 'journals' | 'assets' | 'checks' | 'export';
+type Tab = 'income' | 'balance' | 'trial' | 'ledger' | 'journals' | 'assets' | 'checks' | 'yearend' | 'tax' | 'export';
 
 export default function AccountsPage() {
   const [params, setParams] = useSearchParams();
@@ -41,6 +42,8 @@ export default function AccountsPage() {
             { value: 'journals', label: 'Journals' },
             { value: 'assets', label: 'Assets' },
             { value: 'checks', label: 'Balance checks' },
+            { value: 'yearend', label: 'Year end' },
+            { value: 'tax', label: 'Provisional tax' },
             { value: 'export', label: 'Export' },
           ]}
         />
@@ -52,6 +55,8 @@ export default function AccountsPage() {
       {tab === 'journals' && <Journals />}
       {tab === 'assets' && <Assets />}
       {tab === 'checks' && <BalanceChecks />}
+      {tab === 'yearend' && <YearEnd />}
+      {tab === 'tax' && <ProvisionalTax />}
       {tab === 'export' && <Exports />}
     </div>
   );

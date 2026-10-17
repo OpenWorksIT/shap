@@ -8,7 +8,13 @@ import { audit } from '../lib/audit.js';
 import { assertOpen, formatNumber, getSettings, q, today } from '../lib/books.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
-import { renderDocumentPdf, type PdfDocument } from './pdf.js';
+import { renderDocumentPdf, type BrandRow, type PdfDocument } from './pdf.js';
+
+export async function loadBrand(db: Db, id: string | null | undefined): Promise<BrandRow | null> {
+  if (!id) return null;
+  const [b] = await db<BrandRow[]>`select * from brands where id = ${id}`;
+  return b ?? null;
+}
 
 const idParam = z.object({ id: z.string().uuid() });
 type DocInput = z.input<typeof documentInput>;
@@ -58,6 +64,16 @@ async function writeLines(db: Db, documentId: string, lines: NonNullable<DocInpu
   await db`update documents set subtotal_cents = ${subtotal}, vat_cents = ${vat}, total_cents = ${subtotal + vat}, updated_at = now() where id = ${documentId}`;
 }
 
+/** The trading name a document goes out under: the job's, else the client's, else the company default. */
+export async function defaultBrand(db: Db, projectId: string | null, clientId: string | null): Promise<string | null> {
+  const [r] = await db<{ id: string | null }[]>`
+    select coalesce(
+      (select brand_id from projects where id = ${projectId}),
+      (select brand_id from clients where id = ${clientId}),
+      (select default_brand_id from settings where id)) as id`;
+  return r?.id ?? null;
+}
+
 /** Creates a quote or invoice with its lines. Call inside a transaction (numbering locks the settings row). */
 export async function createDocument(tx: Db, user: AuthUser | null, kind: DocKind, raw: DocInput, opts: { status?: string } = {}): Promise<{ id: string; number: string }> {
   const input = parse(documentInput, raw);
@@ -67,16 +83,17 @@ export async function createDocument(tx: Db, user: AuthUser | null, kind: DocKin
     const [p] = await tx<{ clientId: string | null }[]>`select client_id from projects where id = ${input.projectId}`;
     clientId = p?.clientId ?? null;
   }
+  const brandId = input.brandId ?? (await defaultBrand(tx, input.projectId ?? null, clientId));
   const number = input.number?.trim() || (await nextNumber(tx, kind));
   const due = input.dueDate ?? (kind === 'invoice' ? addDays(input.issueDate, settings.paymentDays) : addDays(input.issueDate, settings.quoteValidDays));
   const vatRate = settings.vatRegistered ? settings.vatRateBp : 0;
   let row: { id: string; number: string } | undefined;
   try {
     [row] = await tx<{ id: string; number: string }[]>`
-      insert into documents (kind, number, status, project_id, client_id, issue_date, due_date, title, notes, terms, vat_rate_bp, created_by)
+      insert into documents (kind, number, status, project_id, client_id, issue_date, due_date, title, notes, terms, vat_rate_bp, created_by, brand_id)
       values (${kind}, ${number}, ${opts.status ?? 'draft'}, ${input.projectId ?? null}, ${clientId}, ${input.issueDate}, ${due},
               ${input.title}, ${input.notes}, ${input.terms || (kind === 'invoice' ? settings.invoiceTerms : settings.quoteTerms)},
-              ${vatRate}, ${user?.id ?? null})
+              ${vatRate}, ${user?.id ?? null}, ${brandId})
       returning id, number`;
   } catch (err) {
     if (pgCode(err) === PG.uniqueViolation) throw conflict(`There is already ${kind === 'invoice' ? 'an invoice' : 'a quote'} numbered ${number}`);
@@ -92,8 +109,9 @@ export async function loadDocument(db: Db, id: string) {
       p.name as project_name, p.number as project_number, p.site_address,
       c.name as client_name, c.contact_person as client_contact, c.address as client_address, c.email as client_email,
       c.phone as client_phone, c.vat_number as client_vat_number, c.code as client_code,
-      sq.number as source_quote_number
+      sq.number as source_quote_number, b.name as brand_name
     from documents d
+    left join brands b on b.id = d.brand_id
     left join lateral (select sum(amount_cents) as paid from receipts where invoice_id = d.id) r on true
     left join projects p on p.id = d.project_id left join clients c on c.id = d.client_id
     left join documents sq on sq.id = d.source_quote_id
@@ -114,11 +132,12 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const s = search?.trim() || null;
     const rows = await sql.unsafe(
       `select d.id, d.kind, d.number, d.status, d.issue_date, d.due_date, d.title, d.subtotal_cents, d.vat_cents, d.total_cents,
-         d.project_id, d.client_id, p.name as project_name, p.number as project_number, c.name as client_name,
+         d.project_id, d.client_id, d.brand_id, b.name as brand_name, p.name as project_name, p.number as project_number, c.name as client_name,
          coalesce(r.paid, 0)::bigint as paid_cents, ${paymentStateSql} as payment_state
        from documents d
        left join lateral (select sum(amount_cents) as paid from receipts where invoice_id = d.id) r on true
        left join projects p on p.id = d.project_id left join clients c on c.id = d.client_id
+       left join brands b on b.id = d.brand_id
        where ($1::text is null or d.kind = $1) and ($2::text is null or d.status = $2)
          and ($3::uuid is null or d.client_id = $3::uuid) and ($4::uuid is null or d.project_id = $4::uuid)
          and ($5::text is null or d.number ilike '%' || $5 || '%' or d.title ilike '%' || $5 || '%'
@@ -166,7 +185,8 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
         await tx`
           update documents set number = ${number}, project_id = ${input.projectId ?? null}, client_id = ${clientId},
             issue_date = ${input.issueDate}, due_date = ${input.dueDate ?? null}, title = ${input.title}, notes = ${input.notes},
-            terms = ${input.terms}, vat_rate_bp = ${vatRate}, updated_at = now()
+            terms = ${input.terms}, vat_rate_bp = ${vatRate}, updated_at = now(),
+            brand_id = ${input.brandId ?? (await defaultBrand(tx, input.projectId ?? null, clientId))}
           where id = ${id}`;
       } catch (err) {
         if (pgCode(err) === PG.uniqueViolation) throw conflict(`Number ${number} is already used`);
@@ -245,6 +265,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (doc.kind !== 'quote') throw badRequest('Only quotes can be turned into invoices');
     const created = await sql.begin(async (tx) => {
       const inv = await createDocument(tx, user, 'invoice', {
+        brandId: doc.brandId,
         projectId: doc.projectId,
         clientId: doc.clientId,
         issueDate: today(),
@@ -269,6 +290,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { doc, lines } = await loadDocument(sql, id);
     return sql.begin((tx) =>
       createDocument(tx, user, kind ?? doc.kind, {
+        brandId: doc.brandId,
         projectId: doc.projectId,
         clientId: doc.clientId,
         issueDate: today(),
@@ -309,15 +331,17 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
   const pdfFor = async (id: string) => {
     const data = await loadDocument(sql, id);
     const settings = await getSettings(sql);
+    const brand = await loadBrand(sql, data.doc.brandId ?? settings.defaultBrandId);
     let logo: Buffer | null = null;
-    if (settings.logoId) {
-      const [a] = await sql<{ bytes: Buffer }[]>`select bytes from attachments where id = ${settings.logoId}`;
+    const logoId = brand?.logoId ?? settings.logoId;
+    if (logoId) {
+      const [a] = await sql<{ bytes: Buffer }[]>`select bytes from attachments where id = ${logoId}`;
       logo = a?.bytes ?? null;
     }
-    const pdf = await renderDocumentPdf({ ...data, settings, logo });
+    const pdf = await renderDocumentPdf({ ...data, settings, brand, logo });
     const label = data.doc.kind === 'invoice' ? (settings.vatRegistered ? 'Tax invoice' : 'Invoice') : 'Quote';
-    const filename = `${label} ${data.doc.number}${data.doc.clientName ? ` - ${data.doc.clientName}` : ''}.pdf`.replace(/[^\w.\- ]/g, '');
-    return { pdf, filename, data, settings };
+    const filename = `${brand ? `${brand.name} ` : ''}${label} ${data.doc.number}${data.doc.clientName ? ` - ${data.doc.clientName}` : ''}.pdf`.replace(/[^\w.\- ]/g, '');
+    return { pdf, filename, data, settings, brand };
   };
 
   app.get('/api/documents/:id/pdf', { preHandler: requireRole('owner', 'accountant') }, async (req, reply) => {
@@ -333,13 +357,13 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = parse(idParam, req.params);
     const input = parse(z.object({ to: z.string().trim().email('Enter the client’s email'), message: z.string().max(4000).default('') }), req.body);
     if (!ctx.config.SMTP_URL) throw badRequest('Email isn’t set up on this server (SMTP_URL). Use Share or Download instead.');
-    const { pdf, filename, data, settings } = await pdfFor(id);
+    const { pdf, filename, data, settings, brand } = await pdfFor(id);
     const what = data.doc.kind === 'invoice' ? 'Invoice' : 'Quote';
     await ctx.mailer.send({
       to: input.to,
-      replyTo: settings.email || undefined,
-      subject: `${what} ${data.doc.number} from ${settings.tradingName || settings.companyName}`,
-      text: input.message || `Good day,\n\nPlease find ${what.toLowerCase()} ${data.doc.number} attached.\n\nKind regards,\n${settings.tradingName || settings.companyName}`,
+      replyTo: brand?.email || settings.email || undefined,
+      subject: `${what} ${data.doc.number} from ${brand?.name || settings.tradingName || settings.companyName}`,
+      text: input.message || `Good day,\n\nPlease find ${what.toLowerCase()} ${data.doc.number} attached.\n\nKind regards,\n${brand?.name || settings.tradingName || settings.companyName}`,
       attachments: [{ filename, content: pdf, contentType: 'application/pdf' }],
     });
     if (data.doc.kind === 'quote' && data.doc.status === 'draft') await sql`update documents set status = 'sent', sent_at = now() where id = ${id}`;

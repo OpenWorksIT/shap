@@ -10,8 +10,6 @@ export interface ImportOptions {
   replace?: boolean;
   /** Post one journal so bank, loan and share capital agree with the tracker's trial balance. */
   agreeTrialBalance?: boolean;
-  /** Where costs with a blank "Account" were paid from. */
-  blankAccountTo?: 'bank' | 'owner_loan';
   userId?: string | null;
 }
 
@@ -40,7 +38,7 @@ export interface ImportResult {
 
 const OPERATIONAL_TABLES = [
   'receipts', 'document_lines', 'documents', 'planned_items', 'assets', 'costs', 'labour_entries',
-  'wage_payments', 'worker_savings', 'balance_checks', 'projects', 'workers', 'clients',
+  'wage_payments', 'worker_savings', 'balance_checks', 'projects', 'workers',
 ] as const;
 
 const chunk = <T>(xs: T[], n = 500): T[][] => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
@@ -78,15 +76,15 @@ export async function applyTracker(sql: Sql, plan: TrackerPlan, opts: ImportOpti
     const businessBank = await ensureSource('Business bank', 'bank', bankAcc);
     const cash = await ensureSource('Cash', 'cash', loanAcc);
     const ownerPaid = await ensureSource('Paid personally (owner)', 'owner', loanAcc);
-    const notRecorded = await ensureSource('Not recorded (tracker)', 'other', opts.blankAccountTo === 'owner_loan' ? loanAcc : bankAcc);
-    const sourceFor = new Map<string, string>();
+    // A blank "Account" means it wasn't captured yet: no source, so it waits in "Not captured yet".
+    const sourceFor = new Map<string, string | null>();
     const mapping: ImportResult['sourceMapping'] = [];
     for (const acc of plan.accounts) {
-      let id: string;
+      let id: string | null;
       let postsTo: string;
       if (!acc) {
-        id = notRecorded;
-        postsTo = opts.blankAccountTo === 'owner_loan' ? 'Owner’s loan' : 'Bank';
+        id = null;
+        postsTo = 'Not captured yet (assign under Costs)';
       } else if (/\bcs\b|business|company/i.test(acc)) {
         // "FNB CS" / "CS FNB": the company's own account.
         id = businessBank;
@@ -97,7 +95,7 @@ export async function applyTracker(sql: Sql, plan: TrackerPlan, opts: ImportOpti
         postsTo = 'Owner’s loan';
       }
       sourceFor.set(acc, id);
-      mapping.push({ account: acc || '(blank)', source: acc ? (id === businessBank ? 'Business bank' : acc) : 'Not recorded (tracker)', postsTo });
+      mapping.push({ account: acc || '(blank)', source: acc ? (id === businessBank ? 'Business bank' : acc) : 'Not captured yet', postsTo });
     }
 
     // ---------------------------------------------------------- what costs were for
@@ -121,8 +119,10 @@ export async function applyTracker(sql: Sql, plan: TrackerPlan, opts: ImportOpti
     // ---------------------------------------------------------- clients
     const clientIds = new Map<string, string>();
     for (const c of plan.clients) {
-      const [row] = await tx<{ id: string }[]>`insert into clients (code, name) values (${c.code}, ${c.code}) returning id`;
-      clientIds.set(c.code, row!.id);
+      // A client already set up (e.g. from a company file or an earlier import) is reused by its code.
+      const [found] = await tx<{ id: string }[]>`select id from clients where lower(code) = lower(${c.code})`;
+      const id = found?.id ?? (await tx<{ id: string }[]>`insert into clients (code, name) values (${c.code}, ${c.code}) returning id`)[0]!.id;
+      clientIds.set(c.code, id);
     }
     counts.clients = plan.clients.length;
 
@@ -202,7 +202,7 @@ export async function applyTracker(sql: Sql, plan: TrackerPlan, opts: ImportOpti
     const costRows = [];
     for (const c of plan.costs) {
       const category = c.personal === 'personal_expense' ? personalCat : await categoryFor(c.type);
-      const source = !c.account && c.personal === 'owner_paid' ? ownerPaid : sourceFor.get(c.account) ?? notRecorded;
+      const source = !c.account && c.personal === 'owner_paid' ? ownerPaid : (sourceFor.get(c.account) ?? null);
       costRows.push({
         date: c.date, description: c.description, amountCents: c.amountCents, vatCents: 0, supplier: c.supplier,
         categoryId: category, sourceId: source, projectId: c.projectKey ? projectIds.get(c.projectKey)! : null,
@@ -214,12 +214,13 @@ export async function applyTracker(sql: Sql, plan: TrackerPlan, opts: ImportOpti
       if (!p.demoCostCents) continue;
       costRows.push({
         date: p.invoiceDate ?? firstActivity.get(p.key) ?? new Date().toISOString().slice(0, 10), description: 'Demo & removal (from tracker)',
-        amountCents: p.demoCostCents, vatCents: 0, supplier: '', categoryId: demoCat, sourceId: notRecorded,
+        amountCents: p.demoCostCents, vatCents: 0, supplier: '', categoryId: demoCat, sourceId: null,
         projectId: projectIds.get(p.key)!, note: 'From the C Demo column on Per Project', createdBy: opts.userId ?? null,
       });
     }
     for (const part of chunk(costRows)) await tx`insert into costs ${tx(part)}`;
     counts.costs = costRows.length;
+    counts.uncapturedCosts = costRows.filter((r) => r.sourceId == null).length;
 
     // ---------------------------------------------------------- invoices and payments received
     const [settings] = await tx<{ paymentDays: number; defaultReceiptSourceId: string | null }[]>`select payment_days, default_receipt_source_id from settings where id`;
@@ -271,7 +272,9 @@ export async function applyTracker(sql: Sql, plan: TrackerPlan, opts: ImportOpti
 
     // ---------------------------------------------------------- agree a closed year to its trial balance
     let agreement: ImportResult['agreement'] = null;
-    if (opts.agreeTrialBalance !== false && plan.trialBalance) {
+    const [agreed] = plan.trialBalance ? await tx`select 1 from year_ends where fy_end = ${plan.trialBalance.date}` : [];
+    if (agreed) warnings.push(`The year to ${formatDate(plan.trialBalance!.date)} is already agreed to your accountant’s figures, so the tracker’s trial balance was skipped.`);
+    if (opts.agreeTrialBalance !== false && plan.trialBalance && !agreed) {
       const tb = plan.trialBalance;
       const bal = async (acc: string) =>
         (await tx<{ b: number }[]>`select coalesce(sum(amount_cents), 0)::bigint as b from ledger where account_id = ${acc} and date <= ${tb.date}::date`)[0]!.b;

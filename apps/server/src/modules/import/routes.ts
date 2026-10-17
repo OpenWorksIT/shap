@@ -12,7 +12,6 @@ const body = z.object({
   apply: z.boolean().default(false),
   replace: z.boolean().default(false),
   agreeTrialBalance: z.boolean().default(true),
-  blankAccountTo: z.enum(['bank', 'owner_loan']).default('bank'),
 });
 
 export function registerImportRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -50,7 +49,6 @@ export function registerImportRoutes(app: FastifyInstance, ctx: Ctx): void {
     const result = await applyTracker(ctx.sql, plan, {
       replace: input.replace,
       agreeTrialBalance: input.agreeTrialBalance,
-      blankAccountTo: input.blankAccountTo,
       userId: user.id,
     });
     return { preview, result };

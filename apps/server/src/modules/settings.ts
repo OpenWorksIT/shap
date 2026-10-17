@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import {
   accountInput,
   attachmentInput,
+  brandInput,
   categoryInput,
   settingsInput,
   sourceInput,
@@ -20,7 +21,7 @@ import { parse } from '../lib/validate.js';
 const idParam = z.object({ id: z.string().uuid() });
 
 export async function referenceData(db: Db, money: boolean) {
-  const [settings, sources, categories, workTypes, accounts] = await Promise.all([
+  const [settings, sources, categories, workTypes, accounts, brands] = await Promise.all([
     getSettings(db),
     db`select s.id, s.name, s.kind, s.account_id, s.active, a.code as account_code, a.name as account_name
        from payment_sources s join accounts a on a.id = s.account_id order by s.sort, s.name`,
@@ -28,8 +29,9 @@ export async function referenceData(db: Db, money: boolean) {
        from cost_categories c join accounts a on a.id = c.account_id order by c.sort, c.name`,
     db`select id, name, active from work_types order by sort, name`,
     money ? db`select id, code, name, type, system_key, active from accounts order by code` : Promise.resolve([]),
+    db`select * from brands order by active desc, sort, name`,
   ]);
-  return { settings, sources, categories, workTypes, accounts };
+  return { settings, sources, categories, workTypes, accounts, brands };
 }
 
 /** Saves an uploaded file (receipt photo, logo). Returns its id. */
@@ -75,6 +77,48 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
   app.delete('/api/settings/logo', { preHandler: requireRole('owner') }, async () => {
     await sql`update settings set logo_id = null where id`;
+    return { ok: true };
+  });
+
+  // ---- trading names
+  app.post('/api/brands', { preHandler: requireRole('owner') }, async (req) => {
+    const user = userOrThrow(req);
+    const input = parse(brandInput, req.body);
+    try {
+      const [next] = await sql<{ n: number }[]>`select coalesce(max(sort), 0) + 1 as n from brands`;
+      const [row] = await sql`insert into brands ${sql({ ...input, sort: next!.n })} returning *`;
+      await audit(sql, { userId: user.id, action: 'create', entity: 'brand', entityId: row!.id, ip: req.ip });
+      return row;
+    } catch (err) {
+      if (pgCode(err) === PG.uniqueViolation) throw conflict('There’s already a trading name called that');
+      throw err;
+    }
+  });
+  app.put('/api/brands/:id', { preHandler: requireRole('owner') }, async (req) => {
+    const user = userOrThrow(req);
+    const { id } = parse(idParam, req.params);
+    const input = parse(brandInput, req.body);
+    try {
+      const [row] = await sql`update brands set ${sql(input)} where id = ${id} returning *`;
+      if (!row) throw notFound('Trading name');
+      await audit(sql, { userId: user.id, action: 'update', entity: 'brand', entityId: id, ip: req.ip });
+      return row;
+    } catch (err) {
+      if (pgCode(err) === PG.uniqueViolation) throw conflict('There’s already a trading name called that');
+      throw err;
+    }
+  });
+  app.post('/api/brands/:id/logo', { preHandler: requireRole('owner') }, async (req) => {
+    const { id } = parse(idParam, req.params);
+    const input = parse(attachmentInput, req.body);
+    if (input.mime !== 'image/png' && input.mime !== 'image/jpeg') throw badRequest('Use a PNG or JPEG logo');
+    const logoId = await saveAttachment(sql, input);
+    await sql`update brands set logo_id = ${logoId} where id = ${id}`;
+    return { logoId };
+  });
+  app.delete('/api/brands/:id/logo', { preHandler: requireRole('owner') }, async (req) => {
+    const { id } = parse(idParam, req.params);
+    await sql`update brands set logo_id = null where id = ${id}`;
     return { ok: true };
   });
 

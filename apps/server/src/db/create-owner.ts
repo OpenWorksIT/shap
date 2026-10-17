@@ -39,7 +39,11 @@ try {
   await migrate(sql);
   await createUser(sql, { name, email, password, role: 'owner' });
   if (company) await sql`update settings set company_name = ${company} where id`;
-  console.log(`Created the owner login for ${email}. Sign in, fill in Settings → Company, then import your tracker under Settings → Import.`);
+  // A new install's placeholder trading name takes the company's name (without "(Pty) Ltd").
+  if (company)
+    await sql`update brands set name = ${company.replace(/\s*\((pty|proprietary)\)\s*(ltd|limited)\.?$/i, '').trim() || company}, legal_line = ${company}
+      where name = 'My company' and (select count(*) from brands) = 1`;
+  console.log(`Created the owner login for ${email}. Sign in, fill in Settings → Company (and your trading names), then import your tracker under Settings → Import.`);
 } catch (err) {
   console.error((err as Error).message.includes('duplicate') ? 'Someone already signs in with that email.' : (err as Error).message);
   process.exitCode = 1;

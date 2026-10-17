@@ -1,19 +1,27 @@
 /**
  * Import a project tracker workbook from the command line:
- *   npm run import -- path/to/tracker.xlsx [--replace] [--blank-account-is-owner] [--no-trial-balance] [--dry-run]
+ *   npm run import -- path/to/tracker.xlsx [--replace] [--no-trial-balance] [--dry-run] [--company company.json]
+ * --company loads a Shap company file (trading names, clients, agreed year ends) after the tracker.
  */
+import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { formatZar, monthLabel } from '@shap/shared';
 import { loadConfig } from '../config.js';
 import { applyTracker } from '../modules/import/apply.js';
+import { restoreCompanyFile } from '../modules/company-file.js';
 import { readTracker } from '../modules/import/tracker.js';
 import { createDb } from './index.js';
 import { migrate } from './migrate.js';
 
-const file = process.argv.slice(2).find((a) => !a.startsWith('--'));
+const argAfter = (f: string) => {
+  const i = process.argv.indexOf(`--${f}`);
+  return i >= 0 ? process.argv[i + 1] : undefined;
+};
+const companyPath = argAfter('company');
+const file = process.argv.slice(2).find((a) => !a.startsWith('--') && a !== companyPath);
 const flag = (f: string) => process.argv.includes(`--${f}`);
 if (!file) {
-  console.error('Usage: npm run import -- path/to/tracker.xlsx [--replace] [--blank-account-is-owner] [--no-trial-balance] [--dry-run]');
+  console.error('Usage: npm run import -- path/to/tracker.xlsx [--replace] [--no-trial-balance] [--dry-run]');
   process.exit(1);
 }
 
@@ -28,9 +36,12 @@ try {
   const r = await applyTracker(sql, plan, {
     replace: flag('replace'),
     agreeTrialBalance: !flag('no-trial-balance'),
-    blankAccountTo: flag('blank-account-is-owner') ? 'owner_loan' : 'bank',
   });
   console.log('Imported:', r.counts);
+  if (companyPath) {
+    const restored = await sql.begin((tx) => restoreCompanyFile(tx, JSON.parse(readFileSync(companyPath, 'utf8'))));
+    console.log('Company file loaded:', restored);
+  }
   for (const w of r.warnings.slice(plan.warnings.length)) console.log(`  ! ${w}`);
   if (r.agreement) {
     console.log(`Agreed to the trial balance at ${r.agreement.date}:`);

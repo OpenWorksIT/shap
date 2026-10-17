@@ -2,6 +2,8 @@
 # Starts the Shap test stack on this PC and prints the address to use on your phone.
 #   ./start.sh                     start (or restart) with the fictional demo company
 #   ./start.sh --import FILE.xlsx  start fresh with YOUR tracker instead of the demo (asks for your login)
+#   ./start.sh --import FILE.xlsx --company company.json
+#                                  ...and load a Shap company file (trading names, logos, clients, agreed year ends)
 #   ./start.sh --update            pull the latest code from GitHub and rebuild
 #   ./start.sh --stop              stop everything (data is kept)
 #   ./start.sh --reset             stop and DELETE all test data (the demo is reloaded next start)
@@ -22,6 +24,7 @@ setenv() { # setenv KEY VALUE: replace or add a line in .env
 }
 
 IMPORT=""
+COMPANY_FILE=""
 case "${1:-}" in
   --stop) compose --profile named --profile quick down; exit 0 ;;
   --reset)
@@ -35,7 +38,12 @@ case "${1:-}" in
   --import)
     IMPORT="${2:-}"
     [ -f "$IMPORT" ] || { echo "Usage: ./start.sh --import path/to/tracker.xlsx" >&2; exit 1; }
-    IMPORT="$(cd "$(dirname "$IMPORT")" && pwd)/$(basename "$IMPORT")" ;;
+    IMPORT="$(cd "$(dirname "$IMPORT")" && pwd)/$(basename "$IMPORT")"
+    if [ "${3:-}" = --company ]; then
+      COMPANY_FILE="${4:-}"
+      [ -f "$COMPANY_FILE" ] || { echo "Usage: ./start.sh --import tracker.xlsx --company company.json" >&2; exit 1; }
+      COMPANY_FILE="$(cd "$(dirname "$COMPANY_FILE")" && pwd)/$(basename "$COMPANY_FILE")"
+    fi ;;
 esac
 
 rand() { openssl rand -base64 "$1" | tr '+/' '-_' | tr -d '=\n'; }
@@ -114,8 +122,13 @@ if [ -n "$IMPORT" ]; then
   read -r -s -p "Choose a password (10+ characters): " OWNER_PASSWORD; echo
   compose exec -T -e OWNER_PASSWORD="$OWNER_PASSWORD" app node apps/server/dist/db/create-owner.js --email "$OWNER_EMAIL" --name "$OWNER_NAME" --company "$COMPANY"
   compose cp "$IMPORT" app:/tmp/tracker.xlsx
-  compose exec -T app node apps/server/dist/db/import-cli.js /tmp/tracker.xlsx
-  compose exec -T app rm -f /tmp/tracker.xlsx || true
+  if [ -n "$COMPANY_FILE" ]; then
+    compose cp "$COMPANY_FILE" app:/tmp/company.json
+    compose exec -T app node apps/server/dist/db/import-cli.js /tmp/tracker.xlsx --company /tmp/company.json
+  else
+    compose exec -T app node apps/server/dist/db/import-cli.js /tmp/tracker.xlsx
+  fi
+  compose exec -T app rm -f /tmp/tracker.xlsx /tmp/company.json || true
 fi
 
 # ---------- address ----------

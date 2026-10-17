@@ -123,4 +123,5 @@ export const LEDGER_SOURCE_LABELS: Record<string, string> = {
   asset: 'Asset',
   depreciation: 'Depreciation',
   disposal: 'Asset disposal',
+  year_end: 'Year-end adjustment',
 };

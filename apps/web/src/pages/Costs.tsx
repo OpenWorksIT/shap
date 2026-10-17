@@ -15,13 +15,17 @@ type Period = 'month' | 'last' | 'fy' | 'lastfy' | 'all';
 export default function CostsPage() {
   const { ref, settings, isOwner } = useAuthed();
   const [params, setParams] = useSearchParams();
-  const period = (params.get('period') as Period) || (params.get('kind') ? 'all' : 'month');
+  const period = (params.get('period') as Period) || (params.get('kind') || params.get('source') === 'none' ? 'all' : 'month');
   const category = params.get('category') ?? '';
   const source = params.get('source') ?? '';
   const project = params.get('project');
   const kind = params.get('kind') ?? '';
   const [search, setSearch] = useState('');
   const [drawer, setDrawer] = useState<null | 'new' | CostRow>(null);
+  const capturing = source === 'none' && isOwner;
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [assignTo, setAssignTo] = useState('');
+  const toast = useToast();
   const today = todayIso();
   const fy = financialYear(today, settings.fyEndMonth);
   const lastFy = financialYear(addMonths(fy.start, -1), settings.fyEndMonth);
@@ -73,6 +77,12 @@ export default function CostsPage() {
           </>
         }
       />
+      {source === 'none' && (
+        <div className="banner signal small">
+          These costs don’t say yet which account or card paid them. Until you say, they sit in <em>Costs not yet matched to a payment</em> in
+          the books, so your bank and loan balances leave them out. Tick the ones paid the same way and choose where they came from.
+        </div>
+      )}
       {kind === 'materials-unallocated' && (
         <div className="banner signal small row">
           <span className="grow">Parts bought without a job. Open one to put it on the right job, so that job’s profit is right.</span>
@@ -99,6 +109,7 @@ export default function CostsPage() {
         </select>
         <select className="select auto" value={source} onChange={(e) => setParam('source', e.target.value)} aria-label="Paid from">
           <option value="">Paid from anywhere</option>
+          <option value="none">Not captured yet</option>
           {ref.sources.map((s) => (
             <option key={s.id} value={s.id}>
               {s.name}
@@ -121,6 +132,11 @@ export default function CostsPage() {
           <table className="table">
             <thead>
               <tr>
+                {capturing && (
+                  <th style={{ width: 36 }}>
+                    <input type="checkbox" aria-label="Select all" checked={picked.size > 0 && picked.size === rows.length} onChange={(e) => setPicked(e.target.checked ? new Set(rows.map((r) => r.id)) : new Set())} />
+                  </th>
+                )}
                 <th>Date</th>
                 <th>What</th>
                 <th className="hide-sm">Type</th>
@@ -132,6 +148,23 @@ export default function CostsPage() {
             <tbody>
               {rows.map((c) => (
                 <tr key={c.id} className="clickable" onClick={() => isOwner && setDrawer(c)}>
+                  {capturing && (
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${c.description}`}
+                        checked={picked.has(c.id)}
+                        onChange={() =>
+                          setPicked((p) => {
+                            const n = new Set(p);
+                            if (n.has(c.id)) n.delete(c.id);
+                            else n.add(c.id);
+                            return n;
+                          })
+                        }
+                      />
+                    </td>
+                  )}
                   <td className="nowrap">{formatDate(c.date)}</td>
                   <td>
                     {c.description}
@@ -164,7 +197,7 @@ export default function CostsPage() {
                       ''
                     )}
                   </td>
-                  <td className="hide-md">{c.sourceName}</td>
+                  <td className="hide-md">{c.sourceName ?? <span className="chip warn">Not captured</span>}</td>
                   <td className="num">
                     <Money cents={c.amountCents} />
                   </td>
@@ -175,8 +208,38 @@ export default function CostsPage() {
         </div>
       ) : (
         <div className="panel">
-          <Empty title="No costs here">Try a longer period or clear the filters.</Empty>
+          <Empty title={source === 'none' ? 'Everything is captured' : 'No costs here'}>Try a longer period or clear the filters.</Empty>
         </div>
+      )}
+      {capturing && picked.size > 0 && (
+        <section className="panel panel-pad sticky-bar row wrap">
+          <span className="grow">
+            <strong>{picked.size}</strong> selected · {formatZar(rows.filter((r) => picked.has(r.id)).reduce((s, r) => s + r.amountCents, 0))}
+          </span>
+          <select className="select auto" value={assignTo} onChange={(e) => setAssignTo(e.target.value)} aria-label="Paid from">
+            <option value="">Paid from…</option>
+            {ref.sources.filter((x) => x.active).map((x) => (
+              <option key={x.id} value={x.id}>
+                {x.name}
+              </option>
+            ))}
+          </select>
+          <button
+            className="btn primary"
+            disabled={!assignTo}
+            onClick={() =>
+              void api<{ updated: number }>('/api/costs/assign-source', { body: { ids: [...picked], sourceId: assignTo } })
+                .then((r) => {
+                  toast(`${r.updated} cost${r.updated === 1 ? '' : 's'} captured`);
+                  setPicked(new Set());
+                  void reload();
+                })
+                .catch((err) => toast(err instanceof ApiError ? err.message : 'Couldn’t save', 'error'))
+            }
+          >
+            Capture
+          </button>
+        </section>
       )}
       {drawer && (
         <Drawer title={drawer === 'new' ? 'Add a cost' : 'Cost'} onClose={() => setDrawer(null)}>

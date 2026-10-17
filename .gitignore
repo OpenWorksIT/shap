@@ -11,3 +11,11 @@ coverage/
 *.csv
 deploy/test/.env
 deploy/vps/.env
+# Per-server files written by deploy/vps/add-company.sh (keys and passwords live in companies/).
+deploy/vps/companies/
+deploy/vps/companies.yml
+deploy/vps/sites/*.caddy
+# Company files hold your clients and figures.
+*.company.json
+shap-company*.json
+*company file*.json

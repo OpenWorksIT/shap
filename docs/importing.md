@@ -39,7 +39,11 @@ active: they're kept, just off the crew list.
 |---|---|---|
 | e.g. `FNB CS` (anything with *CS* or *business*) | Business bank | Bank |
 | Cards and accounts in the owner's name (e.g. `Owner CC`, `Owner savings`) | A source of that name | Owner's loan account |
-| Blank | *Not recorded (tracker)* | Bank, or the owner's loan if you choose so at import |
+| Blank | Nothing: the cost is *not captured yet* | *Costs not yet matched to a payment* (a holding account) until you say what paid it |
+
+A blank `Account` means you hadn't captured how it was paid, so Shap doesn't guess. **Costs → Not
+captured yet** lists them; tick the ones paid the same way and choose the account or card. Until
+then they sit in a holding account, so your bank and loan balances leave them out.
 
 You can change any of these afterwards under **Settings → Lists**. Because the ledger is built
 live, changing where a source posts restates every cost paid from it.
@@ -55,20 +59,31 @@ After importing, Shap reports:
   job's invoice: the pivot puts it in the invoice month, while Shap counts it in the month it
   happened, or holds it in work in progress until the next invoice.
 - **Trial balance.** The journal it posted, and anything left in *Suspense* (for example
-  work in progress at year end, which a tracker trial balance usually doesn't carry).
+  work in progress at year end, which a tracker trial balance usually doesn't carry). Once you
+  enter the accountant's figures for that year (**Accounts → Year end**), they replace this journal.
 
 ## After the import
 
-1. **Settings → Company**: name, registration and VAT numbers, banking details, logo.
-2. **Clients → Import details**: an Invoice Ninja client export (or any CSV with a *Name* column)
-   fills in names, emails and addresses, matched on the client number or name.
+1. **Settings → Company**: name, registration and VAT numbers, and your **trading names**: each
+   has its own logo, colour, contacts and bank details, and every job, client, quote and invoice
+   can go out under any of them. Numbering and the books are shared. A company file (see
+   [deployment](deployment.md#company-file)) sets all of this up in one go.
+2. **Clients → Import details**: an Invoice Ninja client export (or any CSV with a *Name* column).
+   Tracker clients are named by code (`Naidoo001`), so Shap suggests which client each row is from
+   the code, the job names and the street address, and you check the list before anything changes.
+   Jobs with no client can be linked in the same step.
 3. **Workers → Allocate**: put labour days that had no job onto a job or a type of general work.
 4. **Accounts → Balance checks**: enter today's bank balance and your loan balance. The tracker
    doesn't record money moving between the bank and your own accounts (card repayments, the
    company paying you back), so the books will differ. One tap posts the difference as an
    adjustment journal.
-5. Once your accountant has signed off a year, set **Books closed up to** under
-   *Invoicing & books*.
+5. **Accounts → Year end**: type in the accountant's figures from the annual financial statements.
+   Shap posts one adjustment per account on the last day of that year, so the statements match and
+   the next year opens from the agreed balances; the year is locked. Anything that doesn't tie up
+   shows in *Suspense*.
+6. **Accounts → Provisional tax**: this year to date, projected to twelve months, against last
+   year, with the tax on the small business corporation table. Change any projected figure, then
+   save or print it for the IRP6.
 
 Importing again later needs **Replace what's there**, which deletes jobs, people, costs and
 documents first. Settings, users and your lists are kept.

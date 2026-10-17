@@ -24,7 +24,7 @@ import { api, ApiError, apiUrl } from '../lib/api';
 import { fileToBase64, shrinkImage } from '../lib/files';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
-import type { Settings } from '../lib/types';
+import type { Brand, Settings } from '../lib/types';
 
 type Tab = 'company' | 'invoicing' | 'lists' | 'users' | 'import';
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -44,15 +44,25 @@ export default function SettingsPage() {
             { value: 'invoicing', label: 'Invoicing & books' },
             { value: 'lists', label: 'Lists' },
             { value: 'users', label: 'People who sign in' },
-            { value: 'import', label: 'Import tracker' },
+            { value: 'import', label: 'Import & company file' },
           ]}
         />
       </div>
-      {tab === 'company' && <SettingsForm section="company" />}
+      {tab === 'company' && (
+        <>
+          <SettingsForm section="company" />
+          <TradingNames />
+        </>
+      )}
       {tab === 'invoicing' && <SettingsForm section="invoicing" />}
       {tab === 'lists' && <Lists />}
       {tab === 'users' && <Users />}
-      {tab === 'import' && <ImportTracker />}
+      {tab === 'import' && (
+        <>
+          <ImportTracker />
+          <CompanyFile />
+        </>
+      )}
     </div>
   );
 }
@@ -69,7 +79,7 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
     setBusy(true);
     setError('');
     try {
-      const { logoId: _l, ...rest } = f;
+      const { logoId: _l, ...rest } = f as Settings & { logoId: string | null };
       await api('/api/settings', { method: 'PUT', body: rest });
       await refreshReference();
       toast('Settings saved');
@@ -77,17 +87,6 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
       setError(err instanceof ApiError ? err.message : 'Couldn’t save');
     } finally {
       setBusy(false);
-    }
-  };
-  const uploadLogo = async (file: File | undefined) => {
-    if (!file) return;
-    try {
-      const img = file.type === 'image/png' ? { dataBase64: await fileToBase64(file), mime: 'image/png' as const, filename: file.name } : await shrinkImage(file, 800, 0.9);
-      await api('/api/settings/logo', { body: img });
-      await refreshReference();
-      toast('Logo saved. It appears on quotes and invoices.');
-    } catch (err) {
-      toast(err instanceof ApiError ? err.message : 'Couldn’t upload the logo', 'error');
     }
   };
   const text = (k: keyof Settings, label: string, hint?: string, type = 'text') => (
@@ -113,37 +112,26 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
       {section === 'company' ? (
         <>
           <section className="panel panel-pad stack">
-            <h3>Company</h3>
+            <h3>The company</h3>
+            <p className="xs muted">The registered company. How it presents itself on quotes and invoices (name, logo, contacts, bank) is set per trading name below.</p>
             <div className="form-grid">
-              {text('companyName', 'Registered name', 'e.g. Construction Solutions (Pty) Ltd')}
-              {text('tradingName', 'Trading as', 'Shown big on quotes and invoices, if different')}
+              {text('companyName', 'Registered name', 'e.g. Example Builders (Pty) Ltd')}
               {text('regNumber', 'Registration number')}
               {text('vatNumber', 'VAT number')}
-              {text('phone', 'Phone', undefined, 'tel')}
-              {text('email', 'Email', 'Replies to emailed invoices go here', 'email')}
-              {text('website', 'Website')}
             </div>
-            <Field label="Address">{(p) => <textarea {...p} className="textarea" rows={3} value={f.address} onChange={(e) => set('address', e.target.value)} />}</Field>
-          </section>
-          <section className="panel panel-pad stack">
-            <h3>Banking details (printed on invoices)</h3>
-            <Field label="Bank, account and branch">{(p) => <textarea {...p} className="textarea" rows={3} value={f.bankDetails} onChange={(e) => set('bankDetails', e.target.value)} placeholder={'FNB · Gold Business account\nAccount 62xxxxxxxxx · Branch 250655'} />}</Field>
-          </section>
-          <section className="panel panel-pad stack">
-            <h3>Logo</h3>
-            <div className="row wrap">
-              {settings.logoId && <img src={apiUrl(`/api/attachments/${settings.logoId}`)} alt="Company logo" className="logo-preview" />}
-              <label className="btn">
-                <Icon name="upload" size={18} />
-                {settings.logoId ? 'Replace logo' : 'Upload a logo'}
-                <input type="file" accept="image/png,image/jpeg" hidden onChange={(e) => void uploadLogo(e.target.files?.[0])} />
-              </label>
-              {settings.logoId && (
-                <button type="button" className="btn quiet" onClick={() => void api('/api/settings/logo', { method: 'DELETE' }).then(refreshReference)}>
-                  Remove
-                </button>
-              )}
-            </div>
+            {ref.brands.length > 1 && (
+              <Field label="Default trading name" hint="For new jobs and documents when the job or client doesn’t say">
+                {(p) => (
+                  <select {...p} className="select" value={f.defaultBrandId ?? ''} onChange={(e) => set('defaultBrandId', e.target.value || null)}>
+                    {ref.brands.filter((b) => b.active).map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </Field>
+            )}
           </section>
         </>
       ) : (
@@ -575,7 +563,7 @@ function ImportTracker() {
   const [file, setFile] = useState<{ name: string; data: string } | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [result, setResult] = useState<Result | null>(null);
-  const [opts, setOpts] = useState({ replace: false, agreeTrialBalance: true, blankAccountTo: 'bank' as 'bank' | 'owner_loan' });
+  const [opts, setOpts] = useState({ replace: false, agreeTrialBalance: true });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -650,19 +638,11 @@ function ImportTracker() {
             )}
           </section>
           <section className="panel panel-pad stack">
-            <h3>Two choices</h3>
-            <div className="field">
-              <span className="label">Costs with a blank “Account” were paid from…</span>
-              <label className="check">
-                <input type="radio" checked={opts.blankAccountTo === 'bank'} onChange={() => setOpts({ ...opts, blankAccountTo: 'bank' })} />
-                The company’s bank account
-              </label>
-              <label className="check">
-                <input type="radio" checked={opts.blankAccountTo === 'owner_loan'} onChange={() => setOpts({ ...opts, blankAccountTo: 'owner_loan' })} />
-                My own money (adds to my loan account)
-              </label>
-              <span className="hint">You can change this afterwards under Lists → “Not recorded (tracker)”, and the books follow.</span>
-            </div>
+            <h3>Before you import</h3>
+            <p className="small muted">
+              Costs with a blank “Account” come in as <em>not captured yet</em>: Shap won’t guess what paid them. Afterwards, Costs → “Not captured yet” lets you
+              tick them off in batches.
+            </p>
             {preview.trialBalance && (
               <label className="check">
                 <input type="checkbox" checked={opts.agreeTrialBalance} onChange={(e) => setOpts({ ...opts, agreeTrialBalance: e.target.checked })} />
@@ -786,8 +766,10 @@ function ImportResult({ r }: { r: Result }) {
       <section className="panel panel-pad stack">
         <h3>Next</h3>
         <ol className="small next-steps">
-          <li>Fill in Settings → Company and your banking details, so quotes and invoices are ready to send.</li>
+          <li>If you have a company file, load it below: trading names, logos, bank details, clients and agreed year ends in one go. Otherwise set up Settings → Company → Trading names.</li>
           <li>Import your client list from Invoice Ninja (Clients → Import details) to swap codes for real names and emails.</li>
+          {r.counts.uncapturedCosts ? <li>Say how the {r.counts.uncapturedCosts} costs with a blank account were paid (Costs → Not captured yet).</li> : null}
+          <li>Enter your accountant’s figures for past years under Accounts → Year end, so the books start where the statements end.</li>
           <li>{r.counts.unallocatedLabour ? `Allocate the ${r.counts.unallocatedLabour} labour days that had no job (Workers → Allocate).` : 'All labour is on a job.'}</li>
           <li>Under Accounts → Balance checks, enter today’s bank balance and your loan balance; one tap posts the money that moved between them.</li>
         </ol>
@@ -803,5 +785,193 @@ function ImportResult({ r }: { r: Result }) {
         )}
       </section>
     </div>
+  );
+}
+
+/* ---------------------------------------------------------------- trading names */
+function TradingNames() {
+  const { ref } = useAuthed();
+  const [edit, setEdit] = useState<Brand | 'new' | null>(null);
+  return (
+    <section className="panel narrow-wide">
+      <div className="panel-head spread">
+        <span>
+          <strong>Trading names</strong>
+          <div className="xs muted">One company, several names on the door. Each quote, invoice and job picks one; numbering and the books are shared.</div>
+        </span>
+        <button className="btn small" onClick={() => setEdit('new')}>
+          <Icon name="plus" size={14} />
+          Add
+        </button>
+      </div>
+      <ul className="list">
+        {ref.brands.map((b) => (
+          <li key={b.id}>
+            <button className={`list-row ${b.active ? '' : 'inactive'}`} onClick={() => setEdit(b)}>
+              <span className="brand-swatch" style={{ background: b.accent }} />
+              {b.logoId ? <img src={apiUrl(`/api/attachments/${b.logoId}`)} alt="" className="brand-logo" /> : <span className="brand-logo empty">No logo</span>}
+              <span className="grow">
+                <strong>{b.name}</strong>
+                {ref.settings.defaultBrandId === b.id && <span className="chip" style={{ marginLeft: 8 }}>default</span>}
+                <div className="xs muted ellipsis">{[b.email, b.phone, b.website].filter(Boolean).join(' · ') || 'No contact details yet'}</div>
+              </span>
+              <Icon name="chevronRight" size={16} />
+            </button>
+          </li>
+        ))}
+      </ul>
+      {edit && <BrandDrawer brand={edit === 'new' ? null : edit} onClose={() => setEdit(null)} />}
+    </section>
+  );
+}
+
+function BrandDrawer({ brand, onClose }: { brand: Brand | null; onClose: () => void }) {
+  const { refreshReference, settings } = useAuthed();
+  const toast = useToast();
+  const [f, setF] = useState({
+    name: brand?.name ?? '',
+    legalLine: brand?.legalLine ?? (settings.companyName ? `${settings.companyName} t/a ` : ''),
+    email: brand?.email ?? '',
+    phone: brand?.phone ?? '',
+    website: brand?.website ?? '',
+    address: brand?.address ?? '',
+    bankDetails: brand?.bankDetails ?? '',
+    accent: brand?.accent ?? '#e8731c',
+    active: brand?.active ?? true,
+  });
+  const [logoId, setLogoId] = useState(brand?.logoId ?? null);
+  const [error, setError] = useState('');
+  const set = (k: keyof typeof f, v: string | boolean) => setF((x) => ({ ...x, [k]: v }));
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    try {
+      if (brand) await api(`/api/brands/${brand.id}`, { method: 'PUT', body: f });
+      else await api('/api/brands', { body: f });
+      await refreshReference();
+      toast('Trading name saved');
+      onClose();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Couldn’t save');
+    }
+  };
+  const uploadLogo = async (file: File | undefined) => {
+    if (!file || !brand) return;
+    try {
+      const img = file.type === 'image/png' ? { dataBase64: await fileToBase64(file), mime: 'image/png' as const, filename: file.name } : await shrinkImage(file, 1200, 0.9);
+      const r = await api<{ logoId: string }>(`/api/brands/${brand.id}/logo`, { body: img });
+      setLogoId(r.logoId);
+      await refreshReference();
+      toast('Logo saved');
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Couldn’t upload the logo', 'error');
+    }
+  };
+  return (
+    <Drawer title={brand ? brand.name : 'New trading name'} onClose={onClose}>
+      <form className="stack" onSubmit={save}>
+        <Field label="Trading name">{(p) => <input {...p} className="input" value={f.name} onChange={(e) => set('name', e.target.value)} required placeholder="e.g. OpenWorks IT" />}</Field>
+        <Field label="Legal line" hint="Printed under the name and in the footer">
+          {(p) => <input {...p} className="input" value={f.legalLine} onChange={(e) => set('legalLine', e.target.value)} placeholder="Company (Pty) Ltd t/a Trading name" />}
+        </Field>
+        <div className="form-grid">
+          <Field label="Email">{(p) => <input {...p} className="input" type="email" value={f.email} onChange={(e) => set('email', e.target.value)} />}</Field>
+          <Field label="Phone">{(p) => <input {...p} className="input" type="tel" value={f.phone} onChange={(e) => set('phone', e.target.value)} />}</Field>
+          <Field label="Website">{(p) => <input {...p} className="input" value={f.website} onChange={(e) => set('website', e.target.value)} />}</Field>
+        </div>
+        <Field label="Address">{(p) => <textarea {...p} className="textarea" rows={3} value={f.address} onChange={(e) => set('address', e.target.value)} />}</Field>
+        <Field label="Bank details (printed on invoices)">
+          {(p) => <textarea {...p} className="textarea" rows={3} value={f.bankDetails} onChange={(e) => set('bankDetails', e.target.value)} placeholder={'FNB · Cheque account\nAccount 62xxxxxxxxx · Branch 250655'} />}
+        </Field>
+        <Field label="Colour" hint="Headings and the amount-due box on the PDF">
+          {(p) => (
+            <div className="row">
+              <input {...p} type="color" value={f.accent} onChange={(e) => set('accent', e.target.value)} className="color-input" />
+              <input className="input" value={f.accent} onChange={(e) => set('accent', e.target.value)} style={{ maxWidth: 120 }} aria-label="Colour code" />
+            </div>
+          )}
+        </Field>
+        <div className="field">
+          <span className="label">Logo</span>
+          {brand ? (
+            <div className="row wrap">
+              {logoId && <img src={apiUrl(`/api/attachments/${logoId}`)} alt={`${f.name} logo`} className="logo-preview" />}
+              <label className="btn">
+                <Icon name="upload" size={18} />
+                {logoId ? 'Replace logo' : 'Upload a logo'}
+                <input type="file" accept="image/png,image/jpeg" hidden onChange={(e) => void uploadLogo(e.target.files?.[0])} />
+              </label>
+              {logoId && (
+                <button type="button" className="btn quiet" onClick={() => void api(`/api/brands/${brand.id}/logo`, { method: 'DELETE' }).then(() => (setLogoId(null), refreshReference()))}>
+                  Remove
+                </button>
+              )}
+            </div>
+          ) : (
+            <span className="xs muted">Save first, then add the logo. A wide logo (wider than tall) suits the invoice best.</span>
+          )}
+        </div>
+        {brand && (
+          <label className="check">
+            <input type="checkbox" checked={f.active} onChange={(e) => set('active', e.target.checked)} />
+            In use
+          </label>
+        )}
+        {error && <div className="banner alert small">{error}</div>}
+        <button className="btn primary big block">Save</button>
+      </form>
+    </Drawer>
+  );
+}
+
+/* ---------------------------------------------------------------- company file */
+function CompanyFile() {
+  const { refreshReference } = useAuthed();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<Record<string, number> | null>(null);
+  const [error, setError] = useState('');
+  const load = async (file: File | undefined) => {
+    if (!file) return;
+    setBusy(true);
+    setError('');
+    try {
+      const json = JSON.parse(await file.text());
+      const r = await api<{ restored: Record<string, number> }>('/api/company-file', { body: { file: json } });
+      setResult(r.restored);
+      await refreshReference();
+      toast('Company file loaded');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : err instanceof SyntaxError ? 'That isn’t a Shap company file' : 'Couldn’t load that file');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const labels: Record<string, string> = { brands: 'trading names', clients: 'clients', jobsLinked: 'jobs linked to a client', jobsBranded: 'jobs given a trading name', yearEnds: 'agreed year ends' };
+  return (
+    <section className="panel panel-pad stack narrow-wide">
+      <h3>Company file</h3>
+      <p className="small">
+        Everything that sets Shap up, without the day-to-day records: trading names and logos, company details, numbering and terms, your lists and
+        accounts, clients, and the accountant’s agreed year ends. Save one to keep a copy or move to another server. Loading one merges it in; nothing is
+        deleted. Load it <strong>after</strong> importing the tracker, so it can link jobs to clients.
+      </p>
+      <div className="row wrap">
+        <a className="btn" href={apiUrl('/api/company-file')}>
+          <Icon name="download" size={18} />
+          Save company file
+        </a>
+        <label className="btn primary">
+          <Icon name="upload" size={18} />
+          {busy ? 'Loading…' : 'Load a company file'}
+          <input type="file" accept=".json,application/json" hidden onChange={(e) => void load(e.target.files?.[0])} disabled={busy} />
+        </label>
+      </div>
+      {error && <div className="banner alert small">{error}</div>}
+      {result && (
+        <div className="banner ok small">
+          Loaded: {Object.entries(result).map(([k, v]) => `${v} ${labels[k] ?? k}`).join(', ') || 'settings'}.
+        </div>
+      )}
+    </section>
   );
 }

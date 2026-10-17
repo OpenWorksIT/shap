@@ -62,6 +62,35 @@ To email quotes and invoices from Shap, set `SMTP_URL` and `MAIL_FROM` in `.env`
 `docker compose up -d`. Without it, use **Share PDF**, which hands the PDF to WhatsApp or email
 on a phone and downloads it on a PC.
 
+## Another company on the same server
+
+Shap can run a second business (a friend's, say) on the same VPS without a second server. Each
+company gets its own database and database login, its own encryption key, its own owner login
+and its own web address; Postgres and Caddy are shared, and one update reaches every company.
+A company of one or two people doing daily admin uses very little: each extra company adds an
+app container of roughly 100 MB of memory, so a 2 GB VPS has room for several.
+
+```bash
+cd /opt/shap/deploy/vps
+sudo ./add-company.sh friend shap.friendsbuilding.co.za     # point that domain's DNS at the VPS first
+sudo docker compose exec app-friend node apps/server/dist/db/create-owner.js \
+  --email them@theircompany.co.za --name "Their Name" --company "Their Company (Pty) Ltd"
+```
+
+Their settings and keys are in `deploy/vps/companies/friend.env` (email settings go there too).
+Backups include every company's database. To take a company off the server, stop its container
+(`docker compose rm -sf app-friend`), delete its block from `companies.yml`, its `sites/friend.caddy`
+and `companies/friend.env`, and drop the database once you have a backup.
+
+## Company file
+
+**Settings → Import & company file → Save company file** downloads everything that sets Shap up
+(trading names and logos, company details, numbering and terms, your lists and accounts, clients
+and the accountant's agreed year ends) as one JSON file, without the day-to-day records. Loading
+one merges it in. With the tracker import: `./start.sh --import tracker.xlsx --company company.json`
+on the test stack, or `npm run import -- tracker.xlsx --company company.json` on a server. Company
+files hold client details and figures: keep them out of git.
+
 ## Updates
 
 ```bash
@@ -72,8 +101,8 @@ Database changes run by themselves when the app starts.
 
 ## Backups
 
-[deploy/backup/backup.sh](../deploy/backup/backup.sh) dumps the database (including slip photos
-and your logo), checks the dump can be read, and stores it encrypted and de-duplicated with
+[deploy/backup/backup.sh](../deploy/backup/backup.sh) dumps every company's database (including
+slip photos and logos), checks each dump can be read, and stores it encrypted and de-duplicated with
 restic, ideally at a second provider (an S3-compatible bucket, a Hetzner storage box, or your
 PC over SFTP).
 

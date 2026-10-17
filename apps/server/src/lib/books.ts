@@ -14,6 +14,7 @@ export interface SettingsRow {
   website: string;
   bankDetails: string;
   logoId: string | null;
+  defaultBrandId: string | null;
   vatRegistered: boolean;
   vatRateBp: number;
   fyEndMonth: number;

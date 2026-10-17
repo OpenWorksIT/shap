@@ -18,6 +18,7 @@ interface Dashboard {
   owedToWorkersCents: number;
   unallocatedLabour: { n: number; cost: number; days: number };
   materialsWithoutJob: { n: number; total: number };
+  uncapturedCosts: { n: number; total: number };
   bankCents: number;
   ownerLoanCents: number;
   projects: ProjectRow[];
@@ -93,6 +94,16 @@ function OwnerHome() {
           <strong>{data.materialsWithoutJob.n} parts purchase{data.materialsWithoutJob.n === 1 ? '' : 's'}</strong> this year without a job (<Money cents={data.materialsWithoutJob.total} whole />)
         </span>
         Review
+        <Icon name="chevronRight" size={16} />
+      </Link>
+    ),
+    data.uncapturedCosts.n > 0 && (
+      <Link key="unc" to="/costs?source=none" className="attention">
+        <Icon name="alert" size={18} />
+        <span className="grow">
+          <strong>{data.uncapturedCosts.n} cost{data.uncapturedCosts.n === 1 ? '' : 's'}</strong> don’t say which account paid them yet (<Money cents={data.uncapturedCosts.total} whole />)
+        </span>
+        Capture
         <Icon name="chevronRight" size={16} />
       </Link>
     ),

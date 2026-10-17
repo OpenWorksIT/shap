@@ -192,7 +192,7 @@ export default function ProjectPage() {
                       )}
                     </td>
                     <td className="hide-sm">{c.categoryName}</td>
-                    <td className="hide-sm">{c.sourceName}</td>
+                    <td className="hide-sm">{c.sourceName ?? <span className="chip warn">Not captured</span>}</td>
                     <td className="num">
                       <Money cents={c.amountCents} />
                     </td>

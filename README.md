@@ -17,6 +17,8 @@ The name is the shaka: thumb and pinky out, *shap, all good*.
 | ![Home](docs/screenshots/home.png) | ![Job](docs/screenshots/job.png) | ![Log](docs/screenshots/phone-log.png) |
 | **Income statement by month** | **A worker's month-by-month** | **Quote from a parts plan** |
 | ![Trade statement](docs/screenshots/trade-statement.png) | ![Worker](docs/screenshots/worker.png) | ![Quote](docs/screenshots/quote.png) |
+| **Trading names** | **Agreeing a year to the accountant** | **Provisional tax estimate** |
+| ![Trading names](docs/screenshots/trading-names.png) | ![Year end](docs/screenshots/year-end.png) | ![Provisional tax](docs/screenshots/provisional-tax.png) |
 
 *(Screenshots show the fictional demo company.)*
 
@@ -39,16 +41,30 @@ The name is the shaka: thumb and pinky out, *shap, all good*.
   invoiced, plus your mark-up. A quote becomes an invoice in one tap. PDFs can be shared to
   WhatsApp from the phone or emailed. Payments are recorded against invoices, so you see paid,
   part paid and overdue at a glance. VAT can be switched on if you register.
+- **Trading names.** One company, several names on the door: each has its own logo, colour,
+  contacts and bank details on the PDF. A job, client, quote or invoice goes out under any of
+  them; numbering, workflows and the books are shared.
 - **Accounts.** Income statement (totals or **by month**, like a Trade Statement), balance sheet,
   trial balance, general ledger per account, journals, an **asset register** with monthly
   depreciation and disposal, **balance checks** against bank, card and loan statements with
   one-tap adjustments, a lock date for closed years, and CSV exports for your accountant. An
   *accountant* login can read and export everything but change nothing.
+- **Year end and tax.** Type in the accountant's figures from the annual financial statements and
+  Shap posts one adjustment per account, so that year's statements match and the next year opens
+  from the agreed balances; whatever doesn't tie up shows in Suspense. A **provisional tax**
+  estimate projects this year to twelve months next to last year, with the SARS small business
+  corporation table.
 - **Import your tracker.** Upload the Excel project tracker (Per Project, Costs, Wages List…) and
   Shap brings across clients, jobs, invoices and payments, costs, workers, days, wage payments and
   savings. It checks every job against *Per Project* and every month against the *Trade Statement*,
   and can agree a closed year to its trial balance. See [docs/importing.md](docs/importing.md).
-  Client names and emails come across from an Invoice Ninja client export.
+  Costs with a blank account come in as *not captured yet* rather than guessed, and are ticked
+  off in batches later. Client details come across from an Invoice Ninja client export, matched
+  to the tracker's client codes with a list you check first.
+- **More than one company.** A friend's business can run on the same server with its own
+  database, login and address ([deployment](docs/deployment.md#another-company-on-the-same-server)).
+  A **company file** carries a whole setup (trading names, logos, clients, agreed year ends)
+  from one server to another.
 
 ### How the books work
 
@@ -79,6 +95,7 @@ phone, and it runs next to Steady's and Sorted's test stacks:
 git clone https://github.com/OpenWorksIT/shap && cd shap/deploy/test
 ./start.sh                                  # fictional demo company
 ./start.sh --import ~/Documents/tracker.xlsx   # or start fresh with your own tracker
+./start.sh --import ~/Documents/tracker.xlsx --company ~/Documents/mine.company.json
 ```
 
 See [deploy/test/README.md](deploy/test/README.md) for a fixed address and the phone home screen.

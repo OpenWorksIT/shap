@@ -33,6 +33,13 @@ export async function seed(sql: Sql, opts: { reset?: boolean; password?: string 
   await sql`update settings set company_name = 'Demo Builders (Pty) Ltd', trading_name = 'Demo Builders', reg_number = '2024/000000/07',
     address = ${'12 Example Street\nGqeberha 6001'}, phone = '041 000 0000', email = 'accounts@example.co.za',
     bank_details = ${'Example Bank · Business cheque account\nAccount 000 000 0000 · Branch 250655'} where id`;
+  // Two trading names for one company: the building side and a fictional electrical side.
+  await sql`update brands set name = 'Demo Builders', legal_line = 'Demo Builders (Pty) Ltd', email = 'accounts@example.co.za', phone = '041 000 0000',
+    address = ${'12 Example Street\nGqeberha 6001'}, bank_details = ${'Example Bank · Business cheque account\nAccount 000 000 0000 · Branch 250655'}, accent = '#1f5f8b'
+    where name = 'My company'`;
+  await sql`insert into brands (name, legal_line, email, phone, address, bank_details, accent, sort)
+    values ('Demo Electrical', 'Demo Builders (Pty) Ltd t/a Demo Electrical', 'sparks@example.co.za', '041 000 0001', ${'12 Example Street\nGqeberha 6001'},
+            ${'Example Bank · Business cheque account\nAccount 000 000 0000 · Branch 250655'}, '#c2410c', 2)`;
   const { buffer } = await buildDemoTracker(today());
   await applyTracker(sql, await readTracker(buffer), { agreeTrialBalance: true });
   await sql`update clients set name = case code

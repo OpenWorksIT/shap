@@ -65,6 +65,15 @@ describe('importing it', () => {
     expect(await balance(env.sql, 'share_capital', tb.date)).toBe(-tb.shareCapitalCents);
   });
 
+  it('leaves costs with a blank account as not captured, instead of guessing what paid them', async () => {
+    const blank = plan.costs.filter((c) => !c.account).length;
+    expect(blank).toBeGreaterThan(0);
+    const [r] = await env.sql<{ n: number; total: number }[]>`select count(*)::int as n, coalesce(sum(amount_cents), 0)::bigint as total from costs where source_id is null`;
+    expect(r!.n).toBe(blank);
+    expect(result.counts.uncapturedCosts).toBe(blank);
+    expect(await balance(env.sql, 'uncaptured')).toBe(-r!.total);
+  });
+
   it('continues invoice numbering after the last imported invoice', async () => {
     const [s] = await env.sql<{ invoiceNext: number; markupBp: number }[]>`select invoice_next, markup_bp from settings`;
     expect(s!.invoiceNext).toBe(totals.projects - 2 + 1);

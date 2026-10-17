@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type CSSProperties } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { formatDate, formatZar } from '@shap/shared';
 import { PageHead } from '../components/Shell';
@@ -11,7 +11,8 @@ import type { DocRow } from '../lib/types';
 type Kind = 'invoice' | 'quote';
 
 export default function DocumentsPage() {
-  const { isOwner } = useAuthed();
+  const { isOwner, ref } = useAuthed();
+  const brands = ref.brands.filter((b) => b.active);
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const kind = (params.get('kind') as Kind) || 'invoice';
@@ -121,6 +122,11 @@ export default function DocumentsPage() {
                 <tr key={d.id} className="clickable" onClick={() => navigate(`/documents/${d.id}`)}>
                   <td className="strong nowrap">
                     <Link to={`/documents/${d.id}`}>{d.number}</Link>
+                    {brands.length > 1 && d.brandId && (
+                      <div className="brand-tag" style={{ '--brand-dot': brands.find((b) => b.id === d.brandId)?.accent } as CSSProperties}>
+                        {d.brandName}
+                      </div>
+                    )}
                   </td>
                   <td>
                     {d.clientName ?? '—'}

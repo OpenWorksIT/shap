@@ -36,6 +36,21 @@ export interface Settings {
   defaultWageSourceId: string | null;
   defaultCostSourceId: string | null;
   lockDate: string | null;
+  defaultBrandId: string | null;
+}
+
+export interface Brand {
+  id: string;
+  name: string;
+  legalLine: string;
+  email: string;
+  phone: string;
+  website: string;
+  address: string;
+  bankDetails: string;
+  logoId: string | null;
+  accent: string;
+  active: boolean;
 }
 
 export interface Source {
@@ -76,6 +91,7 @@ export interface Reference {
   categories: Category[];
   workTypes: WorkType[];
   accounts: Account[];
+  brands: Brand[];
 }
 
 export interface ProjectRow {
@@ -90,6 +106,7 @@ export interface ProjectRow {
   endDate: string | null;
   siteAddress: string;
   notes: string;
+  brandId: string | null;
   estLabourCents: number;
   estMaterialsCents: number;
   estDemoCents: number;
@@ -164,8 +181,8 @@ export interface CostRow {
   categoryId: string;
   categoryName: string;
   categoryKind: CategoryKind;
-  sourceId: string;
-  sourceName: string;
+  sourceId: string | null;
+  sourceName: string | null;
   projectId: string | null;
   projectName: string | null;
   projectNumber: number | null;
@@ -207,6 +224,8 @@ export interface DocRow {
   projectNumber?: number | null;
   clientId?: string | null;
   clientName?: string | null;
+  brandId?: string | null;
+  brandName?: string | null;
 }
 
 export interface DocLine {
@@ -245,6 +264,7 @@ export interface ClientRow {
   vatNumber: string;
   notes: string;
   active: boolean;
+  brandId: string | null;
   invoicedCents: number;
   outstandingCents: number;
   labourCostCents: number;

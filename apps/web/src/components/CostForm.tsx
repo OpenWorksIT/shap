@@ -16,7 +16,7 @@ export interface CostDraft {
   vatCents: number;
   supplier: string;
   categoryId: string;
-  sourceId: string;
+  sourceId: string | null;
   projectId: string | null;
   plannedItemId: string | null;
   receiptId: string | null;
@@ -145,7 +145,8 @@ export function CostForm({ initial, projectId, plannedItem, onSaved, onDeleted }
         </Field>
         <Field label="Paid from">
           {(p) => (
-            <select {...p} className="select" value={f.sourceId} onChange={(e) => set('sourceId', e.target.value)}>
+            <select {...p} className="select" value={f.sourceId ?? ''} onChange={(e) => set('sourceId', e.target.value || null)}>
+              <option value="">Not sure yet (capture later)</option>
               {sources.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}

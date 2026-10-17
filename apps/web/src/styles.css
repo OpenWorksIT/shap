@@ -1532,6 +1532,95 @@ button.list-row {
   bottom: 12px;
   box-shadow: var(--shadow);
 }
+.brand-swatch {
+  width: 6px;
+  align-self: stretch;
+  border-radius: 3px;
+  flex: none;
+}
+.brand-logo {
+  height: 36px;
+  width: 96px;
+  object-fit: contain;
+  flex: none;
+  background: #fff;
+  border-radius: 6px;
+  padding: 3px;
+  border: 1px solid var(--rule);
+}
+.brand-logo.empty {
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  color: var(--muted);
+}
+.color-input {
+  width: 48px;
+  height: 40px;
+  padding: 2px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  background: var(--surface, #fff);
+  cursor: pointer;
+}
+.brand-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.brand-tag::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--brand-dot, var(--muted));
+}
+.chip.ok {
+  background: var(--ok-soft, var(--sunken));
+  border-color: transparent;
+  color: var(--ok, var(--ink-2));
+}
+.year-table .money-input,
+.tax-sheet .money-input {
+  max-width: 160px;
+  margin-left: auto;
+}
+.year-table .money-input .input,
+.tax-sheet .money-input .input {
+  text-align: right;
+  min-height: 36px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.year-table tr.off td {
+  background: var(--warn-soft);
+}
+.tax-sheet td.num,
+.tax-sheet th.num {
+  white-space: nowrap;
+}
+.tax-sheet tr.total td {
+  font-weight: 700;
+  border-top: 2px solid var(--ink, currentColor);
+}
+.tax-sheet tr.sub td {
+  font-weight: 600;
+  background: var(--sunken);
+}
+@media print {
+  .no-print,
+  .tabs-scroll {
+    display: none !important;
+  }
+  .tax-sheet .money-input {
+    border: 0;
+  }
+  .tax-sheet .money-input > span {
+    display: none;
+  }
+}
 
 /* ---------- Responsive ---------- */
 @media (max-width: 1100px) {

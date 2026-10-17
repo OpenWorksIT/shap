@@ -63,3 +63,42 @@ export function ProjectSelect({
 export function useWorkers() {
   return useApi<WorkerRow[]>('/api/workers');
 }
+
+/**
+ * Which trading name a job, client or document goes out under. Hidden while there's only one.
+ * Empty means "the usual": the job's, then the client's, then the default.
+ */
+export function BrandSelect({
+  value,
+  onChange,
+  emptyLabel = 'The usual',
+  disabled,
+  id,
+  ...rest
+}: {
+  value: string | null;
+  onChange: (id: string | null) => void;
+  emptyLabel?: string;
+  disabled?: boolean;
+  id?: string;
+  'aria-invalid'?: boolean;
+  'aria-describedby'?: string;
+}) {
+  const { ref } = useAuthed();
+  const brands = ref.brands.filter((b) => b.active || b.id === value);
+  return (
+    <select {...rest} id={id} className="select" value={value ?? ''} onChange={(e) => onChange(e.target.value || null)} disabled={disabled}>
+      <option value="">{emptyLabel}</option>
+      {brands.map((b) => (
+        <option key={b.id} value={b.id}>
+          {b.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+export function useHasBrands(): boolean {
+  const { ref } = useAuthed();
+  return ref.brands.filter((b) => b.active).length > 1;
+}

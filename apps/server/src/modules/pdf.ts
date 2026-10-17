@@ -4,6 +4,20 @@ import PDFDocument from 'pdfkit';
 import { formatDate, formatZar, LINE_CATEGORY_LABELS, type LineCategory } from '@shap/shared';
 import type { SettingsRow } from '../lib/books.js';
 
+export interface BrandRow {
+  id: string;
+  name: string;
+  legalLine: string;
+  email: string;
+  phone: string;
+  website: string;
+  address: string;
+  bankDetails: string;
+  logoId: string | null;
+  accent: string;
+  active: boolean;
+}
+
 export interface PdfDocument {
   doc: {
     id: string;
@@ -35,17 +49,19 @@ export interface PdfDocument {
     clientCode: string | null;
     voidReason: string;
     sourceQuoteNumber: string | null;
+    brandId: string | null;
+    brandName: string | null;
   };
   lines: { id: string; category: LineCategory; description: string; qty: number; unit: string; unitPriceCents: number; lineTotalCents: number }[];
   settings: SettingsRow;
+  brand: BrandRow | null;
   logo: Buffer | null;
 }
 
-const INK = '#1f2b33';
-const MUTED = '#5d6a72';
-const RULE = '#d9d2c7';
-const BAND = '#f4efe7';
-const ACCENT = '#e8731c';
+const INK = '#1d262c';
+const MUTED = '#66737b';
+const RULE = '#e2ddd5';
+const ZEBRA = '#faf8f5';
 
 // Atkinson Hyperlegible (the app's typeface), from the fontsource package; Helvetica if it's missing.
 const require = createRequire(import.meta.url);
@@ -63,9 +79,36 @@ const BOLD = fontPath(700);
 
 const qtyText = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0+$/, '').replace(/\.$/, ''));
 
+/** A pale tint of the brand colour for bands and boxes. */
+function tint(hex: string, amount: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const mix = (c: number) => Math.round(c + (255 - c) * amount);
+  const r = mix((n >> 16) & 255);
+  const g = mix((n >> 8) & 255);
+  const b = mix(n & 255);
+  return `#${((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1)}`;
+}
+
+/**
+ * Quote / invoice layout: the trading name's logo and colour, the document's essentials
+ * (number, date, amount due) where the eye lands first, and the bank details in a box
+ * at the bottom so paying is easy.
+ */
 export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
-  const { doc, lines, settings, logo } = data;
-  const pdf = new PDFDocument({ size: 'A4', margins: { top: 40, bottom: 56, left: 40, right: 40 }, bufferPages: true, info: { Title: `${doc.kind} ${doc.number}`, Author: settings.companyName } });
+  const { doc, lines, settings, brand, logo } = data;
+  const accent = brand?.accent && /^#[0-9a-f]{6}$/i.test(brand.accent) ? brand.accent : '#e8731c';
+  const soft = tint(accent, 0.9);
+  const tradingName = brand?.name || settings.tradingName || settings.companyName;
+  const legal = brand?.legalLine || (tradingName !== settings.companyName ? `${settings.companyName} t/a ${tradingName}` : settings.companyName);
+  const contact = {
+    address: brand?.address || settings.address,
+    phone: brand?.phone || settings.phone,
+    email: brand?.email || settings.email,
+    website: brand?.website || settings.website,
+    bank: brand?.bankDetails || settings.bankDetails,
+  };
+
+  const pdf = new PDFDocument({ size: 'A4', margins: { top: 40, bottom: 60, left: 44, right: 44 }, bufferPages: true, info: { Title: `${doc.kind === 'invoice' ? 'Invoice' : 'Quote'} ${doc.number}`, Author: tradingName } });
   const chunks: Buffer[] = [];
   pdf.on('data', (c: Buffer) => chunks.push(c));
   const done = new Promise<Buffer>((resolve) => pdf.on('end', () => resolve(Buffer.concat(chunks))));
@@ -76,93 +119,107 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   if (BOLD) pdf.registerFont('BodyBold', BOLD);
 
   const W = pdf.page.width;
-  const L = 40;
-  const R = W - 40;
+  const L = 44;
+  const R = W - 44;
   const contentW = R - L;
-  const bottom = () => pdf.page.height - 70;
-
+  const bottom = () => pdf.page.height - 74;
   const isInvoice = doc.kind === 'invoice';
-  const heading = isInvoice ? (settings.vatRegistered && doc.vatRateBp > 0 ? 'TAX INVOICE' : 'INVOICE') : 'QUOTATION';
-  const company = settings.tradingName || settings.companyName;
+  const heading = isInvoice ? (settings.vatRegistered && doc.vatRateBp > 0 ? 'Tax invoice' : 'Invoice') : 'Quotation';
+  const balance = doc.totalCents - (isInvoice ? doc.paidCents : 0);
+  const label = (text: string, x: number, at: number, opts: PDFKit.Mixins.TextOptions = {}) =>
+    pdf.font(bold).fontSize(7.5).fillColor(MUTED).text(text.toUpperCase(), x, at, { characterSpacing: 0.9, ...opts });
 
-  // ---- top band
-  pdf.rect(0, 0, W, 6).fill(ACCENT);
-  let y = 34;
+  // ---- header: logo left, title and essentials right
+  let y = 40;
   let logoBottom = y;
   if (logo) {
     try {
-      pdf.image(logo, L, y, { fit: [150, 64] });
-      logoBottom = y + 64;
+      pdf.image(logo, L, y, { fit: [210, 78] });
+      logoBottom = y + 78;
     } catch {
       /* unreadable image: carry on without it */
     }
   }
-  // company block, right aligned
-  pdf.fillColor(INK).font(bold).fontSize(13).text(company, L, y, { width: contentW, align: 'right' });
-  const companyLines = [
-    settings.tradingName && settings.tradingName !== settings.companyName ? settings.companyName : '',
-    settings.address,
-    [settings.phone, settings.email].filter(Boolean).join('  ·  '),
-    settings.website,
-    settings.regNumber ? `Reg. no. ${settings.regNumber}` : '',
-    settings.vatNumber && settings.vatRegistered ? `VAT no. ${settings.vatNumber}` : '',
-  ].filter(Boolean);
-  pdf.font(regular).fontSize(8.5).fillColor(MUTED).text(companyLines.join('\n'), L, pdf.y + 2, { width: contentW, align: 'right', lineGap: 1 });
-  y = Math.max(pdf.y, logoBottom) + 22;
-
-  // ---- title and meta
-  pdf.font(bold).fontSize(22).fillColor(INK).text(heading, L, y);
-  if (doc.status === 'void') pdf.font(bold).fontSize(11).fillColor('#b42318').text(`VOID – ${doc.voidReason}`, L, pdf.y + 2);
-  else if (doc.status === 'draft') pdf.font(bold).fontSize(10).fillColor(MUTED).text('DRAFT', L, pdf.y + 2);
-
+  if (!logo) {
+    pdf.font(bold).fontSize(20).fillColor(accent).text(tradingName, L, y + 6, { width: 260 });
+    logoBottom = pdf.y;
+  }
+  pdf.font(bold).fontSize(26).fillColor(accent).text(heading, L, y, { width: contentW, align: 'right' });
   const meta: [string, string][] = [
     [isInvoice ? 'Invoice no.' : 'Quote no.', doc.number],
     ['Date', formatDate(doc.issueDate)],
   ];
   if (doc.dueDate) meta.push([isInvoice ? 'Due' : 'Valid until', formatDate(doc.dueDate)]);
   if (doc.clientCode) meta.push(['Account', doc.clientCode]);
-  if (doc.sourceQuoteNumber) meta.push(['Quote', doc.sourceQuoteNumber]);
-  let my = y + 2;
+  if (doc.sourceQuoteNumber) meta.push(['Our quote', doc.sourceQuoteNumber]);
+  let my = y + 36;
   for (const [k, v] of meta) {
-    pdf.font(regular).fontSize(9).fillColor(MUTED).text(k, R - 210, my, { width: 90 });
-    pdf.font(bold).fontSize(9.5).fillColor(INK).text(v, R - 120, my, { width: 120, align: 'right' });
-    my += 15;
+    pdf.font(regular).fontSize(9).fillColor(MUTED).text(k, R - 200, my, { width: 90, align: 'right' });
+    pdf.font(bold).fontSize(9.5).fillColor(INK).text(v, R - 100, my, { width: 100, align: 'right' });
+    my += 14;
   }
-  y = Math.max(pdf.y, my) + 18;
+  if (doc.status === 'void') {
+    pdf.font(bold).fontSize(10).fillColor('#b42318').text(`VOID — ${doc.voidReason}`, R - 260, my + 2, { width: 260, align: 'right' });
+    my += 16;
+  } else if (doc.status === 'draft') {
+    pdf.font(bold).fontSize(9).fillColor(MUTED).text('DRAFT', R - 200, my + 2, { width: 200, align: 'right' });
+    my += 14;
+  }
+  y = Math.max(logoBottom, my) + 22;
 
-  // ---- bill to / for
-  const half = (contentW - 24) / 2;
-  const label = (text: string, x: number, at: number) => pdf.font(bold).fontSize(7.5).fillColor(MUTED).text(text.toUpperCase(), x, at, { characterSpacing: 0.8 });
-  label(isInvoice ? 'Bill to' : 'Prepared for', L, y);
-  pdf.font(bold).fontSize(11).fillColor(INK).text(doc.clientName || '—', L, y + 12, { width: half });
-  const clientLines = [doc.clientContact, doc.clientAddress, doc.clientPhone, doc.clientEmail, doc.clientVatNumber ? `VAT no. ${doc.clientVatNumber}` : ''].filter(Boolean) as string[];
-  pdf.font(regular).fontSize(9).fillColor(INK).text(clientLines.join('\n'), L, pdf.y + 2, { width: half, lineGap: 1 });
-  const leftBottom = pdf.y;
-  let rightBottom = y;
-  if (doc.title || doc.projectName) {
-    label('For', L + half + 24, y);
-    pdf.font(bold).fontSize(11).fillColor(INK).text(doc.title || doc.projectName || '', L + half + 24, y + 12, { width: half });
-    const forLines = [doc.projectName && doc.title && doc.title !== doc.projectName ? `Job ${doc.projectNumber}: ${doc.projectName}` : doc.projectNumber ? `Job ${doc.projectNumber}` : '', doc.siteAddress].filter(Boolean) as string[];
-    if (forLines.length) pdf.font(regular).fontSize(9).fillColor(INK).text(forLines.join('\n'), L + half + 24, pdf.y + 2, { width: half, lineGap: 1 });
-    rightBottom = pdf.y;
+  // ---- from / to band
+  const colW = (contentW - 30) / 2;
+  const bandTop = y;
+  pdf.rect(L, bandTop, contentW, 2).fill(accent);
+  y = bandTop + 14;
+  label('From', L, y);
+  label(isInvoice ? 'Bill to' : 'Prepared for', L + colW + 30, y);
+  y += 12;
+  pdf.font(bold).fontSize(10.5).fillColor(INK).text(tradingName, L, y, { width: colW });
+  const fromLines = [
+    legal !== tradingName ? legal : '',
+    settings.regNumber ? `Reg. no. ${settings.regNumber}` : '',
+    settings.vatRegistered && settings.vatNumber ? `VAT no. ${settings.vatNumber}` : '',
+    contact.address,
+    [contact.phone, contact.email].filter(Boolean).join('  ·  '),
+    contact.website,
+  ].filter(Boolean);
+  pdf.font(regular).fontSize(8.5).fillColor(MUTED).text(fromLines.join('\n'), L, pdf.y + 2, { width: colW, lineGap: 1.2 });
+  const fromBottom = pdf.y;
+  pdf.font(bold).fontSize(10.5).fillColor(INK).text(doc.clientName || '—', L + colW + 30, y, { width: colW });
+  const toLines = [doc.clientContact && doc.clientContact !== doc.clientName ? doc.clientContact : '', doc.clientAddress, [doc.clientPhone, doc.clientEmail].filter(Boolean).join('  ·  '), doc.clientVatNumber ? `VAT no. ${doc.clientVatNumber}` : ''].filter(Boolean) as string[];
+  pdf.font(regular).fontSize(8.5).fillColor(MUTED).text(toLines.join('\n'), L + colW + 30, pdf.y + 2, { width: colW, lineGap: 1.2 });
+  y = Math.max(fromBottom, pdf.y) + 16;
+
+  // ---- what it's for
+  const forText = doc.title || doc.projectName || '';
+  if (forText) {
+    pdf.font(regular).fontSize(9);
+    const site = doc.siteAddress ? `  ·  ${doc.siteAddress}` : '';
+    const h = pdf.heightOfString(`${forText}${site}`, { width: contentW - 70 }) + 14;
+    pdf.roundedRect(L, y, contentW, h, 4).fill(soft);
+    label('For', L + 12, y + 8);
+    pdf.font(bold).fontSize(9.5).fillColor(INK).text(forText, L + 52, y + 7, { width: contentW - 64, continued: Boolean(site) });
+    if (site) pdf.font(regular).fillColor(MUTED).text(site);
+    y += h + 14;
   }
-  y = Math.max(leftBottom, rightBottom) + 20;
 
   // ---- lines
-  const cols = { desc: L + 8, qty: L + contentW - 250, unit: L + contentW - 185, amount: L + contentW - 95 };
+  const cols = { desc: L + 10, qty: R - 250, unit: R - 182, amount: R - 92 };
   const tableHeader = () => {
-    pdf.rect(L, y, contentW, 20).fill(BAND);
-    pdf.font(bold).fontSize(8.5).fillColor(MUTED);
-    pdf.text('Description', cols.desc, y + 6);
-    pdf.text('Qty', cols.qty, y + 6, { width: 55, align: 'right' });
-    pdf.text('Unit price', cols.unit, y + 6, { width: 80, align: 'right' });
-    pdf.text('Amount', cols.amount, y + 6, { width: 87, align: 'right' });
-    y += 26;
+    pdf.font(bold).fontSize(8).fillColor(MUTED);
+    pdf.text('DESCRIPTION', cols.desc, y, { characterSpacing: 0.6 });
+    pdf.text('QTY', cols.qty, y, { width: 55, align: 'right', characterSpacing: 0.6 });
+    pdf.text('UNIT PRICE', cols.unit, y, { width: 80, align: 'right', characterSpacing: 0.6 });
+    pdf.text('AMOUNT', cols.amount, y, { width: 82, align: 'right', characterSpacing: 0.6 });
+    y += 13;
+    pdf.moveTo(L, y).lineTo(R, y).lineWidth(1.2).strokeColor(accent).stroke();
+    y += 6;
   };
   const ensure = (h: number) => {
     if (y + h > bottom()) {
       pdf.addPage();
-      y = 48;
+      y = 50;
       tableHeader();
     }
   };
@@ -170,69 +227,76 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
 
   const categories = [...new Set(lines.map((l) => l.category))];
   const grouped = categories.length > 1;
+  let row = 0;
   for (const cat of categories) {
     const group = lines.filter((l) => l.category === cat);
     if (grouped) {
-      ensure(22);
-      pdf.font(bold).fontSize(9.5).fillColor(INK).text(LINE_CATEGORY_LABELS[cat], cols.desc, y);
-      y = pdf.y + 4;
+      ensure(24);
+      pdf.font(bold).fontSize(8).fillColor(accent).text(LINE_CATEGORY_LABELS[cat].toUpperCase(), cols.desc, y + 4, { characterSpacing: 0.8 });
+      y = pdf.y + 5;
     }
     for (const l of group) {
-      const descW = cols.qty - cols.desc - 12;
+      const descW = cols.qty - cols.desc - 14;
       pdf.font(regular).fontSize(9.5);
-      const h = pdf.heightOfString(l.description, { width: descW });
-      ensure(h + 8);
-      pdf.fillColor(INK).text(l.description, cols.desc, y, { width: descW });
-      pdf.text(`${qtyText(l.qty)}${l.unit ? ` ${l.unit}` : ''}`, cols.qty, y, { width: 55, align: 'right' });
-      pdf.text(formatZar(l.unitPriceCents), cols.unit, y, { width: 80, align: 'right' });
-      pdf.text(formatZar(l.lineTotalCents), cols.amount, y, { width: 87, align: 'right' });
-      y += h + 6;
-      pdf.moveTo(L, y - 2).lineTo(R, y - 2).lineWidth(0.5).strokeColor(RULE).stroke();
-    }
-    if (grouped) {
-      const sub = group.reduce((s, l) => s + l.lineTotalCents, 0);
-      ensure(18);
-      pdf.font(regular).fontSize(8.5).fillColor(MUTED).text(`${LINE_CATEGORY_LABELS[cat]} subtotal`, cols.unit - 80, y + 1, { width: 160, align: 'right' });
-      pdf.font(bold).fontSize(9).fillColor(INK).text(formatZar(sub), cols.amount, y + 1, { width: 87, align: 'right' });
-      y += 20;
+      const h = pdf.heightOfString(l.description, { width: descW }) + 12;
+      ensure(h);
+      if (row++ % 2 === 1) pdf.rect(L, y, contentW, h).fill(ZEBRA);
+      pdf.fillColor(INK).text(l.description, cols.desc, y + 6, { width: descW });
+      pdf.text(`${qtyText(l.qty)}${l.unit ? ` ${l.unit}` : ''}`, cols.qty, y + 6, { width: 55, align: 'right' });
+      pdf.text(formatZar(l.unitPriceCents), cols.unit, y + 6, { width: 80, align: 'right' });
+      pdf.font(bold).text(formatZar(l.lineTotalCents), cols.amount, y + 6, { width: 82, align: 'right' });
+      y += h;
     }
   }
-
-  // ---- totals
-  const totals: [string, number, boolean][] = [['Subtotal', doc.subtotalCents, false]];
-  if (doc.vatRateBp > 0) totals.push([`VAT ${(doc.vatRateBp / 100).toFixed(doc.vatRateBp % 100 ? 1 : 0)}%`, doc.vatCents, false]);
-  totals.push(['Total', doc.totalCents, true]);
-  if (isInvoice && doc.paidCents) {
-    totals.push(['Paid', -doc.paidCents, false]);
-    totals.push(['Balance due', doc.totalCents - doc.paidCents, true]);
-  }
-  ensure(totals.length * 18 + 12);
-  y += 6;
-  for (const [k, v, strong] of totals) {
-    if (strong) {
-      pdf.rect(R - 230, y - 4, 230, 20).fill(k === 'Balance due' ? '#fde8d7' : BAND);
-    }
-    pdf.font(strong ? bold : regular).fontSize(strong ? 11 : 9.5).fillColor(INK);
-    pdf.text(k, R - 222, y, { width: 120 });
-    pdf.text(formatZar(v), R - 120, y, { width: 112, align: 'right' });
-    y += strong ? 22 : 17;
-  }
+  pdf.moveTo(L, y + 2).lineTo(R, y + 2).lineWidth(0.6).strokeColor(RULE).stroke();
   y += 14;
 
-  // ---- banking, notes, terms
+  // ---- totals (right) and payment details (left), side by side
+  const totals: [string, number][] = [];
+  if (grouped) for (const cat of categories) totals.push([LINE_CATEGORY_LABELS[cat], lines.filter((l) => l.category === cat).reduce((s, l) => s + l.lineTotalCents, 0)]);
+  totals.push(['Subtotal', doc.subtotalCents]);
+  if (doc.vatRateBp > 0) totals.push([`VAT ${(doc.vatRateBp / 100).toFixed(doc.vatRateBp % 100 ? 1 : 0)}%`, doc.vatCents]);
+  if (isInvoice && doc.paidCents) {
+    totals.push(['Total', doc.totalCents]);
+    totals.push(['Paid', -doc.paidCents]);
+  }
+  const bigLabel = isInvoice ? (doc.paidCents >= doc.totalCents && doc.totalCents > 0 ? 'Paid in full' : 'Amount due') : 'Quote total';
+  const totalsH = totals.length * 16 + 44;
+  const bankText = isInvoice && contact.bank ? `${contact.bank}\nReference: ${doc.number}` : '';
+  pdf.font(regular).fontSize(9);
+  const bankH = bankText ? pdf.heightOfString(bankText, { width: 230, lineGap: 1.5 }) + 34 : 0;
+  ensure(Math.max(totalsH, bankH) + 10);
+  const tx = R - 230;
+  let ty = y;
+  for (const [k, v] of totals) {
+    pdf.font(regular).fontSize(9).fillColor(MUTED).text(k, tx, ty, { width: 130 });
+    pdf.font(regular).fontSize(9.5).fillColor(INK).text(formatZar(v), tx + 120, ty, { width: 110, align: 'right' });
+    ty += 16;
+  }
+  ty += 4;
+  pdf.roundedRect(tx - 10, ty, 240, 34, 5).fill(accent);
+  pdf.font(bold).fontSize(9).fillColor('#ffffff').text(bigLabel.toUpperCase(), tx, ty + 12, { width: 120, characterSpacing: 0.8 });
+  pdf.font(bold).fontSize(14).fillColor('#ffffff').text(formatZar(isInvoice ? Math.max(balance, 0) : doc.totalCents), tx + 90, ty + 9, { width: 130, align: 'right' });
+  if (bankText) {
+    pdf.roundedRect(L, y, 250, bankH, 5).lineWidth(1).strokeColor(tint(accent, 0.6)).stroke();
+    label('Please pay into', L + 12, y + 10);
+    pdf.font(regular).fontSize(9).fillColor(INK).text(bankText, L + 12, y + 23, { width: 230, lineGap: 1.5 });
+  }
+  y = Math.max(ty + 34, y + bankH) + 22;
+
+  // ---- notes and terms
   const block = (title: string, body: string) => {
     if (!body.trim()) return;
-    pdf.font(regular).fontSize(9);
-    const h = pdf.heightOfString(body, { width: contentW }) + 20;
+    pdf.font(regular).fontSize(8.5);
+    const h = pdf.heightOfString(body, { width: contentW }) + 22;
     if (y + h > bottom()) {
       pdf.addPage();
-      y = 48;
+      y = 50;
     }
     label(title, L, y);
-    pdf.font(regular).fontSize(9).fillColor(INK).text(body, L, y + 12, { width: contentW, lineGap: 1.5 });
+    pdf.font(regular).fontSize(8.5).fillColor(MUTED).text(body, L, y + 12, { width: contentW, lineGap: 1.5 });
     y = pdf.y + 14;
   };
-  if (isInvoice) block('Banking details', settings.bankDetails + (settings.bankDetails ? `\nReference: ${doc.number}` : ''));
   block('Notes', doc.notes);
   block(isInvoice ? 'Terms' : 'Terms and conditions', doc.terms);
 
@@ -242,9 +306,9 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
     pdf.switchToPage(i);
     // Writing inside the bottom margin would otherwise start a new page.
     pdf.page.margins.bottom = 0;
-    const fy = pdf.page.height - 38;
-    pdf.moveTo(L, fy - 8).lineTo(R, fy - 8).lineWidth(0.5).strokeColor(RULE).stroke();
-    const foot = [settings.companyName, settings.regNumber ? `Reg. ${settings.regNumber}` : '', settings.vatRegistered && settings.vatNumber ? `VAT ${settings.vatNumber}` : ''].filter(Boolean).join('  ·  ');
+    const fy = pdf.page.height - 40;
+    pdf.rect(0, pdf.page.height - 6, W, 6).fill(accent);
+    const foot = [legal, settings.regNumber ? `Reg. ${settings.regNumber}` : '', settings.vatRegistered && settings.vatNumber ? `VAT ${settings.vatNumber}` : ''].filter(Boolean).join('  ·  ');
     pdf.font(regular).fontSize(7.5).fillColor(MUTED).text(foot, L, fy, { width: contentW - 80, lineBreak: false });
     pdf.text(`Page ${i - range.start + 1} of ${range.count}`, R - 80, fy, { width: 80, align: 'right', lineBreak: false });
   }
