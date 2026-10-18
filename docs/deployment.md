@@ -85,6 +85,21 @@ Backups include every company's database. To take a company off the server, stop
 (`docker compose rm -sf app-friend`), delete its block from `companies.yml`, its `sites/friend.caddy`
 and `companies/friend.env`, and drop the database once you have a backup.
 
+## Other apps on the same server
+
+Shap's Caddy can also be the front door for other apps on the VPS (on vps1: Steady), so they
+don't fight over ports 80 and 443. The other app joins a shared Docker network called `edge`,
+and its site goes in `deploy/vps/sites/`:
+
+```bash
+sudo docker network create edge                      # once
+# in deploy/vps/.env, add edge.yml to COMPOSE_FILE (keep companies.yml if it's there):
+#   COMPOSE_FILE=docker-compose.yml:edge.yml
+sudo docker compose up -d caddy
+```
+
+Then follow the other app's own instructions (Steady: docs/DEPLOY.md, "Sharing a server").
+
 ## Company file
 
 **Settings → Import & company file → Save company file** downloads everything that sets Shap up

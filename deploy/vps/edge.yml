@@ -1,0 +1,18 @@
+# Optional: lets this Caddy be the front door for other apps on the same VPS (e.g. Steady
+# on vps1). It joins a shared Docker network called "edge", where those apps' containers
+# can be reached by name; their sites go in sites/*.caddy.
+#
+#   docker network create edge        (once)
+#   add ":edge.yml" to COMPOSE_FILE in .env, e.g. COMPOSE_FILE=docker-compose.yml:edge.yml
+#   docker compose up -d caddy
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+services:
+  caddy:
+    networks:
+      - default
+      - edge
+
+networks:
+  edge:
+    external: true
