@@ -55,6 +55,7 @@ services:
     ports:
       - '80:80'
       - '443:443'
+      - '443:443/udp'   # HTTP/3: Caddy advertises it, so it must be reachable
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./sites:/etc/caddy/sites:ro
