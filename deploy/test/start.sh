@@ -128,7 +128,7 @@ if [ -n "$IMPORT" ]; then
   else
     compose exec -T app node apps/server/dist/db/import-cli.js /tmp/tracker.xlsx
   fi
-  compose exec -T app rm -f /tmp/tracker.xlsx /tmp/company.json || true
+  compose exec -T -u root app rm -f /tmp/tracker.xlsx /tmp/company.json || true
 fi
 
 # ---------- address ----------
