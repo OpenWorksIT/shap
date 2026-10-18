@@ -30,12 +30,15 @@ recovery codes.
 
 ## 2. Bring your tracker across
 
-Either upload it in the app under **Settings → Import tracker**, or on the server:
+Either upload it in the app under **Settings → Import & company file**, or on the server
+(`--company` is optional; see [Company file](#company-file)):
 
 ```bash
 sudo docker compose cp ~/tracker.xlsx app:/tmp/tracker.xlsx
-sudo docker compose exec app node apps/server/dist/db/import-cli.js /tmp/tracker.xlsx
-sudo docker compose exec app rm /tmp/tracker.xlsx
+sudo docker compose cp ~/company.json app:/tmp/company.json
+sudo docker compose exec app node apps/server/dist/db/import-cli.js /tmp/tracker.xlsx --company /tmp/company.json
+sudo docker compose exec -u root app rm -f /tmp/tracker.xlsx /tmp/company.json   # docker cp leaves them root-owned
+shred -u ~/tracker.xlsx ~/company.json
 ```
 
 Then follow *After the import* in [importing.md](importing.md).
