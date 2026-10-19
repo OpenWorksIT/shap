@@ -51,6 +51,11 @@ services:
     volumes:
       - /var/lib/shap/ctl:/ctl
       - /var/backups/shap:/backups:ro
+    # Caddy reaches Shap by this name. Not plain "app": when Caddy also fronts other apps on a
+    # shared network (edge.yml), their "app" would answer for that name too.
+    networks:
+      default:
+        aliases: [shap-app]
     depends_on:
       db:
         condition: service_healthy

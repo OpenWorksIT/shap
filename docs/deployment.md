@@ -98,6 +98,9 @@ sudo docker network create edge                      # once
 sudo docker compose up -d caddy
 ```
 
+Point each site at a container name that's unique on that network (Shap's own is `shap-app`),
+not a generic `app`: names on the shared network are visible to Caddy from every app.
+
 Then follow the other app's own instructions (Steady: docs/DEPLOY.md, "Sharing a server").
 
 ## Company file

@@ -3,6 +3,12 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.1.1 (19 October 2026)
+
+- **Sharing the server**: Caddy now reaches Shap by its own name (`shap-app`). With other apps
+  on the shared `edge` network, another app's container called `app` could answer for Shap's
+  address instead.
+
 ## 1.1.0 (19 October 2026)
 
 - **Bank statements**: a match can be a few cents out (a supplier's or the bank's rounding);

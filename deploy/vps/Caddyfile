@@ -27,7 +27,7 @@
 
 # Your company.
 {$SHAP_DOMAIN} {
-	import shap app:8080
+	import shap shap-app:8080
 }
 
 # Other companies on this VPS (written by add-company.sh).

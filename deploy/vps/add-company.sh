@@ -71,6 +71,9 @@ cat >> companies.yml <<YML
       TZ: Africa/Johannesburg
     expose:
       - '8080'
+    networks:
+      default:
+        aliases: [shap-app-$SLUG]
     depends_on:
       db:
         condition: service_healthy
@@ -81,7 +84,7 @@ grep -q '^COMPOSE_FILE=' .env || printf '\n# Your company plus the ones add-comp
 mkdir -p sites
 cat > "sites/$SLUG.caddy" <<CADDY
 $DOMAIN {
-	import shap app-$SLUG:8080
+	import shap shap-app-$SLUG:8080
 }
 CADDY
 
