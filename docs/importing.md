@@ -81,7 +81,11 @@ After importing, Shap reports:
    Shap posts one adjustment per account on the last day of that year, so the statements match and
    the next year opens from the agreed balances; the year is locked. Anything that doesn't tie up
    shows in *Suspense*.
-6. **Accounts → Provisional tax**: this year to date, projected to twelve months, against last
+6. **Accounts → Bank statements**: import each account's statement (CSV from online banking).
+   Matches go in by themselves where they're certain; tick through the rest. This is also the
+   quickest way to clear *costs not captured yet*: matching a cost to the statement records how
+   it was paid.
+7. **Accounts → Provisional tax**: this year to date, projected to twelve months, against last
    year, with the tax on the small business corporation table. Change any projected figure, then
    save or print it for the IRP6.
 

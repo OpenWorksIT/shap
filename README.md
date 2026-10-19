@@ -40,7 +40,9 @@ The name is the shaka: thumb and pinky out, *shap, all good*.
   labour, materials, demo or other. *Charge job costs* adds what a job has cost and not yet been
   invoiced, plus your mark-up. A quote becomes an invoice in one tap. PDFs can be shared to
   WhatsApp from the phone or emailed. Payments are recorded against invoices, so you see paid,
-  part paid and overdue at a glance. VAT can be switched on if you register.
+  part paid and overdue at a glance. A deposit (a percentage or an amount) shows on the quote and
+  the invoice asks for it first. An invoice the client won't finish paying can be marked
+  delinquent: the rest is written off as a bad debt. VAT can be switched on if you register.
 - **Trading names.** One company, several names on the door: each has its own logo, colour,
   contacts and bank details on the PDF. A job, client, quote or invoice goes out under any of
   them; numbering, workflows and the books are shared.
@@ -49,6 +51,12 @@ The name is the shaka: thumb and pinky out, *shap, all good*.
   depreciation and disposal, **balance checks** against bank, card and loan statements with
   one-tap adjustments, a lock date for closed years, and CSV exports for your accountant. An
   *accountant* login can read and export everything but change nothing.
+- **Bank statements.** Import a bank or card statement as CSV and Shap reconciles it: each line
+  is matched to what you captured, including a slip captured item by item against the one total
+  on the statement, and costs not yet matched to a payment take the statement's account. Bank
+  fees and debit orders you never captured become costs in one click (the cost type guessed from
+  how you captured that supplier before); client payments are recorded against their invoice;
+  transfers between your own accounts are booked; and anything unticked is left off.
 - **Year end and tax.** Type in the accountant's figures from the annual financial statements and
   Shap posts one adjustment per account, so that year's statements match and the next year opens
   from the agreed balances; whatever doesn't tie up shows in Suspense. A **provisional tax**

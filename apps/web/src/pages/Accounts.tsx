@@ -19,9 +19,10 @@ import { api, ApiError, apiUrl } from '../lib/api';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
 import type { Account, StatementLine, Totals } from '../lib/types';
+import { BankRecon } from './Bank';
 import { ProvisionalTax, YearEnd } from './YearEnd';
 
-type Tab = 'income' | 'balance' | 'trial' | 'ledger' | 'journals' | 'assets' | 'checks' | 'yearend' | 'tax' | 'export';
+type Tab = 'income' | 'balance' | 'trial' | 'ledger' | 'journals' | 'assets' | 'bank' | 'checks' | 'yearend' | 'tax' | 'export';
 
 export default function AccountsPage() {
   const [params, setParams] = useSearchParams();
@@ -41,6 +42,7 @@ export default function AccountsPage() {
             { value: 'ledger', label: 'Ledger' },
             { value: 'journals', label: 'Journals' },
             { value: 'assets', label: 'Assets' },
+            { value: 'bank', label: 'Bank statements' },
             { value: 'checks', label: 'Balance checks' },
             { value: 'yearend', label: 'Year end' },
             { value: 'tax', label: 'Provisional tax' },
@@ -54,6 +56,7 @@ export default function AccountsPage() {
       {tab === 'ledger' && <Ledger />}
       {tab === 'journals' && <Journals />}
       {tab === 'assets' && <Assets />}
+      {tab === 'bank' && <BankRecon />}
       {tab === 'checks' && <BalanceChecks />}
       {tab === 'yearend' && <YearEnd />}
       {tab === 'tax' && <ProvisionalTax />}

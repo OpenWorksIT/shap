@@ -64,6 +64,12 @@ export default function CostsPage() {
         sub={data ? `${rows.length} costs · ${formatZar(total)}` : undefined}
         actions={
           <>
+            {isOwner && (
+              <Link className="btn" to="/accounts?tab=bank">
+                <Icon name="upload" size={18} />
+                Bank statement
+              </Link>
+            )}
             <a className="btn" href={apiUrl(`/api/export/costs?${qs}`)}>
               <Icon name="download" size={18} />
               CSV
