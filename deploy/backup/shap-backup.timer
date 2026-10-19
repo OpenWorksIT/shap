@@ -1,8 +1,8 @@
 [Unit]
-Description=Nightly Shap backup
+Description=Nightly off-site copy of Shap backups (restic)
 
 [Timer]
-OnCalendar=*-*-* 02:15:00
+OnCalendar=*-*-* 03:30:00
 RandomizedDelaySec=15m
 Persistent=true
 

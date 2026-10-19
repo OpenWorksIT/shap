@@ -1,0 +1,10 @@
+[Unit]
+Description=Copy Shap backups from the server to this PC (a few times a day)
+
+[Timer]
+OnStartupSec=10min
+OnCalendar=*-*-* 07:00,13:00,19:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -16,7 +16,13 @@ export interface ParsedStatement {
   rows: StatementRow[];
   columns: { date: string; description: string; amount: string; balance: string | null };
   skipped: number;
+  /** Card transactions not yet cleared: left out until a later statement shows them settled. */
+  pending: number;
+  dateOrder: DateOrder;
 }
+
+/** Day first (South African) or month first (some banks' exports, e.g. Discovery's 10-17-26). */
+export type DateOrder = 'dmy' | 'mdy';
 
 const MONTHS: Record<string, number> = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -26,13 +32,16 @@ const valid = (y: number, m: number, d: number) => {
   return dt.getUTCMonth() === m - 1 ? `${y}-${pad(m)}-${pad(d)}` : null;
 };
 
-/** Dates as South African banks write them. Day comes before month when it's ambiguous. */
-export function parseStatementDate(raw: string): string | null {
+/** Dates as banks write them. Numeric day/month order follows `order` (day first unless told). */
+export function parseStatementDate(raw: string, order: DateOrder = 'dmy'): string | null {
   const s = raw.trim().replace(/^'+|'+$/g, '');
   let m = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:[ T].*)?$/.exec(s);
   if (m) return valid(+m[1]!, +m[2]!, +m[3]!);
   m = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})(?:\s.*)?$/.exec(s);
-  if (m) return valid(m[3]!.length === 2 ? 2000 + +m[3]! : +m[3]!, +m[2]!, +m[1]!);
+  if (m) {
+    const y = m[3]!.length === 2 ? 2000 + +m[3]! : +m[3]!;
+    return order === 'mdy' ? valid(y, +m[1]!, +m[2]!) : valid(y, +m[2]!, +m[1]!);
+  }
   m = /^(\d{1,2})[\s-]+([A-Za-z]{3,9})[\s-,]+(\d{2,4})$/.exec(s);
   if (m) {
     const mon = MONTHS[m[2]!.toLowerCase().slice(0, m[2]!.toLowerCase().startsWith('sept') ? 4 : 3)];
@@ -70,6 +79,26 @@ export function parseStatementAmount(raw: string): number | null {
   return sign * Math.round(Number(s) * 100);
 }
 
+/**
+ * Which way round a file's numeric dates are: the reading under which every date is valid,
+ * none is in the future, and (when both qualify) the dates run in order. Day first otherwise.
+ */
+export function detectDateOrder(cells: string[], today = new Date().toISOString().slice(0, 10)): DateOrder {
+  const limit = new Date(Date.parse(today) + 3 * 86_400_000).toISOString().slice(0, 10);
+  const score = (order: DateOrder) => {
+    const ds = cells.map((c) => parseStatementDate(c, order)).filter((d): d is string => d != null);
+    if (ds.length < cells.length) return -1;
+    let pts = ds.every((d) => d <= limit) ? 2 : 0;
+    const asc = ds.every((d, i) => i === 0 || d >= ds[i - 1]!);
+    const desc = ds.every((d, i) => i === 0 || d <= ds[i - 1]!);
+    if (asc || desc) pts += 1;
+    return pts;
+  };
+  const d = score('dmy');
+  const m = score('mdy');
+  return m > d ? 'mdy' : 'dmy';
+}
+
 const norm = (h: string) => h.toLowerCase().replace(/[^a-z]/g, ' ').replace(/\s+/g, ' ').trim();
 const SKIP = /^(opening|closing) balance|balance (brought|carried) forward|^balance b\/?f/i;
 
@@ -79,7 +108,7 @@ export function parseStatementCsv(text: string, opts: { flip?: boolean } = {}): 
 
   // ---- a header row: a date column plus an amount (or in/out) column
   let header = -1;
-  let ix: { date: number; desc: number; amount: number; debit: number; credit: number; fee: number; balance: number } | null = null;
+  let ix: { date: number; desc: number; amount: number; debit: number; credit: number; fee: number; balance: number; status: number } | null = null;
   for (let r = 0; r < Math.min(table.length, 40) && header < 0; r++) {
     const h = table[r]!.map(norm);
     const find = (...names: string[]) => {
@@ -107,6 +136,7 @@ export function parseStatementCsv(text: string, opts: { flip?: boolean } = {}): 
         desc: find('description', 'details', 'narrative', 'transaction description', 'transaction', 'reference', 'beneficiary'),
         fee: h.findIndex((c) => c === 'fee' || c === 'fees' || c === 'charges'),
         balance: find('balance', 'running balance', 'available balance'),
+        status: h.findIndex((c) => c === 'type' || c === 'status' || c === 'state' || c === 'transaction status'),
       };
     }
   }
@@ -120,7 +150,7 @@ export function parseStatementCsv(text: string, opts: { flip?: boolean } = {}): 
       return cells.length ? cells.filter(test).length / cells.length : 0;
     };
     const cols = Array.from({ length: width }, (_, c) => c);
-    const date = cols.find((c) => share((s) => parseStatementDate(s) != null, c) > 0.7) ?? -1;
+    const date = cols.find((c) => share((s) => (parseStatementDate(s) ?? parseStatementDate(s, 'mdy')) != null, c) > 0.7) ?? -1;
     const nums = cols.filter((c) => c !== date && share((s) => parseStatementAmount(s) != null && /\d[.,]\d{2}\b|^-?\d+$/.test(s), c) > 0.7);
     const textCols = cols.filter((c) => c !== date && !nums.includes(c));
     const avgLen = (c: number) => body.reduce((s, r) => s + (r[c]?.length ?? 0), 0) / body.length;
@@ -128,15 +158,22 @@ export function parseStatementCsv(text: string, opts: { flip?: boolean } = {}): 
     if (date < 0 || !nums.length) {
       throw new Error('Couldn’t find the date and amount columns in this file. Export the statement as CSV from online banking and try again.');
     }
-    ix = { date, desc, amount: nums[0]!, debit: -1, credit: -1, fee: -1, balance: nums[1] ?? -1 };
+    ix = { date, desc, amount: nums[0]!, debit: -1, credit: -1, fee: -1, balance: nums[1] ?? -1, status: -1 };
   }
 
   const head = header >= 0 ? table[header]! : [];
   const name = (i: number, fallback: string) => (i >= 0 ? head[i] || `column ${i + 1}` : fallback);
+  const body = table.slice(header + 1).filter((r) => r.some((c) => c));
+  const order = detectDateOrder(body.map((r) => r[ix!.date] ?? '').filter((c) => /^\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}/.test(c)));
   const rows: StatementRow[] = [];
   let skipped = 0;
-  for (const r of table.slice(header + 1)) {
-    const date = parseStatementDate(r[ix.date] ?? '');
+  let pending = 0;
+  for (const r of body) {
+    if (ix.status >= 0 && /pending|authori[sz]|reserved|hold/i.test(r[ix.status] ?? '')) {
+      pending++;
+      continue;
+    }
+    const date = parseStatementDate(r[ix.date] ?? '', order);
     let description = ix.desc >= 0 ? (r[ix.desc] ?? '') : '';
     // Some exports split the description over two columns ("Description", "Original Description").
     if (!description) description = r.filter((c, i) => i !== ix!.date && parseStatementAmount(c) == null).join(' ');
@@ -159,11 +196,15 @@ export function parseStatementCsv(text: string, opts: { flip?: boolean } = {}): 
       balanceCents: ix.balance >= 0 ? parseStatementAmount(r[ix.balance] ?? '') : null,
     });
   }
-  if (!rows.length) throw new Error('No transactions found in this file');
+  if (!rows.length) {
+    throw new Error(pending ? `Only pending transactions in this file (${pending}). They come in once they’ve cleared: import a later statement.` : 'No transactions found in this file');
+  }
   rows.sort((a, b) => a.date.localeCompare(b.date));
   return {
     rows,
     skipped,
+    pending,
+    dateOrder: order,
     columns: {
       date: name(ix.date, 'date'),
       description: name(ix.desc, 'description'),

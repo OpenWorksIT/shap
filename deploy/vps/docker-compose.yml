@@ -29,7 +29,10 @@ services:
       retries: 10
 
   app:
-    build: ../..
+    build:
+      context: ../..
+      args:
+        GIT_SHA: ${GIT_SHA:-}
     image: shap-app:local
     restart: unless-stopped
     env_file: .env
@@ -43,6 +46,11 @@ services:
       TZ: Africa/Johannesburg
     expose:
       - '8080'
+    # Settings → System: requests for shap-ctl (updates, backups) and the backups themselves
+    # (read only). Set up by ctl/install.sh; without it the app just says so.
+    volumes:
+      - /var/lib/shap/ctl:/ctl
+      - /var/backups/shap:/backups:ro
     depends_on:
       db:
         condition: service_healthy

@@ -1,0 +1,9 @@
+[Unit]
+Description=Shap: update, check for updates or back up (as asked in the app)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/shap/deploy/vps/ctl/shap-ctl.sh
+TimeoutStartSec=45min

@@ -111,34 +111,28 @@ files hold client details and figures: keep them out of git.
 
 ## Updates
 
+Once, on the server:
+
+```bash
+sudo /opt/shap/deploy/vps/ctl/install.sh
+```
+
+After that, **Settings → Updates & backups** shows the version, checks GitHub (also every
+night), lists what's new, and updates with one button: it backs up, pulls the new version,
+rebuilds and restarts, and the page reloads when Shap is back. Database changes run by
+themselves when the app starts. The app never gets Docker or root: it leaves a request that
+`shap-ctl` (a small root service on the server, [`deploy/vps/ctl`](../deploy/vps/ctl)) picks up.
+
+By hand, the same thing is:
+
 ```bash
 cd /opt/shap && sudo git pull && cd deploy/vps && sudo docker compose up -d --build
 ```
 
-Database changes run by themselves when the app starts.
-
 ## Backups
 
-[deploy/backup/backup.sh](../deploy/backup/backup.sh) dumps every company's database (including
-slip photos and logos), checks each dump can be read, and stores it encrypted and de-duplicated with
-restic, ideally at a second provider (an S3-compatible bucket, a Hetzner storage box, or your
-PC over SFTP).
-
-```bash
-sudo cp /opt/shap/deploy/backup/shap-backup.{service,timer} /etc/systemd/system/
-sudo sh -c 'openssl rand -base64 32 > /root/.restic-password && chmod 600 /root/.restic-password'
-sudo nano /etc/systemd/system/shap-backup.service   # set RESTIC_REPOSITORY
-sudo restic -r <repository> init --password-file /root/.restic-password
-sudo systemctl enable --now shap-backup.timer
-```
-
-**Keep a copy of `/root/.restic-password` somewhere safe off the server.** Without it the backups
-can't be opened. Try a restore once:
-
-```bash
-restic -r <repository> restore latest --target /tmp/restore
-docker compose exec -T db pg_restore -U shap -d shap --clean --if-exists < /tmp/restore/var/backups/shap/shap-*.dump
-```
+Every night and before every update, kept on the server and copied to your PC. See
+[backups.md](backups.md), including how to restore.
 
 ## Firewall
 

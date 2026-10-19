@@ -147,6 +147,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
     return {
       columns: parsed.columns,
       skipped: parsed.skipped,
+      pending: parsed.pending,
       count: parsed.rows.length,
       duplicates: keys.filter((k) => have.has(k)).length,
       from: parsed.rows[0]!.date,

@@ -1,0 +1,10 @@
+[Unit]
+Description=Shap: nightly backup and update check
+
+[Timer]
+OnCalendar=*-*-* 02:30
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

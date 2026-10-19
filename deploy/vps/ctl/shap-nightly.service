@@ -1,0 +1,9 @@
+[Unit]
+Description=Shap: nightly backup and update check
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/shap/deploy/vps/ctl/shap-ctl.sh nightly
+TimeoutStartSec=45min

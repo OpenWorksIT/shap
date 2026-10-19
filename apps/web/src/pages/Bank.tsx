@@ -31,6 +31,7 @@ interface Preview {
   count: number;
   duplicates: number;
   skipped: number;
+  pending: number;
   from: string;
   to: string;
   inCents: number;
@@ -428,6 +429,7 @@ function ImportStatement({ sourceId, sourceName, onDone }: { sourceId: string; s
           <p className="small">
             <strong>{preview.count}</strong> transactions, {formatDate(preview.from)} to {formatDate(preview.to)}: money in {formatZar(preview.inCents)}, money out{' '}
             {formatZar(preview.outCents)}.{preview.duplicates > 0 && ` ${preview.duplicates} are already imported and will be skipped.`}
+            {preview.pending > 0 && ` ${preview.pending} pending (not yet cleared) left out: they come in with a later statement.`}
             <br />
             <span className="xs muted">
               Read from columns: {preview.columns.date} · {preview.columns.description} · {preview.columns.amount}

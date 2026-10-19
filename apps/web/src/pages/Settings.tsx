@@ -25,8 +25,9 @@ import { fileToBase64, shrinkImage } from '../lib/files';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
 import type { Brand, Settings } from '../lib/types';
+import { SystemSettings } from './System';
 
-type Tab = 'company' | 'invoicing' | 'lists' | 'users' | 'import';
+type Tab = 'company' | 'invoicing' | 'lists' | 'users' | 'import' | 'system';
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 export default function SettingsPage() {
@@ -45,6 +46,7 @@ export default function SettingsPage() {
             { value: 'lists', label: 'Lists' },
             { value: 'users', label: 'People who sign in' },
             { value: 'import', label: 'Import & company file' },
+            { value: 'system', label: 'Updates & backups' },
           ]}
         />
       </div>
@@ -57,6 +59,7 @@ export default function SettingsPage() {
       {tab === 'invoicing' && <SettingsForm section="invoicing" />}
       {tab === 'lists' && <Lists />}
       {tab === 'users' && <Users />}
+      {tab === 'system' && <SystemSettings />}
       {tab === 'import' && (
         <>
           <ImportTracker />

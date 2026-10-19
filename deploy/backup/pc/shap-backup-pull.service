@@ -1,0 +1,7 @@
+[Unit]
+Description=Copy Shap backups from the server to this PC
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/shap-pull.sh

@@ -1,0 +1,10 @@
+# Runs shap-ctl when Settings → System in the app leaves a request.
+[Unit]
+Description=Shap: watch for requests from the app
+
+[Path]
+PathExists=/var/lib/shap/ctl/request
+Unit=shap-ctl.service
+
+[Install]
+WantedBy=multi-user.target

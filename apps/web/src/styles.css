@@ -1744,3 +1744,33 @@ button.list-row {
     background: #fff;
   }
 }
+
+/* ---------- Settings → Updates & backups ---------- */
+.big-number {
+  font-size: 1.4rem;
+  font-weight: 800;
+}
+.changelog,
+.code-block {
+  white-space: pre-wrap;
+  font-family: ui-monospace, monospace;
+  font-size: var(--fs-xs);
+  background: var(--sunken);
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+}
+.changelog {
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  white-space: normal;
+}
+.changelog ul {
+  margin: 4px 0 10px;
+  padding-left: 18px;
+}
+.changelog p {
+  margin: 4px 0;
+}

@@ -43,6 +43,25 @@ describe('reading statements', () => {
     expect(p.rows.map((r) => r.amountCents)).toEqual([-35250, 50000]);
   });
 
+  it('reads month-first dates (Discovery Bank) and leaves out pending card transactions', () => {
+    const csv = [
+      '\ufeffValue Date,Value Time,Type,Description,Beneficiary or CardHolder,Amount',
+      '10-17-26,20:03,Pending,Hosting Co Cape Town ZA,A CARDHOLDER,-443.68',
+      '10-14-26,09:12,Card Purchase,Engen Walmer ZA,A CARDHOLDER,-650.00',
+      '10-02-26,08:00,Debit Order,Santam Insurance,,-845.50',
+      ',,,,,',
+      ',,,,,',
+    ].join('\n');
+    const p = parseStatementCsv(csv);
+    expect(p.dateOrder).toBe('mdy');
+    expect(p.pending).toBe(1);
+    expect(p.rows.map((r) => [r.date, r.description, r.amountCents])).toEqual([
+      ['2026-10-02', 'Santam Insurance', -84550],
+      ['2026-10-14', 'Engen Walmer ZA', -65000],
+    ]);
+    expect(() => parseStatementCsv(csv.split('\n').slice(0, 2).join('\n'))).toThrow(/pending/);
+  });
+
   it('works without a header row, and can flip a card statement’s signs', () => {
     const csv = ['"2026/03/05","350.00","1200.00","ENGEN WALMER"', '"2026/03/06","99.00","1299.00","VODACOM"'].join('\n');
     expect(parseStatementCsv(csv, { flip: true }).rows.map((r) => [r.description, r.amountCents])).toEqual([
