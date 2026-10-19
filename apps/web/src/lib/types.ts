@@ -61,6 +61,8 @@ export interface Source {
   accountCode: string;
   accountName: string;
   active: boolean;
+  statementsRequired?: boolean;
+  statementsFrom?: string | null;
 }
 export interface Category {
   id: string;

@@ -23,6 +23,7 @@ import { registerWorkerRoutes } from './modules/workers.js';
 import { registerYearEndRoutes } from './modules/yearend.js';
 import { registerBankRoutes } from './modules/bank/routes.js';
 import { registerSystemRoutes } from './modules/system.js';
+import { registerStatementRoutes } from './modules/statements.js';
 import { registerCompanyFileRoutes } from './modules/company-file.js';
 
 export interface BuildOptions {
@@ -110,6 +111,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   registerYearEndRoutes(app, ctx);
   registerBankRoutes(app, ctx);
   registerSystemRoutes(app, ctx);
+  registerStatementRoutes(app, ctx);
   registerCompanyFileRoutes(app, ctx);
 
   // Production: serve the built web app and fall back to index.html for client-side routes.

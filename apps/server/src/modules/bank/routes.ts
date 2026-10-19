@@ -7,8 +7,11 @@ import { audit } from '../../lib/audit.js';
 import { assertOpen, q } from '../../lib/books.js';
 import { badRequest, notFound } from '../../lib/errors.js';
 import { parse } from '../../lib/validate.js';
-import { depositDueSql } from '../documents.js';
-import { guessCategory, suggestMatches, supplierFrom, type Suggestion } from './match.js';
+import { depositDueSql, syncProjectOfDocument } from '../documents.js';
+import { guessCategory, guessIncome, suggestMatches, supplierFrom, type Suggestion } from './match.js';
+
+/** By hand, a match may be out by up to R1 (a supplier's or bank's rounding); the largest item takes the difference. */
+const HAND_ROUNDING_CENTS = 100;
 import { fingerprints, parseStatementCsv } from './parse.js';
 
 const uuid = z.string().uuid();
@@ -112,6 +115,18 @@ async function link(tx: Db, line: LineRow, items: { kind: Kind; id: string }[]) 
   const costIds = items.filter((i) => i.kind === 'cost').map((i) => i.id);
   if (costIds.length) await tx`update costs set source_id = ${line.sourceId} where id = any(${costIds}::uuid[]) and (source_id is null or source_id <> ${line.sourceId})`;
   await tx`update bank_lines set ignored = false where id = ${line.id}`;
+  // Rounding: the books follow the statement. The largest item absorbs the few cents' difference.
+  if (costIds.length && line.amountCents < 0) {
+    const [t] = await tx<{ total: number }[]>`
+      select (coalesce((select sum(c.amount_cents) from costs c join bank_matches m on m.kind = 'cost' and m.record_id = c.id where m.bank_line_id = ${line.id}), 0)
+        + coalesce((select sum(w.amount_cents) from wage_payments w join bank_matches m on m.kind = 'wage_payment' and m.record_id = w.id where m.bank_line_id = ${line.id}), 0))::bigint as total`;
+    const diff = -line.amountCents - t!.total;
+    if (diff !== 0 && Math.abs(diff) <= HAND_ROUNDING_CENTS) {
+      const note = `Rounded by ${diff > 0 ? '+' : '−'}R${(Math.abs(diff) / 100).toFixed(2)} to match the statement`;
+      await tx`update costs set amount_cents = amount_cents + ${diff}, note = case when note = '' then ${note} else note || ' · ' || ${note} end
+        where id = (select id from costs where id = any(${costIds}::uuid[]) order by amount_cents desc limit 1)`;
+    }
+  }
 }
 
 export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -236,6 +251,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
             insert into receipts (invoice_id, date, amount_cents, source_id, method, reference, note)
             values (${s.ids[0]!}, ${l.date}, ${l.amountCents}, ${l.sourceId}, 'eft', '', ${`From statement: ${l.description}`}) returning id`;
           await link(tx, l, [{ kind: 'receipt', id: r!.id }]);
+          await syncProjectOfDocument(tx, s.ids[0]!);
         } else {
           if (s.kind === 'cost') {
             const dates = await tx<{ date: string }[]>`select date::text from costs where id = any(${s.ids}::uuid[])`;
@@ -257,6 +273,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
     const history = await sql<{ supplier: string; categoryId: string }[]>`
       select supplier, category_id from costs where supplier <> '' order by date desc limit 3000`;
     const [src] = await sql<{ name: string; accountId: string }[]>`select name, account_id from payment_sources where id = ${sourceId}`;
+    const incomeAccounts = await sql<{ id: string; code: string; name: string; systemKey: string | null }[]>`select id, code, name, system_key from accounts where type = 'income' and active`;
     // What the books say this account held at the last statement balance, to compare.
     const lastBal = [...lines].reverse().find((l) => l.balanceCents != null);
     let booksCents: number | null = null;
@@ -277,7 +294,8 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
           matches: m ?? [],
           suggestion: s,
           supplier: supplierFrom(l.description),
-          categoryId: l.amountCents < 0 && !m ? guessCategory(l.description, categories, history) : null,
+          categoryId: m ? null : l.amountCents < 0 ? guessCategory(l.description, categories, history) : guessCategory(l.description, categories, history, { fallback: false }),
+          incomeAccountId: !m && l.amountCents > 0 ? guessIncome(l.description, incomeAccounts) : null,
         };
       }),
     };
@@ -308,7 +326,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
         union all select amount_cents, date from wage_payments where id = any(${items.filter((i) => i.kind === 'wage_payment').map((i) => i.id)}::uuid[])
       ) x`;
     const total = sums[0]!.t;
-    if (items.some((i) => i.kind !== 'journal') && total !== -line.amountCents) {
+    if (items.some((i) => i.kind !== 'journal') && Math.abs(total + line.amountCents) > HAND_ROUNDING_CENTS) {
       throw badRequest(`Those add up to R${(Math.abs(total) / 100).toFixed(2)}, not the statement’s R${(Math.abs(line.amountCents) / 100).toFixed(2)}`);
     }
     await assertCanChange(sql, (sums[0]!.dates ?? []).filter(Boolean));
@@ -359,7 +377,19 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { items } = parse(
       z.object({
         items: z
-          .array(z.object({ lineId: uuid, categoryId: uuid, supplier: z.string().trim().max(120).default(''), description: z.string().trim().max(200).default(''), projectId: uuid.nullable().default(null) }))
+          .array(
+            z
+              .object({
+                lineId: uuid,
+                // A cost type (money out is a cost; money in a refund on that type) or, for money in, an income account.
+                categoryId: uuid.nullable().default(null),
+                incomeAccountId: uuid.nullable().default(null),
+                supplier: z.string().trim().max(120).default(''),
+                description: z.string().trim().max(200).default(''),
+                projectId: uuid.nullable().default(null),
+              })
+              .refine((i) => Boolean(i.categoryId) !== Boolean(i.incomeAccountId), 'Choose a cost type or an income account'),
+          )
           .min(1)
           .max(1000),
       }),
@@ -369,10 +399,23 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
     await sql.begin(async (tx) => {
       for (const it of items) {
         const line = await loadLine(tx, it.lineId);
-        if (line.amountCents >= 0) throw badRequest(`${line.date} ${line.description}: money in can’t be a cost`);
         const [taken] = await tx`select 1 from bank_matches where bank_line_id = ${line.id} limit 1`;
         if (taken) continue;
         await assertOpen(tx, line.date);
+        if (it.incomeAccountId) {
+          if (line.amountCents < 0) throw badRequest(`${line.date} ${line.description}: money out can’t be income`);
+          const [acc] = await tx<{ type: string; name: string }[]>`select type, name from accounts where id = ${it.incomeAccountId}`;
+          if (acc?.type !== 'income') throw badRequest('Choose an income account');
+          const [src] = await tx<{ accountId: string }[]>`select account_id from payment_sources where id = ${line.sourceId}`;
+          const text = it.description || `${acc.name}: ${supplierFrom(line.description)}`;
+          const [j] = await tx<{ id: string }[]>`insert into journals (date, description, reference, kind, created_by) values (${line.date}, ${text}, ${line.description.slice(0, 100)}, 'manual', ${user.id}) returning id`;
+          await tx`insert into journal_lines (journal_id, account_id, debit_cents, credit_cents, memo) values
+            (${j!.id}, ${src!.accountId}, ${line.amountCents}, 0, ${text}), (${j!.id}, ${it.incomeAccountId}, 0, ${line.amountCents}, ${text})`;
+          await link(tx, line, [{ kind: 'journal', id: j!.id }]);
+          created++;
+          continue;
+        }
+        // Money out is a cost; money in on a cost type is a refund (a negative cost).
         const [c] = await tx<{ id: string }[]>`
           insert into costs (date, description, amount_cents, supplier, category_id, source_id, project_id, note, created_by)
           values (${line.date}, ${it.description || supplierFrom(line.description)}, ${-line.amountCents}, ${it.supplier || supplierFrom(line.description)},
@@ -402,6 +445,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
         insert into receipts (invoice_id, date, amount_cents, source_id, method, note, created_by)
         values (${invoiceId}, ${line.date}, ${line.amountCents}, ${line.sourceId}, 'eft', ${`From statement: ${line.description}`}, ${user.id}) returning id`;
       await link(tx, line, [{ kind: 'receipt', id: r!.id }]);
+      await syncProjectOfDocument(tx, invoiceId);
     });
     return { ok: true };
   });

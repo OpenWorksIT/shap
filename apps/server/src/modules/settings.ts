@@ -23,7 +23,7 @@ const idParam = z.object({ id: z.string().uuid() });
 export async function referenceData(db: Db, money: boolean) {
   const [settings, sources, categories, workTypes, accounts, brands] = await Promise.all([
     getSettings(db),
-    db`select s.id, s.name, s.kind, s.account_id, s.active, a.code as account_code, a.name as account_name
+    db`select s.id, s.name, s.kind, s.account_id, s.active, s.statements_required, s.statements_from, a.code as account_code, a.name as account_name
        from payment_sources s join accounts a on a.id = s.account_id order by s.sort, s.name`,
     db`select c.id, c.name, c.kind, c.account_id, c.active, a.code as account_code, a.name as account_name
        from cost_categories c join accounts a on a.id = c.account_id order by c.sort, c.name`,

@@ -326,7 +326,7 @@ function ListDrawer({ kind, row, onClose, onSaved }: { kind: ListKind; row: Reco
   const set = (k: string, v: unknown) => setF((x) => ({ ...x, [k]: v }));
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    const body = kind === 'sources' ? { name: f.name, kind: f.kind, accountId: f.accountId, active: f.active } : kind === 'categories' ? { name: f.name, kind: f.kind, accountId: f.accountId, active: f.active } : kind === 'accounts' ? { code: f.code, name: f.name, type: f.type, active: f.active } : { name: f.name, active: f.active };
+    const body = kind === 'sources' ? { name: f.name, kind: f.kind, accountId: f.accountId, active: f.active, statementsRequired: Boolean(f.statementsRequired), statementsFrom: f.statementsRequired && f.statementsFrom ? f.statementsFrom : null } : kind === 'categories' ? { name: f.name, kind: f.kind, accountId: f.accountId, active: f.active } : kind === 'accounts' ? { code: f.code, name: f.name, type: f.type, active: f.active } : { name: f.name, active: f.active };
     try {
       if (row) await api(`/api/${kind}/${row.id as string}`, { method: 'PUT', body });
       else await api(`/api/${kind}`, { body });
@@ -370,6 +370,31 @@ function ListDrawer({ kind, row, onClose, onSaved }: { kind: ListKind; row: Reco
               )}
             </Field>
             {accountSelect((t) => t === 'asset' || t === 'liability' || t === 'equity')}
+            {f.kind !== 'cash' && (
+              <div className="fieldset stack" style={{ gap: 6 }}>
+                <label className="check">
+                  <input type="checkbox" checked={Boolean(f.statementsRequired)} onChange={(e) => set('statementsRequired', e.target.checked)} />
+                  <span>
+                    Keep its monthly statement (PDF) on file
+                    <div className="xs muted">Home reminds you of months not uploaded yet (Accounts → Statement PDFs), and the accountant can download them.</div>
+                  </span>
+                </label>
+                {Boolean(f.statementsRequired) && (
+                  <Field label="From" hint="The first month you want on file">
+                    {(p) => (
+                      <input
+                        {...p}
+                        className="input"
+                        type="month"
+                        value={String(f.statementsFrom ?? '').slice(0, 7)}
+                        onChange={(e) => set('statementsFrom', e.target.value ? `${e.target.value}-01` : null)}
+                        style={{ maxWidth: 200 }}
+                      />
+                    )}
+                  </Field>
+                )}
+              </div>
+            )}
           </>
         )}
         {kind === 'categories' && (

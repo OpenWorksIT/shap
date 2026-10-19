@@ -31,6 +31,32 @@ export const paymentStateSql = `
 /** The deposit asked for, in cents: a percentage of the total or a fixed amount, never more than the total. */
 export const depositDueSql = `least(d.total_cents, coalesce(round(d.total_cents * d.deposit_bp / 10000.0), d.deposit_cents, 0))::bigint`;
 
+/**
+ * A job follows its invoices: once it's fully invoiced (at least its accepted quotes) it's
+ * "invoiced", and once those invoices are settled (paid, or written off as delinquent) it's
+ * "done". Leads, quotes and cancelled jobs are left alone, as are jobs still being invoiced.
+ */
+export async function syncProjectStatus(db: Db, projectId: string | null | undefined): Promise<void> {
+  if (!projectId) return;
+  const [r] = await db<{ status: string; invoiced: number | null; settled: boolean | null; quoted: number | null }[]>`
+    select p.status,
+      (select sum(d.total_cents) from documents d where d.project_id = p.id and d.kind = 'invoice' and d.status = 'issued')::bigint as invoiced,
+      (select bool_and(d.written_off_on is not null or coalesce((select sum(x.amount_cents) from receipts x where x.invoice_id = d.id), 0) >= d.total_cents)
+         from documents d where d.project_id = p.id and d.kind = 'invoice' and d.status = 'issued') as settled,
+      (select sum(q.total_cents) from documents q where q.project_id = p.id and q.kind = 'quote' and q.status = 'accepted')::bigint as quoted
+    from projects p where p.id = ${projectId}`;
+  if (!r || !['active', 'invoiced', 'done'].includes(r.status) || r.invoiced == null) return;
+  const full = r.invoiced >= (r.quoted ?? 0);
+  const next = full ? (r.settled ? 'done' : 'invoiced') : 'active';
+  if (next !== r.status) await db`update projects set status = ${next} where id = ${projectId}`;
+}
+
+/** The same, for the job an invoice belongs to. */
+export async function syncProjectOfDocument(db: Db, documentId: string): Promise<void> {
+  const [d] = await db<{ projectId: string | null }[]>`select project_id from documents where id = ${documentId}`;
+  await syncProjectStatus(db, d?.projectId);
+}
+
 async function nextNumber(db: Db, kind: DocKind): Promise<string> {
   // Lock the settings row so two people can't take the same number.
   const [s] = await db<{ prefix: string; next: number; pad: number }[]>`
@@ -205,6 +231,8 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
         where d.id = ${id} and d.written_off_on is not null`;
       await audit(tx, { userId: user.id, action: 'update', entity: old.kind, entityId: id, ip: req.ip, details: { number, status: old.status } });
     });
+    await syncProjectStatus(sql, (old as { projectId?: string | null }).projectId);
+    await syncProjectStatus(sql, input.projectId);
     return loadDocument(sql, id);
   });
 
@@ -218,6 +246,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [lines] = await sql<{ n: number }[]>`select count(*) as n from document_lines where document_id = ${id}`;
     if (!lines!.n) throw badRequest('Add at least one line first');
     await sql`update documents set status = 'issued', updated_at = now() where id = ${id}`;
+    await syncProjectStatus(sql, (doc as { projectId?: string | null }).projectId);
     await audit(sql, { userId: user.id, action: 'issue', entity: 'invoice', entityId: id, ip: req.ip });
     return loadDocument(sql, id);
   });
@@ -236,6 +265,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
       }
       await audit(tx, { userId: user.id, action: `quote_${status}`, entity: 'quote', entityId: id, ip: req.ip });
     });
+    await syncProjectStatus(sql, doc.projectId);
     return loadDocument(sql, id);
   });
 
@@ -250,6 +280,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (paid) throw badRequest('Remove the payments on this invoice before voiding it');
     if (doc.writtenOffOn) throw badRequest('Undo the write-off before voiding this invoice');
     await sql`update documents set status = 'void', void_reason = ${reason}, updated_at = now() where id = ${id}`;
+    await syncProjectOfDocument(sql, id);
     await audit(sql, { userId: user.id, action: 'void', entity: 'invoice', entityId: id, ip: req.ip, details: { reason } });
     return loadDocument(sql, id);
   });
@@ -333,6 +364,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (input.date < doc.issueDate) throw badRequest('The write-off can’t be dated before the invoice');
     await assertOpen(sql, input.date);
     await sql`update documents set written_off_on = ${input.date}, written_off_cents = ${left}, written_off_reason = ${input.reason}, updated_at = now() where id = ${id}`;
+    await syncProjectStatus(sql, doc.projectId);
     await audit(sql, { userId: user.id, action: 'write_off', entity: 'invoice', entityId: id, ip: req.ip, details: { amount: left, reason: input.reason } });
     return loadDocument(sql, id);
   });
@@ -344,6 +376,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!doc?.writtenOffOn) throw notFound('Write-off');
     await assertOpen(sql, doc.writtenOffOn);
     await sql`update documents set written_off_on = null, written_off_cents = 0, written_off_reason = '', updated_at = now() where id = ${id}`;
+    await syncProjectOfDocument(sql, id);
     await audit(sql, { userId: user.id, action: 'undo_write_off', entity: 'invoice', entityId: id, ip: req.ip });
     return loadDocument(sql, id);
   });
@@ -359,6 +392,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (doc.writtenOffOn) throw badRequest('This invoice was written off as delinquent. Undo that first, then record the payment.');
     await assertOpen(sql, input.date);
     const [row] = await sql`insert into receipts ${sql({ ...input, invoiceId: id, createdBy: user.id })} returning *`;
+    await syncProjectOfDocument(sql, id);
     await audit(sql, { userId: user.id, action: 'create', entity: 'receipt', entityId: row!.id, ip: req.ip, details: { invoiceId: id, amount: input.amountCents } });
     return loadDocument(sql, id);
   });
@@ -372,6 +406,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (r.writtenOffOn) throw badRequest('This invoice was written off as delinquent. Undo that first, then change its payments.');
     await assertOpen(sql, r.date);
     await sql`delete from receipts where id = ${id}`;
+    await syncProjectOfDocument(sql, r.invoiceId);
     await audit(sql, { userId: user.id, action: 'delete', entity: 'receipt', entityId: id, ip: req.ip });
     return loadDocument(sql, r.invoiceId);
   });

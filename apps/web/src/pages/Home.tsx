@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { formatDate, formatPercent, formatZar } from '@shap/shared';
+import { formatDate, formatPercent, formatZar, monthLabel } from '@shap/shared';
 import { MonthChart } from '../components/MonthChart';
 import { PageHead } from '../components/Shell';
 import { DocChip, Empty, ErrorBox, Icon, Kpi, Loading, Money, ProjectChip } from '../components/ui';
@@ -19,6 +19,7 @@ interface Dashboard {
   unallocatedLabour: { n: number; cost: number; days: number };
   materialsWithoutJob: { n: number; total: number };
   uncapturedCosts: { n: number; total: number };
+  statementsMissing?: { sourceId: string; sourceName: string; months: string[] }[];
   bankCents: number;
   ownerLoanCents: number;
   projects: ProjectRow[];
@@ -107,6 +108,17 @@ function OwnerHome() {
         <Icon name="chevronRight" size={16} />
       </Link>
     ),
+    ...(data.statementsMissing ?? []).map((m) => (
+      <Link key={`st-${m.sourceId}`} to={`/accounts?tab=files&source=${m.sourceId}&month=${m.months[0]}`} className="attention">
+        <Icon name="upload" size={18} />
+        <span className="grow">
+          <strong>{m.sourceName}</strong> statement{m.months.length === 1 ? '' : 's'} not on file: {monthLabel(m.months[0]!)}
+          {m.months.length > 1 ? ` and ${m.months.length - 1} more` : ''}
+        </span>
+        Upload
+        <Icon name="chevronRight" size={16} />
+      </Link>
+    )),
     data.owing.overdue > 0 && (
       <Link key="over" to="/documents?kind=invoice&state=overdue" className="attention">
         <Icon name="alert" size={18} />

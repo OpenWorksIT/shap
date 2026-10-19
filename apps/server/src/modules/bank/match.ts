@@ -64,10 +64,14 @@ export function similar(description: string, supplier: string): boolean {
   return tokens(supplier).some((t) => desc.includes(t) || squashed.includes(t));
 }
 
+/** Suppliers and banks sometimes round: totals within this many cents still count as a match. */
+export const ROUNDING_CENTS = 50;
+const near = (a: number, b: number) => Math.abs(a - b) <= ROUNDING_CENTS;
+
 const days = (a: string, b: string) => Math.round((Date.parse(a) - Date.parse(b)) / 86_400_000);
 const zar = (c: number) => formatZar(c);
 
-/** Finds a set of 2–10 amounts (from at most 18) that add up to the target. */
+/** Finds a set of 2–10 amounts (from at most 18) that add up to the target, give or take rounding. */
 function subsetSum(items: { id: string; amountCents: number }[], target: number): string[] | null {
   const pool = [...items].sort((a, b) => b.amountCents - a.amountCents).slice(0, 18);
   const suffix = pool.map((_, i) => pool.slice(i).reduce((s, x) => s + x.amountCents, 0));
@@ -75,10 +79,10 @@ function subsetSum(items: { id: string; amountCents: number }[], target: number)
   let steps = 0;
   const walk = (i: number, left: number): boolean => {
     if (++steps > 200_000) return false;
-    if (left === 0) return picked.length >= 2;
-    if (i >= pool.length || picked.length >= 10 || suffix[i]! < left) return false;
+    if (Math.abs(left) <= ROUNDING_CENTS && picked.length >= 2) return true;
+    if (i >= pool.length || picked.length >= 10 || suffix[i]! < left - ROUNDING_CENTS) return false;
     const x = pool[i]!;
-    if (x.amountCents <= left) {
+    if (x.amountCents <= left + ROUNDING_CENTS) {
       picked.push(x.id);
       if (walk(i + 1, left - x.amountCents)) return true;
       picked.pop();
@@ -97,28 +101,29 @@ export function suggestMatches(
     const amount = Math.abs(line.amountCents);
     if (line.amountCents < 0) {
       // Card and debit-order transactions reach the statement a day or more after the slip.
-      const near = c.costs.filter((x) => (x.sourceId == null || x.sourceId === line.sourceId) && days(line.date, x.date) >= -2 && days(line.date, x.date) <= 7);
-      for (const x of near) {
-        if (x.amountCents !== amount) continue;
+      const nearby = c.costs.filter((x) => (x.sourceId == null || x.sourceId === line.sourceId) && days(line.date, x.date) >= -2 && days(line.date, x.date) <= 7);
+      for (const x of nearby) {
+        if (!near(x.amountCents, amount)) continue;
         const sim = similar(line.description, x.supplier) || similar(line.description, x.description);
-        options.push({ lineId: line.id, s: { kind: 'cost', ids: [x.id], score: 50 + (sim ? 30 : 0) - Math.abs(days(line.date, x.date)) * 3, label: `${x.description}${x.supplier ? ` – ${x.supplier}` : ''}` } });
+        options.push({ lineId: line.id, s: { kind: 'cost', ids: [x.id], score: 50 + (sim ? 30 : 0) - (x.amountCents === amount ? 0 : 10) - Math.abs(days(line.date, x.date)) * 3, label: `${x.description}${x.supplier ? ` – ${x.supplier}` : ''}` } });
       }
       // One slip, several items: same supplier, same day.
       const groups = new Map<string, CostCandidate[]>();
-      for (const x of near) {
+      for (const x of nearby) {
         const k = `${x.date}|${x.supplier.toLowerCase().trim()}`;
         groups.set(k, [...(groups.get(k) ?? []), x]);
       }
       for (const g of groups.values()) {
-        if (g.length < 2 || g.reduce((s, x) => s + x.amountCents, 0) !== amount) continue;
-        const sim = similar(line.description, g[0]!.supplier);
+        const sum = g.reduce((s, x) => s + x.amountCents, 0);
+        if (g.length < 2 || !near(sum, amount)) continue;
+        const sim = similar(line.description, g[0]!.supplier) ? 30 : 0;
         options.push({
           lineId: line.id,
-          s: { kind: 'cost', ids: g.map((x) => x.id), score: 48 + (sim ? 30 : 0) - Math.abs(days(line.date, g[0]!.date)) * 3, label: `${g.length} items${g[0]!.supplier ? ` from ${g[0]!.supplier}` : ''} on ${g[0]!.date}` },
+          s: { kind: 'cost', ids: g.map((x) => x.id), score: 48 + sim - (sum === amount ? 0 : 10) - Math.abs(days(line.date, g[0]!.date)) * 3, label: `${g.length} items${g[0]!.supplier ? ` from ${g[0]!.supplier}` : ''} on ${g[0]!.date}` },
         });
       }
       // Any handful of nearby costs that add up, the supplier's first.
-      const close = near.filter((x) => Math.abs(days(line.date, x.date)) <= 4 && x.amountCents > 0 && x.amountCents < amount);
+      const close = nearby.filter((x) => Math.abs(days(line.date, x.date)) <= 4 && x.amountCents > 0 && x.amountCents < amount);
       const bySupplier = close.filter((x) => similar(line.description, x.supplier));
       for (const [pool, bonus] of [[bySupplier, 25], [close, 0]] as const) {
         if (pool.length < 2) continue;
@@ -205,6 +210,7 @@ export function guessCategory(
   description: string,
   categories: { id: string; name: string; active: boolean }[],
   history: { supplier: string; categoryId: string }[],
+  opts: { fallback?: boolean } = {},
 ): string | null {
   const counts = new Map<string, number>();
   for (const h of history) if (h.supplier && similar(description, h.supplier)) counts.set(h.categoryId, (counts.get(h.categoryId) ?? 0) + 1);
@@ -216,5 +222,11 @@ export function guessCategory(
     const hit = active.find((x) => names.some((n) => x.name.toLowerCase().includes(n)));
     if (hit) return hit.id;
   }
-  return active.find((x) => /sundry/i.test(x.name))?.id ?? null;
+  return opts.fallback === false ? null : (active.find((x) => /sundry/i.test(x.name))?.id ?? null);
+}
+
+/** Money in that's income rather than a client paying an invoice: interest, cashback, rewards. */
+export function guessIncome(description: string, accounts: { id: string; systemKey: string | null; name: string }[]): string | null {
+  if (!/interest|int\.? ?cr|cash ?back|reward|ebucks|vitality money|discovery miles/i.test(description)) return null;
+  return (accounts.find((a) => a.systemKey === 'revenue_other') ?? accounts.find((a) => /other income/i.test(a.name)))?.id ?? null;
 }

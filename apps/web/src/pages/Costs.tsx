@@ -22,7 +22,10 @@ export default function CostsPage() {
   const kind = params.get('kind') ?? '';
   const [search, setSearch] = useState('');
   const [drawer, setDrawer] = useState<null | 'new' | CostRow>(null);
-  const capturing = source === 'none' && isOwner;
+  const unallocated = kind === 'materials-unallocated' && isOwner;
+  const capturing = (source === 'none' || kind === 'materials-unallocated') && isOwner;
+  const [toJob, setToJob] = useState<string | null>(null);
+  const [toType, setToType] = useState('');
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [assignTo, setAssignTo] = useState('');
   const toast = useToast();
@@ -50,6 +53,14 @@ export default function CostsPage() {
     return (data ?? []).filter((c) => !s || c.description.toLowerCase().includes(s) || c.supplier.toLowerCase().includes(s) || (c.projectName ?? '').toLowerCase().includes(s));
   }, [data, search]);
   const total = rows.reduce((s, c) => s + c.amountCents, 0);
+  const bulk = (change: Record<string, unknown>, what: string) =>
+    api<{ updated: number }>('/api/costs/bulk', { body: { ids: [...picked], ...change } })
+      .then((r) => {
+        toast(`${r.updated} cost${r.updated === 1 ? '' : 's'} ${what}`);
+        setPicked(new Set());
+        void reload();
+      })
+      .catch((err) => toast(err instanceof ApiError ? err.message : 'Couldn’t save', 'error'));
   const setParam = (k: string, v: string | null) => {
     const n = new URLSearchParams(params);
     if (v) n.set(k, v);
@@ -91,7 +102,10 @@ export default function CostsPage() {
       )}
       {kind === 'materials-unallocated' && (
         <div className="banner signal small row">
-          <span className="grow">Parts bought without a job. Open one to put it on the right job, so that job’s profit is right.</span>
+          <span className="grow">
+            Parts bought without a job. Tick them and put them on the right job, so that job’s profit is right; or mark them as not for a job (stock for
+            the yard), or change their type if they weren’t parts at all (advertising, entertainment). Either way they leave this list.
+          </span>
           <button className="btn small" onClick={() => setParam('kind', null)}>
             Show all costs
           </button>
@@ -217,7 +231,34 @@ export default function CostsPage() {
           <Empty title={source === 'none' ? 'Everything is captured' : 'No costs here'}>Try a longer period or clear the filters.</Empty>
         </div>
       )}
-      {capturing && picked.size > 0 && (
+      {unallocated && picked.size > 0 && (
+        <section className="panel panel-pad sticky-bar row wrap">
+          <span className="grow">
+            <strong>{picked.size}</strong> selected · {formatZar(rows.filter((r) => picked.has(r.id)).reduce((s, r) => s + r.amountCents, 0))}
+          </span>
+          <div className="auto-w">
+            <ProjectSelect value={toJob} onChange={setToJob} emptyLabel="Put on a job…" />
+          </div>
+          <button className="btn primary" disabled={!toJob} onClick={() => void bulk({ projectId: toJob }, 'put on the job')}>
+            Put on job
+          </button>
+          <button className="btn" onClick={() => void bulk({ noJob: true }, 'marked as not for a job')}>
+            Not for a job
+          </button>
+          <select className="select auto" value={toType} onChange={(e) => setToType(e.target.value)} aria-label="Change type to">
+            <option value="">Change type…</option>
+            {ref.categories.filter((c) => c.active).map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          <button className="btn" disabled={!toType} onClick={() => void bulk({ categoryId: toType }, 'changed type')}>
+            Change
+          </button>
+        </section>
+      )}
+      {capturing && !unallocated && picked.size > 0 && (
         <section className="panel panel-pad sticky-bar row wrap">
           <span className="grow">
             <strong>{picked.size}</strong> selected · {formatZar(rows.filter((r) => picked.has(r.id)).reduce((s, r) => s + r.amountCents, 0))}

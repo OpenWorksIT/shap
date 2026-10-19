@@ -19,7 +19,12 @@ interface Line {
   suggestion: { kind: string; ids: string[]; score: number; label: string } | null;
   supplier: string;
   categoryId: string | null;
+  incomeAccountId: string | null;
 }
+
+/** What a line becomes when captured: "cat:<cost type>" (a cost, or a refund for money in) or "inc:<income account>". */
+const defaultTarget = (l: Line) => (l.incomeAccountId ? `inc:${l.incomeAccountId}` : l.categoryId ? `cat:${l.categoryId}` : '');
+const targetOf = (l: Line, e: { target?: string } | undefined) => e?.target ?? defaultTarget(l);
 interface Recon {
   source: { name: string } | null;
   statementBalance: { date: string; cents: number } | null;
@@ -57,7 +62,7 @@ export function BankRecon() {
   const [view, setView] = useState<View>('todo');
   const { data, error, loading, reload } = useApi<Recon>(sourceId ? `/api/bank/recon?sourceId=${sourceId}` : null);
   const [ticked, setTicked] = useState<Set<string>>(new Set());
-  const [edits, setEdits] = useState<Record<string, { categoryId?: string; supplier?: string }>>({});
+  const [edits, setEdits] = useState<Record<string, { target?: string; supplier?: string }>>({});
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [drawer, setDrawer] = useState<null | { kind: 'match' | 'transfer'; line: Line }>(null);
@@ -83,7 +88,7 @@ export function BankRecon() {
 
   const todo = lines.filter((l) => l.state === 'open' || l.state === 'suggested');
   const tickedSuggested = todo.filter((l) => ticked.has(l.id) && l.state === 'suggested');
-  const tickedNewCosts = todo.filter((l) => ticked.has(l.id) && l.state === 'open' && l.amountCents < 0 && (edits[l.id]?.categoryId ?? l.categoryId));
+  const tickedNewCosts = todo.filter((l) => ticked.has(l.id) && l.state === 'open' && targetOf(l, edits[l.id]));
   const unticked = todo.filter((l) => !ticked.has(l.id));
 
   const run = async (fn: () => Promise<string | void>) => {
@@ -107,11 +112,21 @@ export function BankRecon() {
       if (tickedNewCosts.length) {
         created = (
           await api<{ created: number }>('/api/bank/lines/create-costs', {
-            body: { items: tickedNewCosts.map((l) => ({ lineId: l.id, categoryId: edits[l.id]?.categoryId ?? l.categoryId, supplier: edits[l.id]?.supplier ?? l.supplier })) },
+            body: {
+              items: tickedNewCosts.map((l) => {
+                const t = targetOf(l, edits[l.id]);
+                return {
+                  lineId: l.id,
+                  categoryId: t.startsWith('cat:') ? t.slice(4) : null,
+                  incomeAccountId: t.startsWith('inc:') ? t.slice(4) : null,
+                  supplier: edits[l.id]?.supplier ?? l.supplier,
+                };
+              }),
+            },
           })
         ).created;
       }
-      return [matched && `${matched} matched`, created && `${created} added as costs`].filter(Boolean).join(', ') || 'Nothing to capture';
+      return [matched && `${matched} matched`, created && `${created} added`].filter(Boolean).join(', ') || 'Nothing to capture';
     });
   const leaveOff = (ids: string[], ignored = true) =>
     run(async () => {
@@ -244,7 +259,7 @@ export function BankRecon() {
               <span className="grow small">
                 {tickedSuggested.length > 0 && `${tickedSuggested.length} to match`}
                 {tickedSuggested.length > 0 && tickedNewCosts.length > 0 && ' · '}
-                {tickedNewCosts.length > 0 && `${tickedNewCosts.length} to add as costs`}
+                {tickedNewCosts.length > 0 && `${tickedNewCosts.length} to add`}
                 {!tickedSuggested.length && !tickedNewCosts.length && 'Tick lines to capture them'}
               </span>
               {unticked.length > 0 && (
@@ -271,8 +286,8 @@ export function BankRecon() {
 
 function LineAction(p: {
   line: Line;
-  edit: { categoryId?: string; supplier?: string };
-  onEdit: (e: { categoryId?: string; supplier?: string }) => void;
+  edit: { target?: string; supplier?: string };
+  onEdit: (e: { target?: string; supplier?: string }) => void;
   busy: boolean;
   canEdit: boolean;
   onAccept: () => void;
@@ -347,10 +362,10 @@ function LineAction(p: {
       <div className="stack" style={{ gap: 4 }}>
         <span className="xs muted">Not captured: add it as a cost</span>
         <div className="row wrap" style={{ gap: 6 }}>
-          <select className="select auto small-select" value={p.edit.categoryId ?? l.categoryId ?? ''} onChange={(e) => p.onEdit({ categoryId: e.target.value })} aria-label="Cost type">
+          <select className="select auto small-select" value={targetOf(l, p.edit)} onChange={(e) => p.onEdit({ target: e.target.value })} aria-label="Cost type">
             <option value="">Cost type…</option>
             {ref.categories.filter((c) => c.active).map((c) => (
-              <option key={c.id} value={c.id}>
+              <option key={c.id} value={`cat:${c.id}`}>
                 {c.name}
               </option>
             ))}
@@ -362,7 +377,31 @@ function LineAction(p: {
     );
   return (
     <div className="stack" style={{ gap: 4 }}>
-      <span className="xs muted">Money in, not matched to an invoice</span>
+      <span className="xs muted">Money in, not a client payment? Book it as income or a refund</span>
+      <div className="row wrap" style={{ gap: 6 }}>
+        <select className="select auto small-select" value={targetOf(l, p.edit)} onChange={(e) => p.onEdit({ target: e.target.value })} aria-label="Income or refund">
+          <option value="">Income or refund…</option>
+          <optgroup label="Income">
+            {ref.accounts
+              .filter((a) => a.type === 'income' && a.active)
+              .map((a) => (
+                <option key={a.id} value={`inc:${a.id}`}>
+                  {a.name}
+                </option>
+              ))}
+          </optgroup>
+          <optgroup label="Refund on a cost type">
+            {ref.categories.filter((c) => c.active).map((c) => (
+              <option key={c.id} value={`cat:${c.id}`}>
+                {c.name} (refund)
+              </option>
+            ))}
+          </optgroup>
+        </select>
+        {targetOf(l, p.edit).startsWith('cat:') && (
+          <input className="input small-input" value={p.edit.supplier ?? l.supplier} onChange={(e) => p.onEdit({ supplier: e.target.value })} aria-label="Supplier" />
+        )}
+      </div>
       {more}
     </div>
   );
@@ -537,11 +576,12 @@ function MatchDrawer({ line, onClose, onDone }: { line: Line; onClose: () => voi
           <div className="sticky-bar panel panel-pad row">
             <span className="grow small">
               Ticked {formatZar(sum)} of {formatZar(target)}
-              {sum !== target && sum > 0 && <span className="warn-text"> ({formatZar(target - sum)} to go)</span>}
+              {Math.abs(target - sum) > 100 && sum > 0 && <span className="warn-text"> ({formatZar(target - sum)} to go)</span>}
+              {sum !== target && Math.abs(target - sum) <= 100 && <span className="muted"> ({formatZar(target - sum)} rounding: the biggest item takes it)</span>}
             </span>
             <button
               className="btn primary"
-              disabled={busy || sum !== target}
+              disabled={busy || !sum || Math.abs(target - sum) > 100}
               onClick={() => void save({ items: [...picked].map((k) => ({ kind: k.split(':')[0], id: k.split(':')[1] })) }, `/api/bank/lines/${line.id}/match`)}
             >
               Match

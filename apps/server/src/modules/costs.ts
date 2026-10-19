@@ -28,12 +28,40 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
         and (${project ?? null}::uuid is null or c.project_id = ${project ?? null}::uuid)
         and (${source && source !== 'none' ? source : null}::uuid is null or c.source_id = ${source && source !== 'none' ? source : null}::uuid)
         and (${source === 'none'} = false or c.source_id is null)
-        and (${kind ?? null}::text is null or k.kind = ${kind ?? null}::text)
-        and (${kind === 'materials-unallocated'} = false or (k.kind = 'materials' and c.project_id is null))
+        and (${kind && kind !== 'materials-unallocated' ? kind : null}::text is null or k.kind = ${kind && kind !== 'materials-unallocated' ? kind : null}::text)
+        and (${kind === 'materials-unallocated'} = false or (k.kind = 'materials' and c.project_id is null and not c.no_job))
         and (${s}::text is null or c.description ilike '%' || ${s} || '%' or c.supplier ilike '%' || ${s} || '%')
       order by c.date desc, c.created_at desc
       limit 2000
     `;
+  });
+
+  /**
+   * Tidy several costs at once: put them on a job, mark them as not for a job (parts for the
+   * yard, say), or change their type (advertising captured as parts).
+   */
+  app.post('/api/costs/bulk', { preHandler: requireRole('owner') }, async (req) => {
+    const user = userOrThrow(req);
+    const input = parse(
+      z
+        .object({
+          ids: z.array(z.string().uuid()).min(1).max(2000),
+          projectId: z.string().uuid().optional(),
+          noJob: z.literal(true).optional(),
+          categoryId: z.string().uuid().optional(),
+        })
+        .refine((i) => [i.projectId, i.noJob, i.categoryId].filter((x) => x != null).length === 1, 'Choose one change'),
+      req.body,
+    );
+    const dates = await sql<{ date: string }[]>`select date::text from costs where id = any(${input.ids}::uuid[])`;
+    await assertOpen(sql, ...dates.map((d) => d.date));
+    const res = input.projectId
+      ? await sql`update costs set project_id = ${input.projectId}, no_job = false where id = any(${input.ids}::uuid[])`
+      : input.noJob
+        ? await sql`update costs set no_job = true where id = any(${input.ids}::uuid[])`
+        : await sql`update costs set category_id = ${input.categoryId!} where id = any(${input.ids}::uuid[])`;
+    await audit(sql, { userId: user.id, action: 'bulk_update', entity: 'cost', ip: req.ip, details: { count: res.count, change: input.projectId ? 'job' : input.noJob ? 'no_job' : 'type' } });
+    return { updated: res.count };
   });
 
   /** Suppliers you've used, most used first, for the picker on the phone. */

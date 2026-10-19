@@ -4,6 +4,7 @@ import { requireRole, seesMoney, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { getSettings, today } from '../lib/books.js';
 import { paymentStateSql } from './documents.js';
+import { missingStatements } from './statements.js';
 import { projectSummarySql, totals, type ProjectSummary } from './projects.js';
 
 export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -50,7 +51,7 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
         from labour_entries where project_id is null and work_type_id is null`,
       sql<{ n: number; total: number }[]>`
         select count(*)::int as n, coalesce(sum(c.amount_cents), 0)::bigint as total from costs c join cost_categories k on k.id = c.category_id
-        where k.kind = 'materials' and c.project_id is null and c.date >= ${fy.start}::date`,
+        where k.kind = 'materials' and c.project_id is null and not c.no_job and c.date >= ${fy.start}::date`,
       sql<{ key: string; balance: number }[]>`
         select a.system_key as key, coalesce(sum(l.amount_cents), 0)::bigint as balance from accounts a
         left join ledger l on l.account_id = a.id and l.date <= ${now}::date
@@ -96,6 +97,7 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
       unallocatedLabour: unallocated[0],
       materialsWithoutJob: materialsNoJob[0],
       uncapturedCosts: uncaptured[0],
+      statementsMissing: await missingStatements(sql),
       bankCents: bal('bank'),
       ownerLoanCents: -bal('owner_loan'),
       projects: projects.map((p) => ({ ...p, ...totals(p as unknown as ProjectSummary) })),

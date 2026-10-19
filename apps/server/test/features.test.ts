@@ -287,6 +287,79 @@ describe('delinquent invoices', () => {
   });
 });
 
+describe('jobs follow their invoices', () => {
+  it('closes a job once its invoices are paid, and keeps one open while there’s quoted work to invoice', async () => {
+    const plain = await owner.post('/api/projects', { name: 'Gate repair', startDate: '2026-06-01' });
+    const inv = await owner.post('/api/documents', { kind: 'invoice', projectId: plain.id, issueDate: '2026-06-20', lines: [{ category: 'labour', description: 'Gate', qty: 1, unitPriceCents: 80000 }] });
+    await owner.post(`/api/documents/${inv.id}/issue`);
+    const status = async (id: string) => (await env.sql<{ status: string }[]>`select status from projects where id = ${id}`)[0]!.status;
+    expect(await status(plain.id)).toBe('invoiced');
+    await owner.post(`/api/documents/${inv.id}/receipts`, { date: '2026-06-25', amountCents: 80000, sourceId: ids.bank });
+    expect(await status(plain.id)).toBe('done');
+
+    const big = await owner.post('/api/projects', { name: 'Big roof', startDate: '2026-06-01' });
+    const q = await owner.post('/api/documents', { kind: 'quote', projectId: big.id, issueDate: '2026-06-01', lines: [{ category: 'labour', description: 'Roof', qty: 1, unitPriceCents: 1000000 }] });
+    await owner.post(`/api/documents/${q.id}/status`, { status: 'accepted' });
+    const dep = await owner.post('/api/documents', { kind: 'invoice', projectId: big.id, issueDate: '2026-06-02', lines: [{ category: 'labour', description: 'Deposit', qty: 1, unitPriceCents: 500000 }] });
+    await owner.post(`/api/documents/${dep.id}/issue`);
+    await owner.post(`/api/documents/${dep.id}/receipts`, { date: '2026-06-03', amountCents: 500000, sourceId: ids.bank });
+    expect(await status(big.id)).toBe('active');
+    const rest = await owner.post('/api/documents', { kind: 'invoice', projectId: big.id, issueDate: '2026-07-01', lines: [{ category: 'labour', description: 'Balance', qty: 1, unitPriceCents: 500000 }] });
+    await owner.post(`/api/documents/${rest.id}/issue`);
+    expect(await status(big.id)).toBe('invoiced');
+    // The client never pays the rest: written off, the job is finished all the same.
+    await owner.post(`/api/documents/${rest.id}/write-off`, { date: '2026-08-31' });
+    expect(await status(big.id)).toBe('done');
+  });
+});
+
+describe('parts without a job', () => {
+  it('leave the list once they’re put on a job, marked as not for one, or re-typed', async () => {
+    const make = (d: string) => owner.post('/api/costs', { date: '2026-06-05', description: d, amountCents: 1000, supplier: 'Builders', categoryId: ids.parts, sourceId: ids.bank });
+    const [a, b, c] = [await make('Screws'), await make('Yard stock'), await make('Flyers')];
+    const listed = async () => (await owner.get('/api/costs?kind=materials-unallocated')).map((x: { id: string }) => x.id);
+    expect(await listed()).toEqual(expect.arrayContaining([a.id, b.id, c.id]));
+    const job = await owner.post('/api/projects', { name: 'Shed', startDate: '2026-06-01' });
+    const [adv] = await env.sql<{ id: string }[]>`select id from cost_categories where name = 'Advertising'`;
+    await owner.post('/api/costs/bulk', { ids: [a.id], projectId: job.id });
+    await owner.post('/api/costs/bulk', { ids: [b.id], noJob: true });
+    await owner.post('/api/costs/bulk', { ids: [c.id], categoryId: adv!.id });
+    const after = await listed();
+    expect(after).not.toContain(a.id);
+    expect(after).not.toContain(b.id);
+    expect(after).not.toContain(c.id);
+    expect((await owner.call({ method: 'POST', url: '/api/costs/bulk', payload: { ids: [a.id], noJob: true, categoryId: adv!.id } })).statusCode).toBe(400);
+  });
+});
+
+describe('bank statements on file', () => {
+  const PDF = Buffer.from('%PDF-1.4\n%fake statement\n').toString('base64');
+  it('reminds you of months not uploaded for accounts that need them, and keeps the PDFs', async () => {
+    const [src] = await env.sql<{ id: string; name: string; kind: string; accountId: string }[]>`select id, name, kind, account_id from payment_sources where id = ${ids.bank}`;
+    await owner.post(`/api/sources/${ids.bank}`, { name: src!.name, kind: src!.kind, accountId: src!.accountId, statementsRequired: true, statementsFrom: '2026-07-01' }, 'PUT');
+    const before = await owner.get('/api/statement-files');
+    const months = before.missing.find((m: { sourceId: string }) => m.sourceId === ids.bank).months;
+    expect(months[0]).toBe('2026-07');
+    await owner.post('/api/statement-files', { sourceId: ids.bank, month: '2026-07', filename: 'july.pdf', mime: 'application/pdf', dataBase64: PDF });
+    const after = await owner.get('/api/statement-files');
+    expect(after.files).toHaveLength(1);
+    expect(after.missing.find((m: { sourceId: string }) => m.sourceId === ids.bank)?.months ?? []).not.toContain('2026-07');
+    expect((await owner.get('/api/dashboard')).statementsMissing.length).toBeGreaterThanOrEqual(0);
+    const notPdf = await owner.call({ method: 'POST', url: '/api/statement-files', payload: { sourceId: ids.bank, month: '2026-08', filename: 'x.pdf', mime: 'application/pdf', dataBase64: Buffer.from('hello world!').toString('base64') } });
+    expect(notPdf.statusCode).toBe(400);
+    // The accountant can see and download them.
+    const acct = await login(env.app, 'accountant@example.co.za');
+    const list = await acct.get('/api/statement-files');
+    const dl = await acct.call({ method: 'GET', url: `/api/attachments/${list.files[0].attachmentId}` });
+    expect(dl.statusCode).toBe(200);
+  });
+
+  it('has somewhere for a worker’s bonus to go', async () => {
+    const [t] = await env.sql`select 1 from work_types where name = 'Bonuses & extras'`;
+    expect(t).toBeTruthy();
+  });
+});
+
 describe('the company file', () => {
   it('saves the set-up and loads it back, merging', async () => {
     const res = await owner.call({ method: 'GET', url: '/api/company-file' });

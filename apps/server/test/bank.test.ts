@@ -233,4 +233,39 @@ describe('reconciling a statement', () => {
     const again = await owner.get(`/api/bank/recon?sourceId=${bank}`);
     expect(again.lines.find((l: { id: string }) => l.id === fee.id).state).toBe('matched');
   });
+
+  it('accepts a match a few cents out, and the biggest item takes the rounding', async () => {
+    const csv2 = ['Date,Amount,Balance,Description', '2026/04/03,-300.01,0,POS PURCHASE CASHBUILD', '2026/04/05,12.34,0,CREDIT INTEREST', '2026/04/06,150.00,0,REFUND CASHBUILD'].join('\n');
+    const a = await owner.post('/api/costs', { date: '2026-04-02', description: 'Timber', amountCents: 20000, supplier: 'Cashbuild', categoryId: cats.parts, sourceId: null });
+    await owner.post('/api/costs', { date: '2026-04-02', description: 'Nails', amountCents: 10000, supplier: 'Cashbuild', categoryId: cats.parts, sourceId: null });
+    const r = await owner.post('/api/bank/statements', { sourceId: bank, csv: csv2 });
+    expect(r.added).toBe(3);
+    const rec = await owner.get(`/api/bank/recon?sourceId=${bank}`);
+    const line = rec.lines.find((l: { description: string }) => l.description === 'POS PURCHASE CASHBUILD');
+    expect(line.state).toBe('suggested');
+    await owner.post('/api/bank/accept', { sourceId: bank, lineIds: [line.id] });
+    const [timber] = await env.sql<{ amountCents: number; note: string }[]>`select amount_cents, note from costs where id = ${a.id}`;
+    expect(timber!.amountCents).toBe(20001);
+    expect(timber!.note).toMatch(/Rounded/);
+  });
+
+  it('books money in as income or as a refund on a cost type', async () => {
+    const rec = await owner.get(`/api/bank/recon?sourceId=${bank}`);
+    const interest = rec.lines.find((l: { description: string }) => l.description === 'CREDIT INTEREST');
+    const refund = rec.lines.find((l: { description: string }) => l.description === 'REFUND CASHBUILD');
+    const otherIncome = (await env.sql<{ id: string }[]>`select id from accounts where system_key = 'revenue_other'`)[0]!.id;
+    expect(interest.incomeAccountId).toBe(otherIncome);
+    expect(refund.categoryId).toBe(cats.parts);
+    const r = await owner.post('/api/bank/lines/create-costs', {
+      items: [
+        { lineId: interest.id, incomeAccountId: otherIncome },
+        { lineId: refund.id, categoryId: cats.parts },
+      ],
+    });
+    expect(r.created).toBe(2);
+    expect(await balance(env.sql, 'revenue_other')).toBe(-1234);
+    const [c] = await env.sql<{ amountCents: number }[]>`select amount_cents from costs where note like 'From statement: REFUND%'`;
+    expect(c!.amountCents).toBe(-15000);
+    expect(await ledgerTotal(env.sql)).toBe(0);
+  });
 });

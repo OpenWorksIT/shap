@@ -2,6 +2,7 @@ import { useMemo, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { formatDate, formatZar, monthLabel, todayIso, WORKER_KIND_LABELS } from '@shap/shared';
 import { LabourEntryForm } from '../components/LabourForm';
+import { ProjectSelect } from '../components/Pickers';
 import { PayForm } from '../components/PayForm';
 import { PageHead } from '../components/Shell';
 import { Drawer, Empty, ErrorBox, Field, Icon, Kpi, Loading, Money, MoneyInput, Segmented, Tabs, useToast } from '../components/ui';
@@ -36,7 +37,7 @@ export default function WorkerPage() {
   const toast = useToast();
   const { data, error, loading, reload } = useApi<WorkerDetail>(`/api/workers/${id}`);
   const [tab, setTab] = useState<Tab>('months');
-  const [drawer, setDrawer] = useState<null | 'pay' | 'edit' | 'saving' | { entry: LabourEntry }>(null);
+  const [drawer, setDrawer] = useState<null | 'pay' | 'edit' | 'saving' | 'settle' | { entry: LabourEntry }>(null);
 
   // Running saved/(advance) by month, oldest first, then grouped by year like the tracker's breakdown.
   const years = useMemo(() => {
@@ -91,7 +92,24 @@ export default function WorkerPage() {
         }
       />
       <div className="kpis">
-        <Kpi label={balance >= 0 ? 'You owe' : 'Advanced'} value={<Money cents={Math.abs(balance)} />} sub={balance > 0 ? 'earned, not yet paid' : balance < 0 ? 'paid ahead of work' : 'all square'} tone={balance > 0 ? 'warn' : undefined} />
+        <Kpi
+          label={balance >= 0 ? 'You owe' : 'Advanced'}
+          value={<Money cents={Math.abs(balance)} />}
+          sub={
+            balance < 0 && isOwner ? (
+              <button className="btn quiet small" style={{ padding: 0, minHeight: 0 }} onClick={() => setDrawer('settle')}>
+                What was it for? →
+              </button>
+            ) : balance > 0 ? (
+              'earned, not yet paid'
+            ) : balance < 0 ? (
+              'paid ahead of work'
+            ) : (
+              'all square'
+            )
+          }
+          tone={balance > 0 ? 'warn' : undefined}
+        />
         <Kpi label="Earned (all time)" value={<Money cents={earned} whole />} sub={`${days} days`} />
         <Kpi label="Paid (all time)" value={<Money cents={paid} whole />} />
         {(savings !== 0 || data.savings.length > 0) && <Kpi label="Savings you hold" value={<Money cents={savings} />} sub="their money, kept for them" />}
@@ -265,6 +283,9 @@ export default function WorkerPage() {
           </ul>
         </section>
       )}
+      {drawer === 'settle' && (
+        <SettleAdvance workerId={w.id} name={w.name} advanceCents={-balance} onClose={() => setDrawer(null)} onDone={() => (setDrawer(null), void reload())} />
+      )}
       {drawer === 'pay' && (
         <Drawer title={`Pay ${w.name}`} onClose={() => setDrawer(null)}>
           <PayForm workerId={w.id} onSaved={() => (setDrawer(null), void reload())} />
@@ -313,6 +334,99 @@ function SavingsDrawer({ workerId, name, onClose, onSaved }: { workerId: string;
         <Field label="Note">{(p) => <input {...p} className="input" value={note} onChange={(e) => setNote(e.target.value)} />}</Field>
         {error && <div className="banner alert small">{error}</div>}
         <button className="btn primary big block">Save</button>
+      </form>
+    </Drawer>
+  );
+}
+
+/**
+ * An advance is money paid with no work against it yet. Saying what it was for adds the
+ * earnings it paid (days on a job, a bonus, general work) on the date you choose, so the
+ * worker's balance, the job's labour cost and the books all follow, back to that date.
+ */
+function SettleAdvance({ workerId, name, advanceCents, onClose, onDone }: { workerId: string; name: string; advanceCents: number; onClose: () => void; onDone: () => void }) {
+  const { ref } = useAuthed();
+  const toast = useToast();
+  const bonusType = ref.workTypes.find((t) => /bonus/i.test(t.name));
+  const [what, setWhat] = useState<'job' | 'bonus' | 'general'>('job');
+  const [amount, setAmount] = useState<number | null>(advanceCents);
+  const [date, setDate] = useState(todayIso());
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [workTypeId, setWorkTypeId] = useState(ref.workTypes.find((t) => t.active && t.id !== bonusType?.id)?.id ?? '');
+  const [days, setDays] = useState('0');
+  const [note, setNote] = useState('');
+  const [error, setError] = useState('');
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (!amount || amount <= 0) return setError('Enter the amount');
+    if (what === 'job' && !projectId) return setError('Choose the job');
+    try {
+      await api('/api/labour', {
+        body: {
+          date,
+          projectId: what === 'general' ? null : projectId,
+          workTypeId: what === 'general' ? workTypeId : what === 'bonus' && !projectId ? (bonusType?.id ?? null) : null,
+          note: note || (what === 'bonus' ? 'Bonus' : 'From an advance'),
+          entries: [{ workerId, days: Number(days.replace(',', '.')) || 0, wageCents: amount, allowanceCents: 0 }],
+        },
+      });
+      toast(`${formatZar(amount)} booked for ${name}`);
+      onDone();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Couldn’t save');
+    }
+  };
+  return (
+    <Drawer title="What was the advance for?" sub={`${name} was paid ${formatZar(advanceCents)} more than they earned`} onClose={onClose}>
+      <form className="stack" onSubmit={save}>
+        <Segmented
+          label="It was for"
+          value={what}
+          onChange={setWhat}
+          options={[
+            { value: 'job', label: 'Work on a job' },
+            { value: 'bonus', label: 'A bonus' },
+            { value: 'general', label: 'General work' },
+          ]}
+        />
+        <p className="xs muted">
+          {what === 'job'
+            ? 'Adds the work to the job, so its labour cost and profit include it.'
+            : what === 'bonus'
+              ? 'A bonus on top of their days. Put it on a job if it was for that job; otherwise it’s a general labour cost.'
+              : 'Yard, quoting, collecting stock: labour that isn’t for one job.'}
+        </p>
+        <div className="form-grid">
+          <Field label="Amount">{(p) => <MoneyInput {...p} value={amount} onChange={setAmount} />}</Field>
+          <Field label="Date" hint="When it was earned; the books follow">
+            {(p) => <input {...p} className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />}
+          </Field>
+        </div>
+        {what !== 'general' && (
+          <Field label={what === 'job' ? 'Job' : 'Job (optional)'}>{(p) => <ProjectSelect {...p} value={projectId} onChange={setProjectId} emptyLabel={what === 'job' ? 'Choose…' : 'Not for a job'} />}</Field>
+        )}
+        {what === 'general' && (
+          <Field label="Type of work">
+            {(p) => (
+              <select {...p} className="select" value={workTypeId} onChange={(e) => setWorkTypeId(e.target.value)}>
+                {ref.workTypes.filter((t) => t.active).map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
+        )}
+        {what !== 'bonus' && (
+          <Field label="Days (optional)" hint="Leave at 0 for a lump sum">
+            {(p) => <input {...p} className="input" inputMode="decimal" value={days} onChange={(e) => setDays(e.target.value.replace(/[^\d.,]/g, ''))} style={{ maxWidth: 100 }} />}
+          </Field>
+        )}
+        <Field label="Note">{(p) => <input {...p} className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder={what === 'bonus' ? 'e.g. Christmas bonus' : 'e.g. Weekend on the Smith roof'} />}</Field>
+        {error && <div className="banner alert small">{error}</div>}
+        <button className="btn primary big block">Book it</button>
       </form>
     </Drawer>
   );

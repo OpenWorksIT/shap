@@ -3,6 +3,21 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.1.0 (19 October 2026)
+
+- **Bank statements**: a match can be a few cents out (a supplier's or the bank's rounding);
+  the biggest item takes the difference so the books follow the statement. Money in that isn't
+  a client payment can be booked as income (interest, cashback) or as a refund on a cost type.
+- **Statement PDFs**: keep each account's monthly bank statement on file (Accounts → Statement
+  PDFs), for you and the accountant. Choose which accounts need them under Settings → Lists;
+  Home reminds you of months still to upload.
+- **Workers**: an advance can be settled from the worker's page: say it was work on a job, a
+  bonus or general work, and the job's costs and the worker's balance follow, back to that date.
+- **Jobs close themselves**: once a job is fully invoiced and its invoices are paid (or written
+  off as delinquent), it's marked done. Jobs still waiting on quoted work stay open.
+- **Parts without a job**: tick them and put them on a job, mark them as not for a job, or change
+  their type (advertising, entertainment); either way they leave the list.
+
 ## 1.0.0 (19 October 2026)
 
 The first version running a real business's books.

@@ -239,6 +239,17 @@ export const sourceInput = z.object({
   kind: z.enum(SOURCE_KINDS),
   accountId: uuid,
   active: z.boolean().default(true),
+  /** Keep this account's monthly bank statement (PDF) on file, from this month on. */
+  statementsRequired: z.boolean().default(false),
+  statementsFrom: isoDate.nullable().default(null),
+});
+
+export const statementFileInput = z.object({
+  sourceId: uuid,
+  month: z.string().regex(/^\d{4}-\d{2}$/, 'Choose the month'),
+  filename: text(200).min(1),
+  mime: z.literal('application/pdf', { message: 'Upload the statement as a PDF' }),
+  dataBase64: z.string().min(10).max(8_000_000),
 });
 
 export const categoryInput = z.object({
