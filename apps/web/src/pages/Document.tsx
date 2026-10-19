@@ -16,7 +16,7 @@ import {
 } from '@shap/shared';
 import { BrandSelect, ProjectSelect, useHasBrands } from '../components/Pickers';
 import { PageHead } from '../components/Shell';
-import { DocChip, Drawer, ErrorBox, Field, Icon, Loading, Money, MoneyInput, useToast } from '../components/ui';
+import { DocChip, Drawer, ErrorBox, Field, Icon, Loading, Money, MoneyInput, Segmented, useToast } from '../components/ui';
 import { api, ApiError, apiUrl } from '../lib/api';
 import { shareOrDownload } from '../lib/files';
 import { useApi } from '../lib/hooks';
@@ -33,8 +33,17 @@ interface Draft {
   notes: string;
   terms: string;
   number: string;
-  lines: (DocLine & { key: string })[];
+  lines: DraftLine[];
+  depositMode: 'none' | 'percent' | 'amount';
+  depositPercent: string;
+  depositCents: number | null;
+  depositShowBalance: boolean;
 }
+
+/** A line being edited: quantity as typed, and no price until one is entered (no 0 to delete first). */
+type DraftLine = Omit<DocLine, 'qty' | 'unitPriceCents'> & { key: string; qty: string; unitPriceCents: number | null };
+const toQty = (q: string) => Number(String(q).replace(',', '.')) || 0;
+const draftLine = (l: DocLine): DraftLine => ({ ...l, qty: String(l.qty), key: key() });
 
 let keySeq = 0;
 const key = () => `l${++keySeq}`;
@@ -69,13 +78,17 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
     notes: doc?.notes ?? '',
     terms: doc?.terms ?? (kind === 'invoice' ? settings.invoiceTerms : settings.quoteTerms),
     number: doc?.number ?? '',
-    lines: (detail?.lines ?? []).map((l) => ({ ...l, key: key() })),
+    lines: (detail?.lines ?? []).map(draftLine),
+    depositMode: doc?.depositBp ? 'percent' : doc?.depositCents ? 'amount' : 'none',
+    depositPercent: doc?.depositBp ? String(doc.depositBp / 100) : '50',
+    depositCents: doc?.depositCents ?? null,
+    depositShowBalance: doc?.depositShowBalance ?? true,
   });
   const [d, setD] = useState<Draft>(initial);
   const [dirty, setDirty] = useState(!detail);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [drawer, setDrawer] = useState<null | 'pay' | 'email' | 'charge'>(null);
+  const [drawer, setDrawer] = useState<null | 'pay' | 'email' | 'charge' | 'writeoff'>(null);
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => (setD((x) => ({ ...x, [k]: v })), setDirty(true));
 
   // A new document for a job: take the job's client and name.
@@ -87,15 +100,21 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
   }, [project.data]);
 
   const vatRate = doc ? doc.vatRateBp : settings.vatRegistered ? settings.vatRateBp : 0;
-  const subtotal = d.lines.reduce((s, l) => s + lineTotal(l.qty, l.unitPriceCents), 0);
+  const subtotal = d.lines.reduce((s, l) => s + lineTotal(toQty(l.qty), l.unitPriceCents ?? 0), 0);
   const vat = vatOn(subtotal, vatRate);
   const total = subtotal + vat;
   const paid = doc?.paidCents ?? 0;
-  const byCat = useMemo(() => LINE_CATEGORIES.map((c) => [c, d.lines.filter((l) => l.category === c).reduce((s, l) => s + lineTotal(l.qty, l.unitPriceCents), 0)] as const).filter(([, v]) => v), [d.lines]);
+  const writtenOff = doc?.writtenOffOn ? doc.writtenOffCents : 0;
+  const deposit = Math.min(
+    total,
+    d.depositMode === 'percent' ? Math.round((total * Math.min(100, toQty(d.depositPercent))) / 100) : d.depositMode === 'amount' ? (d.depositCents ?? 0) : 0,
+  );
+  const depositOutstanding = kind === 'invoice' && deposit > 0 && paid < deposit;
+  const byCat = useMemo(() => LINE_CATEGORIES.map((c) => [c, d.lines.filter((l) => l.category === c).reduce((s, l) => s + lineTotal(toQty(l.qty), l.unitPriceCents ?? 0), 0)] as const).filter(([, v]) => v), [d.lines]);
 
   const addLine = (category: LineCategory) =>
-    set('lines', [...d.lines, { key: key(), category, description: category === 'labour' ? 'Labour' : '', qty: 1, unit: category === 'labour' ? 'days' : '', unitPriceCents: 0 }]);
-  const updLine = (k: string, patch: Partial<DocLine>) => set('lines', d.lines.map((l) => (l.key === k ? { ...l, ...patch } : l)));
+    set('lines', [...d.lines, { key: key(), category, description: category === 'labour' ? 'Labour' : '', qty: '1', unit: category === 'labour' ? 'days' : '', unitPriceCents: null }]);
+  const updLine = (k: string, patch: Partial<DraftLine>) => set('lines', d.lines.map((l) => (l.key === k ? { ...l, ...patch } : l)));
   const moveLine = (k: string, dir: -1 | 1) => {
     const i = d.lines.findIndex((l) => l.key === k);
     const j = i + dir;
@@ -115,7 +134,10 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
     notes: d.notes,
     terms: d.terms,
     number: d.number || undefined,
-    lines: d.lines.filter((l) => l.description.trim() || l.unitPriceCents).map((l) => ({ category: l.category, description: l.description.trim() || LINE_CATEGORY_LABELS[l.category], qty: Number(l.qty) || 0, unit: l.unit, unitPriceCents: l.unitPriceCents })),
+    lines: d.lines.filter((l) => l.description.trim() || l.unitPriceCents).map((l) => ({ category: l.category, description: l.description.trim() || LINE_CATEGORY_LABELS[l.category], qty: toQty(l.qty), unit: l.unit, unitPriceCents: l.unitPriceCents ?? 0 })),
+    depositBp: d.depositMode === 'percent' && toQty(d.depositPercent) > 0 ? Math.min(10000, Math.round(toQty(d.depositPercent) * 100)) : null,
+    depositCents: d.depositMode === 'amount' && d.depositCents ? d.depositCents : null,
+    depositShowBalance: d.depositShowBalance,
   });
 
   const run = async (fn: () => Promise<void>) => {
@@ -145,13 +167,41 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
       }
     });
   };
-  const action = (path: string, payload: unknown, msg: string) =>
+  const action = (path: string, payload: unknown, msg: string, method: 'POST' | 'DELETE' = 'POST') =>
     run(async () => {
       if (dirty && doc) await api(`/api/documents/${doc.id}`, { method: 'PUT', body: body() });
-      await api(`/api/documents/${doc!.id}/${path}`, { body: payload });
+      await api(`/api/documents/${doc!.id}/${path}`, method === 'DELETE' ? { method } : { body: payload });
       setDirty(false);
       toast(msg);
       await reload();
+    });
+
+  /** A new job built from this quote or invoice: its heading (or client) as the name, its lines as the estimate. */
+  const createJob = () =>
+    run(async () => {
+      const clientName = (clients.data ?? []).find((c) => c.id === d.clientId)?.name ?? '';
+      const name = prompt('Name for the new job', d.title || clientName)?.trim();
+      if (!name) return;
+      const est = (cat: LineCategory) => Math.max(0, d.lines.filter((l) => l.category === cat).reduce((s, l) => s + lineTotal(toQty(l.qty), l.unitPriceCents ?? 0), 0));
+      const p = await api<{ id: string; number: number }>('/api/projects', {
+        body: {
+          name,
+          clientId: d.clientId,
+          brandId: d.brandId,
+          status: kind === 'quote' ? 'quoted' : 'active',
+          startDate: kind === 'invoice' ? d.issueDate : null,
+          estLabourCents: est('labour'),
+          estMaterialsCents: est('materials'),
+          estDemoCents: est('demo'),
+        },
+      });
+      setD((x) => ({ ...x, projectId: p.id, title: x.title || name }));
+      if (doc) {
+        await api(`/api/documents/${doc.id}`, { method: 'PUT', body: { ...body(), projectId: p.id, title: d.title || name } });
+        setDirty(false);
+        await reload();
+      } else setDirty(true);
+      toast(`Job #${p.number} ${name} created${doc ? ' and linked' : ''}`);
     });
 
   const label = kind === 'invoice' ? 'Invoice' : 'Quote';
@@ -215,7 +265,18 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
         <div className="stack-lg">
           <section className="panel panel-pad stack">
             <div className="form-grid">
-              <Field label="Job">{(p) => <ProjectSelect {...p} value={d.projectId} onChange={(v) => (set('projectId', v), v && (set('clientId', null), set('brandId', null)))} emptyLabel="Not for a job" />}</Field>
+              <Field label="Job">
+                {(p) => (
+                  <ProjectSelect
+                    {...p}
+                    value={d.projectId}
+                    onChange={(v) => (set('projectId', v), v && (set('clientId', null), set('brandId', null)))}
+                    emptyLabel="Not for a job"
+                    createLabel={editable ? `New job from this ${kind}` : undefined}
+                    onCreate={editable ? () => void createJob() : undefined}
+                  />
+                )}
+              </Field>
               <Field label="Client">
                 {(p) => (
                   <select {...p} className="select" value={d.clientId ?? ''} onChange={(e) => set('clientId', e.target.value || null)} disabled={!editable}>
@@ -265,13 +326,13 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
                   </select>
                   <textarea className="textarea line-desc" rows={1} value={l.description} onChange={(e) => updLine(l.key, { description: e.target.value })} placeholder="Description" aria-label="Description" disabled={!editable} />
                   <div className="line-nums">
-                    <input className="input line-qty" inputMode="decimal" value={l.qty} onChange={(e) => updLine(l.key, { qty: e.target.value === '' ? 0 : Number(e.target.value.replace(',', '.')) || 0 })} aria-label="Quantity" disabled={!editable} />
+                    <input className="input line-qty" inputMode="decimal" value={l.qty} onChange={(e) => updLine(l.key, { qty: e.target.value.replace(/[^\d.,]/g, '') })} placeholder="1" aria-label="Quantity" disabled={!editable} />
                     <input className="input line-unit" value={l.unit} onChange={(e) => updLine(l.key, { unit: e.target.value })} placeholder="unit" aria-label="Unit" disabled={!editable} />
                     <div className="line-price">
-                      <MoneyInput value={l.unitPriceCents} onChange={(c) => updLine(l.key, { unitPriceCents: c ?? 0 })} allowNegative aria-describedby={undefined} />
+                      <MoneyInput value={l.unitPriceCents} onChange={(c) => updLine(l.key, { unitPriceCents: c })} placeholder="Price" allowNegative aria-label="Unit price" />
                     </div>
                     <span className="line-total">
-                      <Money cents={lineTotal(l.qty, l.unitPriceCents)} />
+                      <Money cents={lineTotal(toQty(l.qty), l.unitPriceCents ?? 0)} />
                     </span>
                     {editable && (
                       <span className="line-tools">
@@ -338,23 +399,97 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
                   <Money cents={total} />
                 </dd>
               </div>
-              {kind === 'invoice' && paid !== 0 && (
+              {deposit > 0 && (kind === 'quote' || depositOutstanding) && (
                 <>
                   <div>
-                    <dt>Paid</dt>
+                    <dt>
+                      Deposit{d.depositMode === 'percent' ? ` (${toQty(d.depositPercent)}%)` : ''} {kind === 'quote' ? 'to confirm' : 'due now'}
+                    </dt>
                     <dd>
-                      <Money cents={-paid} />
+                      <Money cents={deposit} />
                     </dd>
                   </div>
+                  {(kind === 'quote' || d.depositShowBalance) && (
+                    <div className="sub">
+                      <dt>{kind === 'quote' ? 'Balance on completion' : 'Balance after the deposit'}</dt>
+                      <dd>
+                        <Money cents={total - deposit} />
+                      </dd>
+                    </div>
+                  )}
+                </>
+              )}
+              {kind === 'invoice' && (paid !== 0 || writtenOff !== 0) && (
+                <>
+                  {paid !== 0 && (
+                    <div>
+                      <dt>Paid</dt>
+                      <dd>
+                        <Money cents={-paid} />
+                      </dd>
+                    </div>
+                  )}
+                  {writtenOff !== 0 && (
+                    <div>
+                      <dt>Written off</dt>
+                      <dd>
+                        <Money cents={-writtenOff} />
+                      </dd>
+                    </div>
+                  )}
                   <div className="grand">
                     <dt>Balance</dt>
                     <dd>
-                      <Money cents={total - paid} />
+                      <Money cents={total - paid - writtenOff} />
                     </dd>
                   </div>
                 </>
               )}
             </dl>
+            {editable && !writtenOff && (
+              <div className="fieldset stack" style={{ gap: 8 }}>
+                <span className="label">Deposit</span>
+                <Segmented
+                  label="Deposit"
+                  value={d.depositMode}
+                  onChange={(v) => set('depositMode', v)}
+                  options={[
+                    { value: 'none', label: 'None' },
+                    { value: 'percent', label: '%' },
+                    { value: 'amount', label: 'Amount' },
+                  ]}
+                />
+                {d.depositMode === 'percent' && (
+                  <div className="row">
+                    <input className="input" inputMode="decimal" value={d.depositPercent} onChange={(e) => set('depositPercent', e.target.value.replace(/[^\d.,]/g, ''))} aria-label="Deposit percentage" style={{ maxWidth: 90 }} />
+                    <span className="small muted">% of the total</span>
+                  </div>
+                )}
+                {d.depositMode === 'amount' && <MoneyInput value={d.depositCents} onChange={(c) => set('depositCents', c)} placeholder="Amount" aria-label="Deposit amount" />}
+                {kind === 'invoice' && d.depositMode !== 'none' && (
+                  <label className="check small">
+                    <input type="checkbox" checked={d.depositShowBalance} onChange={(e) => set('depositShowBalance', e.target.checked)} />
+                    Show the balance after the deposit
+                  </label>
+                )}
+                {kind === 'invoice' && d.depositMode !== 'none' && (
+                  <span className="xs muted">The PDF asks for the deposit until payments reach it, then for the balance.</span>
+                )}
+              </div>
+            )}
+            {doc?.writtenOffOn && (
+              <div className="banner alert small">
+                <strong>Delinquent.</strong> {formatZar(doc.writtenOffCents)} written off on {formatDate(doc.writtenOffOn)}
+                {doc.writtenOffReason ? ` (${doc.writtenOffReason})` : ''}: no longer expected, and booked as a bad debt.
+                {isOwner && (
+                  <div style={{ marginTop: 6 }}>
+                    <button type="button" className="btn small" onClick={() => void action('write-off', null, 'Write-off undone', 'DELETE')}>
+                      Undo (they’re paying after all)
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
             {error && <div className="banner alert small">{error}</div>}
             {editable && (
               <button className="btn primary big block" disabled={busy || (!dirty && Boolean(doc))}>
@@ -368,7 +503,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
                     Issue invoice (counts in the books)
                   </button>
                 )}
-                {doc.kind === 'invoice' && doc.status === 'issued' && (
+                {doc.kind === 'invoice' && doc.status === 'issued' && !doc.writtenOffOn && (
                   <button type="button" className="btn block" onClick={() => setDrawer('pay')}>
                     <Icon name="money" size={18} />
                     Record a payment
@@ -400,7 +535,12 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
                     <Icon name="copy" size={16} />
                     Duplicate
                   </button>
-                  {doc.kind === 'invoice' && doc.status === 'issued' && !paid && (
+                  {doc.kind === 'invoice' && doc.status === 'issued' && !doc.writtenOffOn && total - paid > 0 && (
+                    <button type="button" className="btn quiet small" onClick={() => setDrawer('writeoff')}>
+                      Mark delinquent…
+                    </button>
+                  )}
+                  {doc.kind === 'invoice' && doc.status === 'issued' && !paid && !doc.writtenOffOn && (
                     <button type="button" className="btn quiet small danger" onClick={() => {
                       const reason = prompt('Why is this invoice being voided?');
                       if (reason) void action('void', { reason }, `Invoice ${doc.number} voided`);
@@ -453,6 +593,18 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
         </aside>
       </form>
 
+      {drawer === 'writeoff' && doc && (
+        <WriteOffDrawer
+          balance={total - paid}
+          paid={paid}
+          issueDate={doc.issueDate}
+          onClose={() => setDrawer(null)}
+          onSave={(payload) => {
+            setDrawer(null);
+            void action('write-off', payload, `Invoice ${doc.number} marked delinquent`);
+          }}
+        />
+      )}
       {drawer === 'pay' && doc && <PaymentDrawer invoiceId={doc.id} balance={total - paid} onClose={() => setDrawer(null)} onSaved={() => (setDrawer(null), void reload())} />}
       {drawer === 'email' && doc && <EmailDrawer docId={doc.id} defaultTo={doc.clientEmail ?? ''} label={`${label} ${doc.number}`} onClose={() => setDrawer(null)} onSent={reload} />}
       {drawer === 'charge' && project.data && (
@@ -461,7 +613,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
           markupBp={settings.markupBp}
           onClose={() => setDrawer(null)}
           onAdd={(lines) => {
-            set('lines', [...d.lines, ...lines.map((l) => ({ ...l, key: key() }))]);
+            set('lines', [...d.lines, ...lines.map(draftLine)]);
             setDrawer(null);
           }}
         />
@@ -612,6 +764,29 @@ function EmailDrawer({ docId, defaultTo, label, onClose, onSent }: { docId: stri
           {busy ? 'Sending…' : 'Send'}
         </button>
       </form>
+    </Drawer>
+  );
+}
+
+/** Delinquent: the client isn't going to pay the rest. It comes off what's owed and is booked as a bad debt. */
+function WriteOffDrawer({ balance, paid, issueDate, onClose, onSave }: { balance: number; paid: number; issueDate: string; onClose: () => void; onSave: (p: { date: string; reason: string }) => void }) {
+  const [date, setDate] = useState(todayIso() < issueDate ? issueDate : todayIso());
+  const [reason, setReason] = useState('');
+  return (
+    <Drawer title="Mark delinquent" onClose={onClose}>
+      <div className="stack">
+        <p className="small">
+          {paid ? `${formatZar(paid)} was paid. ` : ''}The remaining <strong>{formatZar(balance)}</strong> is no longer expected. It comes off what clients owe you and is
+          booked as a bad debt (an expense) on the date below, so your profit and debtors are right. The invoice and its PDF stay as they are: the client
+          still legally owes it.
+        </p>
+        <Field label="Date">{(p) => <input {...p} className="input" type="date" value={date} min={issueDate} onChange={(e) => setDate(e.target.value)} />}</Field>
+        <Field label="Why (for your records)">{(p) => <input {...p} className="input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Client stopped responding" />}</Field>
+        <p className="xs muted">If they pay after all, undo this on the invoice and record the payment.</p>
+        <button type="button" className="btn primary big block" onClick={() => onSave({ date, reason })} disabled={!date}>
+          Write off {formatZar(balance)}
+        </button>
+      </div>
     </Drawer>
   );
 }

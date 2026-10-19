@@ -27,11 +27,11 @@ export default function DocumentsPage() {
     const s = search.trim().toLowerCase();
     return (data ?? []).filter((d) => !s || d.number.toLowerCase().includes(s) || (d.clientName ?? '').toLowerCase().includes(s) || (d.projectName ?? '').toLowerCase().includes(s) || d.title.toLowerCase().includes(s));
   }, [data, search]);
-  const owing = rows.filter((d) => d.status === 'issued').reduce((s, d) => s + d.totalCents - d.paidCents, 0);
+  const owing = rows.filter((d) => d.status === 'issued').reduce((s, d) => s + d.totalCents - d.paidCents - (d.writtenOffCents ?? 0), 0);
   const filter = state || status || 'all';
   const setFilter = (v: string) => {
     const n = new URLSearchParams({ kind });
-    if (['owing', 'overdue', 'paid'].includes(v)) n.set('state', v);
+    if (['owing', 'overdue', 'paid', 'written_off'].includes(v)) n.set('state', v);
     else if (v !== 'all') n.set('status', v);
     setParams(n, { replace: true });
   };
@@ -80,6 +80,7 @@ export default function DocumentsPage() {
               { value: 'owing', label: 'Owing' },
               { value: 'overdue', label: 'Overdue' },
               { value: 'paid', label: 'Paid' },
+              { value: 'written_off', label: 'Delinquent' },
               { value: 'draft', label: 'Drafts' },
             ]}
           />
@@ -141,7 +142,7 @@ export default function DocumentsPage() {
                   </td>
                   {kind === 'invoice' && (
                     <td className="num hide-sm">
-                      <Money cents={d.status === 'issued' && d.totalCents - d.paidCents ? d.totalCents - d.paidCents : null} />
+                      <Money cents={d.status === 'issued' && d.totalCents - d.paidCents - (d.writtenOffCents ?? 0) ? d.totalCents - d.paidCents - (d.writtenOffCents ?? 0) : null} />
                     </td>
                   )}
                   <td>

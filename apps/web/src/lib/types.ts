@@ -226,6 +226,7 @@ export interface DocRow {
   clientName?: string | null;
   brandId?: string | null;
   brandName?: string | null;
+  writtenOffCents?: number;
 }
 
 export interface DocLine {
@@ -248,6 +249,13 @@ export interface DocDetail {
     clientEmail: string | null;
     clientAddress: string | null;
     clientCode: string | null;
+    depositBp: number | null;
+    depositCents: number | null;
+    depositShowBalance: boolean;
+    depositDueCents: number;
+    writtenOffOn: string | null;
+    writtenOffCents: number;
+    writtenOffReason: string;
   };
   lines: DocLine[];
   receipts: { id: string; date: string; amountCents: number; sourceName: string; method: string; reference: string; note: string }[];

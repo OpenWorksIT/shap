@@ -51,6 +51,13 @@ export interface PdfDocument {
     sourceQuoteNumber: string | null;
     brandId: string | null;
     brandName: string | null;
+    depositBp: number | null;
+    depositCents: number | null;
+    depositShowBalance: boolean;
+    depositDueCents: number;
+    writtenOffOn: string | null;
+    writtenOffCents: number;
+    writtenOffReason: string;
   };
   lines: { id: string; category: LineCategory; description: string; qty: number; unit: string; unitPriceCents: number; lineTotalCents: number }[];
   settings: SettingsRow;
@@ -256,11 +263,27 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   if (grouped) for (const cat of categories) totals.push([LINE_CATEGORY_LABELS[cat], lines.filter((l) => l.category === cat).reduce((s, l) => s + l.lineTotalCents, 0)]);
   totals.push(['Subtotal', doc.subtotalCents]);
   if (doc.vatRateBp > 0) totals.push([`VAT ${(doc.vatRateBp / 100).toFixed(doc.vatRateBp % 100 ? 1 : 0)}%`, doc.vatCents]);
-  if (isInvoice && doc.paidCents) {
+  // A deposit is a request for part of the total up front. On an invoice it's what's due until it's in.
+  const deposit = Math.min(doc.depositDueCents ?? 0, doc.totalCents);
+  const depositLabel = `Deposit${doc.depositBp ? ` (${(doc.depositBp / 100).toFixed(doc.depositBp % 100 ? 1 : 0)}%)` : ''}`;
+  const depositDue = isInvoice && deposit > 0 && doc.paidCents < deposit;
+  if (deposit > 0 && (!isInvoice || depositDue)) {
     totals.push(['Total', doc.totalCents]);
-    totals.push(['Paid', -doc.paidCents]);
+    totals.push([isInvoice ? `${depositLabel} due now` : `${depositLabel} to confirm`, deposit]);
+    if (doc.paidCents) totals.push(['Paid', -doc.paidCents]);
+    if (!isInvoice || doc.depositShowBalance) totals.push([isInvoice ? 'Balance after the deposit' : 'Balance on completion', doc.totalCents - deposit]);
+  } else if (isInvoice && doc.paidCents) {
+    totals.push(['Total', doc.totalCents]);
+    totals.push([deposit > 0 ? 'Paid (incl. deposit)' : 'Paid', -doc.paidCents]);
   }
-  const bigLabel = isInvoice ? (doc.paidCents >= doc.totalCents && doc.totalCents > 0 ? 'Paid in full' : 'Amount due') : 'Quote total';
+  const bigLabel = isInvoice
+    ? depositDue
+      ? 'Deposit due'
+      : doc.paidCents >= doc.totalCents && doc.totalCents > 0
+        ? 'Paid in full'
+        : 'Amount due'
+    : 'Quote total';
+  const bigAmount = isInvoice ? (depositDue ? deposit - doc.paidCents : Math.max(balance, 0)) : doc.totalCents;
   const totalsH = totals.length * 16 + 44;
   const bankText = isInvoice && contact.bank ? `${contact.bank}\nReference: ${doc.number}` : '';
   pdf.font(regular).fontSize(9);
@@ -269,14 +292,14 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   const tx = R - 230;
   let ty = y;
   for (const [k, v] of totals) {
-    pdf.font(regular).fontSize(9).fillColor(MUTED).text(k, tx, ty, { width: 130 });
+    pdf.font(regular).fontSize(9).fillColor(MUTED).text(k, tx, ty, { width: 150 });
     pdf.font(regular).fontSize(9.5).fillColor(INK).text(formatZar(v), tx + 120, ty, { width: 110, align: 'right' });
     ty += 16;
   }
   ty += 4;
   pdf.roundedRect(tx - 10, ty, 240, 34, 5).fill(accent);
   pdf.font(bold).fontSize(9).fillColor('#ffffff').text(bigLabel.toUpperCase(), tx, ty + 12, { width: 120, characterSpacing: 0.8 });
-  pdf.font(bold).fontSize(14).fillColor('#ffffff').text(formatZar(isInvoice ? Math.max(balance, 0) : doc.totalCents), tx + 90, ty + 9, { width: 130, align: 'right' });
+  pdf.font(bold).fontSize(14).fillColor('#ffffff').text(formatZar(bigAmount), tx + 90, ty + 9, { width: 130, align: 'right' });
   if (bankText) {
     pdf.roundedRect(L, y, 250, bankH, 5).lineWidth(1).strokeColor(tint(accent, 0.6)).stroke();
     label('Please pay into', L + 12, y + 10);

@@ -204,6 +204,16 @@ export const documentInput = z.object({
   terms: text(4000).default(''),
   lines: z.array(documentLineInput).max(300).default([]),
   number: text(30).optional(),
+  /** Deposit asked for up front: a percentage (basis points) or a fixed amount, not both. */
+  depositBp: z.number().int().min(1).max(10000).nullable().default(null),
+  depositCents: z.number().int().min(1).max(1_000_000_000_00).nullable().default(null),
+  depositShowBalance: z.boolean().default(true),
+}).refine((d) => !(d.depositBp && d.depositCents), { message: 'Give the deposit as a percentage or an amount, not both', path: ['depositCents'] });
+
+/** Delinquent: write off what's left on an invoice (the client won't pay the rest). */
+export const writeOffInput = z.object({
+  date: isoDate,
+  reason: text(300).default(''),
 });
 
 export const quoteStatusInput = z.object({ status: z.enum(QUOTE_STATUSES) });

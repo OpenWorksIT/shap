@@ -38,7 +38,7 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
           c.name as client_name, p.name as project_name, ${paymentStateSql} as payment_state
         from documents d left join lateral (select sum(amount_cents) as paid from receipts where invoice_id = d.id) r on true
         left join clients c on c.id = d.client_id left join projects p on p.id = d.project_id
-        where d.kind = 'invoice' and d.status = 'issued' and d.total_cents - coalesce(r.paid, 0) <> 0
+        where d.kind = 'invoice' and d.status = 'issued' and d.written_off_on is null and d.total_cents - coalesce(r.paid, 0) <> 0
         order by d.issue_date`),
       sql<{ id: string; name: string; balanceCents: number }[]>`
         select w.id, w.name,

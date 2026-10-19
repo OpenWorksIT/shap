@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { addDays, documentInput, lineTotal, quoteStatusInput, receiptInput, type DocKind } from '@shap/shared';
+import { addDays, documentInput, lineTotal, quoteStatusInput, receiptInput, writeOffInput, type DocKind } from '@shap/shared';
 import { z } from 'zod';
 import { requireRole, userOrThrow, type AuthUser } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -19,13 +19,17 @@ export async function loadBrand(db: Db, id: string | null | undefined): Promise<
 const idParam = z.object({ id: z.string().uuid() });
 type DocInput = z.input<typeof documentInput>;
 
-/** Paid state of an invoice, worked out from its payments and due date. */
+/** Paid state of an invoice, worked out from its payments, due date and any write-off. */
 export const paymentStateSql = `
   case when d.kind <> 'invoice' or d.status <> 'issued' then null
+       when d.written_off_on is not null then 'written_off'
        when coalesce(r.paid, 0) >= d.total_cents and d.total_cents > 0 then 'paid'
        when coalesce(r.paid, 0) > 0 then 'part_paid'
        when d.due_date is not null and d.due_date < current_date then 'overdue'
        else 'unpaid' end`;
+
+/** The deposit asked for, in cents: a percentage of the total or a fixed amount, never more than the total. */
+export const depositDueSql = `least(d.total_cents, coalesce(round(d.total_cents * d.deposit_bp / 10000.0), d.deposit_cents, 0))::bigint`;
 
 async function nextNumber(db: Db, kind: DocKind): Promise<string> {
   // Lock the settings row so two people can't take the same number.
@@ -90,10 +94,11 @@ export async function createDocument(tx: Db, user: AuthUser | null, kind: DocKin
   let row: { id: string; number: string } | undefined;
   try {
     [row] = await tx<{ id: string; number: string }[]>`
-      insert into documents (kind, number, status, project_id, client_id, issue_date, due_date, title, notes, terms, vat_rate_bp, created_by, brand_id)
+      insert into documents (kind, number, status, project_id, client_id, issue_date, due_date, title, notes, terms, vat_rate_bp, created_by, brand_id,
+                             deposit_bp, deposit_cents, deposit_show_balance)
       values (${kind}, ${number}, ${opts.status ?? 'draft'}, ${input.projectId ?? null}, ${clientId}, ${input.issueDate}, ${due},
               ${input.title}, ${input.notes}, ${input.terms || (kind === 'invoice' ? settings.invoiceTerms : settings.quoteTerms)},
-              ${vatRate}, ${user?.id ?? null}, ${brandId})
+              ${vatRate}, ${user?.id ?? null}, ${brandId}, ${input.depositBp}, ${input.depositCents}, ${input.depositShowBalance})
       returning id, number`;
   } catch (err) {
     if (pgCode(err) === PG.uniqueViolation) throw conflict(`There is already ${kind === 'invoice' ? 'an invoice' : 'a quote'} numbered ${number}`);
@@ -106,6 +111,7 @@ export async function createDocument(tx: Db, user: AuthUser | null, kind: DocKin
 export async function loadDocument(db: Db, id: string) {
   const [doc] = await db<PdfDocument['doc'][]>`
     select d.*, coalesce(r.paid, 0)::bigint as paid_cents, ${db.unsafe(paymentStateSql)} as payment_state,
+      ${db.unsafe(depositDueSql)} as deposit_due_cents,
       p.name as project_name, p.number as project_number, p.site_address,
       c.name as client_name, c.contact_person as client_contact, c.address as client_address, c.email as client_email,
       c.phone as client_phone, c.vat_number as client_vat_number, c.code as client_code,
@@ -131,7 +137,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { kind, status, client, project, search, state } = q(req);
     const s = search?.trim() || null;
     const rows = await sql.unsafe(
-      `select d.id, d.kind, d.number, d.status, d.issue_date, d.due_date, d.title, d.subtotal_cents, d.vat_cents, d.total_cents,
+      `select d.id, d.kind, d.number, d.status, d.issue_date, d.due_date, d.title, d.subtotal_cents, d.vat_cents, d.total_cents, d.written_off_cents,
          d.project_id, d.client_id, d.brand_id, b.name as brand_name, p.name as project_name, p.number as project_number, c.name as client_name,
          coalesce(r.paid, 0)::bigint as paid_cents, ${paymentStateSql} as payment_state
        from documents d
@@ -186,6 +192,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
           update documents set number = ${number}, project_id = ${input.projectId ?? null}, client_id = ${clientId},
             issue_date = ${input.issueDate}, due_date = ${input.dueDate ?? null}, title = ${input.title}, notes = ${input.notes},
             terms = ${input.terms}, vat_rate_bp = ${vatRate}, updated_at = now(),
+            deposit_bp = ${input.depositBp}, deposit_cents = ${input.depositCents}, deposit_show_balance = ${input.depositShowBalance},
             brand_id = ${input.brandId ?? (await defaultBrand(tx, input.projectId ?? null, clientId))}
           where id = ${id}`;
       } catch (err) {
@@ -193,6 +200,9 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
         throw err;
       }
       await writeLines(tx, id, input.lines, vatRate);
+      // A written-off invoice that changes: what's written off is still whatever wasn't paid.
+      await tx`update documents d set written_off_cents = greatest(d.total_cents - coalesce((select sum(amount_cents) from receipts where invoice_id = d.id), 0), 0)
+        where d.id = ${id} and d.written_off_on is not null`;
       await audit(tx, { userId: user.id, action: 'update', entity: old.kind, entityId: id, ip: req.ip, details: { number, status: old.status } });
     });
     return loadDocument(sql, id);
@@ -233,11 +243,12 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const { reason } = parse(z.object({ reason: z.string().trim().min(2, 'Give a reason').max(300) }), req.body);
-    const [doc] = await sql<{ kind: string; status: string; issueDate: string }[]>`select * from documents where id = ${id}`;
+    const [doc] = await sql<{ kind: string; status: string; issueDate: string; writtenOffOn: string | null }[]>`select * from documents where id = ${id}`;
     if (!doc || doc.kind !== 'invoice') throw notFound('Invoice');
     await assertOpen(sql, doc.issueDate);
     const [paid] = await sql`select 1 from receipts where invoice_id = ${id} limit 1`;
     if (paid) throw badRequest('Remove the payments on this invoice before voiding it');
+    if (doc.writtenOffOn) throw badRequest('Undo the write-off before voiding this invoice');
     await sql`update documents set status = 'void', void_reason = ${reason}, updated_at = now() where id = ${id}`;
     await audit(sql, { userId: user.id, action: 'void', entity: 'invoice', entityId: id, ip: req.ip, details: { reason } });
     return loadDocument(sql, id);
@@ -272,6 +283,9 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
         title: doc.title,
         notes: doc.notes,
         terms: '',
+        depositBp: doc.depositBp,
+        depositCents: doc.depositCents,
+        depositShowBalance: doc.depositShowBalance,
         lines: lines.map((l) => ({ category: l.category, description: l.description, qty: l.qty, unit: l.unit, unitPriceCents: l.unitPriceCents })),
       });
       await tx`update documents set source_quote_id = ${id} where id = ${inv.id}`;
@@ -297,9 +311,41 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
         title: doc.title,
         notes: doc.notes,
         terms: '',
+        depositBp: doc.depositBp,
+        depositCents: doc.depositCents,
+        depositShowBalance: doc.depositShowBalance,
         lines: lines.map((l) => ({ category: l.category, description: l.description, qty: l.qty, unit: l.unit, unitPriceCents: l.unitPriceCents })),
       }),
     );
+  });
+
+  // ---- delinquent: write off what's left
+  app.post('/api/documents/:id/write-off', { preHandler: requireRole('owner') }, async (req) => {
+    const user = userOrThrow(req);
+    const { id } = parse(idParam, req.params);
+    const input = parse(writeOffInput, req.body);
+    const { doc } = await loadDocument(sql, id);
+    if (doc.kind !== 'invoice') throw notFound('Invoice');
+    if (doc.status !== 'issued') throw badRequest('Only issued invoices can be written off');
+    if (doc.writtenOffOn) throw badRequest('This invoice is already written off');
+    const left = doc.totalCents - doc.paidCents;
+    if (left <= 0) throw badRequest('Nothing is owed on this invoice');
+    if (input.date < doc.issueDate) throw badRequest('The write-off can’t be dated before the invoice');
+    await assertOpen(sql, input.date);
+    await sql`update documents set written_off_on = ${input.date}, written_off_cents = ${left}, written_off_reason = ${input.reason}, updated_at = now() where id = ${id}`;
+    await audit(sql, { userId: user.id, action: 'write_off', entity: 'invoice', entityId: id, ip: req.ip, details: { amount: left, reason: input.reason } });
+    return loadDocument(sql, id);
+  });
+
+  app.delete('/api/documents/:id/write-off', { preHandler: requireRole('owner') }, async (req) => {
+    const user = userOrThrow(req);
+    const { id } = parse(idParam, req.params);
+    const [doc] = await sql<{ writtenOffOn: string | null }[]>`select written_off_on from documents where id = ${id}`;
+    if (!doc?.writtenOffOn) throw notFound('Write-off');
+    await assertOpen(sql, doc.writtenOffOn);
+    await sql`update documents set written_off_on = null, written_off_cents = 0, written_off_reason = '', updated_at = now() where id = ${id}`;
+    await audit(sql, { userId: user.id, action: 'undo_write_off', entity: 'invoice', entityId: id, ip: req.ip });
+    return loadDocument(sql, id);
   });
 
   // ---- payments received
@@ -307,9 +353,10 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const input = parse(receiptInput, req.body);
-    const [doc] = await sql<{ kind: string; status: string }[]>`select kind, status from documents where id = ${id}`;
+    const [doc] = await sql<{ kind: string; status: string; writtenOffOn: string | null }[]>`select kind, status, written_off_on from documents where id = ${id}`;
     if (!doc || doc.kind !== 'invoice') throw notFound('Invoice');
     if (doc.status !== 'issued') throw badRequest(doc.status === 'draft' ? 'Issue the invoice before recording a payment' : 'This invoice is void');
+    if (doc.writtenOffOn) throw badRequest('This invoice was written off as delinquent. Undo that first, then record the payment.');
     await assertOpen(sql, input.date);
     const [row] = await sql`insert into receipts ${sql({ ...input, invoiceId: id, createdBy: user.id })} returning *`;
     await audit(sql, { userId: user.id, action: 'create', entity: 'receipt', entityId: row!.id, ip: req.ip, details: { invoiceId: id, amount: input.amountCents } });
@@ -319,8 +366,10 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.delete('/api/receipts/:id', { preHandler: requireRole('owner') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
-    const [r] = await sql<{ date: string; invoiceId: string }[]>`select date, invoice_id from receipts where id = ${id}`;
+    const [r] = await sql<{ date: string; invoiceId: string; writtenOffOn: string | null }[]>`
+      select r.date, r.invoice_id, d.written_off_on from receipts r join documents d on d.id = r.invoice_id where r.id = ${id}`;
     if (!r) throw notFound('Payment');
+    if (r.writtenOffOn) throw badRequest('This invoice was written off as delinquent. Undo that first, then change its payments.');
     await assertOpen(sql, r.date);
     await sql`delete from receipts where id = ${id}`;
     await audit(sql, { userId: user.id, action: 'delete', entity: 'receipt', entityId: id, ip: req.ip });

@@ -3,6 +3,7 @@ import { lineTotal, plannedItemInput, projectInput, PROJECT_STATUSES } from '@sh
 import { z } from 'zod';
 import { requireRole, seesMoney, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
+import { paymentStateSql } from './documents.js';
 import { audit } from '../lib/audit.js';
 import { getSettings, q, today } from '../lib/books.js';
 import { badRequest, notFound } from '../lib/errors.js';
@@ -33,6 +34,7 @@ export const projectSummarySql = `
     coalesce(inv.other, 0)::bigint as invoiced_other_cents,
     coalesce(inv.vat, 0)::bigint as invoiced_vat_cents,
     coalesce(rec.total, 0)::bigint as received_cents,
+    coalesce((select sum(wo.written_off_cents) from documents wo where wo.project_id = p.id and wo.kind = 'invoice' and wo.status = 'issued'), 0)::bigint as written_off_cents,
     coalesce(pl.total, 0)::bigint as planned_cents,
     coalesce(pl.bought, 0)::bigint as planned_bought_cents,
     inv.last_date as last_invoice_date,
@@ -95,6 +97,7 @@ export interface ProjectSummary {
   invoicedOtherCents: number;
   invoicedVatCents: number;
   receivedCents: number;
+  writtenOffCents: number;
 }
 
 export function totals(s: ProjectSummary) {
@@ -108,7 +111,7 @@ export function totals(s: ProjectSummary) {
     invoicedCents: invoiced,
     grossProfitCents: gross,
     margin: invoiced ? gross / invoiced : null,
-    outstandingCents: invoiced + s.invoicedVatCents - s.receivedCents,
+    outstandingCents: invoiced + s.invoicedVatCents - s.receivedCents - (s.writtenOffCents ?? 0),
   };
 }
 
@@ -158,9 +161,10 @@ export function registerProjectRoutes(app: FastifyInstance, ctx: Ctx): void {
       sql`select c.*, k.name as category_name, k.kind as category_kind, s.name as source_name
           from costs c join cost_categories k on k.id = c.category_id left join payment_sources s on s.id = c.source_id
           where c.project_id = ${id} order by c.date desc, c.created_at desc`,
-      sql`select d.id, d.kind, d.number, d.status, d.issue_date, d.due_date, d.title, d.subtotal_cents, d.total_cents,
-            coalesce((select sum(r.amount_cents) from receipts r where r.invoice_id = d.id), 0)::bigint as paid_cents
-          from documents d where d.project_id = ${id} order by d.issue_date desc, d.created_at desc`,
+      sql`select d.id, d.kind, d.number, d.status, d.issue_date, d.due_date, d.title, d.subtotal_cents, d.total_cents, d.written_off_cents,
+            coalesce(r.paid, 0)::bigint as paid_cents, ${sql.unsafe(paymentStateSql)} as payment_state
+          from documents d left join lateral (select sum(amount_cents) as paid from receipts where invoice_id = d.id) r on true
+          where d.project_id = ${id} order by d.issue_date desc, d.created_at desc`,
       sql`select w.id, w.name, sum(e.days)::float as days, sum(e.wage_cents + e.allowance_cents)::bigint as cost_cents
           from labour_entries e join workers w on w.id = e.worker_id where e.project_id = ${id}
           group by w.id, w.name order by days desc`,

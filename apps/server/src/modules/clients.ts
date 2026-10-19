@@ -3,6 +3,7 @@ import { clientInput } from '@shap/shared';
 import { z } from 'zod';
 import { requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
+import { paymentStateSql } from './documents.js';
 import { pgCode, PG } from '../db/index.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
@@ -22,7 +23,7 @@ export const clientStatsSql = `
   from clients c
   left join lateral (
     select sum(d.subtotal_cents) as total,
-           sum(d.total_cents - coalesce((select sum(r.amount_cents) from receipts r where r.invoice_id = d.id), 0)) as outstanding,
+           sum(d.total_cents - d.written_off_cents - coalesce((select sum(r.amount_cents) from receipts r where r.invoice_id = d.id), 0)) as outstanding,
            max(d.issue_date) as last_invoice
     from documents d where d.kind = 'invoice' and d.status = 'issued' and d.client_id = c.id
   ) inv on true
@@ -58,9 +59,10 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [stats] = await sql.unsafe(`select * from (${clientStatsSql}) s where s.id = $1`, [id]);
     const projects = await sql`select id, number, name, status, start_date from projects where client_id = ${id} order by number desc`;
     const documents = await sql`
-      select d.id, d.kind, d.number, d.status, d.issue_date, d.total_cents, d.title, p.name as project_name,
-        coalesce((select sum(r.amount_cents) from receipts r where r.invoice_id = d.id), 0)::bigint as paid_cents
+      select d.id, d.kind, d.number, d.status, d.issue_date, d.total_cents, d.written_off_cents, d.title, p.name as project_name,
+        coalesce(r.paid, 0)::bigint as paid_cents, ${sql.unsafe(paymentStateSql)} as payment_state
       from documents d left join projects p on p.id = d.project_id
+      left join lateral (select sum(amount_cents) as paid from receipts where invoice_id = d.id) r on true
       where d.client_id = ${id} order by d.issue_date desc, d.created_at desc
     `;
     return { client, stats, projects, documents };

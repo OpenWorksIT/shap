@@ -167,7 +167,7 @@ export function ClientPage() {
                     {d.kind === 'quote' ? 'Quote' : 'Invoice'} {d.number}
                     <div className="xs muted">{formatDate(d.issueDate)}</div>
                   </span>
-                  <DocChip status={d.status} paymentState={d.kind === 'invoice' && d.status === 'issued' ? (d.paidCents >= d.totalCents ? 'paid' : d.paidCents ? 'part_paid' : 'unpaid') : null} />
+                  <DocChip status={d.status} paymentState={d.paymentState ?? (d.kind === 'invoice' && d.status === 'issued' ? (d.paidCents >= d.totalCents ? 'paid' : d.paidCents ? 'part_paid' : 'unpaid') : null)} />
                   <Money cents={d.totalCents} />
                 </Link>
               </li>

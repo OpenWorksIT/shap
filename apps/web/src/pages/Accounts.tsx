@@ -409,7 +409,7 @@ interface LedgerData {
 }
 
 function sourceLink(source: string, id: string): string | null {
-  if (source === 'invoice') return `/documents/${id}`;
+  if (source === 'invoice' || source === 'write_off') return `/documents/${id}`;
   if (source === 'journal') return `/accounts?tab=journals&journal=${id}`;
   if (source === 'asset' || source === 'depreciation' || source === 'disposal') return '/accounts?tab=assets';
   return null;

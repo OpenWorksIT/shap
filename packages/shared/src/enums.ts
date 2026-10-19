@@ -51,6 +51,7 @@ export const DOC_STATUS_LABELS: Record<string, string> = {
   part_paid: 'Part paid',
   paid: 'Paid',
   overdue: 'Overdue',
+  written_off: 'Delinquent',
 };
 
 export const WORKER_KINDS = ['permanent', 'casual', 'subcontractor'] as const;
@@ -124,4 +125,5 @@ export const LEDGER_SOURCE_LABELS: Record<string, string> = {
   depreciation: 'Depreciation',
   disposal: 'Asset disposal',
   year_end: 'Year-end adjustment',
+  write_off: 'Written off (bad debt)',
 };

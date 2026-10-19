@@ -12,6 +12,8 @@ export function ProjectSelect({
   id,
   emptyLabel = 'No job',
   allowEmpty = true,
+  createLabel,
+  onCreate,
   ...rest
 }: {
   value: string | null;
@@ -19,6 +21,9 @@ export function ProjectSelect({
   id?: string;
   emptyLabel?: string;
   allowEmpty?: boolean;
+  /** Offers "+ <createLabel>" at the top of the list; choosing it calls onCreate instead of onChange. */
+  createLabel?: string;
+  onCreate?: () => void;
   'aria-invalid'?: boolean;
   'aria-describedby'?: string;
 }) {
@@ -40,8 +45,15 @@ export function ProjectSelect({
   const missing = value && !list.some((r) => r.id === value);
   return (
     <div className="stack" style={{ gap: 4 }}>
-      <select id={id} className="select" value={value ?? ''} onChange={(e) => onChange(e.target.value || null)} {...rest}>
+      <select
+        id={id}
+        className="select"
+        value={value ?? ''}
+        onChange={(e) => (e.target.value === '__new__' ? onCreate?.() : onChange(e.target.value || null))}
+        {...rest}
+      >
         {allowEmpty && <option value="">{emptyLabel}</option>}
+        {onCreate && <option value="__new__">+ {createLabel ?? 'New job'}</option>}
         {missing && <option value={value}>{every.loading ? 'Loading…' : 'Current job'}</option>}
         {list.map((p) => (
           <option key={p.id} value={p.id}>

@@ -218,6 +218,75 @@ describe('provisional tax', () => {
   });
 });
 
+describe('deposits', () => {
+  it('asks for a percentage on a quote and carries it to the invoice', async () => {
+    const q = await owner.post('/api/documents', {
+      kind: 'quote',
+      issueDate: '2026-06-01',
+      depositBp: 5000,
+      lines: [{ category: 'labour', description: 'Build wall', qty: 2, unit: 'days', unitPriceCents: 150000 }],
+    });
+    const quote = await owner.get(`/api/documents/${q.id}`);
+    expect(quote.doc).toMatchObject({ depositBp: 5000, depositDueCents: 150000 });
+    const inv = await owner.post(`/api/documents/${q.id}/convert`);
+    const invoice = await owner.get(`/api/documents/${inv.id}`);
+    expect(invoice.doc).toMatchObject({ depositBp: 5000, depositDueCents: 150000, depositShowBalance: true });
+    const pdf = await owner.call({ method: 'GET', url: `/api/documents/${inv.id}/pdf` });
+    expect(pdf.statusCode).toBe(200);
+  });
+
+  it('takes a fixed amount, never more than the total, but not both kinds at once', async () => {
+    const d = await owner.post('/api/documents', { kind: 'invoice', issueDate: '2026-06-02', depositCents: 999999999, lines: [{ category: 'other', description: 'Call-out', qty: 1, unitPriceCents: 50000 }] });
+    expect((await owner.get(`/api/documents/${d.id}`)).doc.depositDueCents).toBe(50000);
+    const both = await owner.call({ method: 'POST', url: '/api/documents', payload: { kind: 'quote', issueDate: '2026-06-02', depositBp: 1000, depositCents: 100, lines: [] } });
+    expect(both.statusCode).toBe(400);
+  });
+});
+
+describe('delinquent invoices', () => {
+  let id: string;
+  it('writes off what is left as a bad debt, off what clients owe', async () => {
+    const inv = await issueInvoice({ title: 'Never paid in full', issueDate: '2026-06-10' });
+    id = inv.doc.id;
+    await owner.post(`/api/documents/${id}/receipts`, { date: '2026-06-15', amountCents: 40000, sourceId: ids.bank });
+    const debtorsBefore = await balance(env.sql, 'receivables');
+    const doc = await owner.post(`/api/documents/${id}/write-off`, { date: '2026-07-31', reason: 'Client stopped answering' });
+    expect(doc.doc).toMatchObject({ paymentState: 'written_off', writtenOffCents: 60000, writtenOffOn: '2026-07-31' });
+    expect(await balance(env.sql, 'bad_debts')).toBe(60000);
+    expect(await balance(env.sql, 'receivables')).toBe(debtorsBefore - 60000);
+    expect(await balance(env.sql, 'receivables', '2026-07-30')).toBe(debtorsBefore);
+    expect(await ledgerTotal(env.sql)).toBe(0);
+    const owing = await owner.get('/api/documents?kind=invoice&state=owing');
+    expect(owing.some((d: { id: string }) => d.id === id)).toBe(false);
+    const delinquent = await owner.get('/api/documents?kind=invoice&state=written_off');
+    expect(delinquent.map((d: { id: string }) => d.id)).toEqual([id]);
+    const dash = await owner.get('/api/dashboard');
+    expect(dash.owing.invoices.some((i: { id: string }) => i.id === id)).toBe(false);
+  });
+
+  it('won’t take payments or be voided until the write-off is undone', async () => {
+    const pay = await owner.call({ method: 'POST', url: `/api/documents/${id}/receipts`, payload: { date: '2026-08-01', amountCents: 100, sourceId: ids.bank } });
+    expect(pay.statusCode).toBe(400);
+    const again = await owner.call({ method: 'POST', url: `/api/documents/${id}/write-off`, payload: { date: '2026-08-01' } });
+    expect(again.statusCode).toBe(400);
+  });
+
+  it('undoes cleanly', async () => {
+    const doc = await owner.post(`/api/documents/${id}/write-off`, {}, 'DELETE');
+    expect(doc.doc).toMatchObject({ paymentState: 'part_paid', writtenOffCents: 0, writtenOffOn: null });
+    expect(await balance(env.sql, 'bad_debts')).toBe(0);
+    expect(await ledgerTotal(env.sql)).toBe(0);
+  });
+
+  it('won’t write off a paid invoice or date it before the invoice', async () => {
+    const early = await owner.call({ method: 'POST', url: `/api/documents/${id}/write-off`, payload: { date: '2026-06-01' } });
+    expect(early.statusCode).toBe(400);
+    await owner.post(`/api/documents/${id}/receipts`, { date: '2026-08-01', amountCents: 60000, sourceId: ids.bank });
+    const paid = await owner.call({ method: 'POST', url: `/api/documents/${id}/write-off`, payload: { date: '2026-08-02' } });
+    expect(paid.statusCode).toBe(400);
+  });
+});
+
 describe('the company file', () => {
   it('saves the set-up and loads it back, merging', async () => {
     const res = await owner.call({ method: 'GET', url: '/api/company-file' });

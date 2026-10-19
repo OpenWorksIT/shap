@@ -966,6 +966,11 @@ button.list-row {
   white-space: nowrap;
   line-height: 1.6;
 }
+.chip.d-written_off {
+  background: var(--ink-3);
+  border-color: transparent;
+  color: #fff;
+}
 .chip.warn,
 .chip.d-overdue {
   background: var(--alert-soft);

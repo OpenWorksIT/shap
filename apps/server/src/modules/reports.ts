@@ -446,12 +446,13 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
       return sendCsv(reply, name, toCsv(['Date', 'Worker', 'Amount', 'Paid from', 'Note'], rows.map((r) => [r.date, r.worker, centsToCsv(r.amountCents), r.source, r.note])));
     }
     if (what === 'invoices') {
-      const rows = await sql`select d.number, d.issue_date, d.due_date, d.status, c.name as client, p.name as project, d.subtotal_cents, d.vat_cents, d.total_cents,
+      const rows = await sql`select d.number, d.issue_date, d.due_date, case when d.written_off_on is not null then 'written off' else d.status end as status,
+          c.name as client, p.name as project, d.subtotal_cents, d.vat_cents, d.total_cents, d.written_off_cents,
           coalesce((select sum(amount_cents) from receipts r where r.invoice_id = d.id), 0)::bigint as paid
         from documents d left join clients c on c.id = d.client_id left join projects p on p.id = d.project_id
         where d.kind = 'invoice' and d.issue_date between ${f}::date and ${t}::date order by d.issue_date, d.number`;
-      return sendCsv(reply, name, toCsv(['Invoice', 'Date', 'Due', 'Status', 'Client', 'Job', 'Subtotal', 'VAT', 'Total', 'Paid', 'Balance'],
-        rows.map((r) => [r.number, r.issueDate, r.dueDate, r.status, r.client, r.project, centsToCsv(r.subtotalCents), centsToCsv(r.vatCents), centsToCsv(r.totalCents), centsToCsv(r.paid), centsToCsv(r.totalCents - r.paid)])));
+      return sendCsv(reply, name, toCsv(['Invoice', 'Date', 'Due', 'Status', 'Client', 'Job', 'Subtotal', 'VAT', 'Total', 'Paid', 'Written off', 'Balance'],
+        rows.map((r) => [r.number, r.issueDate, r.dueDate, r.status, r.client, r.project, centsToCsv(r.subtotalCents), centsToCsv(r.vatCents), centsToCsv(r.totalCents), centsToCsv(r.paid), centsToCsv(r.writtenOffCents), centsToCsv(r.totalCents - r.paid - r.writtenOffCents)])));
     }
     if (what === 'receipts') {
       const rows = await sql`select r.date, d.number, c.name as client, r.amount_cents, s.name as source, r.method, r.reference from receipts r join documents d on d.id = r.invoice_id
