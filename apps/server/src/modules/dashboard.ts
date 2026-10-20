@@ -5,7 +5,7 @@ import type { Ctx } from '../context.js';
 import { getSettings, today } from '../lib/books.js';
 import { paymentStateSql } from './documents.js';
 import { missingStatements } from './statements.js';
-import { findDuplicates } from './costs.js';
+import { findDuplicates } from './duplicates.js';
 import { projectSummarySql, totals, type ProjectSummary } from './projects.js';
 
 export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -99,7 +99,7 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
       materialsWithoutJob: materialsNoJob[0],
       uncapturedCosts: uncaptured[0],
       statementsMissing: await missingStatements(sql),
-      duplicateCosts: (await findDuplicates(sql)).filter((d) => d.likely).length,
+      duplicateCosts: (await findDuplicates(sql)).length,
       bankCents: bal('bank'),
       ownerLoanCents: -bal('owner_loan'),
       projects: projects.map((p) => ({ ...p, ...totals(p as unknown as ProjectSummary) })),

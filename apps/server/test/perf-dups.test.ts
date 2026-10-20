@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { findDuplicates } from '../src/modules/costs.js';
+import { findDuplicates } from '../src/modules/duplicates.js';
 import { ref, setup, type TestEnv } from './helpers.js';
 
 describe('finding twins among many costs', () => {

@@ -247,9 +247,11 @@ function Twins({ id, onMerged }: { id: string; onMerged: (thisOneGone: boolean) 
   const { data } = useApi<Twin[]>(open ? `/api/costs/${id}/twins` : null);
   const merge = async (copyId: string, originalId: string) => {
     try {
-      const r = await api<{ merged: number; failed: { reason: string }[] }>('/api/costs/merge', { body: { pairs: [{ copyId, originalId }], byHand: true } });
-      if (!r.merged) return toast(r.failed[0]?.reason ?? 'Couldn’t merge', 'error');
-      toast('Merged');
+      const r = await api<{ merged: number; results: { ok: boolean; reason?: string }[] }>('/api/costs/merge', {
+        body: { pairs: [{ removeId: copyId, keepId: originalId }], byHand: true },
+      });
+      if (!r.merged) return toast(r.results[0]?.reason ?? 'Couldn’t merge', 'error');
+      toast('Merged. Costs → Costs counted twice → Recent merges can undo it.');
       onMerged(copyId === id);
     } catch (err) {
       toast(err instanceof ApiError ? err.message : 'Couldn’t merge', 'error');

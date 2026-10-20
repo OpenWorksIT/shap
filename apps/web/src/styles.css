@@ -1774,3 +1774,18 @@ button.list-row {
 .changelog p {
   margin: 4px 0;
 }
+
+/* Shap was updated while this page was open. */
+.update-banner {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  font-size: var(--fs-sm);
+  background: var(--warn-soft);
+  color: var(--ink);
+  border-bottom: 1px solid var(--line, rgba(0, 0, 0, 0.08));
+}

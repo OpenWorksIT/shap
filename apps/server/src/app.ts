@@ -13,6 +13,7 @@ import { HttpError } from './lib/errors.js';
 import { createMailer, type Mailer } from './lib/mailer.js';
 import { registerClientRoutes } from './modules/clients.js';
 import { registerCostRoutes } from './modules/costs.js';
+import { registerDuplicateRoutes } from './modules/duplicates.js';
 import { registerDashboardRoutes } from './modules/dashboard.js';
 import { registerDocumentRoutes } from './modules/documents.js';
 import { registerImportRoutes } from './modules/import/routes.js';
@@ -22,7 +23,7 @@ import { registerSettingsRoutes } from './modules/settings.js';
 import { registerWorkerRoutes } from './modules/workers.js';
 import { registerYearEndRoutes } from './modules/yearend.js';
 import { registerBankRoutes } from './modules/bank/routes.js';
-import { registerSystemRoutes } from './modules/system.js';
+import { appVersion, registerSystemRoutes } from './modules/system.js';
 import { registerStatementRoutes } from './modules/statements.js';
 import { registerCompanyFileRoutes } from './modules/company-file.js';
 
@@ -61,14 +62,28 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
       reply.header('vary', 'Origin');
       if (req.method === 'OPTIONS') {
         reply.header('access-control-allow-methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-        reply.header('access-control-allow-headers', 'content-type,authorization');
+        reply.header('access-control-allow-headers', 'content-type,authorization,x-shap-version,x-shap-client');
         reply.header('access-control-max-age', '600');
         return reply.code(204).send();
       }
     }
   });
 
+  // A page still running an older version of the app (opened before an update) mustn't change
+  // anything: its screens may send what the new server reads differently. It's asked to reload.
+  const version = appVersion();
+  app.addHook('onRequest', async (req, reply) => {
+    if (!req.url.startsWith('/api/') || req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return;
+    const theirs = req.headers['x-shap-version'];
+    // Pages from before 1.1.7 don't say their version at all; the phone app signs in with a token.
+    const oldPage = theirs === undefined && !req.headers.authorization && !req.url.startsWith('/api/auth/');
+    if (oldPage || (typeof theirs === 'string' && theirs !== version && req.headers['x-shap-client'] !== 'native')) {
+      return reply.code(409).send({ error: 'Shap was updated while this page was open. Reload the page, then try again.', code: 'stale_client' });
+    }
+  });
+
   app.addHook('onSend', async (req, reply, payload) => {
+    if (req.url.startsWith('/api/')) reply.header('x-shap-version', version);
     reply.header('x-content-type-options', 'nosniff');
     reply.header('referrer-policy', 'strict-origin-when-cross-origin');
     reply.header('x-frame-options', 'SAMEORIGIN');
@@ -104,6 +119,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   registerClientRoutes(app, ctx);
   registerProjectRoutes(app, ctx);
   registerWorkerRoutes(app, ctx);
+  registerDuplicateRoutes(app, ctx);
   registerCostRoutes(app, ctx);
   registerDocumentRoutes(app, ctx);
   registerReportRoutes(app, ctx);

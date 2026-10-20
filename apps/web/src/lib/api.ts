@@ -47,6 +47,14 @@ export function apiUrl(path: string): string {
   return `${BASE}${path}`;
 }
 
+/** This page's version; the server says its own on every reply. */
+export const APP_VERSION = __SHAP_VERSION__;
+let onStale: ((serverVersion: string) => void) | null = null;
+/** Called when the server is a different version from this page (updated while it was open). */
+export function setStaleHandler(fn: (serverVersion: string) => void) {
+  onStale = fn;
+}
+
 let onUnauthorized: (() => void) | null = null;
 export function setUnauthorizedHandler(fn: () => void) {
   onUnauthorized = fn;
@@ -57,7 +65,12 @@ export async function api<T = unknown>(path: string, opts: { method?: string; bo
   try {
     res = await fetch(apiUrl(path), {
       method: opts.method ?? (opts.body !== undefined ? 'POST' : 'GET'),
-      headers: { ...(opts.body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...authHeaders() },
+      headers: {
+        ...(opts.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        'X-Shap-Version': APP_VERSION,
+        'X-Shap-Client': NATIVE ? 'native' : 'web',
+        ...authHeaders(),
+      },
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
       credentials: NATIVE ? 'omit' : 'same-origin',
       signal: opts.signal,
@@ -66,6 +79,8 @@ export async function api<T = unknown>(path: string, opts: { method?: string; bo
     if ((err as Error).name === 'AbortError') throw err;
     throw new ApiError(0, 'Can’t reach the Shap server. Check your connection.', 'network');
   }
+  const server = res.headers.get('x-shap-version');
+  if (server && server !== APP_VERSION && !NATIVE) onStale?.(server);
   const text = await res.text();
   const data = text ? safeJson(text) : null;
   if (!res.ok) {

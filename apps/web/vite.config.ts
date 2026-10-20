@@ -1,10 +1,14 @@
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
+import { readFileSync } from 'node:fs';
 import { VitePWA } from 'vite-plugin-pwa';
 
 const api = process.env.API_URL ?? 'http://localhost:8080';
+// The version this build is, so the app can tell when the server has been updated under it.
+const version = (JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string }).version;
 
 export default defineConfig({
+  define: { __SHAP_VERSION__: JSON.stringify(version) },
   plugins: [
     react(),
     VitePWA({

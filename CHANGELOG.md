@@ -3,6 +3,37 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.2.0 (20 October 2026)
+
+Bank statements and costs counted twice, reworked and tested end to end on a replay of a real
+year of statements.
+
+- **A statement can't go in under the wrong account by accident.** Importing a file whose
+  transactions are already under another account (or the same file name) is stopped with a
+  warning naming that account; you can still import it after ticking that it really belongs
+  there. This was the cause of most costs being counted twice.
+- **Costs counted twice, rebuilt.** Only two cases are listed, both certain: the same bank
+  transaction imported twice and turned into two costs, and a slip you captured that was then
+  added again from the statement. Two costs you captured yourself are never paired (the same
+  shop sells many things at nearly the same price). Merging keeps the cost on the job and
+  removes the copy together with its extra statement line.
+- **Every merge can be undone**, from *Recent merges* on the same screen, exactly as it was.
+- **Ticks stay yours.** The review screen and the bank to-do list no longer re-tick
+  everything after a merge or a match, and *Not this* is remembered.
+- **One problem doesn't stop the rest.** A pair or a statement line in the closed period
+  (before the lock date) is left with a note; the others still go through.
+- **Already captured? is suggested, not added.** A statement line that looks like a slip you
+  captured days earlier is offered as a match (never automatically) instead of being added as
+  a new cost.
+- **Imported statements** shows how many costs were added from each, and flags one whose
+  transactions are also on another account. *Take out with what was added* removes a statement
+  as if it was never imported. Unmatching, or deleting a statement, now gives costs back the
+  account and amount they had before they were matched.
+- **Out-of-date pages can't save.** If Shap is updated while a page is open, it says so and
+  asks you to reload; until then the server refuses changes from it.
+- **Restoring a backup**: the instructions in docs/backups.md were wrong for a backup from an
+  older version; they now create the database fresh.
+
 ## 1.1.6 (20 October 2026)
 
 - **Costs counted twice, rethought**: it only looked at costs added from a bank statement whose

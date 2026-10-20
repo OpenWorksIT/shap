@@ -1,3 +1,4 @@
+import { appVersion } from '../src/modules/system.js';
 import type { FastifyInstance, InjectOptions } from 'fastify';
 import { buildApp } from '../src/app.js';
 import { createUser } from '../src/auth.js';
@@ -45,7 +46,9 @@ export async function login(app: FastifyInstance, email: string) {
   const res = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email, password: 'test-password-1' } });
   if (res.statusCode !== 200) throw new Error(`login failed for ${email}: ${res.body}`);
   const cookie = res.cookies.find((c) => c.name === 'shap_session')!.value;
-  const call = (opts: InjectOptions) => app.inject({ ...opts, cookies: { ...(opts.cookies ?? {}), shap_session: cookie } });
+  // As the web app does: it says which version it is.
+  const call = (opts: InjectOptions) =>
+    app.inject({ ...opts, headers: { 'x-shap-version': appVersion(), ...(opts.headers ?? {}) }, cookies: { ...(opts.cookies ?? {}), shap_session: cookie } });
   const get = async <T = any>(url: string): Promise<T> => {
     const r = await call({ method: 'GET', url });
     if (r.statusCode >= 400) throw new Error(`GET ${url} → ${r.statusCode} ${r.body}`);

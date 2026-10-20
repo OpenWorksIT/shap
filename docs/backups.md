@@ -38,18 +38,28 @@ For a second, off-site copy as well (an S3 bucket or a storage box), see
 ## Restoring
 
 This replaces everything in the company's database with the backup. Make a backup of the
-current state first (Settings → Back up now) in case you need to go back.
+current state first (the first command below) in case you need to go back.
+
+The database is dropped and created fresh, then the backup is restored into it. (Restoring over
+the existing database with `pg_restore --clean` doesn't work once the backup is from an older
+version: tables added since are left in place and the restore fails half-way.) When Shap starts
+again it brings the restored database up to the current version by itself.
 
 ```bash
 # a backup from your PC goes back to the server first:
-scp ~/Backups/Shap/shap-daily-2026-10-19_0230.dump vps1:/root/
+scp ~/Backups/Shap/shap-daily-2026-10-19_0230.dump vps1:/tmp/
 
 cd /opt/shap/deploy/vps
-docker compose stop app
-docker compose exec -T db pg_restore -U shap -d shap --clean --if-exists --no-owner < /root/shap-daily-2026-10-19_0230.dump
-docker compose start app
+sudo /opt/shap/deploy/vps/ctl/shap-ctl.sh backup     # the current state, just in case
+sudo docker compose stop app
+sudo docker compose exec -T db dropdb -U shap shap
+sudo docker compose exec -T db createdb -U shap shap
+sudo sh -c 'docker compose exec -T db pg_restore -U shap -d shap --no-owner --exit-on-error < /tmp/shap-daily-2026-10-19_0230.dump'
+sudo docker compose start app
+sudo docker compose logs --tail 20 app                # "applied …" lines: brought up to date
 ```
 
-For another company on the same server, use its database (`shap_<name>`) and its app container
-(`app-<name>`). To look at an old backup without touching the real one, restore it into a new
-database (`docker compose exec db createdb -U shap shap_restore`) and inspect that.
+Everyone signs in again afterwards. For another company on the same server, use its database
+(`shap_<name>`) and its app container (`app-<name>`). To look at an old backup without touching
+the real one, restore it into a new database (`docker compose exec db createdb -U shap
+shap_restore`) and inspect that.

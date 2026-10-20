@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { formatDate, formatZar } from '@shap/shared';
 import { Drawer, Empty, ErrorBox, Field, Icon, Loading, Money, Segmented, useToast } from '../components/ui';
@@ -43,6 +43,7 @@ interface Preview {
   outCents: number;
   looksFlipped: boolean;
   sample: { date: string; description: string; amountCents: number; balanceCents: number | null }[];
+  elsewhere: { sourceName: string; lines: number; of: number; sameFile: boolean } | null;
 }
 
 type View = 'todo' | 'matched' | 'ignored' | 'all';
@@ -69,12 +70,22 @@ export function BankRecon() {
   const [showImport, setShowImport] = useState(false);
   const [showStatements, setShowStatements] = useState(false);
 
-  // Everything to do starts ticked: untick what you want left off.
+  // Everything to do starts ticked the first time it shows: untick what you want left off.
+  // After that your ticks (and "Not this") stay as you left them when the list reloads.
+  const seen = useRef<{ sourceId: string; ids: Set<string> }>({ sourceId: '', ids: new Set() });
   useEffect(() => {
     if (!data) return;
-    setTicked(new Set(data.lines.filter((l) => l.state === 'open' || l.state === 'suggested').map((l) => l.id)));
-    setDismissed(new Set());
-  }, [data]);
+    if (seen.current.sourceId !== sourceId) seen.current = { sourceId, ids: new Set() };
+    const todoIds = data.lines.filter((l) => l.state === 'open' || l.state === 'suggested').map((l) => l.id);
+    const here = new Set(todoIds);
+    setTicked((t) => {
+      const n = new Set([...t].filter((id) => here.has(id)));
+      for (const id of todoIds) if (!seen.current.ids.has(id)) n.add(id);
+      return n;
+    });
+    for (const id of todoIds) seen.current.ids.add(id);
+    setDismissed((d) => new Set([...d].filter((id) => here.has(id))));
+  }, [data, sourceId]);
 
   const lines = useMemo(() => {
     const all = (data?.lines ?? []).map((l) => (l.state === 'suggested' && dismissed.has(l.id) ? { ...l, state: 'open' as State, suggestion: null } : l));
@@ -111,8 +122,9 @@ export function BankRecon() {
       let created = 0;
       if (tickedSuggested.length) matched = (await api<{ matched: number }>('/api/bank/accept', { body: { sourceId, lineIds: tickedSuggested.map((l) => l.id) } })).matched;
       let skipped = 0;
+      let locked = 0;
       if (tickedNewCosts.length) {
-        const r = await api<{ created: number; skipped: unknown[] }>('/api/bank/lines/create-costs', {
+        const r = await api<{ created: number; skipped: unknown[]; locked: string[] }>('/api/bank/lines/create-costs', {
           body: {
             items: tickedNewCosts.map((l) => {
               const t = targetOf(l, edits[l.id]);
@@ -129,9 +141,11 @@ export function BankRecon() {
         });
         created = r.created;
         skipped = r.skipped.length;
+        locked = r.locked.length;
       }
       return (
-        [matched && `${matched} matched`, created && `${created} added`, skipped && `${skipped} not added: they look like costs already captured, so check the suggestions`]
+        [matched && `${matched} matched`, created && `${created} added`, skipped && `${skipped} not added: they look like costs already captured, so check the suggestions`,
+          locked && `${locked} left: they’re before the lock date (Settings)`]
           .filter(Boolean)
           .join(', ') || 'Nothing to capture'
       );
@@ -435,6 +449,7 @@ function ImportStatement({ sourceId, sourceName, onDone }: { sourceId: string; s
   const [preview, setPreview] = useState<Preview | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [otherOk, setOtherOk] = useState(false);
 
   const look = async (f: { name: string; csv: string }, flipIt: boolean) => {
     setBusy(true);
@@ -455,6 +470,7 @@ function ImportStatement({ sourceId, sourceName, onDone }: { sourceId: string; s
     if (!f) return;
     const next = { name: f.name, csv: await f.text() };
     setFile(next);
+    setOtherOk(false);
     const p = await look(next, false);
     if (p?.looksFlipped) {
       setFlip(true);
@@ -465,7 +481,7 @@ function ImportStatement({ sourceId, sourceName, onDone }: { sourceId: string; s
     if (!file) return;
     setBusy(true);
     try {
-      const r = await api<{ added: number; duplicates: number; autoMatched: number }>('/api/bank/statements', { body: { sourceId, csv: file.csv, filename: file.name, flip } });
+      const r = await api<{ added: number; duplicates: number; autoMatched: number }>('/api/bank/statements', { body: { sourceId, csv: file.csv, filename: file.name, flip, otherAccountOk: otherOk } });
       toast(`${r.added} transactions added${r.duplicates ? `, ${r.duplicates} already here` : ''}${r.autoMatched ? `, ${r.autoMatched} matched straight away` : ''}`);
       onDone();
     } catch (err) {
@@ -513,7 +529,30 @@ function ImportStatement({ sourceId, sourceName, onDone }: { sourceId: string; s
             <input type="checkbox" checked={flip} onChange={(e) => (setFlip(e.target.checked), void look(file, e.target.checked))} />
             Money out shows as positive on this statement (common on card statements): flip it
           </label>
-          <button className="btn primary big" disabled={busy || preview.count === preview.duplicates} onClick={() => void doImport()}>
+          {preview.elsewhere && (
+            <div className="banner alert small stack" style={{ gap: 6 }}>
+              <span>
+                {preview.elsewhere.sameFile ? (
+                  <>
+                    <strong>This file was already imported under {preview.elsewhere.sourceName}.</strong>{' '}
+                  </>
+                ) : (
+                  <>
+                    <strong>
+                      {preview.elsewhere.lines} of these {preview.elsewhere.of} transactions are already imported under {preview.elsewhere.sourceName}.
+                    </strong>{' '}
+                  </>
+                )}
+                It looks like that account’s statement, not {sourceName}’s. Importing it here as well puts every purchase in the books twice. Choose the
+                right account at the top instead.
+              </span>
+              <label className="check small">
+                <input type="checkbox" checked={otherOk} onChange={(e) => setOtherOk(e.target.checked)} />
+                It really is {sourceName}’s statement: import it here anyway
+              </label>
+            </div>
+          )}
+          <button className="btn primary big" disabled={busy || preview.count === preview.duplicates || (Boolean(preview.elsewhere) && !otherOk)} onClick={() => void doImport()}>
             {busy ? 'Importing…' : `Import ${preview.count - preview.duplicates} transactions`}
           </button>
         </>
@@ -681,6 +720,9 @@ interface Statement {
   toDate: string | null;
   lineCount: number;
   matchedCount: number;
+  addedCosts: number;
+  elsewhereCount: number;
+  elsewhereName: string | null;
   createdAt: string;
 }
 
@@ -735,11 +777,15 @@ function ImportedStatements({
         .join(' · ');
     });
   };
-  const remove = (st: Statement) => {
-    if (!confirm('Delete this statement’s lines? Costs added from it stay, but are no longer tied to the statement.')) return;
+  const remove = (st: Statement, removeAdded: boolean) => {
+    const sure = removeAdded
+      ? `Take this statement out as if it was never imported? Its lines go, and so do the ${st.addedCosts} cost${st.addedCosts === 1 ? '' : 's'} and any invoice payments, transfers or income entries added from it. Costs you captured yourself stay, with the account they had before.`
+      : 'Delete this statement’s lines? What was added from it stays in the books, no longer tied to a statement. Costs you captured yourself get back the account they had before.';
+    if (!confirm(sure)) return;
     void run(st.id, async () => {
-      await api(`/api/bank/statements/${st.id}`, { method: 'DELETE' });
-      return 'Statement deleted';
+      const r = await api<{ removed: { costs: number; receipts: number; journals: number } }>(`/api/bank/statements/${st.id}?removeAdded=${removeAdded}`, { method: 'DELETE' });
+      const n = r.removed;
+      return removeAdded ? `Statement taken out: ${n.costs} costs, ${n.receipts} payments and ${n.journals} entries added from it removed` : 'Statement deleted';
     });
   };
 
@@ -761,10 +807,18 @@ function ImportedStatements({
               <div className="row wrap">
                 <strong className="grow">{st.filename || 'Statement'}</strong>
                 <span className="small muted">
-                  {st.fromDate && st.toDate ? `${formatDate(st.fromDate)} – ${formatDate(st.toDate)}` : ''} · {st.lineCount} lines, {st.matchedCount} matched ·
+                  {st.fromDate && st.toDate ? `${formatDate(st.fromDate)} – ${formatDate(st.toDate)}` : ''} · {st.lineCount} lines, {st.matchedCount} matched{st.addedCosts ? `, ${st.addedCosts} costs added from it` : ''} ·
                   imported {formatDate(st.createdAt.slice(0, 10))}
                 </span>
               </div>
+              {st.elsewhereCount > 0 && st.elsewhereName && (
+                <div className="banner alert small">
+                  {st.elsewhereCount} of its {st.lineCount} transactions are also on {st.elsewhereName}’s statements.{' '}
+                  {st.elsewhereCount * 2 >= st.lineCount
+                    ? `It looks like ${st.elsewhereName}’s statement imported here as well, so those purchases are in the books twice. If ${st.elsewhereName}’s copy is already in, take this one out with what was added from it; if not, move it there.`
+                    : 'Transfers between your own accounts show on both; anything else is worth a look.'}
+                </div>
+              )}
               <div className="row wrap">
                 <select className="select auto" aria-label="Move to" value={to[st.id] ?? others[0]?.id ?? ''} onChange={(e) => setTo((t) => ({ ...t, [st.id]: e.target.value }))}>
                   {others.map((s) => (
@@ -777,7 +831,12 @@ function ImportedStatements({
                   {busy === st.id ? 'Working…' : 'Move to this account'}
                 </button>
                 <span className="grow" />
-                <button className="btn quiet danger" disabled={busy != null} onClick={() => remove(st)}>
+                {st.addedCosts > 0 && (
+                  <button className="btn quiet danger" disabled={busy != null} onClick={() => remove(st, true)}>
+                    Take out with what was added
+                  </button>
+                )}
+                <button className="btn quiet danger" disabled={busy != null} onClick={() => remove(st, false)}>
                   Delete
                 </button>
               </div>

@@ -8,7 +8,7 @@ import { assertOpen, q } from '../../lib/books.js';
 import { badRequest, notFound } from '../../lib/errors.js';
 import { parse } from '../../lib/validate.js';
 import { depositDueSql, syncProjectOfDocument } from '../documents.js';
-import { guessCategory, guessIncome, suggestMatches, supplierFrom, type Suggestion } from './match.js';
+import { guessCategory, guessIncome, similar, suggestMatches, supplierFrom, type Suggestion } from './match.js';
 
 /** By hand, a match may be out by up to R1 (a supplier's or bank's rounding); the largest item takes the difference. */
 const HAND_ROUNDING_CENTS = 100;
@@ -42,6 +42,64 @@ async function assertCanChange(db: Db, dates: string[]) {
     if (!agreed) await assertOpen(db, d);
   }
 }
+
+/**
+ * Changing these statement lines (taking them out, moving them) touches only what's matched to
+ * them: that's what must be after the lock date. Lines matched to nothing aren't in the books.
+ */
+async function assertLinesChangeable(db: Db, lineIds: string[]) {
+  if (!lineIds.length) return;
+  const [r] = await db<{ first: string | null }[]>`
+    select min(d)::text as first from (
+      select c.date as d from costs c join bank_matches m on m.kind = 'cost' and m.record_id = c.id where m.bank_line_id = any(${lineIds}::uuid[])
+      union all select r.date from receipts r join bank_matches m on m.kind = 'receipt' and m.record_id = r.id where m.bank_line_id = any(${lineIds}::uuid[])
+      union all select w.date from wage_payments w join bank_matches m on m.kind = 'wage_payment' and m.record_id = w.id where m.bank_line_id = any(${lineIds}::uuid[])
+      union all select j.date from journals j join bank_matches m on m.kind = 'journal' and m.record_id = j.id where m.bank_line_id = any(${lineIds}::uuid[])
+    ) x`;
+  if (r?.first) await assertOpen(db, r.first);
+}
+
+/**
+ * Money out that looks like a cost you already captured and that isn't tied to the bank yet:
+ * about the same amount (within R1) from up to 12 days before to 5 days after, and either the
+ * same supplier by name, or the exact amount within 3 days. Adding such a line as a new cost
+ * would count the purchase twice, so it's held back and the captured one shown instead.
+ */
+async function twinsFor(db: Db, lines: { id: string; date: string; amountCents: number; description: string }[]) {
+  const outs = lines.filter((l) => l.amountCents < 0);
+  const found = new Map<string, { costId: string; label: string }>();
+  if (!outs.length) return found;
+  const rows = (await db.unsafe(
+    `select x.line_id, c.id, c.date::text, c.amount_cents, c.description, c.supplier, p.name as project_name
+     from unnest($1::uuid[], $2::date[], $3::bigint[]) as x(line_id, d, a)
+     join lateral (
+       select c.* from costs c
+       where abs(c.amount_cents + x.a) <= 100 and c.date between x.d - 12 and x.d + 5
+         and not exists (select 1 from bank_matches m where m.kind = 'cost' and m.record_id = c.id)
+       order by (c.amount_cents = -x.a) desc, abs(c.date - x.d) limit 8
+     ) c on true
+     left join projects p on p.id = c.project_id`,
+    [outs.map((l) => l.id), outs.map((l) => l.date), outs.map((l) => l.amountCents)],
+  )) as unknown as { lineId: string; id: string; date: string; amountCents: number; description: string; supplier: string; projectName: string | null }[];
+  for (const l of outs) {
+    const twin = rows.find((c) => {
+      if (c.lineId !== l.id) return false;
+      const named = similar(l.description, c.supplier) || similar(l.description, c.description);
+      const near = c.amountCents === -l.amountCents && Math.abs(Date.parse(c.date) - Date.parse(l.date)) <= 3 * 864e5;
+      return named || near;
+    });
+    if (twin) {
+      found.set(l.id, {
+        costId: twin.id,
+        label: `${twin.description}${twin.supplier && twin.supplier !== twin.description ? ` – ${twin.supplier}` : ''}, ${twin.date}, ${(twin.amountCents / 100).toFixed(2)}${twin.projectName ? ` (${twin.projectName})` : ''}`,
+      });
+    }
+  }
+  return found;
+}
+
+/** Is this date open for changes (after the lock date)? */
+const isOpen = (db: Db, date: string) => assertOpen(db, date).then(() => true, () => false);
 
 /** Records already tied to a statement line, so they aren't suggested twice. */
 const unmatched = (kind: Kind, alias: string) => `not exists (select 1 from bank_matches m where m.kind = '${kind}' and m.record_id = ${alias}.id)`;
@@ -114,7 +172,13 @@ async function link(tx: Db, line: LineRow, items: { kind: Kind; id: string }[]) 
       on conflict (kind, record_id) do update set bank_line_id = excluded.bank_line_id`;
   }
   const costIds = items.filter((i) => i.kind === 'cost').map((i) => i.id);
-  if (costIds.length) await tx`update costs set source_id = ${line.sourceId} where id = any(${costIds}::uuid[]) and (source_id is null or source_id <> ${line.sourceId})`;
+  if (costIds.length) {
+    // The statement says which account paid; what the cost said before is kept for unmatching.
+    await tx`update bank_matches m set source_changed = true, prev_source_id = c.source_id from costs c
+      where m.kind = 'cost' and m.record_id = c.id and m.bank_line_id = ${line.id} and c.id = any(${costIds}::uuid[])
+        and c.source_id is distinct from ${line.sourceId}::uuid and not m.source_changed`;
+    await tx`update costs set source_id = ${line.sourceId} where id = any(${costIds}::uuid[]) and source_id is distinct from ${line.sourceId}::uuid`;
+  }
   await tx`update bank_lines set ignored = false where id = ${line.id}`;
   // Rounding: the books follow the statement. The largest item absorbs the few cents' difference.
   if (costIds.length && line.amountCents < 0) {
@@ -124,10 +188,51 @@ async function link(tx: Db, line: LineRow, items: { kind: Kind; id: string }[]) 
     const diff = -line.amountCents - t!.total;
     if (diff !== 0 && Math.abs(diff) <= HAND_ROUNDING_CENTS) {
       const note = `Rounded by ${diff > 0 ? '+' : '−'}R${(Math.abs(diff) / 100).toFixed(2)} to match the statement`;
+      const [big] = await tx<{ id: string }[]>`select id from costs where id = any(${costIds}::uuid[]) order by amount_cents desc limit 1`;
+      await tx`update bank_matches m set prev_amount_cents = c.amount_cents, prev_note = c.note from costs c
+        where m.kind = 'cost' and m.record_id = c.id and c.id = ${big!.id} and m.prev_amount_cents is null`;
       await tx`update costs set amount_cents = amount_cents + ${diff}, note = case when note = '' then ${note} else note || ' · ' || ${note} end
-        where id = (select id from costs where id = any(${costIds}::uuid[]) order by amount_cents desc limit 1)`;
+        where id = ${big!.id}`;
     }
   }
+}
+
+/** Undoes matches on these lines: costs get back the account (and amount) they had before matching. */
+async function unlink(tx: Db, lineIds: string[]) {
+  if (!lineIds.length) return;
+  await tx`update costs c set source_id = case when m.source_changed then m.prev_source_id else c.source_id end,
+      amount_cents = coalesce(m.prev_amount_cents, c.amount_cents), note = coalesce(m.prev_note, c.note)
+    from bank_matches m where m.kind = 'cost' and m.record_id = c.id and m.bank_line_id = any(${lineIds}::uuid[])
+      and (m.source_changed or m.prev_amount_cents is not null)`;
+  await tx`delete from bank_matches where bank_line_id = any(${lineIds}::uuid[])`;
+}
+
+const normDesc = (d: string) => d.toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+/**
+ * The same transactions already imported under another account: this file is probably that
+ * account's statement (or was imported there too). Same date, amount and description.
+ */
+async function alreadyElsewhere(db: Db, sourceId: string, rows: { date: string; amountCents: number; description: string }[], filename: string) {
+  if (!rows.length) return null;
+  const [hit] = (await db.unsafe(
+    `select l.source_id, ps.name as source_name, count(distinct r.i)::int as lines,
+       (select st.filename from bank_statements st where st.source_id = l.source_id and st.filename <> '' order by st.created_at desc limit 1) as filename
+     from unnest($1::date[], $2::bigint[], $3::text[]) with ordinality as r(d, a, k, i)
+     join bank_lines l on l.date = r.d and l.amount_cents = r.a and lower(regexp_replace(l.description, '[^A-Za-z0-9]+', '', 'g')) = r.k
+     join payment_sources ps on ps.id = l.source_id
+     where l.source_id <> $4
+     group by l.source_id, ps.name order by lines desc limit 1`,
+    [rows.map((r) => r.date), rows.map((r) => r.amountCents), rows.map((r) => normDesc(r.description)), sourceId],
+  )) as unknown as { sourceId: string; sourceName: string; lines: number; filename: string | null }[];
+  const [same] = filename
+    ? await db<{ sourceName: string }[]>`select ps.name as source_name from bank_statements st join payment_sources ps on ps.id = st.source_id
+        where st.filename = ${filename} and st.source_id <> ${sourceId} limit 1`
+    : [];
+  const many = hit && hit.lines >= 3 && hit.lines * 10 >= rows.length * 3;
+  const all = hit && rows.length <= 5 && hit.lines === rows.length;
+  if (!same && !many && !all) return null;
+  return { sourceName: same?.sourceName ?? hit!.sourceName, lines: hit?.lines ?? 0, of: rows.length, sameFile: Boolean(same) };
 }
 
 export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -142,7 +247,14 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
   };
 
   // ---------------------------------------------------------------- import
-  const importInput = z.object({ sourceId: uuid, csv: z.string().min(10).max(10_000_000), filename: z.string().max(200).default(''), flip: z.boolean().default(false) });
+  const importInput = z.object({
+    sourceId: uuid,
+    csv: z.string().min(10).max(10_000_000),
+    filename: z.string().max(200).default(''),
+    flip: z.boolean().default(false),
+    // Import even though the same transactions are already under another account.
+    otherAccountOk: z.boolean().default(false),
+  });
 
   const read = (csv: string, flip: boolean) => {
     try {
@@ -172,6 +284,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
       outCents: -parsed.rows.filter((r) => r.amountCents < 0).reduce((s, r) => s + r.amountCents, 0),
       // A card statement often shows purchases as positive numbers.
       looksFlipped: src?.kind === 'card' && outs < parsed.rows.length / 3,
+      elsewhere: await alreadyElsewhere(sql, input.sourceId, parsed.rows, input.filename),
       sample: parsed.rows.slice(0, 12),
     };
   });
@@ -182,6 +295,14 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
     const parsed = read(input.csv, input.flip);
     const keys = fingerprints(parsed.rows);
     const rows = parsed.rows;
+    const other = input.otherAccountOk ? null : await alreadyElsewhere(sql, input.sourceId, rows, input.filename);
+    if (other) {
+      throw badRequest(
+        other.sameFile
+          ? `This file was already imported under ${other.sourceName}. Choose that account, or import it here anyway if it really belongs to both.`
+          : `${other.lines} of these ${other.of} transactions are already imported under ${other.sourceName}: this looks like its statement. Choose that account, or import it here anyway.`,
+      );
+    }
     const result = await sql.begin(async (tx) => {
       const last = [...rows].reverse().find((r) => r.balanceCents != null);
       const [st] = await tx<{ id: string }[]>`
@@ -209,17 +330,59 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
     return sql`
       select s.id, s.source_id, ps.name as source_name, s.filename, s.from_date::text, s.to_date::text, s.closing_balance_cents, s.created_at,
         (select count(*)::int from bank_lines l where l.statement_id = s.id) as line_count,
-        (select count(*)::int from bank_lines l where l.statement_id = s.id and exists (select 1 from bank_matches m where m.bank_line_id = l.id)) as matched_count
+        (select count(*)::int from bank_lines l where l.statement_id = s.id and exists (select 1 from bank_matches m where m.bank_line_id = l.id)) as matched_count,
+        (select count(*)::int from costs c join bank_matches m on m.kind = 'cost' and m.record_id = c.id join bank_lines l on l.id = m.bank_line_id
+          where l.statement_id = s.id and c.note like 'From statement:%') as added_costs,
+        -- Transactions also on another account's statements: imported under the wrong account?
+        (select count(*)::int from bank_lines l where l.statement_id = s.id and exists (select 1 from bank_lines t where t.source_id <> l.source_id
+          and t.date = l.date and t.amount_cents = l.amount_cents
+          and lower(regexp_replace(t.description, '[^A-Za-z0-9]+', '', 'g')) = lower(regexp_replace(l.description, '[^A-Za-z0-9]+', '', 'g')))) as elsewhere_count,
+        (select ps2.name from bank_lines l join bank_lines t on t.source_id <> l.source_id and t.date = l.date and t.amount_cents = l.amount_cents
+          and lower(regexp_replace(t.description, '[^A-Za-z0-9]+', '', 'g')) = lower(regexp_replace(l.description, '[^A-Za-z0-9]+', '', 'g'))
+          join payment_sources ps2 on ps2.id = t.source_id where l.statement_id = s.id group by ps2.name order by count(*) desc limit 1) as elsewhere_name
       from bank_statements s join payment_sources ps on ps.id = s.source_id order by s.created_at desc limit 200`;
   });
 
+  /**
+   * Takes a statement out again. Costs matched to its lines get back the account they had.
+   * With removeAdded, what was added from it goes too (costs, invoice payments, transfers and
+   * income entries created from its lines): as if it had never been imported.
+   */
   app.delete('/api/bank/statements/:id', owner, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(z.object({ id: uuid }), req.params);
-    const r = await sql`delete from bank_statements where id = ${id}`;
-    if (!r.count) throw notFound('Statement');
-    await audit(sql, { userId: user.id, action: 'delete', entity: 'bank_statement', entityId: id, ip: req.ip });
-    return { ok: true };
+    const { removeAdded } = parse(z.object({ removeAdded: z.enum(['true', 'false']).default('false') }), req.query);
+    const removed = await sql.begin(async (tx) => {
+      const [st] = await tx<{ id: string }[]>`select id from bank_statements where id = ${id} for update`;
+      if (!st) throw notFound('Statement');
+      const lineIds = (await tx<{ id: string }[]>`select id from bank_lines where statement_id = ${id}`).map((l) => l.id);
+      await assertLinesChangeable(tx, lineIds);
+      const out = { costs: 0, receipts: 0, journals: 0 };
+      if (removeAdded === 'true' && lineIds.length) {
+        const added = (kind: Kind) => tx<{ id: string }[]>`select record_id as id from bank_matches where kind = ${kind} and bank_line_id = any(${lineIds}::uuid[])`;
+        const costIds = (await tx<{ id: string }[]>`
+          select c.id from costs c join bank_matches m on m.kind = 'cost' and m.record_id = c.id
+          where m.bank_line_id = any(${lineIds}::uuid[]) and c.note like 'From statement:%'
+            and not exists (select 1 from assets a where a.cost_id = c.id)`).map((r) => r.id);
+        const receipts = await tx<{ id: string; invoiceId: string }[]>`
+          select r.id, r.invoice_id from receipts r join bank_matches m on m.kind = 'receipt' and m.record_id = r.id
+          where m.bank_line_id = any(${lineIds}::uuid[]) and r.note like 'From statement:%'`;
+        const journalIds = (await added('journal')).map((r) => r.id);
+        await tx`delete from bank_matches where bank_line_id = any(${lineIds}::uuid[]) and (record_id = any(${costIds}::uuid[]) or record_id = any(${receipts.map((r) => r.id)}::uuid[]) or kind = 'journal')`;
+        if (costIds.length) out.costs = (await tx`delete from costs where id = any(${costIds}::uuid[])`).count;
+        if (receipts.length) out.receipts = (await tx`delete from receipts where id = any(${receipts.map((r) => r.id)}::uuid[])`).count;
+        if (journalIds.length) {
+          await tx`delete from journal_lines where journal_id = any(${journalIds}::uuid[])`;
+          out.journals = (await tx`delete from journals where id = any(${journalIds}::uuid[])`).count;
+        }
+        for (const inv of new Set(receipts.map((r) => r.invoiceId))) await syncProjectOfDocument(tx, inv);
+      }
+      await unlink(tx, lineIds);
+      await tx`delete from bank_statements where id = ${id}`;
+      await audit(tx, { userId: user.id, action: 'delete', entity: 'bank_statement', entityId: id, ip: req.ip, details: { lines: lineIds.length, ...out } });
+      return out;
+    });
+    return { ok: true, removed };
   });
 
   /**
@@ -240,8 +403,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [to] = await sql<{ accountId: string; name: string }[]>`select account_id, name from payment_sources where id = ${sourceId}`;
     if (!to) throw badRequest('Choose the account');
     const result = await sql.begin(async (tx) => {
-      const [range] = await tx<{ first: string | null }[]>`select min(date)::text as first from bank_lines where statement_id = ${id}`;
-      if (range?.first) await assertOpen(tx, range.first);
+      await assertLinesChangeable(tx, (await tx<{ id: string }[]>`select id from bank_lines where statement_id = ${id}`).map((l) => l.id));
       const isMatched = (alias: string) => `exists (select 1 from bank_matches m where m.bank_line_id = ${alias}.id)`;
       // Lines already on the other account.
       const clashes = await tx.unsafe(
@@ -301,6 +463,15 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (open.length) {
       const cands = await candidates(sql, sourceId, open[0]!.date, open[open.length - 1]!.date);
       suggestions = suggestMatches(open, cands);
+      // Lines the matcher couldn't place but that look like a cost already captured: suggested
+      // too (never automatically), so they're matched rather than added a second time.
+      const taken = new Set([...suggestions.values()].filter((s) => s.kind === 'cost').flatMap((s) => s.ids));
+      const twins = await twinsFor(sql, open.filter((l) => !suggestions.has(l.id)));
+      for (const [lineId, t] of twins) {
+        if (taken.has(t.costId)) continue;
+        taken.add(t.costId);
+        suggestions.set(lineId, { kind: 'cost', ids: [t.costId], score: 40, label: `Already captured? ${t.label}` });
+      }
     }
     return { lines, matched, suggestions };
   };
@@ -315,7 +486,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
         // A suggested invoice payment is recorded when accepted; never automatically.
         if (s.kind === 'invoice') {
           if (!lineIds) continue;
-          await assertOpen(tx, l.date);
+          if (!(await isOpen(tx, l.date))) continue;
           const [r] = await tx<{ id: string }[]>`
             insert into receipts (invoice_id, date, amount_cents, source_id, method, reference, note)
             values (${s.ids[0]!}, ${l.date}, ${l.amountCents}, ${l.sourceId}, 'eft', '', ${`From statement: ${l.description}`}) returning id`;
@@ -324,7 +495,8 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
         } else {
           if (s.kind === 'cost') {
             const dates = await tx<{ date: string }[]>`select date::text from costs where id = any(${s.ids}::uuid[])`;
-            await assertCanChange(tx, dates.map((d) => d.date));
+            // One in the closed period doesn't stop the rest.
+            if (!(await assertCanChange(tx, dates.map((d) => d.date)).then(() => true, () => false))) continue;
           }
           await link(tx, l, s.ids.map((id) => ({ kind: s.kind as Kind, id })));
         }
@@ -407,8 +579,12 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   app.delete('/api/bank/lines/:id/match', owner, async (req) => {
+    const user = userOrThrow(req);
     const { id } = parse(z.object({ id: uuid }), req.params);
-    await sql`delete from bank_matches where bank_line_id = ${id}`;
+    await sql.begin(async (tx) => {
+      await unlink(tx, [id]);
+      await audit(tx, { userId: user.id, action: 'unmatch', entity: 'bank_line', entityId: id, ip: req.ip });
+    });
     return { ok: true };
   });
 
@@ -468,22 +644,24 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
     );
     let created = 0;
     const skipped: { lineId: string; costId: string; label: string }[] = [];
+    // Lines in the closed period are left (and counted), so the rest still go in.
+    const locked: string[] = [];
     await sql.begin(async (tx) => {
+      const [settings] = await tx<{ lockDate: string | null }[]>`select lock_date::text from settings where id`;
       for (const it of items) {
         const line = await loadLine(tx, it.lineId);
         const [taken] = await tx`select 1 from bank_matches where bank_line_id = ${line.id} limit 1`;
         if (taken) continue;
-        await assertOpen(tx, line.date);
+        if (settings?.lockDate && line.date <= settings.lockDate) {
+          locked.push(line.id);
+          continue;
+        }
         // Already captured? A cost of the same amount around that date, not matched to the
         // bank yet, is almost always the same purchase: match it instead of adding it twice.
         if (line.amountCents < 0 && !it.force) {
-          const [twin] = await tx<{ id: string; description: string; date: string }[]>`
-            select c.id, c.description, c.date::text from costs c
-            where abs(c.amount_cents + ${line.amountCents}) <= 100 and c.date between (${line.date}::date - 12) and (${line.date}::date + 5)
-              and not exists (select 1 from bank_matches m where m.kind = 'cost' and m.record_id = c.id)
-            order by abs(c.date - ${line.date}::date) limit 1`;
+          const twin = (await twinsFor(tx, [line])).get(line.id);
           if (twin) {
-            skipped.push({ lineId: line.id, costId: twin.id, label: `${twin.description} (${twin.date})` });
+            skipped.push({ lineId: line.id, costId: twin.costId, label: twin.label });
             continue;
           }
         }
@@ -509,9 +687,9 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
         await link(tx, line, [{ kind: 'cost', id: c!.id }]);
         created++;
       }
-      await audit(tx, { userId: user.id, action: 'create_from_statement', entity: 'cost', ip: req.ip, details: { created, skipped: skipped.length } });
+      await audit(tx, { userId: user.id, action: 'create_from_statement', entity: 'cost', ip: req.ip, details: { created, skipped: skipped.length, locked: locked.length } });
     });
-    return { created, skipped };
+    return { created, skipped, locked };
   });
 
   /** Money in that pays an invoice. */

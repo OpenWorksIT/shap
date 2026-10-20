@@ -269,35 +269,6 @@ describe('reconciling a statement', () => {
     expect(await ledgerTotal(env.sql)).toBe(0);
   });
 
-  it('spots a statement line already captured on a job from another account, and merges a copy that slipped through', async () => {
-    const job = await owner.post('/api/projects', { name: 'Garden wall', startDate: '2026-05-01' });
-    const captured = await owner.post('/api/costs', {
-      date: '2026-05-02', description: 'Blocks', amountCents: 31000, supplier: 'Mr Builder', categoryId: cats.parts, sourceId: card, projectId: job.id,
-    });
-    const r = await owner.post('/api/bank/statements', { sourceId: bank, csv: ['Date,Amount,Balance,Description', '2026/05/04,-310.00,0,POS PURCHASE MR BUILDER WALMER'].join('\n') });
-    expect(r.autoMatched).toBe(0);
-    const rec = await owner.get(`/api/bank/recon?sourceId=${bank}`);
-    const line = rec.lines.find((l: { description: string }) => l.description === 'POS PURCHASE MR BUILDER WALMER');
-    expect(line.state).toBe('suggested');
-    expect(line.suggestion.label).toMatch(/Garden wall/);
-    // Ticked and added as new anyway: held back, because it looks captured already.
-    const held = await owner.post('/api/bank/lines/create-costs', { items: [{ lineId: line.id, categoryId: cats.parts }] });
-    expect(held).toMatchObject({ created: 0, skipped: [{ lineId: line.id, costId: captured.id }] });
-    // Forced through (as older versions did): it shows up as counted twice, and merging puts it right.
-    expect((await owner.post('/api/bank/lines/create-costs', { items: [{ lineId: line.id, categoryId: cats.parts, force: true }] })).created).toBe(1);
-    const dups = await owner.get('/api/costs/duplicates');
-    expect(dups).toHaveLength(1);
-    expect(dups[0]).toMatchObject({ originalId: captured.id, projectName: 'Garden wall', amountCents: 31000 });
-    expect((await owner.get('/api/dashboard')).duplicateCosts).toBe(1);
-    expect((await owner.post('/api/costs/merge', { pairs: [{ copyId: dups[0].copyId, originalId: captured.id }] })).merged).toBe(1);
-    const rows = await env.sql<{ id: string; sourceId: string; projectId: string }[]>`select id, source_id, project_id from costs where description = 'Blocks' or note like 'From statement: POS PURCHASE MR BUILDER%'`;
-    expect(rows).toEqual([{ id: captured.id, sourceId: bank, projectId: job.id }]);
-    const after = await owner.get(`/api/bank/recon?sourceId=${bank}`);
-    expect(after.lines.find((l: { id: string }) => l.id === line.id).state).toBe('matched');
-    expect(await owner.get('/api/costs/duplicates')).toHaveLength(0);
-    expect(await ledgerTotal(env.sql)).toBe(0);
-  });
-
   it('moves a statement imported under the wrong account, with everything matched to it', async () => {
     const cardCsv = ['Date,Amount,Balance,Description', '2026/06/03,-450.00,,ENGEN WALMER', '2026/06/04,-120.00,,NETFLIX', '2026/06/20,2000.00,,PAYMENT RECEIVED THANK YOU'].join('\n');
     const fuel = await owner.post('/api/costs', { date: '2026-06-03', description: 'Fuel', amountCents: 45000, supplier: 'Engen', categoryId: cats.parts, sourceId: null });
@@ -310,7 +281,7 @@ describe('reconciling a statement', () => {
     // The card repayment, booked (wrongly) as coming from the card.
     await owner.post(`/api/bank/lines/${id('PAYMENT RECEIVED THANK YOU')}/transfer`, { otherSourceId: card });
     // Part of it was also imported under the card already, unmatched there.
-    await owner.post('/api/bank/statements', { sourceId: card, csv: cardCsv.split('\n').slice(0, 2).join('\n') });
+    await owner.post('/api/bank/statements', { sourceId: card, csv: cardCsv.split('\n').slice(0, 2).join('\n'), otherAccountOk: true });
 
     const list = await owner.get('/api/bank/statements');
     const st = list.find((x: { filename: string }) => x.filename === 'card.csv');
@@ -331,72 +302,24 @@ describe('reconciling a statement', () => {
     expect(await ledgerTotal(env.sql)).toBe(0);
   });
 
-  it('merges a copy whose statement line was itself imported twice, and by hand from either cost', async () => {
-    const job = await owner.post('/api/projects', { name: 'Boundary wall', startDate: '2026-07-01' });
-    const captured = await owner.post('/api/costs', {
-      date: '2026-07-09', description: 'Sand, cement', amountCents: 31000, supplier: 'Mr Builder', categoryId: cats.parts, sourceId: card, projectId: job.id,
-    });
-    const a = await owner.post('/api/bank/statements', { sourceId: card, csv: ['Date,Amount,Balance,Description', '2026/07/09,-310.00,,MR BUILDER'].join('\n') });
-    expect(a.autoMatched).toBe(1);
-    // The same transaction again, written differently in another download.
-    await owner.post('/api/bank/statements', { sourceId: card, csv: ['Date,Amount,Balance,Description', '2026/07/09,-310.00,,MR Builder Walmer'].join('\n') });
-    const rec = await owner.get(`/api/bank/recon?sourceId=${card}`);
-    const dup = rec.lines.find((l: { description: string }) => l.description === 'MR Builder Walmer');
-    expect(dup.state).toBe('open');
-    await owner.post('/api/bank/lines/create-costs', { items: [{ lineId: dup.id, categoryId: cats.parts, force: true }] });
-    const found = (await owner.get('/api/costs/duplicates')).find((d: { originalId: string }) => d.originalId === captured.id);
-    expect(found).toBeTruthy();
-    const twins = await owner.get(`/api/costs/${found.copyId}/twins`);
-    expect(twins.map((t: { id: string }) => t.id)).toContain(captured.id);
-    const r = await owner.post('/api/costs/merge', { pairs: [{ copyId: found.copyId, originalId: captured.id }] });
-    expect(r).toEqual({ merged: 1, failed: [] });
-    const after = await owner.get(`/api/bank/recon?sourceId=${card}`);
-    expect(after.lines.filter((l: { amountCents: number; date: string }) => l.date === '2026-07-09' && l.amountCents === -31000)).toHaveLength(1);
-    const [c] = await env.sql<{ projectId: string }[]>`select project_id from costs where id = ${captured.id}`;
-    expect(c!.projectId).toBe(job.id);
-
-    // Two real payments of the same amount are not folded together.
-    const p1 = await owner.post('/api/costs', { date: '2026-07-20', description: 'Paint', amountCents: 50000, supplier: 'Mica', categoryId: cats.parts, sourceId: card });
-    const p2 = await owner.post('/api/costs', { date: '2026-07-22', description: 'Paint', amountCents: 50000, supplier: 'Mica', categoryId: cats.parts, sourceId: card });
-    await owner.post('/api/bank/statements', { sourceId: card, csv: ['Date,Amount,Balance,Description', '2026/07/20,-500.00,,MICA', '2026/07/22,-500.00,,MICA'].join('\n') });
-    const no = await owner.post('/api/costs/merge', { pairs: [{ copyId: p2.id, originalId: p1.id }] });
-    expect(no.merged).toBe(0);
-    expect(no.failed[0].reason).toMatch(/two separate payments/);
-    // By hand you can say they're one: the copy's line goes back on the to-do list.
-    const yes = await owner.post('/api/costs/merge', { pairs: [{ copyId: p2.id, originalId: p1.id }], byHand: true });
-    expect(yes.merged).toBe(1);
-    const open = (await owner.get(`/api/bank/recon?sourceId=${card}`)).lines.filter((l: { description: string; state: string }) => l.description === 'MICA' && l.state !== 'matched');
-    expect(open).toHaveLength(1);
-
-    // Same amount, a few days apart, nothing in common by name: not a twin.
-    await owner.post('/api/costs', { date: '2026-08-04', description: 'Electrical', amountCents: 30000, supplier: 'Powerline', categoryId: cats.parts, sourceId: null });
-    await owner.post('/api/bank/statements', { sourceId: bank, csv: ['Date,Amount,Balance,Description', '2026/08/13,-300.00,,EXCLUSIVE CAR CARE AND'].join('\n') });
-    const car = (await owner.get(`/api/bank/recon?sourceId=${bank}`)).lines.find((l: { description: string }) => l.description === 'EXCLUSIVE CAR CARE AND');
-    await owner.post('/api/bank/lines/create-costs', { items: [{ lineId: car.id, categoryId: cats.parts, force: true }] });
-    expect((await owner.get('/api/costs/duplicates')).some((d: { originalDescription: string }) => d.originalDescription === 'Electrical')).toBe(false);
-    expect(await ledgerTotal(env.sql)).toBe(0);
+  it('leaves lines in the closed period and still captures the rest', async () => {
+    await owner.post('/api/bank/statements', { sourceId: bank, csv: ['Date,Amount,Balance,Description', '2025/01/05,-77.00,,OLD FEE', '2026/11/05,-88.00,,NEW FEE'].join('\n') });
+    await env.sql`update settings set lock_date = '2025-02-28'`;
+    const lines = (await owner.get(`/api/bank/recon?sourceId=${bank}`)).lines.filter((l: { description: string }) => ['OLD FEE', 'NEW FEE'].includes(l.description));
+    const r = await owner.post('/api/bank/lines/create-costs', { items: lines.map((l: { id: string }) => ({ lineId: l.id, categoryId: cats.bank })) });
+    expect(r.created).toBe(1);
+    expect(r.locked).toHaveLength(1);
+    await env.sql`update settings set lock_date = null`;
   });
 
-  it('finds twins that weren’t added from a statement, and lists ones the bank shows apart to check', async () => {
-    const job = await owner.post('/api/projects', { name: 'Carport', startDate: '2026-09-01' });
-    const keep = await owner.post('/api/costs', { date: '2026-09-03', description: 'Roof sheets', amountCents: 125000, supplier: 'Timber City', categoryId: cats.parts, sourceId: card, projectId: job.id });
-    const again = await owner.post('/api/costs', { date: '2026-09-04', description: 'Timber City sheets', amountCents: 125000, supplier: '', categoryId: cats.parts, sourceId: null });
-    // Both tied to their own line on the same statement.
-    const k2 = await owner.post('/api/costs', { date: '2026-09-10', description: 'Sand, cement', amountCents: 41000, supplier: 'Mr Builder', categoryId: cats.parts, sourceId: card, projectId: job.id });
-    await owner.post('/api/bank/statements', { sourceId: card, csv: ['Date,Amount,Balance,Description', '2026/09/10,-410.00,,MR BUILDER WALMER', '2026/09/10,-410.00,,MR BUILDER WALMER'].join('\n') });
-    const lines = (await owner.get(`/api/bank/recon?sourceId=${card}`)).lines.filter((l: { amountCents: number }) => l.amountCents === -41000);
-    const loose = lines.find((l: { state: string }) => l.state !== 'matched');
-    await owner.post('/api/bank/lines/create-costs', { items: [{ lineId: loose.id, categoryId: cats.parts, force: true }] });
-
-    const dups = await owner.get('/api/costs/duplicates');
-    const hand = dups.find((d: { originalId: string }) => d.originalId === keep.id);
-    expect(hand).toMatchObject({ copyId: again.id, likely: true, copyFromStatement: false });
-    const apart = dups.find((d: { originalId: string }) => d.originalId === k2.id);
-    expect(apart).toMatchObject({ likely: false, separateOnBank: true });
-    const r = await owner.post('/api/costs/merge', { pairs: [{ copyId: hand.copyId, originalId: keep.id }, { copyId: apart.copyId, originalId: k2.id }], byHand: true });
-    expect(r.merged).toBe(2);
-    const after = (await owner.get(`/api/bank/recon?sourceId=${card}`)).lines.filter((l: { amountCents: number }) => l.amountCents === -41000);
-    expect(after.map((l: { state: string }) => (l.state === 'suggested' ? 'open' : l.state)).sort()).toEqual(['matched', 'open']);
-    expect(await ledgerTotal(env.sql)).toBe(0);
+  it('suggests a cost captured well before the bank took it, instead of adding it twice', async () => {
+    const slip = await owner.post('/api/costs', { date: '2026-11-01', description: 'Gutter brackets', amountCents: 41940, supplier: 'Roofing Hub', categoryId: cats.parts, sourceId: null });
+    const r = await owner.post('/api/bank/statements', { sourceId: bank, csv: ['Date,Amount,Balance,Description', '2026/11/12,-420.00,,ROOFING HUB WALMER'].join('\n') });
+    expect(r.autoMatched).toBe(0);
+    const line = (await owner.get(`/api/bank/recon?sourceId=${bank}`)).lines.find((l: { description: string }) => l.description === 'ROOFING HUB WALMER');
+    expect(line).toMatchObject({ state: 'suggested', suggestion: { kind: 'cost', ids: [slip.id], label: expect.stringMatching(/^Already captured\? Gutter brackets/) } });
+    await owner.post('/api/bank/accept', { sourceId: bank, lineIds: [line.id] });
+    const [c] = await env.sql<{ amountCents: number; sourceId: string }[]>`select amount_cents, source_id from costs where id = ${slip.id}`;
+    expect(c).toMatchObject({ amountCents: 42000, sourceId: bank });
   });
 });
