@@ -1,7 +1,7 @@
 {
   "name": "shap",
   "private": true,
-  "version": "1.1.5",
+  "version": "1.1.6",
   "description": "FOSS job, labour, quoting, invoicing and bookkeeping for small South African contractors.",
   "license": "AGPL-3.0-or-later",
   "workspaces": [

@@ -190,8 +190,8 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
  */
 export async function mergeCosts(tx: Db, copyId: string, originalId: string, byHand = false): Promise<string | null> {
   if (copyId === originalId) return 'That’s the same cost';
-  const [c] = await tx<{ id: string; date: string; amountCents: number; sourceId: string | null; projectId: string | null; receiptId: string | null; supplier: string }[]>`
-    select id, date::text, amount_cents, source_id, project_id, receipt_id, supplier from costs where id = ${copyId}`;
+  const [c] = await tx<{ id: string; date: string; amountCents: number; sourceId: string | null; projectId: string | null; receiptId: string | null; plannedItemId: string | null; supplier: string }[]>`
+    select id, date::text, amount_cents, source_id, project_id, receipt_id, planned_item_id, supplier from costs where id = ${copyId}`;
   const [o] = await tx<{ id: string; date: string; amountCents: number; projectId: string | null; receiptId: string | null; supplier: string }[]>`
     select id, date::text, amount_cents, project_id, receipt_id, supplier from costs where id = ${originalId}`;
   if (!c || !o) return 'One of them was already deleted';
@@ -225,6 +225,7 @@ export async function mergeCosts(tx: Db, copyId: string, originalId: string, byH
       project_id = coalesce(project_id, ${c.projectId}::uuid),
       no_job = case when project_id is null and ${c.projectId}::uuid is not null then false else no_job end,
       receipt_id = coalesce(receipt_id, ${c.receiptId}::uuid),
+      planned_item_id = coalesce(planned_item_id, ${c.plannedItemId}::uuid),
       supplier = case when supplier = '' then ${c.supplier} else supplier end,
       note = case when ${note} = '' then note when note = '' then ${note} else note || ' · ' || ${note} end
     where id = ${o.id}`;
@@ -234,58 +235,77 @@ export async function mergeCosts(tx: Db, copyId: string, originalId: string, byH
 
 type DupRow = {
   copyId: string; date: string; amountCents: number; description: string; supplier: string; note: string; copySource: string | null; copyCategory: string;
-  originalId: string; originalDate: string; originalAmountCents: number; originalDescription: string; originalSupplier: string;
+  copyProjectName: string | null; copyProjectNumber: number | null; copyFromStatement: boolean; copyPaid: boolean;
+  originalId: string; originalDate: string; originalAmountCents: number; originalDescription: string; originalSupplier: string; originalNote: string;
   originalSource: string | null; originalCategory: string; projectId: string | null; projectName: string | null; projectNumber: number | null;
+  originalFromStatement: boolean; originalPaid: boolean; sameTransaction: boolean;
 };
 
+/** Which of two twins to keep: the one on a job, then one you captured (not added from a statement), then one with a slip. */
+const keepRank = `(case when {a}.project_id is not null then 8 else 0 end) + (case when {a}.note not like 'From statement:%' then 4 else 0 end)
+  + (case when {a}.receipt_id is not null then 2 else 0 end)`;
+
 /**
- * Statement copies of a cost already captured: about the same amount, a few days apart, and
- * the same supplier by name. Same day and exact amount but different names is listed as
- * "check" (not likely). Amount alone is never enough: plenty of things cost R300.
+ * The same purchase captured twice: about the same amount (give or take R1), within 12 days,
+ * and the same supplier by name. At least one of the two has no job or came from a statement
+ * (two costs on different jobs are two purchases). The one to keep is the one on a job, else
+ * the one you captured. Pairs the bank shows as two separate payments, or with nothing in
+ * common by name but the same amount on the same day, are listed to check, unticked.
  */
 export async function findDuplicates(db: Db) {
-  const rows = await db<DupRow[]>`
+  const rank = (x: string) => keepRank.replaceAll('{a}', x);
+  const paid = (x: string) => `exists (select 1 from bank_matches m where m.kind = 'cost' and m.record_id = ${x}.id)`;
+  const rows = (await db.unsafe(`
     select s.id as copy_id, s.date::text, s.amount_cents, s.description, s.supplier, s.note, ss.name as copy_source, sk.name as copy_category,
+      sp.name as copy_project_name, sp.number as copy_project_number, s.note like 'From statement:%' as copy_from_statement, ${paid('s')} as copy_paid,
       o.id as original_id, o.date::text as original_date, o.amount_cents as original_amount_cents, o.description as original_description,
-      o.supplier as original_supplier, os.name as original_source, ok.name as original_category,
-      o.project_id, p.name as project_name, p.number as project_number
+      o.supplier as original_supplier, o.note as original_note, os.name as original_source, ok.name as original_category,
+      o.project_id, p.name as project_name, p.number as project_number,
+      o.note like 'From statement:%' as original_from_statement, ${paid('o')} as original_paid,
+      exists (
+        select 1 from bank_matches ms join bank_lines ls on ls.id = ms.bank_line_id
+        join bank_matches mo on mo.kind = 'cost' and mo.record_id = o.id join bank_lines lo on lo.id = mo.bank_line_id
+        where ms.kind = 'cost' and ms.record_id = s.id and lo.id <> ls.id and lo.source_id = ls.source_id
+          and lo.statement_id <> ls.statement_id and lo.amount_cents = ls.amount_cents and lo.date = ls.date) as same_transaction
     from costs s
+    join costs o on o.amount_cents between s.amount_cents - 100 and s.amount_cents + 100 and o.date between s.date - 12 and s.date + 12 and o.id <> s.id
+      and (s.project_id is null or o.project_id is null or s.project_id = o.project_id)
+      and (s.project_id is null or s.note like 'From statement:%')
+      and (${rank('o')} > ${rank('s')} or (${rank('o')} = ${rank('s')} and (o.created_at, o.id) < (s.created_at, s.id)))
     join cost_categories sk on sk.id = s.category_id
     left join payment_sources ss on ss.id = s.source_id
-    join costs o on o.id <> s.id and abs(o.amount_cents - s.amount_cents) <= 100 and o.date between (s.date - 12) and (s.date + 5)
-      and o.note not like 'From statement:%'
-      and (
-        not exists (select 1 from bank_matches m2 where m2.kind = 'cost' and m2.record_id = o.id)
-        or not exists (select 1 from bank_matches m3 where m3.kind = 'cost' and m3.record_id = s.id)
-        or exists (
-          select 1 from bank_matches ms join bank_lines ls on ls.id = ms.bank_line_id
-          join bank_matches mo on mo.kind = 'cost' and mo.record_id = o.id join bank_lines lo on lo.id = mo.bank_line_id
-          where ms.kind = 'cost' and ms.record_id = s.id and lo.id <> ls.id and lo.source_id = ls.source_id
-            and lo.statement_id <> ls.statement_id and lo.amount_cents = ls.amount_cents and lo.date = ls.date))
+    left join projects sp on sp.id = s.project_id
     join cost_categories ok on ok.id = o.category_id
     left join payment_sources os on os.id = o.source_id
     left join projects p on p.id = o.project_id
-    where s.note like 'From statement:%' and not exists (select 1 from assets a where a.cost_id = s.id)
-    order by s.date desc`;
+    where not exists (select 1 from assets a where a.cost_id = s.id)`)) as unknown as DupRow[];
+  const said = (desc: string, supplier: string, note: string) => `${note.startsWith('From statement:') ? note.replace(/^From statement:\s*/, '').split(' · ')[0] : ''} ${desc} ${supplier}`;
   const scored = rows
     .map((r) => {
-      const said = `${r.note.replace(/^From statement:\s*/, '').split(' · ')[0]} ${r.description} ${r.supplier}`;
-      const named = similar(said, r.originalSupplier) || similar(said, r.originalDescription) || similar(`${r.originalSupplier} ${r.originalDescription}`, r.supplier);
+      const a = said(r.description, r.supplier, r.note);
+      const b = said(r.originalDescription, r.originalSupplier, r.originalNote);
+      const named = similar(a, r.originalSupplier) || similar(a, r.originalDescription) || similar(b, r.supplier) || similar(b, r.description);
       const sameDay = r.date === r.originalDate && r.amountCents === r.originalAmountCents;
+      // Both tied to their own line on the bank: two payments, unless it's one line imported twice.
+      const separateOnBank = r.copyPaid && r.originalPaid && !r.sameTransaction;
       const dayGap = Math.abs(Date.parse(r.date) - Date.parse(r.originalDate)) / 864e5;
-      return { ...r, likely: named, score: (named ? 100 : 0) + (sameDay ? 20 : 0) + (r.amountCents === r.originalAmountCents ? 10 : 0) + (r.projectId ? 5 : 0) - dayGap };
+      return {
+        ...r,
+        separateOnBank,
+        likely: named && !separateOnBank && (r.copyFromStatement || r.originalFromStatement || dayGap <= 3),
+        score: (named ? 100 : 0) - (separateOnBank ? 50 : 0) + (sameDay ? 20 : 0) + (r.amountCents === r.originalAmountCents ? 10 : 0) + (r.projectId ? 5 : 0) - dayGap,
+      };
     })
-    .filter((r) => r.likely || r.date === r.originalDate)
+    .filter((r) => r.likely || (r.date === r.originalDate && r.amountCents === r.originalAmountCents) || (r.separateOnBank && r.score > 50))
     .sort((a, b) => b.score - a.score);
-  // Each copy and each captured cost in one pair only, the best first.
-  const usedCopy = new Set<string>();
-  const usedOrig = new Set<string>();
+  // Each cost in one pair only, the best pairs first.
+  const used = new Set<string>();
   const out = [];
   for (const r of scored) {
-    if (usedCopy.has(r.copyId) || usedOrig.has(r.originalId)) continue;
-    usedCopy.add(r.copyId);
-    usedOrig.add(r.originalId);
-    const { note: _n, score: _s, ...rest } = r;
+    if (used.has(r.copyId) || used.has(r.originalId)) continue;
+    used.add(r.copyId);
+    used.add(r.originalId);
+    const { note: _n, originalNote: _o, score: _s, copyPaid: _c, originalPaid: _p, sameTransaction: _t, ...rest } = r;
     out.push(rest);
   }
   return out.sort((a, b) => (a.likely === b.likely ? b.date.localeCompare(a.date) : a.likely ? -1 : 1));

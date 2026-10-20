@@ -376,4 +376,27 @@ describe('reconciling a statement', () => {
     expect((await owner.get('/api/costs/duplicates')).some((d: { originalDescription: string }) => d.originalDescription === 'Electrical')).toBe(false);
     expect(await ledgerTotal(env.sql)).toBe(0);
   });
+
+  it('finds twins that weren’t added from a statement, and lists ones the bank shows apart to check', async () => {
+    const job = await owner.post('/api/projects', { name: 'Carport', startDate: '2026-09-01' });
+    const keep = await owner.post('/api/costs', { date: '2026-09-03', description: 'Roof sheets', amountCents: 125000, supplier: 'Timber City', categoryId: cats.parts, sourceId: card, projectId: job.id });
+    const again = await owner.post('/api/costs', { date: '2026-09-04', description: 'Timber City sheets', amountCents: 125000, supplier: '', categoryId: cats.parts, sourceId: null });
+    // Both tied to their own line on the same statement.
+    const k2 = await owner.post('/api/costs', { date: '2026-09-10', description: 'Sand, cement', amountCents: 41000, supplier: 'Mr Builder', categoryId: cats.parts, sourceId: card, projectId: job.id });
+    await owner.post('/api/bank/statements', { sourceId: card, csv: ['Date,Amount,Balance,Description', '2026/09/10,-410.00,,MR BUILDER WALMER', '2026/09/10,-410.00,,MR BUILDER WALMER'].join('\n') });
+    const lines = (await owner.get(`/api/bank/recon?sourceId=${card}`)).lines.filter((l: { amountCents: number }) => l.amountCents === -41000);
+    const loose = lines.find((l: { state: string }) => l.state !== 'matched');
+    await owner.post('/api/bank/lines/create-costs', { items: [{ lineId: loose.id, categoryId: cats.parts, force: true }] });
+
+    const dups = await owner.get('/api/costs/duplicates');
+    const hand = dups.find((d: { originalId: string }) => d.originalId === keep.id);
+    expect(hand).toMatchObject({ copyId: again.id, likely: true, copyFromStatement: false });
+    const apart = dups.find((d: { originalId: string }) => d.originalId === k2.id);
+    expect(apart).toMatchObject({ likely: false, separateOnBank: true });
+    const r = await owner.post('/api/costs/merge', { pairs: [{ copyId: hand.copyId, originalId: keep.id }, { copyId: apart.copyId, originalId: k2.id }], byHand: true });
+    expect(r.merged).toBe(2);
+    const after = (await owner.get(`/api/bank/recon?sourceId=${card}`)).lines.filter((l: { amountCents: number }) => l.amountCents === -41000);
+    expect(after.map((l: { state: string }) => (l.state === 'suggested' ? 'open' : l.state)).sort()).toEqual(['matched', 'open']);
+    expect(await ledgerTotal(env.sql)).toBe(0);
+  });
 });

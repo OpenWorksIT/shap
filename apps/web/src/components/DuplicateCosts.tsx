@@ -25,6 +25,10 @@ interface Pair {
   projectName: string | null;
   projectNumber: number | null;
   likely: boolean;
+  separateOnBank: boolean;
+  copyFromStatement: boolean;
+  copyProjectName: string | null;
+  copyProjectNumber: number | null;
 }
 
 /**
@@ -43,7 +47,7 @@ export function DuplicateCosts({ onChanged }: { onChanged?: () => void }) {
     setBusy(true);
     try {
       const pairs = (data ?? []).filter((p) => picked.has(p.copyId)).map((p) => ({ copyId: p.copyId, originalId: p.originalId }));
-      const r = await api<{ merged: number; failed: { reason: string }[] }>('/api/costs/merge', { body: { pairs } });
+      const r = await api<{ merged: number; failed: { reason: string }[] }>('/api/costs/merge', { body: { pairs, byHand: true } });
       toast(
         `${r.merged} duplicate${r.merged === 1 ? '' : 's'} merged${r.failed.length ? ` · ${r.failed.length} not: ${r.failed[0]!.reason}` : ''}`,
         r.failed.length && !r.merged ? 'error' : undefined,
@@ -68,10 +72,9 @@ export function DuplicateCosts({ onChanged }: { onChanged?: () => void }) {
   return (
     <div className="stack">
       <div className="banner signal small">
-        These were added from a bank statement, but a cost from the same supplier and of the same amount was already captured a few days earlier: the
-        same purchase counted twice. Merging keeps the one you captured (its job, type and slip), records that the statement paid it, and removes the
-        copy. Ones marked <em>different names</em> are the same amount on the same day only, so they start unticked: tick them only if they really are one
-        purchase.
+        Two costs from the same supplier, of the same amount, within a few days, where one has no job or was added from a bank statement: most likely
+        the same purchase counted twice. Merging keeps the one on the right (its job, type and slip; it also takes the other’s tie to the bank) and
+        removes the one on the left. Ones marked to check start unticked: tick them only if they really are one purchase.
       </div>
       <div className="panel table-wrap">
         <table className="table">
@@ -82,8 +85,8 @@ export function DuplicateCosts({ onChanged }: { onChanged?: () => void }) {
                   <input type="checkbox" aria-label="Tick all" checked={picked.size === data.length} onChange={(e) => setPicked(new Set(e.target.checked ? data.map((p) => p.copyId) : []))} />
                 </th>
               )}
-              <th>Added from the statement</th>
-              <th>Already captured (kept)</th>
+              <th>Remove</th>
+              <th>Keep</th>
               <th className="num">Amount</th>
             </tr>
           </thead>
@@ -111,11 +114,12 @@ export function DuplicateCosts({ onChanged }: { onChanged?: () => void }) {
                   {formatDate(p.date)} · {p.description}
                   {!p.likely && (
                     <span className="chip warn" style={{ marginLeft: 6 }}>
-                      different names: check
+                      {p.separateOnBank ? 'check: two payments on the bank' : 'check'}
                     </span>
                   )}
                   <div className="xs muted">
-                    {p.copyCategory} · {p.copySource ?? 'not captured'}
+                    {p.copyCategory} · {p.copySource ?? 'not captured'} · {p.copyProjectName ? `#${p.copyProjectNumber} ${p.copyProjectName}` : 'no job'}
+                    {p.copyFromStatement ? ' · from a statement' : ''}
                   </div>
                 </td>
                 <td className="small">

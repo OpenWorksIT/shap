@@ -94,9 +94,9 @@ function OwnerHome() {
         <Icon name="alert" size={18} />
         <span className="grow">
           <strong>
-            {data.duplicateCosts} cost{data.duplicateCosts === 1 ? '' : 's'} from bank statements
+            {data.duplicateCosts} cost{data.duplicateCosts === 1 ? '' : 's'}
           </strong>{' '}
-          look already captured (counted twice)
+          look counted twice
         </span>
         Merge
         <Icon name="chevronRight" size={16} />

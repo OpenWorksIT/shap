@@ -3,6 +3,16 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.1.6 (20 October 2026)
+
+- **Costs counted twice, rethought**: it only looked at costs added from a bank statement whose
+  twin wasn't tied to the bank, so plenty of real doubles never showed. Now any two costs from
+  the same supplier, of the same amount (give or take R1), within 12 days are compared, as long
+  as one of them has no job or came from a statement. The one kept is the one on a job, then
+  the one you captured, then the one with a slip.
+- Pairs the bank shows as two separate payments are listed too, marked *check*, unticked:
+  merging one puts the removed cost's statement line back on the to-do list.
+
 ## 1.1.5 (20 October 2026)
 
 - **Fewer false twins**: *Costs counted twice* paired costs on amount and date alone, so a car
