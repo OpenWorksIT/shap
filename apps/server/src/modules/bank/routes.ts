@@ -207,7 +207,9 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.get('/api/bank/statements', readers, async () => {
     return sql`
-      select s.id, s.source_id, ps.name as source_name, s.filename, s.from_date, s.to_date, s.closing_balance_cents, s.line_count, s.created_at
+      select s.id, s.source_id, ps.name as source_name, s.filename, s.from_date::text, s.to_date::text, s.closing_balance_cents, s.created_at,
+        (select count(*)::int from bank_lines l where l.statement_id = s.id) as line_count,
+        (select count(*)::int from bank_lines l where l.statement_id = s.id and exists (select 1 from bank_matches m where m.bank_line_id = l.id)) as matched_count
       from bank_statements s join payment_sources ps on ps.id = s.source_id order by s.created_at desc limit 200`;
   });
 
@@ -218,6 +220,72 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!r.count) throw notFound('Statement');
     await audit(sql, { userId: user.id, action: 'delete', entity: 'bank_statement', entityId: id, ip: req.ip });
     return { ok: true };
+  });
+
+  /**
+   * A statement imported under the wrong account (a card's statement loaded as the bank's):
+   * the statement, its lines and everything matched to them move to the right account.
+   * Lines the right account already has (that statement imported there too) are kept once:
+   * whichever copy is matched stays. A transfer that would now be from the account to itself
+   * is undone, and its line waits to be done again.
+   */
+  app.post('/api/bank/statements/:id/move', owner, async (req) => {
+    const user = userOrThrow(req);
+    const { id } = parse(z.object({ id: uuid }), req.params);
+    const { sourceId } = parse(z.object({ sourceId: uuid }), req.body);
+    const [st] = await sql<{ sourceId: string }[]>`select source_id from bank_statements where id = ${id}`;
+    if (!st) throw notFound('Statement');
+    if (st.sourceId === sourceId) throw badRequest('It’s already under that account');
+    const [from] = await sql<{ accountId: string }[]>`select account_id from payment_sources where id = ${st.sourceId}`;
+    const [to] = await sql<{ accountId: string; name: string }[]>`select account_id, name from payment_sources where id = ${sourceId}`;
+    if (!to) throw badRequest('Choose the account');
+    const result = await sql.begin(async (tx) => {
+      const [range] = await tx<{ first: string | null }[]>`select min(date)::text as first from bank_lines where statement_id = ${id}`;
+      if (range?.first) await assertOpen(tx, range.first);
+      const isMatched = (alias: string) => `exists (select 1 from bank_matches m where m.bank_line_id = ${alias}.id)`;
+      // Lines already on the other account.
+      const clashes = await tx.unsafe(
+        `select a.id as here_id, b.id as there_id, ${isMatched('a')} as here_matched, ${isMatched('b')} as there_matched
+         from bank_lines a join bank_lines b on b.source_id = $2 and b.fingerprint = a.fingerprint where a.statement_id = $1`,
+        [id, sourceId],
+      ) as unknown as { hereId: string; thereId: string; hereMatched: boolean; thereMatched: boolean }[];
+      let alreadyThere = 0;
+      for (const c of clashes) {
+        if (c.hereMatched && c.thereMatched) throw badRequest('Some of these lines are already imported and matched under that account. Delete one of the two statements instead.');
+        if (c.hereMatched) await tx`delete from bank_lines where id = ${c.thereId}`;
+        else await tx`delete from bank_lines where id = ${c.hereId}`;
+        alreadyThere++;
+      }
+      const lineIds = (await tx<{ id: string }[]>`select id from bank_lines where statement_id = ${id}`).map((l) => l.id);
+      await tx`update bank_lines set source_id = ${sourceId} where id = any(${lineIds}::uuid[])`;
+      await tx`update bank_statements set source_id = ${sourceId}, line_count = ${lineIds.length} where id = ${id}`;
+      // Whatever those lines paid was paid from the right account.
+      const costs = await tx`update costs set source_id = ${sourceId}
+        where id in (select record_id from bank_matches where kind = 'cost' and bank_line_id = any(${lineIds}::uuid[]))`;
+      const receipts = await tx`update receipts set source_id = ${sourceId}
+        where id in (select record_id from bank_matches where kind = 'receipt' and bank_line_id = any(${lineIds}::uuid[]))`;
+      const wages = await tx`update wage_payments set source_id = ${sourceId}
+        where id in (select record_id from bank_matches where kind = 'wage_payment' and bank_line_id = any(${lineIds}::uuid[]))`;
+      let journals = 0;
+      let undone = 0;
+      if (from!.accountId !== to.accountId) {
+        const js = await tx<{ id: string }[]>`select record_id as id from bank_matches where kind = 'journal' and bank_line_id = any(${lineIds}::uuid[])`;
+        for (const j of js) {
+          await tx`update journal_lines set account_id = ${to.accountId} where journal_id = ${j.id} and account_id = ${from!.accountId}`;
+          const [self] = await tx<{ n: number }[]>`select count(distinct account_id)::int as n from journal_lines where journal_id = ${j.id}`;
+          if (self!.n < 2) {
+            await tx`delete from bank_matches where kind = 'journal' and record_id = ${j.id}`;
+            await tx`delete from journal_lines where journal_id = ${j.id}`;
+            await tx`delete from journals where id = ${j.id}`;
+            undone++;
+          } else journals++;
+        }
+      }
+      const moved = { lines: lineIds.length, alreadyThere, costs: costs.count, receipts: receipts.count, wages: wages.count, journals, transfersUndone: undone };
+      await audit(tx, { userId: user.id, action: 'move_statement', entity: 'bank_statement', entityId: id, ip: req.ip, details: { from: st.sourceId, to: sourceId, ...moved } });
+      return moved;
+    });
+    return result;
   });
 
   // ---------------------------------------------------------------- reconciling

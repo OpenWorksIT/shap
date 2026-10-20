@@ -67,6 +67,7 @@ export function BankRecon() {
   const [busy, setBusy] = useState(false);
   const [drawer, setDrawer] = useState<null | { kind: 'match' | 'transfer'; line: Line }>(null);
   const [showImport, setShowImport] = useState(false);
+  const [showStatements, setShowStatements] = useState(false);
 
   // Everything to do starts ticked: untick what you want left off.
   useEffect(() => {
@@ -161,6 +162,11 @@ export function BankRecon() {
               Import a statement
             </button>
           )}
+          {isOwner && (
+            <button className="btn" onClick={() => setShowStatements(true)}>
+              Imported statements
+            </button>
+          )}
           <span className="grow" />
           {data?.statementBalance && (
             <span className="small">
@@ -176,6 +182,14 @@ export function BankRecon() {
         </p>
       </section>
 
+      {showStatements && (
+        <ImportedStatements
+          sourceId={sourceId}
+          sources={sources}
+          onClose={() => setShowStatements(false)}
+          onChanged={() => void reload()}
+        />
+      )}
       <ErrorBox error={error} onRetry={reload} />
       {loading && !data ? (
         <Loading />
@@ -655,6 +669,122 @@ function TransferDrawer({ sourceId, line, onClose, onDone }: { sourceId: string;
           Book the transfer
         </button>
       </div>
+    </Drawer>
+  );
+}
+
+interface Statement {
+  id: string;
+  sourceId: string;
+  filename: string;
+  fromDate: string | null;
+  toDate: string | null;
+  lineCount: number;
+  matchedCount: number;
+  createdAt: string;
+}
+
+/** Statements imported for an account: move one imported under the wrong account, or delete it. */
+function ImportedStatements({
+  sourceId,
+  sources,
+  onClose,
+  onChanged,
+}: {
+  sourceId: string;
+  sources: { id: string; name: string }[];
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const toast = useToast();
+  const { data, error, reload } = useApi<Statement[]>('/api/bank/statements');
+  const [to, setTo] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+  const here = sources.find((s) => s.id === sourceId)?.name ?? '';
+  const mine = (data ?? []).filter((s) => s.sourceId === sourceId);
+  const others = sources.filter((s) => s.id !== sourceId);
+
+  const run = async (id: string, fn: () => Promise<string>) => {
+    setBusy(id);
+    try {
+      toast(await fn());
+      await reload();
+      onChanged();
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Couldn’t do that', 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+  const move = (st: Statement) => {
+    const target = to[st.id] ?? others[0]?.id;
+    const name = sources.find((s) => s.id === target)?.name ?? '';
+    if (!target || !confirm(`Move this statement and everything matched to it from ${here} to ${name}?`)) return;
+    void run(st.id, async () => {
+      const r = await api<{ lines: number; costs: number; receipts: number; wages: number; journals: number; transfersUndone: number; alreadyThere: number }>(
+        `/api/bank/statements/${st.id}/move`,
+        { body: { sourceId: target } },
+      );
+      return [
+        `Moved to ${name}: ${r.lines} lines`,
+        r.costs + r.receipts + r.wages + r.journals > 0 && `${r.costs + r.receipts + r.wages + r.journals} matched records now paid from ${name}`,
+        r.alreadyThere > 0 && `${r.alreadyThere} already there, kept once`,
+        r.transfersUndone > 0 && `${r.transfersUndone} transfer${r.transfersUndone === 1 ? '' : 's'} undone (now from ${name} to itself): do again`,
+      ]
+        .filter(Boolean)
+        .join(' · ');
+    });
+  };
+  const remove = (st: Statement) => {
+    if (!confirm('Delete this statement’s lines? Costs added from it stay, but are no longer tied to the statement.')) return;
+    void run(st.id, async () => {
+      await api(`/api/bank/statements/${st.id}`, { method: 'DELETE' });
+      return 'Statement deleted';
+    });
+  };
+
+  return (
+    <Drawer title="Imported statements" sub={here} onClose={onClose} wide>
+      <ErrorBox error={error} onRetry={reload} />
+      {!data ? (
+        <Loading />
+      ) : !mine.length ? (
+        <Empty title="None yet">No statements imported for {here}.</Empty>
+      ) : (
+        <div className="stack">
+          <p className="small muted">
+            Imported a statement under the wrong account (a card’s statement as the bank’s)? Move it: its lines, and everything matched or added from it,
+            go to the right account.
+          </p>
+          {mine.map((st) => (
+            <div key={st.id} className="panel panel-pad stack" style={{ gap: 8 }}>
+              <div className="row wrap">
+                <strong className="grow">{st.filename || 'Statement'}</strong>
+                <span className="small muted">
+                  {st.fromDate && st.toDate ? `${formatDate(st.fromDate)} – ${formatDate(st.toDate)}` : ''} · {st.lineCount} lines, {st.matchedCount} matched ·
+                  imported {formatDate(st.createdAt.slice(0, 10))}
+                </span>
+              </div>
+              <div className="row wrap">
+                <select className="select auto" aria-label="Move to" value={to[st.id] ?? others[0]?.id ?? ''} onChange={(e) => setTo((t) => ({ ...t, [st.id]: e.target.value }))}>
+                  {others.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+                <button className="btn" disabled={busy != null || !others.length} onClick={() => move(st)}>
+                  {busy === st.id ? 'Working…' : 'Move to this account'}
+                </button>
+                <span className="grow" />
+                <button className="btn quiet danger" disabled={busy != null} onClick={() => remove(st)}>
+                  Delete
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </Drawer>
   );
 }

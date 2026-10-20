@@ -3,6 +3,15 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.1.3 (20 October 2026)
+
+- **Statement under the wrong account**: Bank → *Imported statements* lists what you've imported
+  for an account. *Move to this account* takes a statement imported under the wrong one (a
+  card's statement loaded as the bank's) to the right one: its lines, and every cost, payment
+  or entry matched to or added from them, now say they were paid from the right account. Lines
+  already imported there are kept once. A transfer that would now be from an account to itself
+  is undone, so you can book it again. Statements can be deleted there too.
+
 ## 1.1.2 (20 October 2026)
 
 - **Costs counted twice**: a statement line paid for something you'd already captured on a

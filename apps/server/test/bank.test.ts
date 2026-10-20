@@ -297,4 +297,37 @@ describe('reconciling a statement', () => {
     expect(await owner.get('/api/costs/duplicates')).toHaveLength(0);
     expect(await ledgerTotal(env.sql)).toBe(0);
   });
+
+  it('moves a statement imported under the wrong account, with everything matched to it', async () => {
+    const cardCsv = ['Date,Amount,Balance,Description', '2026/06/03,-450.00,,ENGEN WALMER', '2026/06/04,-120.00,,NETFLIX', '2026/06/20,2000.00,,PAYMENT RECEIVED THANK YOU'].join('\n');
+    const fuel = await owner.post('/api/costs', { date: '2026-06-03', description: 'Fuel', amountCents: 45000, supplier: 'Engen', categoryId: cats.parts, sourceId: null });
+    const r = await owner.post('/api/bank/statements', { sourceId: bank, csv: cardCsv, filename: 'card.csv' });
+    expect(r.added).toBe(3);
+    let rec = await owner.get(`/api/bank/recon?sourceId=${bank}`);
+    const id = (d: string) => rec.lines.find((l: { description: string }) => l.description === d).id;
+    await owner.post('/api/bank/accept', { sourceId: bank, lineIds: [id('ENGEN WALMER')] });
+    await owner.post('/api/bank/lines/create-costs', { items: [{ lineId: id('NETFLIX'), categoryId: cats.bank }] });
+    // The card repayment, booked (wrongly) as coming from the card.
+    await owner.post(`/api/bank/lines/${id('PAYMENT RECEIVED THANK YOU')}/transfer`, { otherSourceId: card });
+    // Part of it was also imported under the card already, unmatched there.
+    await owner.post('/api/bank/statements', { sourceId: card, csv: cardCsv.split('\n').slice(0, 2).join('\n') });
+
+    const list = await owner.get('/api/bank/statements');
+    const st = list.find((x: { filename: string }) => x.filename === 'card.csv');
+    expect(st).toMatchObject({ lineCount: 3, matchedCount: 3 });
+    const moved = await owner.post(`/api/bank/statements/${st.id}/move`, { sourceId: card });
+    expect(moved).toMatchObject({ lines: 3, alreadyThere: 1, costs: 2, transfersUndone: 1 });
+
+    const costs = await env.sql<{ sourceId: string }[]>`select source_id from costs where id = ${fuel.id} or note = 'From statement: NETFLIX'`;
+    expect(costs.map((c) => c.sourceId)).toEqual([card, card]);
+    rec = await owner.get(`/api/bank/recon?sourceId=${card}`);
+    const desc = rec.lines.map((l: { description: string; state: string }) => [l.description, l.state]);
+    expect(desc).toEqual([
+      ['ENGEN WALMER', 'matched'],
+      ['NETFLIX', 'matched'],
+      ['PAYMENT RECEIVED THANK YOU', expect.stringMatching(/open|suggested/)],
+    ]);
+    expect((await owner.get(`/api/bank/recon?sourceId=${bank}`)).lines.some((l: { description: string }) => l.description === 'NETFLIX')).toBe(false);
+    expect(await ledgerTotal(env.sql)).toBe(0);
+  });
 });
