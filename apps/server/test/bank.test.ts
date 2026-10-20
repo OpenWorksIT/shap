@@ -362,6 +362,18 @@ describe('reconciling a statement', () => {
     const no = await owner.post('/api/costs/merge', { pairs: [{ copyId: p2.id, originalId: p1.id }] });
     expect(no.merged).toBe(0);
     expect(no.failed[0].reason).toMatch(/two separate payments/);
+    // By hand you can say they're one: the copy's line goes back on the to-do list.
+    const yes = await owner.post('/api/costs/merge', { pairs: [{ copyId: p2.id, originalId: p1.id }], byHand: true });
+    expect(yes.merged).toBe(1);
+    const open = (await owner.get(`/api/bank/recon?sourceId=${card}`)).lines.filter((l: { description: string; state: string }) => l.description === 'MICA' && l.state !== 'matched');
+    expect(open).toHaveLength(1);
+
+    // Same amount, a few days apart, nothing in common by name: not a twin.
+    await owner.post('/api/costs', { date: '2026-08-04', description: 'Electrical', amountCents: 30000, supplier: 'Powerline', categoryId: cats.parts, sourceId: null });
+    await owner.post('/api/bank/statements', { sourceId: bank, csv: ['Date,Amount,Balance,Description', '2026/08/13,-300.00,,EXCLUSIVE CAR CARE AND'].join('\n') });
+    const car = (await owner.get(`/api/bank/recon?sourceId=${bank}`)).lines.find((l: { description: string }) => l.description === 'EXCLUSIVE CAR CARE AND');
+    await owner.post('/api/bank/lines/create-costs', { items: [{ lineId: car.id, categoryId: cats.parts, force: true }] });
+    expect((await owner.get('/api/costs/duplicates')).some((d: { originalDescription: string }) => d.originalDescription === 'Electrical')).toBe(false);
     expect(await ledgerTotal(env.sql)).toBe(0);
   });
 });

@@ -9,6 +9,8 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      // Registered in main.tsx, which also checks for a new version when you come back to the tab.
+      injectRegister: false,
       includeAssets: ['icon.svg', 'apple-touch-icon.png'],
       manifest: {
         name: 'Shap',

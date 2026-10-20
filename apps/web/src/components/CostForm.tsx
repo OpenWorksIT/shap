@@ -237,6 +237,7 @@ interface Twin {
   projectName: string | null;
   projectNumber: number | null;
   fromStatement: boolean;
+  bankMatched: boolean;
 }
 
 /** The same purchase captured twice: fold one into the other. */
@@ -246,7 +247,7 @@ function Twins({ id, onMerged }: { id: string; onMerged: (thisOneGone: boolean) 
   const { data } = useApi<Twin[]>(open ? `/api/costs/${id}/twins` : null);
   const merge = async (copyId: string, originalId: string) => {
     try {
-      const r = await api<{ merged: number; failed: { reason: string }[] }>('/api/costs/merge', { body: { pairs: [{ copyId, originalId }] } });
+      const r = await api<{ merged: number; failed: { reason: string }[] }>('/api/costs/merge', { body: { pairs: [{ copyId, originalId }], byHand: true } });
       if (!r.merged) return toast(r.failed[0]?.reason ?? 'Couldn’t merge', 'error');
       toast('Merged');
       onMerged(copyId === id);
@@ -276,6 +277,7 @@ function Twins({ id, onMerged }: { id: string; onMerged: (thisOneGone: boolean) 
               <span className="xs muted" style={{ display: 'block' }}>
                 {t.categoryName} · {t.sourceName ?? 'not captured'} · {t.projectName ? `#${t.projectNumber} ${t.projectName}` : 'no job'}
                 {t.fromStatement ? ' · added from a statement' : ''}
+                {t.bankMatched ? ' · matched to the bank' : ''}
               </span>
             </span>
             <button type="button" className="btn small" onClick={() => void merge(id, t.id)} title="Remove this cost; keep the other">

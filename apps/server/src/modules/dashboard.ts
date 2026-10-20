@@ -99,7 +99,7 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
       materialsWithoutJob: materialsNoJob[0],
       uncapturedCosts: uncaptured[0],
       statementsMissing: await missingStatements(sql),
-      duplicateCosts: (await findDuplicates(sql)).length,
+      duplicateCosts: (await findDuplicates(sql)).filter((d) => d.likely).length,
       bankCents: bal('bank'),
       ownerLoanCents: -bal('owner_loan'),
       projects: projects.map((p) => ({ ...p, ...totals(p as unknown as ProjectSummary) })),

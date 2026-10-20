@@ -3,6 +3,17 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.1.5 (20 October 2026)
+
+- **Fewer false twins**: *Costs counted twice* paired costs on amount and date alone, so a car
+  wash and an electrical slip of R300 could show as one purchase. Now the supplier's name has to
+  match too. Same amount on the same day with different names is listed as *different names:
+  check*, unticked.
+- **Merging by hand** a cost that the bank shows as a separate payment now works: the copy's
+  statement line goes back on the to-do list, for you to leave off or match.
+- **Updates show straight away**: after an update the app reloads itself with the new version
+  (it checks when you open it or come back to the tab), instead of needing a hard refresh.
+
 ## 1.1.4 (20 October 2026)
 
 - **More twins found**: *Costs counted twice* now also lists a statement copy when the cost you

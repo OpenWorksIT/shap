@@ -24,6 +24,7 @@ interface Pair {
   projectId: string | null;
   projectName: string | null;
   projectNumber: number | null;
+  likely: boolean;
 }
 
 /**
@@ -36,7 +37,7 @@ export function DuplicateCosts({ onChanged }: { onChanged?: () => void }) {
   const { data, error, loading, reload } = useApi<Pair[]>('/api/costs/duplicates');
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
-  useEffect(() => setPicked(new Set((data ?? []).map((p) => p.copyId))), [data]);
+  useEffect(() => setPicked(new Set((data ?? []).filter((p) => p.likely).map((p) => p.copyId))), [data]);
 
   const merge = async () => {
     setBusy(true);
@@ -67,9 +68,10 @@ export function DuplicateCosts({ onChanged }: { onChanged?: () => void }) {
   return (
     <div className="stack">
       <div className="banner signal small">
-        These were added from a bank statement, but a cost of the same amount was already captured a few days earlier: the same purchase counted twice.
-        Merging keeps the one you captured (its job, type and slip), records that the statement paid it, and removes the copy. Untick any that really
-        were two purchases.
+        These were added from a bank statement, but a cost from the same supplier and of the same amount was already captured a few days earlier: the
+        same purchase counted twice. Merging keeps the one you captured (its job, type and slip), records that the statement paid it, and removes the
+        copy. Ones marked <em>different names</em> are the same amount on the same day only, so they start unticked: tick them only if they really are one
+        purchase.
       </div>
       <div className="panel table-wrap">
         <table className="table">
@@ -107,6 +109,11 @@ export function DuplicateCosts({ onChanged }: { onChanged?: () => void }) {
                 )}
                 <td className="small">
                   {formatDate(p.date)} · {p.description}
+                  {!p.likely && (
+                    <span className="chip warn" style={{ marginLeft: 6 }}>
+                      different names: check
+                    </span>
+                  )}
                   <div className="xs muted">
                     {p.copyCategory} · {p.copySource ?? 'not captured'}
                   </div>
