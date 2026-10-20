@@ -3,6 +3,7 @@ import { assignSourceInput, costInput, vatIncluded } from '@shap/shared';
 import { z } from 'zod';
 import { requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
+import type { Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
 import { assertOpen, getSettings, isIsoDate, q } from '../lib/books.js';
 import { forbidden, notFound } from '../lib/errors.js';
@@ -62,6 +63,42 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
         : await sql`update costs set category_id = ${input.categoryId!} where id = any(${input.ids}::uuid[])`;
     await audit(sql, { userId: user.id, action: 'bulk_update', entity: 'cost', ip: req.ip, details: { count: res.count, change: input.projectId ? 'job' : input.noJob ? 'no_job' : 'type' } });
     return { updated: res.count };
+  });
+
+  /**
+   * Costs added from a bank statement that look like a cost already captured (same amount,
+   * give or take rounding, within a fortnight, not itself matched to the bank): the same
+   * purchase counted twice. Merging keeps the captured one (its job, type and slip) and ties it
+   * to the statement line instead.
+   */
+  app.get('/api/costs/duplicates', { preHandler: requireRole('owner', 'accountant') }, async () => findDuplicates(sql));
+
+  app.post('/api/costs/merge', { preHandler: requireRole('owner') }, async (req) => {
+    const user = userOrThrow(req);
+    const { pairs } = parse(z.object({ pairs: z.array(z.object({ copyId: z.string().uuid(), originalId: z.string().uuid() })).min(1).max(1000) }), req.body);
+    let merged = 0;
+    await sql.begin(async (tx) => {
+      for (const p of pairs) {
+        const [c] = await tx<{ id: string; date: string; amountCents: number; sourceId: string | null; note: string }[]>`
+          select c.id, c.date::text, c.amount_cents, c.source_id, c.note from costs c
+          where c.id = ${p.copyId} and c.note like 'From statement:%'
+            and exists (select 1 from bank_matches m where m.kind = 'cost' and m.record_id = c.id)
+            and not exists (select 1 from assets a where a.cost_id = c.id)`;
+        const [o] = await tx<{ id: string; date: string; amountCents: number }[]>`
+          select o.id, o.date::text, o.amount_cents from costs o where o.id = ${p.originalId} and o.id <> ${p.copyId}
+            and not exists (select 1 from bank_matches m where m.kind = 'cost' and m.record_id = o.id)`;
+        if (!c || !o || Math.abs(c.amountCents - o.amountCents) > 100) continue;
+        await assertOpen(tx, c.date, o.date);
+        await tx`update bank_matches set record_id = ${o.id} where kind = 'cost' and record_id = ${c.id}`;
+        const note = o.amountCents === c.amountCents ? '' : `Rounded by R${((c.amountCents - o.amountCents) / 100).toFixed(2)} to match the statement`;
+        await tx`update costs set source_id = ${c.sourceId}, amount_cents = ${c.amountCents},
+          note = case when ${note} = '' then note when note = '' then ${note} else note || ' · ' || ${note} end where id = ${o.id}`;
+        await tx`delete from costs where id = ${c.id}`;
+        merged++;
+      }
+      await audit(tx, { userId: user.id, action: 'merge_duplicates', entity: 'cost', ip: req.ip, details: { merged } });
+    });
+    return { merged };
   });
 
   /** Suppliers you've used, most used first, for the picker on the phone. */
@@ -140,4 +177,37 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
     const amount = Number(q(req).amount ?? 0);
     return { vatCents: settings.vatRegistered ? vatIncluded(amount, settings.vatRateBp) : 0 };
   });
+}
+
+export async function findDuplicates(db: Db) {
+  const rows = await db<
+    {
+      copyId: string; date: string; amountCents: number; description: string; supplier: string; copySource: string | null; copyCategory: string;
+      originalId: string; originalDate: string; originalAmountCents: number; originalDescription: string; originalSupplier: string;
+      originalSource: string | null; originalCategory: string; projectId: string | null; projectName: string | null; projectNumber: number | null;
+    }[]
+  >`
+    select s.id as copy_id, s.date::text, s.amount_cents, s.description, s.supplier, ss.name as copy_source, sk.name as copy_category,
+      o.id as original_id, o.date::text as original_date, o.amount_cents as original_amount_cents, o.description as original_description,
+      o.supplier as original_supplier, os.name as original_source, ok.name as original_category,
+      o.project_id, p.name as project_name, p.number as project_number
+    from costs s
+    join cost_categories sk on sk.id = s.category_id
+    left join payment_sources ss on ss.id = s.source_id
+    join lateral (
+      select o.* from costs o
+      where o.id <> s.id and abs(o.amount_cents - s.amount_cents) <= 100 and o.date between (s.date - 12) and (s.date + 5)
+        and o.note not like 'From statement:%'
+        and not exists (select 1 from bank_matches m2 where m2.kind = 'cost' and m2.record_id = o.id)
+      order by (o.amount_cents = s.amount_cents) desc, (o.project_id is not null) desc, abs(o.date - s.date), o.created_at
+      limit 1
+    ) o on true
+    join cost_categories ok on ok.id = o.category_id
+    left join payment_sources os on os.id = o.source_id
+    left join projects p on p.id = o.project_id
+    where s.note like 'From statement:%' and exists (select 1 from bank_matches m where m.kind = 'cost' and m.record_id = s.id)
+    order by s.date desc`;
+  // One copy per captured cost.
+  const used = new Set<string>();
+  return rows.filter((r) => (used.has(r.originalId) ? false : (used.add(r.originalId), true)));
 }

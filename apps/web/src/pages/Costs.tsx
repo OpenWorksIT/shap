@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { addMonths, ASSET_CATEGORIES, ASSET_CATEGORY_LABELS, financialYear, formatDate, formatZar, monthEnd, monthStart, todayIso, type AssetCategory } from '@shap/shared';
 import { CostForm, costDraftFrom } from '../components/CostForm';
+import { DuplicateCosts } from '../components/DuplicateCosts';
 import { ProjectSelect } from '../components/Pickers';
 import { PageHead } from '../components/Shell';
 import { Drawer, Empty, ErrorBox, Field, Icon, Loading, Money, useToast } from '../components/ui';
@@ -68,6 +69,21 @@ export default function CostsPage() {
     setParams(n, { replace: true });
   };
 
+  if (kind === 'duplicates')
+    return (
+      <div className="stack-lg">
+        <PageHead
+          title="Costs counted twice"
+          actions={
+            <button className="btn" onClick={() => setParam('kind', null)}>
+              All costs
+            </button>
+          }
+        />
+        <DuplicateCosts />
+      </div>
+    );
+
   return (
     <div className="stack-lg">
       <PageHead
@@ -106,6 +122,9 @@ export default function CostsPage() {
             Parts bought without a job. Tick them and put them on the right job, so that job’s profit is right; or mark them as not for a job (stock for
             the yard), or change their type if they weren’t parts at all (advertising, entertainment). Either way they leave this list.
           </span>
+          <button className="btn small" onClick={() => setParam('kind', 'duplicates')}>
+            Find ones counted twice
+          </button>
           <button className="btn small" onClick={() => setParam('kind', null)}>
             Show all costs
           </button>

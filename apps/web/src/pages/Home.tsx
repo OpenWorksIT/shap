@@ -20,6 +20,7 @@ interface Dashboard {
   materialsWithoutJob: { n: number; total: number };
   uncapturedCosts: { n: number; total: number };
   statementsMissing?: { sourceId: string; sourceName: string; months: string[] }[];
+  duplicateCosts?: number;
   bankCents: number;
   ownerLoanCents: number;
   projects: ProjectRow[];
@@ -85,6 +86,19 @@ function OwnerHome() {
           <strong>{data.unallocatedLabour.n} labour day{data.unallocatedLabour.n === 1 ? '' : 's'}</strong> not on a job or general work (<Money cents={data.unallocatedLabour.cost} whole />)
         </span>
         Allocate
+        <Icon name="chevronRight" size={16} />
+      </Link>
+    ),
+    (data.duplicateCosts ?? 0) > 0 && (
+      <Link key="dup" to="/costs?kind=duplicates" className="attention">
+        <Icon name="alert" size={18} />
+        <span className="grow">
+          <strong>
+            {data.duplicateCosts} cost{data.duplicateCosts === 1 ? '' : 's'} from bank statements
+          </strong>{' '}
+          look already captured (counted twice)
+        </span>
+        Merge
         <Icon name="chevronRight" size={16} />
       </Link>
     ),

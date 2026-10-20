@@ -3,6 +3,18 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.1.2 (20 October 2026)
+
+- **Costs counted twice**: a statement line paid for something you'd already captured on a
+  job, but from a different account (or a few days earlier), wasn't recognised, so ticking it
+  added a second cost with no job. Statement lines are now checked against everything captured
+  around that date, whichever account it says paid; the suggestion names the job.
+- **Held back, not added twice**: ticking a line that looks already captured no longer adds it;
+  you're told to check its suggestion. Choosing *Not this* on the suggestion still lets you add it.
+- **Merge the ones already in**: Costs → *Find ones counted twice* (also on Home) lists costs
+  added from a statement next to the one you'd captured. Merging keeps yours (job, type, slip),
+  records that the statement paid it, and removes the copy.
+
 ## 1.1.1 (19 October 2026)
 
 - **Sharing the server**: Caddy now reaches Shap by its own name (`shap-app`). With other apps

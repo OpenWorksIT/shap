@@ -268,4 +268,33 @@ describe('reconciling a statement', () => {
     expect(c!.amountCents).toBe(-15000);
     expect(await ledgerTotal(env.sql)).toBe(0);
   });
+
+  it('spots a statement line already captured on a job from another account, and merges a copy that slipped through', async () => {
+    const job = await owner.post('/api/projects', { name: 'Garden wall', startDate: '2026-05-01' });
+    const captured = await owner.post('/api/costs', {
+      date: '2026-05-02', description: 'Blocks', amountCents: 31000, supplier: 'Mr Builder', categoryId: cats.parts, sourceId: card, projectId: job.id,
+    });
+    const r = await owner.post('/api/bank/statements', { sourceId: bank, csv: ['Date,Amount,Balance,Description', '2026/05/04,-310.00,0,POS PURCHASE MR BUILDER WALMER'].join('\n') });
+    expect(r.autoMatched).toBe(0);
+    const rec = await owner.get(`/api/bank/recon?sourceId=${bank}`);
+    const line = rec.lines.find((l: { description: string }) => l.description === 'POS PURCHASE MR BUILDER WALMER');
+    expect(line.state).toBe('suggested');
+    expect(line.suggestion.label).toMatch(/Garden wall/);
+    // Ticked and added as new anyway: held back, because it looks captured already.
+    const held = await owner.post('/api/bank/lines/create-costs', { items: [{ lineId: line.id, categoryId: cats.parts }] });
+    expect(held).toMatchObject({ created: 0, skipped: [{ lineId: line.id, costId: captured.id }] });
+    // Forced through (as older versions did): it shows up as counted twice, and merging puts it right.
+    expect((await owner.post('/api/bank/lines/create-costs', { items: [{ lineId: line.id, categoryId: cats.parts, force: true }] })).created).toBe(1);
+    const dups = await owner.get('/api/costs/duplicates');
+    expect(dups).toHaveLength(1);
+    expect(dups[0]).toMatchObject({ originalId: captured.id, projectName: 'Garden wall', amountCents: 31000 });
+    expect((await owner.get('/api/dashboard')).duplicateCosts).toBe(1);
+    expect((await owner.post('/api/costs/merge', { pairs: [{ copyId: dups[0].copyId, originalId: captured.id }] })).merged).toBe(1);
+    const rows = await env.sql<{ id: string; sourceId: string; projectId: string }[]>`select id, source_id, project_id from costs where description = 'Blocks' or note like 'From statement: POS PURCHASE MR BUILDER%'`;
+    expect(rows).toEqual([{ id: captured.id, sourceId: bank, projectId: job.id }]);
+    const after = await owner.get(`/api/bank/recon?sourceId=${bank}`);
+    expect(after.lines.find((l: { id: string }) => l.id === line.id).state).toBe('matched');
+    expect(await owner.get('/api/costs/duplicates')).toHaveLength(0);
+    expect(await ledgerTotal(env.sql)).toBe(0);
+  });
 });

@@ -49,9 +49,10 @@ const unmatched = (kind: Kind, alias: string) => `not exists (select 1 from bank
 async function candidates(db: Db, sourceId: string, from: string, to: string) {
   const [costs, receipts, wages, invoices] = await Promise.all([
     db.unsafe(
-      `select c.id, c.date::text, c.amount_cents, c.supplier, c.description, c.source_id from costs c
-       where c.date between ($2::date - 10) and ($3::date + 4) and (c.source_id is null or c.source_id = $1) and ${unmatched('cost', 'c')}`,
-      [sourceId, from, to],
+      `select c.id, c.date::text, c.amount_cents, c.supplier, c.description, c.source_id, s.name as source_name, p.name as project_name
+       from costs c left join payment_sources s on s.id = c.source_id left join projects p on p.id = c.project_id
+       where c.date between ($1::date - 12) and ($2::date + 5) and ${unmatched('cost', 'c')}`,
+      [from, to],
     ),
     db.unsafe(
       `select r.id, r.date::text, r.amount_cents, r.source_id, 'Payment recorded for invoice ' || d.number || coalesce(' (' || c.name || ')', '') as label
@@ -74,7 +75,7 @@ async function candidates(db: Db, sourceId: string, from: string, to: string) {
     ),
   ]);
   return {
-    costs: costs as unknown as { id: string; date: string; amountCents: number; supplier: string; description: string; sourceId: string | null }[],
+    costs: costs as unknown as { id: string; date: string; amountCents: number; supplier: string; description: string; sourceId: string | null; sourceName: string | null; projectName: string | null }[],
     receipts: receipts as unknown as { id: string; date: string; amountCents: number; sourceId: string; label: string }[],
     wages: wages as unknown as { id: string; date: string; amountCents: number; sourceId: string; workerName: string }[],
     invoices: invoices as unknown as { id: string; number: string; clientName: string; issueDate: string; balanceCents: number; depositOutstandingCents: number }[],
@@ -384,6 +385,8 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
                 // A cost type (money out is a cost; money in a refund on that type) or, for money in, an income account.
                 categoryId: uuid.nullable().default(null),
                 incomeAccountId: uuid.nullable().default(null),
+                // Add it even though a captured cost looks like the same purchase.
+                force: z.boolean().default(false),
                 supplier: z.string().trim().max(120).default(''),
                 description: z.string().trim().max(200).default(''),
                 projectId: uuid.nullable().default(null),
@@ -396,12 +399,26 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
       req.body,
     );
     let created = 0;
+    const skipped: { lineId: string; costId: string; label: string }[] = [];
     await sql.begin(async (tx) => {
       for (const it of items) {
         const line = await loadLine(tx, it.lineId);
         const [taken] = await tx`select 1 from bank_matches where bank_line_id = ${line.id} limit 1`;
         if (taken) continue;
         await assertOpen(tx, line.date);
+        // Already captured? A cost of the same amount around that date, not matched to the
+        // bank yet, is almost always the same purchase: match it instead of adding it twice.
+        if (line.amountCents < 0 && !it.force) {
+          const [twin] = await tx<{ id: string; description: string; date: string }[]>`
+            select c.id, c.description, c.date::text from costs c
+            where abs(c.amount_cents + ${line.amountCents}) <= 100 and c.date between (${line.date}::date - 12) and (${line.date}::date + 5)
+              and not exists (select 1 from bank_matches m where m.kind = 'cost' and m.record_id = c.id)
+            order by abs(c.date - ${line.date}::date) limit 1`;
+          if (twin) {
+            skipped.push({ lineId: line.id, costId: twin.id, label: `${twin.description} (${twin.date})` });
+            continue;
+          }
+        }
         if (it.incomeAccountId) {
           if (line.amountCents < 0) throw badRequest(`${line.date} ${line.description}: money out can’t be income`);
           const [acc] = await tx<{ type: string; name: string }[]>`select type, name from accounts where id = ${it.incomeAccountId}`;
@@ -424,9 +441,9 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
         await link(tx, line, [{ kind: 'cost', id: c!.id }]);
         created++;
       }
-      await audit(tx, { userId: user.id, action: 'create_from_statement', entity: 'cost', ip: req.ip, details: { created } });
+      await audit(tx, { userId: user.id, action: 'create_from_statement', entity: 'cost', ip: req.ip, details: { created, skipped: skipped.length } });
     });
-    return { created };
+    return { created, skipped };
   });
 
   /** Money in that pays an invoice. */

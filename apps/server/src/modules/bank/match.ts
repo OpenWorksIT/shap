@@ -20,6 +20,9 @@ export interface CostCandidate {
   supplier: string;
   description: string;
   sourceId: string | null;
+  /** The account it says it was paid from (shown when that isn't the statement's). */
+  sourceName?: string | null;
+  projectName?: string | null;
 }
 export interface ReceiptCandidate {
   id: string;
@@ -102,10 +105,22 @@ export function suggestMatches(
     if (line.amountCents < 0) {
       // Card and debit-order transactions reach the statement a day or more after the slip.
       const nearby = c.costs.filter((x) => (x.sourceId == null || x.sourceId === line.sourceId) && days(line.date, x.date) >= -2 && days(line.date, x.date) <= 7);
-      for (const x of nearby) {
-        if (!near(x.amountCents, amount)) continue;
+      // One for one. Any account: a cost captured as paid from elsewhere (or with the wrong
+      // account) is still the same purchase, and adding it again would count it twice.
+      for (const x of c.costs) {
+        const d = days(line.date, x.date);
+        if (d < -3 || d > 10 || !near(x.amountCents, amount)) continue;
         const sim = similar(line.description, x.supplier) || similar(line.description, x.description);
-        options.push({ lineId: line.id, s: { kind: 'cost', ids: [x.id], score: 50 + (sim ? 30 : 0) - (x.amountCents === amount ? 0 : 10) - Math.abs(days(line.date, x.date)) * 3, label: `${x.description}${x.supplier ? ` – ${x.supplier}` : ''}` } });
+        const elsewhere = x.sourceId != null && x.sourceId !== line.sourceId;
+        options.push({
+          lineId: line.id,
+          s: {
+            kind: 'cost',
+            ids: [x.id],
+            score: 50 + (sim ? 30 : 0) - (x.amountCents === amount ? 0 : 10) - (elsewhere ? 15 : 0) - Math.abs(d) * 3,
+            label: `${x.description}${x.supplier ? ` – ${x.supplier}` : ''}${x.projectName ? ` (${x.projectName})` : ''}${elsewhere && x.sourceName ? `, captured as paid from ${x.sourceName}` : ''}`,
+          },
+        });
       }
       // One slip, several items: same supplier, same day.
       const groups = new Map<string, CostCandidate[]>();

@@ -109,24 +109,31 @@ export function BankRecon() {
       let matched = 0;
       let created = 0;
       if (tickedSuggested.length) matched = (await api<{ matched: number }>('/api/bank/accept', { body: { sourceId, lineIds: tickedSuggested.map((l) => l.id) } })).matched;
+      let skipped = 0;
       if (tickedNewCosts.length) {
-        created = (
-          await api<{ created: number }>('/api/bank/lines/create-costs', {
-            body: {
-              items: tickedNewCosts.map((l) => {
-                const t = targetOf(l, edits[l.id]);
-                return {
-                  lineId: l.id,
-                  categoryId: t.startsWith('cat:') ? t.slice(4) : null,
-                  incomeAccountId: t.startsWith('inc:') ? t.slice(4) : null,
-                  supplier: edits[l.id]?.supplier ?? l.supplier,
-                };
-              }),
-            },
-          })
-        ).created;
+        const r = await api<{ created: number; skipped: unknown[] }>('/api/bank/lines/create-costs', {
+          body: {
+            items: tickedNewCosts.map((l) => {
+              const t = targetOf(l, edits[l.id]);
+              return {
+                lineId: l.id,
+                categoryId: t.startsWith('cat:') ? t.slice(4) : null,
+                incomeAccountId: t.startsWith('inc:') ? t.slice(4) : null,
+                supplier: edits[l.id]?.supplier ?? l.supplier,
+                // You said "Not this" to the captured cost Shap suggested: add it regardless.
+                force: dismissed.has(l.id),
+              };
+            }),
+          },
+        });
+        created = r.created;
+        skipped = r.skipped.length;
       }
-      return [matched && `${matched} matched`, created && `${created} added`].filter(Boolean).join(', ') || 'Nothing to capture';
+      return (
+        [matched && `${matched} matched`, created && `${created} added`, skipped && `${skipped} not added: they look like costs already captured, so check the suggestions`]
+          .filter(Boolean)
+          .join(', ') || 'Nothing to capture'
+      );
     });
   const leaveOff = (ids: string[], ignored = true) =>
     run(async () => {
