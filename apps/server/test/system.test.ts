@@ -18,7 +18,7 @@ afterAll(() => env.close());
 describe('Settings → Updates & backups', () => {
   it('shows the version, and says so when the server side isn’t set up', async () => {
     const s = await owner.get('/api/system');
-    expect(s).toMatchObject({ version: '1.1.3', gitSha: 'abc1234', managed: false, backups: [] });
+    expect(s).toMatchObject({ version: '1.1.4', gitSha: 'abc1234', managed: false, backups: [] });
     const r = await owner.call({ method: 'POST', url: '/api/system/request', payload: { action: 'update' } });
     expect(r.statusCode).toBe(400);
   });

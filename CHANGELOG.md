@@ -3,6 +3,17 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.1.4 (20 October 2026)
+
+- **More twins found**: *Costs counted twice* now also lists a statement copy when the cost you
+  captured was already tied to the bank, as long as it's the same transaction imported twice
+  (the same date and amount in two different statement files), and when the copy's statement
+  has since been deleted. Merging also removes the extra statement line. Two real payments of
+  the same amount are never folded together.
+- **Merge by hand**: open any cost and choose *Counted twice? Find the other one*. It lists
+  costs of about the same amount within two weeks; keep this one or that one. The one kept
+  takes the other's job, slip and supplier if it had none.
+
 ## 1.1.3 (20 October 2026)
 
 - **Statement under the wrong account**: Bank → *Imported statements* lists what you've imported

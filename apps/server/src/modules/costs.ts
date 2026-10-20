@@ -77,28 +77,29 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
     const user = userOrThrow(req);
     const { pairs } = parse(z.object({ pairs: z.array(z.object({ copyId: z.string().uuid(), originalId: z.string().uuid() })).min(1).max(1000) }), req.body);
     let merged = 0;
+    const failed: { copyId: string; reason: string }[] = [];
     await sql.begin(async (tx) => {
       for (const p of pairs) {
-        const [c] = await tx<{ id: string; date: string; amountCents: number; sourceId: string | null; note: string }[]>`
-          select c.id, c.date::text, c.amount_cents, c.source_id, c.note from costs c
-          where c.id = ${p.copyId} and c.note like 'From statement:%'
-            and exists (select 1 from bank_matches m where m.kind = 'cost' and m.record_id = c.id)
-            and not exists (select 1 from assets a where a.cost_id = c.id)`;
-        const [o] = await tx<{ id: string; date: string; amountCents: number }[]>`
-          select o.id, o.date::text, o.amount_cents from costs o where o.id = ${p.originalId} and o.id <> ${p.copyId}
-            and not exists (select 1 from bank_matches m where m.kind = 'cost' and m.record_id = o.id)`;
-        if (!c || !o || Math.abs(c.amountCents - o.amountCents) > 100) continue;
-        await assertOpen(tx, c.date, o.date);
-        await tx`update bank_matches set record_id = ${o.id} where kind = 'cost' and record_id = ${c.id}`;
-        const note = o.amountCents === c.amountCents ? '' : `Rounded by R${((c.amountCents - o.amountCents) / 100).toFixed(2)} to match the statement`;
-        await tx`update costs set source_id = ${c.sourceId}, amount_cents = ${c.amountCents},
-          note = case when ${note} = '' then note when note = '' then ${note} else note || ' · ' || ${note} end where id = ${o.id}`;
-        await tx`delete from costs where id = ${c.id}`;
-        merged++;
+        const why = await mergeCosts(tx, p.copyId, p.originalId);
+        if (why) failed.push({ copyId: p.copyId, reason: why });
+        else merged++;
       }
-      await audit(tx, { userId: user.id, action: 'merge_duplicates', entity: 'cost', ip: req.ip, details: { merged } });
+      await audit(tx, { userId: user.id, action: 'merge_duplicates', entity: 'cost', ip: req.ip, details: { merged, failed: failed.length } });
     });
-    return { merged };
+    return { merged, failed };
+  });
+
+  /** Costs that could be this one counted twice: about the same amount, within a fortnight. */
+  app.get('/api/costs/:id/twins', { preHandler: requireRole('owner') }, async (req) => {
+    const { id } = parse(idParam, req.params);
+    return sql`
+      select o.id, o.date::text, o.amount_cents, o.description, o.supplier, k.name as category_name, s.name as source_name,
+        o.project_id, p.name as project_name, p.number as project_number, o.note like 'From statement:%' as from_statement,
+        exists (select 1 from bank_matches m where m.kind = 'cost' and m.record_id = o.id) as bank_matched
+      from costs c join costs o on o.id <> c.id and abs(o.amount_cents - c.amount_cents) <= 100 and o.date between c.date - 14 and c.date + 14
+      join cost_categories k on k.id = o.category_id left join payment_sources s on s.id = o.source_id left join projects p on p.id = o.project_id
+      where c.id = ${id}
+      order by (o.amount_cents = c.amount_cents) desc, abs(o.date - c.date), o.created_at limit 10`;
   });
 
   /** Suppliers you've used, most used first, for the picker on the phone. */
@@ -179,6 +180,52 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 }
 
+/**
+ * Folds `copyId` into `originalId`: the original is kept (its job, type and slip), filled in
+ * from the copy where it has nothing, and takes the copy's tie to the bank. Returns why not, or null.
+ */
+export async function mergeCosts(tx: Db, copyId: string, originalId: string): Promise<string | null> {
+  if (copyId === originalId) return 'That’s the same cost';
+  const [c] = await tx<{ id: string; date: string; amountCents: number; sourceId: string | null; projectId: string | null; receiptId: string | null; supplier: string }[]>`
+    select id, date::text, amount_cents, source_id, project_id, receipt_id, supplier from costs where id = ${copyId}`;
+  const [o] = await tx<{ id: string; date: string; amountCents: number; projectId: string | null; receiptId: string | null; supplier: string }[]>`
+    select id, date::text, amount_cents, project_id, receipt_id, supplier from costs where id = ${originalId}`;
+  if (!c || !o) return 'One of them was already deleted';
+  if (Math.abs(c.amountCents - o.amountCents) > 100) return 'The amounts differ by more than R1';
+  const [asset] = await tx`select 1 from assets where cost_id = ${c.id}`;
+  if (asset) return 'The one to remove is an asset purchase';
+  await assertOpen(tx, c.date, o.date);
+  type L = { id: string; statementId: string; sourceId: string; date: string; amountCents: number; others: number };
+  const lines = (costId: string) => tx<L[]>`
+    select l.id, l.statement_id, l.source_id, l.date::text, l.amount_cents,
+      (select count(*)::int from bank_matches x where x.bank_line_id = l.id and x.record_id <> ${costId}) as others
+    from bank_matches m join bank_lines l on l.id = m.bank_line_id where m.kind = 'cost' and m.record_id = ${costId}`;
+  const [cl, ol] = [await lines(c.id), await lines(o.id)];
+  let note = '';
+  if (cl.length && !ol.length) {
+    // The usual case: the statement paid the one you captured.
+    await tx`update bank_matches set record_id = ${o.id} where kind = 'cost' and record_id = ${c.id}`;
+    if (o.amountCents !== c.amountCents) note = `Rounded by R${((c.amountCents - o.amountCents) / 100).toFixed(2)} to match the statement`;
+    await tx`update costs set source_id = ${c.sourceId}, amount_cents = ${c.amountCents} where id = ${o.id}`;
+  } else if (cl.length && ol.length) {
+    // Both tied to the bank: fine only if it's one transaction imported twice (in two different statement files).
+    for (const a of cl) {
+      const twin = ol.find((b) => b.id !== a.id && b.statementId !== a.statementId && b.sourceId === a.sourceId && b.amountCents === a.amountCents && b.date === a.date);
+      if (!twin || a.others) return 'The bank shows these as two separate payments';
+    }
+    await tx`delete from bank_lines where id = any(${cl.map((a) => a.id)}::uuid[])`;
+  }
+  await tx`update costs set
+      project_id = coalesce(project_id, ${c.projectId}::uuid),
+      no_job = case when project_id is null and ${c.projectId}::uuid is not null then false else no_job end,
+      receipt_id = coalesce(receipt_id, ${c.receiptId}::uuid),
+      supplier = case when supplier = '' then ${c.supplier} else supplier end,
+      note = case when ${note} = '' then note when note = '' then ${note} else note || ' · ' || ${note} end
+    where id = ${o.id}`;
+  await tx`delete from costs where id = ${c.id}`;
+  return null;
+}
+
 export async function findDuplicates(db: Db) {
   const rows = await db<
     {
@@ -198,14 +245,22 @@ export async function findDuplicates(db: Db) {
       select o.* from costs o
       where o.id <> s.id and abs(o.amount_cents - s.amount_cents) <= 100 and o.date between (s.date - 12) and (s.date + 5)
         and o.note not like 'From statement:%'
-        and not exists (select 1 from bank_matches m2 where m2.kind = 'cost' and m2.record_id = o.id)
+        and not exists (select 1 from assets a where a.cost_id = s.id)
+        and (
+          not exists (select 1 from bank_matches m2 where m2.kind = 'cost' and m2.record_id = o.id)
+          or not exists (select 1 from bank_matches m3 where m3.kind = 'cost' and m3.record_id = s.id)
+          or exists (
+            select 1 from bank_matches ms join bank_lines ls on ls.id = ms.bank_line_id
+            join bank_matches mo on mo.kind = 'cost' and mo.record_id = o.id join bank_lines lo on lo.id = mo.bank_line_id
+            where ms.kind = 'cost' and ms.record_id = s.id and lo.id <> ls.id and lo.source_id = ls.source_id
+              and lo.statement_id <> ls.statement_id and lo.amount_cents = ls.amount_cents and lo.date = ls.date))
       order by (o.amount_cents = s.amount_cents) desc, (o.project_id is not null) desc, abs(o.date - s.date), o.created_at
       limit 1
     ) o on true
     join cost_categories ok on ok.id = o.category_id
     left join payment_sources os on os.id = o.source_id
     left join projects p on p.id = o.project_id
-    where s.note like 'From statement:%' and exists (select 1 from bank_matches m where m.kind = 'cost' and m.record_id = s.id)
+    where s.note like 'From statement:%'
     order by s.date desc`;
   // One copy per captured cost.
   const used = new Set<string>();

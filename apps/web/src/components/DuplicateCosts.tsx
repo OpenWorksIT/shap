@@ -42,8 +42,11 @@ export function DuplicateCosts({ onChanged }: { onChanged?: () => void }) {
     setBusy(true);
     try {
       const pairs = (data ?? []).filter((p) => picked.has(p.copyId)).map((p) => ({ copyId: p.copyId, originalId: p.originalId }));
-      const r = await api<{ merged: number }>('/api/costs/merge', { body: { pairs } });
-      toast(`${r.merged} duplicate${r.merged === 1 ? '' : 's'} merged`);
+      const r = await api<{ merged: number; failed: { reason: string }[] }>('/api/costs/merge', { body: { pairs } });
+      toast(
+        `${r.merged} duplicate${r.merged === 1 ? '' : 's'} merged${r.failed.length ? ` · ${r.failed.length} not: ${r.failed[0]!.reason}` : ''}`,
+        r.failed.length && !r.merged ? 'error' : undefined,
+      );
       await reload();
       onChanged?.();
     } catch (err) {

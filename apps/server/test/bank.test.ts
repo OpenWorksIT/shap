@@ -330,4 +330,38 @@ describe('reconciling a statement', () => {
     expect((await owner.get(`/api/bank/recon?sourceId=${bank}`)).lines.some((l: { description: string }) => l.description === 'NETFLIX')).toBe(false);
     expect(await ledgerTotal(env.sql)).toBe(0);
   });
+
+  it('merges a copy whose statement line was itself imported twice, and by hand from either cost', async () => {
+    const job = await owner.post('/api/projects', { name: 'Boundary wall', startDate: '2026-07-01' });
+    const captured = await owner.post('/api/costs', {
+      date: '2026-07-09', description: 'Sand, cement', amountCents: 31000, supplier: 'Mr Builder', categoryId: cats.parts, sourceId: card, projectId: job.id,
+    });
+    const a = await owner.post('/api/bank/statements', { sourceId: card, csv: ['Date,Amount,Balance,Description', '2026/07/09,-310.00,,MR BUILDER'].join('\n') });
+    expect(a.autoMatched).toBe(1);
+    // The same transaction again, written differently in another download.
+    await owner.post('/api/bank/statements', { sourceId: card, csv: ['Date,Amount,Balance,Description', '2026/07/09,-310.00,,MR Builder Walmer'].join('\n') });
+    const rec = await owner.get(`/api/bank/recon?sourceId=${card}`);
+    const dup = rec.lines.find((l: { description: string }) => l.description === 'MR Builder Walmer');
+    expect(dup.state).toBe('open');
+    await owner.post('/api/bank/lines/create-costs', { items: [{ lineId: dup.id, categoryId: cats.parts, force: true }] });
+    const found = (await owner.get('/api/costs/duplicates')).find((d: { originalId: string }) => d.originalId === captured.id);
+    expect(found).toBeTruthy();
+    const twins = await owner.get(`/api/costs/${found.copyId}/twins`);
+    expect(twins.map((t: { id: string }) => t.id)).toContain(captured.id);
+    const r = await owner.post('/api/costs/merge', { pairs: [{ copyId: found.copyId, originalId: captured.id }] });
+    expect(r).toEqual({ merged: 1, failed: [] });
+    const after = await owner.get(`/api/bank/recon?sourceId=${card}`);
+    expect(after.lines.filter((l: { amountCents: number; date: string }) => l.date === '2026-07-09' && l.amountCents === -31000)).toHaveLength(1);
+    const [c] = await env.sql<{ projectId: string }[]>`select project_id from costs where id = ${captured.id}`;
+    expect(c!.projectId).toBe(job.id);
+
+    // Two real payments of the same amount are not folded together.
+    const p1 = await owner.post('/api/costs', { date: '2026-07-20', description: 'Paint', amountCents: 50000, supplier: 'Mica', categoryId: cats.parts, sourceId: card });
+    const p2 = await owner.post('/api/costs', { date: '2026-07-22', description: 'Paint', amountCents: 50000, supplier: 'Mica', categoryId: cats.parts, sourceId: card });
+    await owner.post('/api/bank/statements', { sourceId: card, csv: ['Date,Amount,Balance,Description', '2026/07/20,-500.00,,MICA', '2026/07/22,-500.00,,MICA'].join('\n') });
+    const no = await owner.post('/api/costs/merge', { pairs: [{ copyId: p2.id, originalId: p1.id }] });
+    expect(no.merged).toBe(0);
+    expect(no.failed[0].reason).toMatch(/two separate payments/);
+    expect(await ledgerTotal(env.sql)).toBe(0);
+  });
 });

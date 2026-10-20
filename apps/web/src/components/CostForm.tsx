@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { todayIso, vatIncluded } from '@shap/shared';
+import { formatDate, formatZar, todayIso, vatIncluded } from '@shap/shared';
 import { api, ApiError, apiUrl } from '../lib/api';
 import { shrinkImage } from '../lib/files';
 import { useApi } from '../lib/hooks';
@@ -210,6 +210,7 @@ export function CostForm({ initial, projectId, plannedItem, onSaved, onDeleted }
         </div>
       </div>
       <Field label="Note (optional)">{(p) => <input {...p} className="input" value={f.note} onChange={(e) => set('note', e.target.value)} />}</Field>
+      {f.id && isOwner && <Twins id={f.id} onMerged={(gone) => (gone ? onDeleted?.() : onSaved?.())} />}
       {error && <div className="banner alert small">{error}</div>}
       <div className="row">
         <button className="btn primary big grow" disabled={busy || uploading}>
@@ -222,5 +223,70 @@ export function CostForm({ initial, projectId, plannedItem, onSaved, onDeleted }
         )}
       </div>
     </form>
+  );
+}
+
+interface Twin {
+  id: string;
+  date: string;
+  amountCents: number;
+  description: string;
+  supplier: string;
+  categoryName: string;
+  sourceName: string | null;
+  projectName: string | null;
+  projectNumber: number | null;
+  fromStatement: boolean;
+}
+
+/** The same purchase captured twice: fold one into the other. */
+function Twins({ id, onMerged }: { id: string; onMerged: (thisOneGone: boolean) => void }) {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const { data } = useApi<Twin[]>(open ? `/api/costs/${id}/twins` : null);
+  const merge = async (copyId: string, originalId: string) => {
+    try {
+      const r = await api<{ merged: number; failed: { reason: string }[] }>('/api/costs/merge', { body: { pairs: [{ copyId, originalId }] } });
+      if (!r.merged) return toast(r.failed[0]?.reason ?? 'Couldn’t merge', 'error');
+      toast('Merged');
+      onMerged(copyId === id);
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Couldn’t merge', 'error');
+    }
+  };
+  if (!open)
+    return (
+      <button type="button" className="btn quiet small" style={{ alignSelf: 'flex-start' }} onClick={() => setOpen(true)}>
+        Counted twice? Find the other one
+      </button>
+    );
+  return (
+    <div className="panel panel-pad stack" style={{ gap: 8 }}>
+      <strong className="small">Costs of about the same amount, within two weeks</strong>
+      {!data ? (
+        <span className="small muted">Looking…</span>
+      ) : !data.length ? (
+        <span className="small muted">None found.</span>
+      ) : (
+        data.map((t) => (
+          <div key={t.id} className="row wrap small" style={{ gap: 8 }}>
+            <span className="grow">
+              {formatDate(t.date)} · {t.description}
+              {t.supplier && t.supplier !== t.description ? ` – ${t.supplier}` : ''} · {formatZar(t.amountCents)}
+              <span className="xs muted" style={{ display: 'block' }}>
+                {t.categoryName} · {t.sourceName ?? 'not captured'} · {t.projectName ? `#${t.projectNumber} ${t.projectName}` : 'no job'}
+                {t.fromStatement ? ' · added from a statement' : ''}
+              </span>
+            </span>
+            <button type="button" className="btn small" onClick={() => void merge(id, t.id)} title="Remove this cost; keep the other">
+              Keep that one
+            </button>
+            <button type="button" className="btn small quiet" onClick={() => void merge(t.id, id)} title="Remove the other; keep this cost">
+              Keep this one
+            </button>
+          </div>
+        ))
+      )}
+    </div>
   );
 }
