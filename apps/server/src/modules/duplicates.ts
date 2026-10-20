@@ -117,11 +117,28 @@ export async function findDuplicates(db: Db): Promise<Duplicate[]> {
       and (s.project_id is null or s.project_id = o.project_id)
       and not exists (select 1 from bank_matches m where m.kind = 'cost' and m.record_id = o.id)`)) as unknown as Row[];
 
+  // Pairs you said aren't the same purchase stay off the list (either way round).
+  const notSame = new Set(
+    (
+      await db<{ subject: string; target: string }[]>`
+        select subject::text, target from rejected_suggestions where kind = 'duplicate'
+        union all
+        -- Turned down as the match for a statement line, then the line added as its own cost:
+        -- that cost and the one turned down aren't the same purchase either.
+        select m.record_id::text, substring(r.target from 6) from rejected_suggestions r
+        join bank_matches m on m.bank_line_id = r.subject and m.kind = 'cost'
+        where r.kind = 'bank' and r.target like 'cost:%' and r.target not like '%,%'`
+    ).flatMap((r) => [
+      `${r.subject}|${r.target}`,
+      `${r.target}|${r.subject}`,
+    ]),
+  );
   const used = new Set<string>();
   const out: Duplicate[] = [];
   const take = (r: Row, kind: Duplicate['kind'], keep: boolean) => {
     const removeId = r.rId as string;
     const keepId = keep ? (r.kId as string) : null;
+    if (notSame.has(`${removeId}|${keepId ?? ''}`)) return;
     if (used.has(removeId) || (keepId && used.has(keepId))) return;
     used.add(removeId);
     if (keepId) used.add(keepId);
@@ -328,6 +345,39 @@ export function registerDuplicateRoutes(app: FastifyInstance, ctx: Ctx): void {
       await audit(tx, { userId: user.id, action: 'merge_duplicates', entity: 'cost', ip: req.ip, details: { merged, failed: results.length - merged, removed: results.filter((r) => r.ok).map((r) => r.removeId) } });
     });
     return { merged: results.filter((r) => r.ok).length, results };
+  });
+
+  /** "Not the same": these pairs are two purchases and aren't suggested again. */
+  app.post('/api/costs/duplicates/reject', { preHandler: requireRole('owner') }, async (req) => {
+    const user = userOrThrow(req);
+    const { pairs } = parse(z.object({ pairs: z.array(z.object({ removeId: uuid, keepId: uuid.nullable() })).min(1).max(1000) }), req.body);
+    await sql.begin(async (tx) => {
+      for (const p of pairs) {
+        await tx`insert into rejected_suggestions (kind, subject, target, user_id) values ('duplicate', ${p.removeId}, ${p.keepId ?? ''}, ${user.id})
+          on conflict (kind, subject, target) do nothing`;
+      }
+      await audit(tx, { userId: user.id, action: 'not_duplicates', entity: 'cost', ip: req.ip, details: { pairs: pairs.length } });
+    });
+    return { ok: true };
+  });
+
+  /** The pairs marked "not the same", to bring one back. */
+  app.get('/api/costs/duplicates/rejected', { preHandler: requireRole('owner', 'accountant') }, async () => {
+    return sql`
+      select r.id, r.at, a.id as a_id, a.date::text as a_date, a.description as a_description, a.amount_cents as a_amount_cents,
+        b.id as b_id, b.date::text as b_date, b.description as b_description, b.amount_cents as b_amount_cents
+      from rejected_suggestions r
+      join costs a on a.id = r.subject
+      left join costs b on r.target <> '' and b.id = r.target::uuid
+      where r.kind = 'duplicate' and (r.target = '' or b.id is not null)
+      order by r.at desc limit 300`;
+  });
+
+  app.delete('/api/costs/duplicates/rejected/:id', { preHandler: requireRole('owner') }, async (req) => {
+    const { id } = parse(z.object({ id: uuid }), req.params);
+    const r = await sql`delete from rejected_suggestions where id = ${id} and kind = 'duplicate'`;
+    if (!r.count) throw notFound('That pair');
+    return { ok: true };
   });
 
   app.get('/api/costs/merges', { preHandler: requireRole('owner', 'accountant') }, async () => {

@@ -32,6 +32,19 @@ interface Pair {
   keepLineAccount: string | null;
 }
 
+interface Rejected {
+  id: string;
+  at: string;
+  aId: string;
+  aDate: string;
+  aDescription: string;
+  aAmountCents: number;
+  bId: string | null;
+  bDate: string | null;
+  bDescription: string | null;
+  bAmountCents: number | null;
+}
+
 interface Merge {
   id: string;
   at: string;
@@ -57,6 +70,7 @@ export function DuplicateCosts() {
   const toast = useToast();
   const { data, error, loading, reload } = useApi<Pair[]>('/api/costs/duplicates');
   const merges = useApi<Merge[]>('/api/costs/merges');
+  const rejected = useApi<Rejected[]>('/api/costs/duplicates/rejected');
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [problems, setProblems] = useState<Record<string, string>>({});
@@ -88,6 +102,30 @@ export function DuplicateCosts() {
     }
   };
 
+  /** "Not the same": two purchases after all. They stay off this list (and can be brought back). */
+  const notSame = async (pairs: Pair[]) => {
+    if (!pairs.length) return;
+    setBusy(true);
+    try {
+      await api('/api/costs/duplicates/reject', { body: { pairs: pairs.map((p) => ({ removeId: p.removeId, keepId: p.keepId })) } });
+      toast(pairs.length === 1 ? 'Marked as not the same' : `${pairs.length} marked as not the same`);
+      await Promise.all([reload(), rejected.reload()]);
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Couldn’t save that', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const bringBack = async (r: Rejected) => {
+    try {
+      await api(`/api/costs/duplicates/rejected/${r.id}`, { method: 'DELETE' });
+      toast('Back on the list');
+      await Promise.all([reload(), rejected.reload()]);
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Couldn’t bring it back', 'error');
+    }
+  };
+
   const undo = async (m: Merge) => {
     try {
       await api(`/api/costs/merges/${m.id}/undo`, { body: {} });
@@ -116,7 +154,7 @@ export function DuplicateCosts() {
           <div className="banner signal small">
             <strong>Imported twice:</strong> the same bank transaction came in on two statements (often one under the wrong account), and each copy became a
             cost. <strong>Added twice:</strong> you captured the slip, then the statement line was added as a new cost. Merging keeps the one on the right
-            (its job, type and slip) and removes the one on the left, with its extra copy of the statement line. Untick any that really were two purchases.
+            (its job, type and slip) and removes the one on the left, with its extra copy of the statement line. If two really are different purchases, choose <strong>Not the same</strong>: that pair won’t be suggested again.
           </div>
           <div className="panel table-wrap">
             <table className="table">
@@ -162,6 +200,11 @@ export function DuplicateCosts() {
                         {p.lineAccount ? ` · on the ${p.lineAccount} statement` : ''}
                       </div>
                       {problems[p.removeId] && <div className="xs warn-text">{problems[p.removeId]}</div>}
+                      {isOwner && (
+                        <button className="btn quiet small" style={{ marginTop: 4 }} disabled={busy} onClick={() => void notSame([p])} title="These are two different purchases: don’t suggest this again">
+                          Not the same
+                        </button>
+                      )}
                     </td>
                     <td className="small">
                       {p.keepId ? (
@@ -194,12 +237,44 @@ export function DuplicateCosts() {
               <span className="grow small">
                 <strong>{picked.size}</strong> of {data.length} ticked
               </span>
+              <button className="btn quiet" disabled={busy || !picked.size} onClick={() => void notSame(data.filter((p) => picked.has(p.removeId)))}>
+                Not the same
+              </button>
               <button className="btn primary" disabled={busy || !picked.size} onClick={() => void merge()}>
                 {busy ? 'Merging…' : `Merge ${picked.size}`}
               </button>
             </section>
           )}
         </div>
+      )}
+
+      {(rejected.data ?? []).length > 0 && (
+        <details className="panel panel-pad">
+          <summary className="small">
+            <strong>Marked not the same</strong> ({rejected.data!.length}): kept off the list
+          </summary>
+          <div className="table-wrap" style={{ marginTop: 8 }}>
+            <table className="table">
+              <tbody>
+                {rejected.data!.map((r) => (
+                  <tr key={r.id}>
+                    <td className="small">
+                      {formatDate(r.aDate)} · {r.aDescription} · {formatZar(r.aAmountCents)}
+                    </td>
+                    <td className="small">{r.bId ? `${r.bDate ? formatDate(r.bDate) : ''} · ${r.bDescription} · ${formatZar(r.bAmountCents ?? 0)}` : <span className="muted">(statement line imported twice)</span>}</td>
+                    {isOwner && (
+                      <td className="nowrap">
+                        <button className="btn small quiet" onClick={() => void bringBack(r)}>
+                          Bring back
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
       )}
 
       {recent.length > 0 && (

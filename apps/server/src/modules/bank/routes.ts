@@ -8,7 +8,7 @@ import { assertOpen, q } from '../../lib/books.js';
 import { badRequest, notFound } from '../../lib/errors.js';
 import { parse } from '../../lib/validate.js';
 import { depositDueSql, syncProjectOfDocument } from '../documents.js';
-import { guessCategory, guessIncome, similar, suggestMatches, supplierFrom, type Suggestion } from './match.js';
+import { guessCategory, guessIncome, similar, suggestionKey, suggestMatches, supplierFrom, type Suggestion } from './match.js';
 
 /** By hand, a match may be out by up to R1 (a supplier's or bank's rounding); the largest item takes the difference. */
 const HAND_ROUNDING_CENTS = 100;
@@ -65,8 +65,9 @@ async function assertLinesChangeable(db: Db, lineIds: string[]) {
  * same supplier by name, or the exact amount within 3 days. Adding such a line as a new cost
  * would count the purchase twice, so it's held back and the captured one shown instead.
  */
-async function twinsFor(db: Db, lines: { id: string; date: string; amountCents: number; description: string }[]) {
+async function twinsFor(db: Db, lines: { id: string; date: string; amountCents: number; description: string }[], rejected?: Set<string>) {
   const outs = lines.filter((l) => l.amountCents < 0);
+  const no = rejected ?? (await rejectedFor(db, outs.map((l) => l.id)));
   const found = new Map<string, { costId: string; label: string }>();
   if (!outs.length) return found;
   const rows = (await db.unsafe(
@@ -83,7 +84,7 @@ async function twinsFor(db: Db, lines: { id: string; date: string; amountCents: 
   )) as unknown as { lineId: string; id: string; date: string; amountCents: number; description: string; supplier: string; projectName: string | null }[];
   for (const l of outs) {
     const twin = rows.find((c) => {
-      if (c.lineId !== l.id) return false;
+      if (c.lineId !== l.id || no.has(`${l.id}|cost:${c.id}`)) return false;
       const named = similar(l.description, c.supplier) || similar(l.description, c.description);
       const near = c.amountCents === -l.amountCents && Math.abs(Date.parse(c.date) - Date.parse(l.date)) <= 3 * 864e5;
       return named || near;
@@ -96,6 +97,14 @@ async function twinsFor(db: Db, lines: { id: string; date: string; amountCents: 
     }
   }
   return found;
+}
+
+/** Suggestions turned down for these statement lines, as "lineId|key". */
+async function rejectedFor(db: Db, lineIds: string[]): Promise<Set<string>> {
+  if (!lineIds.length) return new Set();
+  const rows = await db<{ subject: string; target: string }[]>`
+    select subject, target from rejected_suggestions where kind = 'bank' and subject = any(${lineIds}::uuid[])`;
+  return new Set(rows.map((r) => `${r.subject}|${r.target}`));
 }
 
 /** Is this date open for changes (after the lock date)? */
@@ -328,7 +337,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.get('/api/bank/statements', readers, async () => {
     return sql`
-      select s.id, s.source_id, ps.name as source_name, s.filename, s.from_date::text, s.to_date::text, s.closing_balance_cents, s.created_at,
+      select s.id, s.source_id, ps.name as source_name, s.filename, s.from_date::text, s.to_date::text, s.closing_balance_cents, s.created_at, s.elsewhere_ok,
         (select count(*)::int from bank_lines l where l.statement_id = s.id) as line_count,
         (select count(*)::int from bank_lines l where l.statement_id = s.id and exists (select 1 from bank_matches m where m.bank_line_id = l.id)) as matched_count,
         (select count(*)::int from costs c join bank_matches m on m.kind = 'cost' and m.record_id = c.id join bank_lines l on l.id = m.bank_line_id
@@ -462,18 +471,25 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
     let suggestions = new Map<string, Suggestion>();
     if (open.length) {
       const cands = await candidates(sql, sourceId, open[0]!.date, open[open.length - 1]!.date);
-      suggestions = suggestMatches(open, cands);
+      const no = await rejectedFor(sql, open.map((l) => l.id));
+      suggestions = suggestMatches(open, cands, no);
       // Lines the matcher couldn't place but that look like a cost already captured: suggested
       // too (never automatically), so they're matched rather than added a second time.
       const taken = new Set([...suggestions.values()].filter((s) => s.kind === 'cost').flatMap((s) => s.ids));
-      const twins = await twinsFor(sql, open.filter((l) => !suggestions.has(l.id)));
+      const twins = await twinsFor(sql, open.filter((l) => !suggestions.has(l.id)), no);
       for (const [lineId, t] of twins) {
         if (taken.has(t.costId)) continue;
         taken.add(t.costId);
         suggestions.set(lineId, { kind: 'cost', ids: [t.costId], score: 40, label: `Already captured? ${t.label}` });
       }
     }
-    return { lines, matched, suggestions };
+    const rejectedCount = new Map<string, number>();
+    if (open.length) {
+      const rows = await sql<{ subject: string; n: number }[]>`
+        select subject, count(*)::int as n from rejected_suggestions where kind = 'bank' and subject = any(${open.map((l) => l.id)}::uuid[]) group by subject`;
+      for (const r of rows) rejectedCount.set(r.subject, r.n);
+    }
+    return { lines, matched, suggestions, rejectedCount };
   };
 
   const applySuggestions = async (sourceId: string, lineIds: string[] | null, minScore = 0) => {
@@ -509,7 +525,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/bank/recon', readers, async (req) => {
     const { sourceId, statementId } = q(req);
     if (!sourceId || !uuid.safeParse(sourceId).success) throw badRequest('Choose an account');
-    const { lines, matched, suggestions } = await recon(sourceId, statementId && uuid.safeParse(statementId).success ? statementId : null);
+    const { lines, matched, suggestions, rejectedCount } = await recon(sourceId, statementId && uuid.safeParse(statementId).success ? statementId : null);
     const categories = await sql<{ id: string; name: string; active: boolean }[]>`select id, name, active from cost_categories`;
     const history = await sql<{ supplier: string; categoryId: string }[]>`
       select supplier, category_id from costs where supplier <> '' order by date desc limit 3000`;
@@ -534,12 +550,41 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
           state: m ? 'matched' : l.ignored ? 'ignored' : s ? 'suggested' : 'open',
           matches: m ?? [],
           suggestion: s,
+          // Suggestions you turned down for this line (they can be brought back).
+          rejected: rejectedCount.get(l.id) ?? 0,
           supplier: supplierFrom(l.description),
           categoryId: m ? null : l.amountCents < 0 ? guessCategory(l.description, categories, history) : guessCategory(l.description, categories, history, { fallback: false }),
           incomeAccountId: !m && l.amountCents > 0 ? guessIncome(l.description, incomeAccounts) : null,
         };
       }),
     };
+  });
+
+  /** "Not this": the suggestion is wrong for this line and isn't offered again (the next best is). */
+  app.post('/api/bank/lines/:id/reject', owner, async (req) => {
+    const user = userOrThrow(req);
+    const { id } = parse(z.object({ id: uuid }), req.params);
+    const s = parse(z.object({ kind: z.enum(['cost', 'receipt', 'wage_payment', 'invoice']), ids: z.array(uuid).min(1).max(50) }), req.body);
+    await loadLine(sql, id);
+    await sql`insert into rejected_suggestions (kind, subject, target, user_id) values ('bank', ${id}, ${suggestionKey(s)}, ${user.id})
+      on conflict (kind, subject, target) do nothing`;
+    return { ok: true };
+  });
+
+  /** Brings back the suggestions turned down for a line. */
+  app.delete('/api/bank/lines/:id/reject', owner, async (req) => {
+    const { id } = parse(z.object({ id: uuid }), req.params);
+    const r = await sql`delete from rejected_suggestions where kind = 'bank' and subject = ${id}`;
+    return { ok: true, restored: r.count };
+  });
+
+  /** A statement flagged as also on another account, looked at and fine (or flag it again). */
+  app.post('/api/bank/statements/:id/elsewhere-ok', owner, async (req) => {
+    const { id } = parse(z.object({ id: uuid }), req.params);
+    const { ok } = parse(z.object({ ok: z.boolean().default(true) }), req.body);
+    const r = await sql`update bank_statements set elsewhere_ok = ${ok} where id = ${id}`;
+    if (!r.count) throw notFound('Statement');
+    return { ok: true };
   });
 
   app.post('/api/bank/accept', owner, async (req) => {

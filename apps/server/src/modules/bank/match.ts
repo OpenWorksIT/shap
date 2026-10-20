@@ -95,9 +95,14 @@ function subsetSum(items: { id: string; amountCents: number }[], target: number)
   return walk(0, target) ? [...picked] : null;
 }
 
+/** A suggestion as a key, to remember that you said it's wrong for that line. */
+export const suggestionKey = (s: { kind: string; ids: string[] }) => `${s.kind}:${[...s.ids].sort().join(',')}`;
+
 export function suggestMatches(
   lines: BankLine[],
   c: { costs: CostCandidate[]; receipts: ReceiptCandidate[]; wages: WageCandidate[]; invoices: InvoiceCandidate[] },
+  /** "lineId|key" for suggestions you turned down: the next best is offered instead. */
+  rejected: Set<string> = new Set(),
 ): Map<string, Suggestion> {
   const options: { lineId: string; s: Suggestion }[] = [];
   for (const line of lines) {
@@ -178,6 +183,7 @@ export function suggestMatches(
   const out = new Map<string, Suggestion>();
   for (const o of options) {
     if (out.has(o.lineId) || o.s.ids.some((id) => used.has(`${o.s.kind}:${id}`))) continue;
+    if (rejected.has(`${o.lineId}|${suggestionKey(o.s)}`)) continue;
     out.set(o.lineId, o.s);
     for (const id of o.s.ids) used.add(`${o.s.kind}:${id}`);
   }

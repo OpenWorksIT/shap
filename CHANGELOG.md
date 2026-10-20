@@ -3,6 +3,21 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.2.1 (21 October 2026)
+
+- **Telling Shap a suggestion is wrong.** Every place that suggests something now takes a
+  "no", remembers it, and stops suggesting it:
+  - *Costs counted twice*: **Not the same** on a pair (or on all ticked ones). It leaves the
+    list and the Home reminder for good. *Marked not the same* lists them to bring one back.
+  - *Bank statements*: **Not this** on a suggested match is now saved (it used to come back
+    whenever the page reloaded). The next best match is offered instead, if there is one, and a
+    line you've turned down "Already captured?" for is no longer held back when you add it.
+    *Show turned down* on the line brings them back.
+  - Turning a cost down as a bank line's match also means the two aren't paired later as
+    counted twice.
+  - *Imported statements*: a statement flagged as also on another account can be marked
+    **It's fine** (transfers between your own accounts), and flagged again.
+
 ## 1.2.0 (20 October 2026)
 
 Bank statements and costs counted twice, reworked and tested end to end on a replay of a real

@@ -17,6 +17,8 @@ interface Line {
   state: State;
   matches: { kind: string; id: string; label: string; amountCents: number }[];
   suggestion: { kind: string; ids: string[]; score: number; label: string } | null;
+  /** Suggestions turned down for this line ("Not this"). */
+  rejected: number;
   supplier: string;
   categoryId: string | null;
   incomeAccountId: string | null;
@@ -64,7 +66,6 @@ export function BankRecon() {
   const { data, error, loading, reload } = useApi<Recon>(sourceId ? `/api/bank/recon?sourceId=${sourceId}` : null);
   const [ticked, setTicked] = useState<Set<string>>(new Set());
   const [edits, setEdits] = useState<Record<string, { target?: string; supplier?: string }>>({});
-  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [drawer, setDrawer] = useState<null | { kind: 'match' | 'transfer'; line: Line }>(null);
   const [showImport, setShowImport] = useState(false);
@@ -84,14 +85,13 @@ export function BankRecon() {
       return n;
     });
     for (const id of todoIds) seen.current.ids.add(id);
-    setDismissed((d) => new Set([...d].filter((id) => here.has(id))));
   }, [data, sourceId]);
 
   const lines = useMemo(() => {
-    const all = (data?.lines ?? []).map((l) => (l.state === 'suggested' && dismissed.has(l.id) ? { ...l, state: 'open' as State, suggestion: null } : l));
+    const all = data?.lines ?? [];
     const show = view === 'todo' ? (l: Line) => l.state === 'open' || l.state === 'suggested' : view === 'all' ? () => true : (l: Line) => l.state === view;
     return all.filter(show);
-  }, [data, view, dismissed]);
+  }, [data, view]);
   const counts = useMemo(() => {
     const c = { open: 0, suggested: 0, matched: 0, ignored: 0 };
     for (const l of data?.lines ?? []) c[l.state]++;
@@ -134,7 +134,6 @@ export function BankRecon() {
                 incomeAccountId: t.startsWith('inc:') ? t.slice(4) : null,
                 supplier: edits[l.id]?.supplier ?? l.supplier,
                 // You said "Not this" to the captured cost Shap suggested: add it regardless.
-                force: dismissed.has(l.id),
               };
             }),
           },
@@ -271,9 +270,21 @@ export function BankRecon() {
                           busy={busy}
                           canEdit={isOwner}
                           onAccept={() => run(async () => ((await api<{ matched: number }>('/api/bank/accept', { body: { sourceId, lineIds: [l.id] } })).matched ? 'Matched' : 'Already matched'))}
-                          onDismiss={() => setDismissed((d) => new Set(d).add(l.id))}
-                          onUnmatch={() => run(async () => (await api(`/api/bank/lines/${l.id}/match`, { method: 'DELETE' }), 'Unmatched'))}
+                          onDismiss={() =>
+                            l.suggestion &&
+                            run(async () => {
+                              await api(`/api/bank/lines/${l.id}/reject`, { body: { kind: l.suggestion!.kind, ids: l.suggestion!.ids } });
+                              return 'Won’t suggest that for this line again';
+                            })
+                          }
                           onBringBack={() => void leaveOff([l.id], false)}
+                          onRestoreRejected={() =>
+                            run(async () => {
+                              await api(`/api/bank/lines/${l.id}/reject`, { method: 'DELETE' });
+                              return 'Suggestions back';
+                            })
+                          }
+                          onUnmatch={() => run(async () => (await api(`/api/bank/lines/${l.id}/match`, { method: 'DELETE' }), 'Unmatched'))}
                           onLeaveOff={() => void leaveOff([l.id])}
                           onFind={() => setDrawer({ kind: 'match', line: l })}
                           onTransfer={() => setDrawer({ kind: 'transfer', line: l })}
@@ -327,6 +338,7 @@ function LineAction(p: {
   canEdit: boolean;
   onAccept: () => void;
   onDismiss: () => void;
+  onRestoreRejected: () => void;
   onUnmatch: () => void;
   onBringBack: () => void;
   onLeaveOff: () => void;
@@ -373,6 +385,11 @@ function LineAction(p: {
       <button className="btn quiet small" onClick={p.onLeaveOff} disabled={p.busy}>
         Leave off
       </button>
+      {l.rejected > 0 && (
+        <button className="btn quiet small" onClick={p.onRestoreRejected} disabled={p.busy} title="Suggestions you said were wrong for this line">
+          Show {l.rejected} turned down
+        </button>
+      )}
     </span>
   );
   if (l.state === 'suggested' && l.suggestion)
@@ -385,7 +402,7 @@ function LineAction(p: {
           <button className="btn small" onClick={p.onAccept} disabled={p.busy}>
             {l.suggestion.kind === 'invoice' ? 'Record it' : 'Match'}
           </button>
-          <button className="btn quiet small" onClick={p.onDismiss}>
+          <button className="btn quiet small" onClick={p.onDismiss} disabled={p.busy} title="It isn’t this: don’t suggest it again for this line">
             Not this
           </button>
           {more}
@@ -723,6 +740,7 @@ interface Statement {
   addedCosts: number;
   elsewhereCount: number;
   elsewhereName: string | null;
+  elsewhereOk: boolean;
   createdAt: string;
 }
 
@@ -777,6 +795,11 @@ function ImportedStatements({
         .join(' · ');
     });
   };
+  const markFine = (st: Statement, ok: boolean) =>
+    run(st.id, async () => {
+      await api(`/api/bank/statements/${st.id}/elsewhere-ok`, { body: { ok } });
+      return ok ? 'Marked as fine' : 'Flagged again';
+    });
   const remove = (st: Statement, removeAdded: boolean) => {
     const sure = removeAdded
       ? `Take this statement out as if it was never imported? Its lines go, and so do the ${st.addedCosts} cost${st.addedCosts === 1 ? '' : 's'} and any invoice payments, transfers or income entries added from it. Costs you captured yourself stay, with the account they had before.`
@@ -811,12 +834,23 @@ function ImportedStatements({
                   imported {formatDate(st.createdAt.slice(0, 10))}
                 </span>
               </div>
-              {st.elsewhereCount > 0 && st.elsewhereName && (
+              {st.elsewhereCount > 0 && st.elsewhereName && st.elsewhereOk && (
+                <span className="xs muted">
+                  {st.elsewhereCount} transactions also on {st.elsewhereName}: you marked this as fine.{' '}
+                  <button className="btn quiet small" onClick={() => void markFine(st, false)} disabled={busy != null}>
+                    Flag it again
+                  </button>
+                </span>
+              )}
+              {st.elsewhereCount > 0 && st.elsewhereName && !st.elsewhereOk && (
                 <div className="banner alert small">
                   {st.elsewhereCount} of its {st.lineCount} transactions are also on {st.elsewhereName}’s statements.{' '}
                   {st.elsewhereCount * 2 >= st.lineCount
                     ? `It looks like ${st.elsewhereName}’s statement imported here as well, so those purchases are in the books twice. If ${st.elsewhereName}’s copy is already in, take this one out with what was added from it; if not, move it there.`
-                    : 'Transfers between your own accounts show on both; anything else is worth a look.'}
+                    : 'Transfers between your own accounts show on both; anything else is worth a look.'}{' '}
+                  <button className="btn quiet small" onClick={() => void markFine(st, true)} disabled={busy != null}>
+                    It’s fine
+                  </button>
                 </div>
               )}
               <div className="row wrap">
