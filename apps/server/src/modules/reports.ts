@@ -125,7 +125,10 @@ export async function balanceSheet(db: Db, date: string) {
   const currentProfit = -plRows.reduce((s, r) => s + r.balanceCents, 0);
   const item = (r: (typeof tb.rows)[number], sign: 1 | -1) => ({ id: r.id, code: r.code, name: r.name, amountCents: r.balanceCents * sign });
   const assets = tb.rows.filter((r) => r.type === 'asset');
-  const nonCurrent = assets.filter((r) => r.code >= '1500' && r.code < '1600').map((r) => item(r, 1));
+  // Non-current: property, plant & equipment (1500–1549, 1590), then intangible assets (1550–1599).
+  const isIntangible = (code: string) => code >= '1550' && code < '1600' && code !== '1590';
+  const nonCurrent = assets.filter((r) => r.code >= '1500' && r.code < '1600' && !isIntangible(r.code)).map((r) => item(r, 1));
+  const intangible = assets.filter((r) => isIntangible(r.code)).map((r) => item(r, 1));
   const current = assets.filter((r) => !(r.code >= '1500' && r.code < '1600')).map((r) => item(r, 1));
   const liabilities = tb.rows.filter((r) => r.type === 'liability');
   const longTerm = liabilities.filter((r) => byId.get(r.id)?.systemKey === 'owner_loan').map((r) => item(r, -1));
@@ -133,13 +136,13 @@ export async function balanceSheet(db: Db, date: string) {
   const equity = tb.rows.filter((r) => r.type === 'equity').map((r) => item(r, -1));
   if (currentProfit !== 0) equity.push({ id: 'current-profit', code: '', name: `Profit for the year to date (${fy.label})`, amountCents: currentProfit });
   const total = (xs: { amountCents: number }[]) => xs.reduce((s, x) => s + x.amountCents, 0);
-  const totalAssets = total(nonCurrent) + total(current);
+  const totalAssets = total(nonCurrent) + total(intangible) + total(current);
   const totalLiabilities = total(longTerm) + total(shortTerm);
   const totalEquity = total(equity);
   return {
     date,
     financialYear: fy,
-    assets: { nonCurrent, current, totalCents: totalAssets },
+    assets: { nonCurrent, intangible, current, totalCents: totalAssets },
     liabilities: { nonCurrent: longTerm, current: shortTerm, totalCents: totalLiabilities },
     equity: { items: equity, totalCents: totalEquity },
     differenceCents: totalAssets - totalLiabilities - totalEquity,
@@ -203,6 +206,7 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
       const r = (x: { code: string; name: string; amountCents: number }) => [x.code, x.name, centsToCsv(x.amountCents)];
       return sendCsv(reply, `balance-sheet-${bs.date}.csv`, toCsv(['Code', 'Item', 'Amount'], [
         ['', 'Non-current assets', ''], ...bs.assets.nonCurrent.map(r),
+        ...(bs.assets.intangible.length ? [['', 'Intangible assets', ''], ...bs.assets.intangible.map(r)] : []),
         ['', 'Current assets', ''], ...bs.assets.current.map(r),
         ['', 'Total assets', centsToCsv(bs.assets.totalCents)],
         ['', 'Non-current liabilities', ''], ...bs.liabilities.nonCurrent.map(r),
@@ -368,10 +372,11 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
     const at = isIsoDate(d) ? d : today();
     return sql`
       select a.*, s.name as source_name, c.description as cost_description,
+        is_intangible(a.category) as intangible,
         coalesce((select sum(-l.amount_cents) from ledger l where l.source in ('depreciation') and l.source_id = a.id
-                  and l.account_id = sys_account('accumulated_depreciation') and l.date <= ${at}::date), 0)::bigint as accumulated_cents,
+                  and l.account_id = accumulated_account(a.category) and l.date <= ${at}::date), 0)::bigint as accumulated_cents,
         coalesce((select sum(l.amount_cents) from ledger l where l.source = 'depreciation' and l.source_id = a.id
-                  and l.account_id = sys_account('depreciation') and l.date <= ${at}::date
+                  and l.account_id = writedown_account(a.category) and l.date <= ${at}::date
                   and l.date >= ${financialYear(at, (await getSettings(sql)).fyEndMonth).start}::date), 0)::bigint as depreciation_this_year_cents
       from assets a left join payment_sources s on s.id = a.source_id left join costs c on c.id = a.cost_id
       order by a.disposed_on nulls first, a.purchase_date desc`;

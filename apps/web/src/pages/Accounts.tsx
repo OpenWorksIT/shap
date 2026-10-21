@@ -4,6 +4,8 @@ import {
   ACCOUNT_TYPE_LABELS,
   addMonths,
   ASSET_CATEGORIES,
+  ASSET_DEFAULT_LIFE_MONTHS,
+  INTANGIBLE_CATEGORIES,
   ASSET_CATEGORY_LABELS,
   financialYear,
   formatAmount,
@@ -227,7 +229,7 @@ interface BsItem {
 interface BalanceSheetData {
   date: string;
   financialYear: { label: string };
-  assets: { nonCurrent: BsItem[]; current: BsItem[]; totalCents: number };
+  assets: { nonCurrent: BsItem[]; intangible: BsItem[]; current: BsItem[]; totalCents: number };
   liabilities: { nonCurrent: BsItem[]; current: BsItem[]; totalCents: number };
   equity: { items: BsItem[]; totalCents: number };
   differenceCents: number;
@@ -301,6 +303,14 @@ function BalanceSheet({ onAccount }: { onAccount: (id: string) => void }) {
                     <td colSpan={2}>Non-current assets</td>
                   </tr>
                   {rows(data.assets.nonCurrent)}
+                </>
+              )}
+              {data.assets.intangible.length > 0 && (
+                <>
+                  <tr className="subgroup">
+                    <td colSpan={2}>Intangible assets</td>
+                  </tr>
+                  {rows(data.assets.intangible)}
                 </>
               )}
               <tr className="subgroup">
@@ -711,6 +721,7 @@ interface AssetRow {
   notes: string;
   accumulatedCents: number;
   depreciationThisYearCents: number;
+  intangible: boolean;
 }
 
 function Assets() {
@@ -721,7 +732,10 @@ function Assets() {
   return (
     <div className="stack">
       <div className="spread wrap">
-        <p className="small muted grow">Tools, equipment and vehicles that last years. Each is written off (depreciated) a month at a time over its life. Small tools stay as running costs.</p>
+        <p className="small muted grow">
+          Things that last years: tools, equipment, vehicles and computers (depreciated), and intangible assets such as patents, trade marks and bought
+          software licences (amortised). Each is written off a month at a time over its life. Small tools and monthly subscriptions stay as running costs.
+        </p>
         {isOwner && (
           <button className="btn primary" onClick={() => setOpen('new')}>
             <Icon name="plus" size={18} />
@@ -751,7 +765,7 @@ function Assets() {
                   <td>
                     <strong>{a.name}</strong>
                     <div className="xs muted">
-                      {ASSET_CATEGORY_LABELS[a.category]} · {Math.round(a.lifeMonths / 12 * 10) / 10} years
+                      {ASSET_CATEGORY_LABELS[a.category]} · {Math.round(a.lifeMonths / 12 * 10) / 10} years{a.intangible ? ' · amortised' : ''}
                       {a.disposedOn ? ` · sold/scrapped ${formatDate(a.disposedOn)}` : ''}
                     </div>
                   </td>
@@ -841,7 +855,16 @@ function AssetDrawer({ asset, onClose, onSaved }: { asset: AssetRow | null; onCl
         <div className="form-grid">
           <Field label="Kind">
             {(p) => (
-              <select {...p} className="select" value={f.category} onChange={(e) => setF({ ...f, category: e.target.value as AssetCategory })}>
+              <select
+                {...p}
+                className="select"
+                value={f.category}
+                onChange={(e) => {
+                  const category = e.target.value as AssetCategory;
+                  // A new asset starts with the usual life for its kind.
+                  setF({ ...f, category, lifeMonths: asset ? f.lifeMonths : ASSET_DEFAULT_LIFE_MONTHS[category] });
+                }}
+              >
                 {ASSET_CATEGORIES.map((c) => (
                   <option key={c} value={c}>
                     {ASSET_CATEGORY_LABELS[c]}
@@ -871,7 +894,10 @@ function AssetDrawer({ asset, onClose, onSaved }: { asset: AssetRow | null; onCl
           </div>
         )}
         <div className="form-grid">
-          <Field label="Useful life (months)" hint="Tools 36, vehicles 60 are common">{(p) => <input {...p} className="input" type="number" min={1} value={f.lifeMonths} onChange={(e) => setF({ ...f, lifeMonths: Number(e.target.value) })} />}</Field>
+          <Field
+            label="Useful life (months)"
+            hint={INTANGIBLE_CATEGORIES.includes(f.category) ? 'Written off as amortisation. Patents: up to 240 (20 years); 120 if you can’t tell' : 'Tools and computers 36, vehicles 60 are common'}
+          >{(p) => <input {...p} className="input" type="number" min={1} value={f.lifeMonths} onChange={(e) => setF({ ...f, lifeMonths: Number(e.target.value) })} />}</Field>
           <Field label="Worth at the end">{(p) => <MoneyInput {...p} value={f.residualCents} onChange={(c) => setF({ ...f, residualCents: c ?? 0 })} />}</Field>
         </div>
         <fieldset className="fieldset">

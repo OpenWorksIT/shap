@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { addMonths, ASSET_CATEGORIES, ASSET_CATEGORY_LABELS, financialYear, formatDate, formatZar, monthEnd, monthStart, todayIso, type AssetCategory } from '@shap/shared';
+import { addMonths, ASSET_CATEGORIES, ASSET_CATEGORY_LABELS, ASSET_DEFAULT_LIFE_MONTHS, financialYear, formatDate, formatZar, monthEnd, monthStart, todayIso, type AssetCategory } from '@shap/shared';
 import { CostForm, costDraftFrom } from '../components/CostForm';
 import { DuplicateCosts } from '../components/DuplicateCosts';
 import { ProjectSelect } from '../components/Pickers';
@@ -25,6 +25,9 @@ export default function CostsPage() {
   const [drawer, setDrawer] = useState<null | 'new' | CostRow>(null);
   const unallocated = kind === 'materials-unallocated' && isOwner;
   const capturing = (source === 'none' || kind === 'materials-unallocated') && isOwner;
+  // Filtered to one cost type: tick them to move them to another type (IT costs to "Software & subscriptions").
+  const retyping = Boolean(category) && isOwner && !capturing;
+  const selectable = capturing || retyping;
   const [toJob, setToJob] = useState<string | null>(null);
   const [toType, setToType] = useState('');
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -62,6 +65,8 @@ export default function CostsPage() {
         void reload();
       })
       .catch((err) => toast(err instanceof ApiError ? err.message : 'Couldn’t save', 'error'));
+  // A different list: start with nothing ticked.
+  useEffect(() => setPicked(new Set()), [category, source, kind, period]);
   const setParam = (k: string, v: string | null) => {
     const n = new URLSearchParams(params);
     if (v) n.set(k, v);
@@ -171,7 +176,7 @@ export default function CostsPage() {
           <table className="table">
             <thead>
               <tr>
-                {capturing && (
+                {selectable && (
                   <th style={{ width: 36 }}>
                     <input type="checkbox" aria-label="Select all" checked={picked.size > 0 && picked.size === rows.length} onChange={(e) => setPicked(e.target.checked ? new Set(rows.map((r) => r.id)) : new Set())} />
                   </th>
@@ -187,7 +192,7 @@ export default function CostsPage() {
             <tbody>
               {rows.map((c) => (
                 <tr key={c.id} className="clickable" onClick={() => isOwner && setDrawer(c)}>
-                  {capturing && (
+                  {selectable && (
                     <td onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"
@@ -277,6 +282,24 @@ export default function CostsPage() {
           </button>
         </section>
       )}
+      {retyping && picked.size > 0 && (
+        <section className="panel panel-pad sticky-bar row wrap">
+          <span className="grow">
+            <strong>{picked.size}</strong> selected · {formatZar(rows.filter((r) => picked.has(r.id)).reduce((s, r) => s + r.amountCents, 0))}
+          </span>
+          <select className="select auto" value={toType} onChange={(e) => setToType(e.target.value)} aria-label="Change type to">
+            <option value="">Change type to…</option>
+            {ref.categories.filter((c) => c.active && c.id !== category).map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          <button className="btn primary" disabled={!toType} onClick={() => void bulk({ categoryId: toType }, 'changed type')}>
+            Change type
+          </button>
+        </section>
+      )}
       {capturing && !unallocated && picked.size > 0 && (
         <section className="panel panel-pad sticky-bar row wrap">
           <span className="grow">
@@ -335,7 +358,7 @@ function AssetFromCost({ cost, onDone }: { cost: CostRow; onDone: () => void }) 
   if (cost.assetId)
     return (
       <div className="banner small">
-        This cost is on the <Link to="/accounts?tab=assets">asset register</Link>, so it depreciates over its life instead of counting as a cost this year.
+        This cost is on the <Link to="/accounts?tab=assets">asset register</Link>, so it’s written off over its life instead of counting as a cost this year.
       </div>
     );
   if (!open)
@@ -360,7 +383,16 @@ function AssetFromCost({ cost, onDone }: { cost: CostRow; onDone: () => void }) 
       <div className="form-grid">
         <Field label="Kind">
           {(p) => (
-            <select {...p} className="select" value={category} onChange={(e) => setCategory(e.target.value as AssetCategory)}>
+            <select
+              {...p}
+              className="select"
+              value={category}
+              onChange={(e) => {
+                const c = e.target.value as AssetCategory;
+                setCategory(c);
+                setLife(ASSET_DEFAULT_LIFE_MONTHS[c]);
+              }}
+            >
               {ASSET_CATEGORIES.map((c) => (
                 <option key={c} value={c}>
                   {ASSET_CATEGORY_LABELS[c]}

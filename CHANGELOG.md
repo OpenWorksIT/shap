@@ -3,6 +3,20 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.3.0 (21 October 2026)
+
+- **Intangible assets.** The asset register takes *Patents & trade marks* and *Software
+  licences* (bought outright). They sit under **Intangible assets** on the balance sheet and
+  are written off as **amortisation** (not depreciation), a month at a time. A patent starts at
+  10 years (up to 20 is allowed). To record an attorney's patent fee: capture the cost, then
+  *This is an asset… → Patents & trade marks*.
+- **IT costs.** New cost types **Software & subscriptions** (AI and other subscriptions, SaaS)
+  and **Hosting, servers & domains** (VPS rentals, domains, cloud), each with its own line in
+  the income statement. Computers and phones that last years stay assets (3 years).
+- **Change the type of many costs at once.** Filter Costs by a type (your old "IT expenses",
+  say), tick them, and *Change type to…*.
+- A new asset's life now starts at the usual one for its kind.
+
 ## 1.2.2 (21 October 2026)
 
 - **Split a cost paid more than one way.** Open the cost and choose *Paid more than one way?

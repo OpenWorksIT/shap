@@ -95,7 +95,7 @@ export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
 };
 export const PROFIT_AND_LOSS_TYPES: AccountType[] = ['income', 'cost_of_sales', 'expense'];
 
-export const ASSET_CATEGORIES = ['tools', 'vehicles', 'equipment', 'computers', 'other'] as const;
+export const ASSET_CATEGORIES = ['tools', 'vehicles', 'equipment', 'computers', 'other', 'patents', 'software'] as const;
 export type AssetCategory = (typeof ASSET_CATEGORIES)[number];
 export const ASSET_CATEGORY_LABELS: Record<AssetCategory, string> = {
   tools: 'Tools',
@@ -103,6 +103,23 @@ export const ASSET_CATEGORY_LABELS: Record<AssetCategory, string> = {
   equipment: 'Plant & equipment',
   computers: 'Computers & phones',
   other: 'Other',
+  patents: 'Patents & trade marks (intangible)',
+  software: 'Software licences (intangible)',
+};
+
+/** Intangible assets: written off as amortisation, shown under intangible assets. */
+export const INTANGIBLE_CATEGORIES: readonly AssetCategory[] = ['patents', 'software'];
+
+/** A sensible starting life in months (your accountant may choose otherwise). */
+export const ASSET_DEFAULT_LIFE_MONTHS: Record<AssetCategory, number> = {
+  tools: 36,
+  vehicles: 60,
+  equipment: 60,
+  computers: 36,
+  other: 36,
+  // Up to 20 years for a patent; 10 when there's no better estimate.
+  patents: 120,
+  software: 36,
 };
 
 export const PAYMENT_METHODS = ['eft', 'cash', 'card', 'other'] as const;
