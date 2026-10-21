@@ -5,7 +5,7 @@ import { requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { audit } from '../lib/audit.js';
 import { assertOpen, getSettings, isIsoDate, q } from '../lib/books.js';
-import { forbidden, notFound } from '../lib/errors.js';
+import { badRequest, forbidden, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 
 const idParam = z.object({ id: z.string().uuid() });
@@ -107,6 +107,57 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
       where id = ${id} returning *`;
     await audit(sql, { userId: user.id, action: 'update', entity: 'cost', entityId: id, ip: req.ip });
     return row;
+  });
+
+  /**
+   * One purchase paid more than one way (R650 cash and R650 by EFT): the cost becomes several,
+   * one per payment, each saying which account paid it. Everything else (job, type, supplier,
+   * slip) is the same on each part; VAT is shared out in proportion.
+   */
+  app.post('/api/costs/:id/split', { preHandler: requireRole('owner') }, async (req) => {
+    const user = userOrThrow(req);
+    const { id } = parse(idParam, req.params);
+    const { parts } = parse(
+      z.object({ parts: z.array(z.object({ amountCents: z.number().int(), sourceId: z.string().uuid().nullable() })).min(2).max(10) }),
+      req.body,
+    );
+    const [c] = await sql<{ date: string; amountCents: number; vatCents: number; note: string }[]>`
+      select date::text, amount_cents, vat_cents, note from costs where id = ${id}`;
+    if (!c) throw notFound('Cost');
+    await assertOpen(sql, c.date);
+    const total = parts.reduce((t, p) => t + p.amountCents, 0);
+    if (total !== c.amountCents) throw badRequest(`The parts add up to R${(total / 100).toFixed(2)}, not R${(c.amountCents / 100).toFixed(2)}`);
+    if (parts.some((p) => p.amountCents === 0 || Math.sign(p.amountCents) !== Math.sign(c.amountCents))) throw badRequest('Every part needs an amount');
+    const [asset] = await sql`select 1 from assets where cost_id = ${id}`;
+    if (asset) throw badRequest('This cost bought an asset, so it can’t be split');
+    const [paid] = await sql`select 1 from bank_matches where kind = 'cost' and record_id = ${id}`;
+    if (paid) throw badRequest('This cost is matched to a bank statement line. Unmatch it there first, then split it.');
+    const sourceIds = [...new Set(parts.map((p) => p.sourceId).filter((x): x is string => Boolean(x)))];
+    if (sourceIds.length) {
+      const [found] = await sql<{ n: number }[]>`select count(*)::int as n from payment_sources where id = any(${sourceIds}::uuid[])`;
+      if (found!.n !== sourceIds.length) throw badRequest('Choose where each part was paid from');
+    }
+    // VAT in proportion; the first part takes the rounding.
+    const vats = parts.map((p) => Math.round((c.vatCents * p.amountCents) / c.amountCents));
+    vats[0]! += c.vatCents - vats.reduce((t, v) => t + v, 0);
+    const note = `Split from R${(c.amountCents / 100).toFixed(2)}, paid ${parts.length} ways`;
+    const ids = await sql.begin(async (tx) => {
+      await tx`update costs set amount_cents = ${parts[0]!.amountCents}, vat_cents = ${vats[0]!}, source_id = ${parts[0]!.sourceId},
+          note = case when note = '' then ${note} else note || ' · ' || ${note} end
+        where id = ${id}`;
+      const out = [id];
+      for (let i = 1; i < parts.length; i++) {
+        const [r] = await tx<{ id: string }[]>`
+          insert into costs (date, description, amount_cents, vat_cents, supplier, category_id, source_id, project_id, no_job, receipt_id, note, created_by)
+          select date, description, ${parts[i]!.amountCents}, ${vats[i]!}, supplier, category_id, ${parts[i]!.sourceId}, project_id, no_job, receipt_id,
+            case when note = '' then ${note} else note end, ${user.id}
+          from costs where id = ${id} returning id`;
+        out.push(r!.id);
+      }
+      await audit(tx, { userId: user.id, action: 'split', entity: 'cost', entityId: id, ip: req.ip, details: { parts: parts.map((p) => p.amountCents), ids: out } });
+      return out;
+    });
+    return { ids };
   });
 
   app.delete('/api/costs/:id', { preHandler: requireRole('owner') }, async (req) => {

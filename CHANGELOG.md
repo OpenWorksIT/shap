@@ -3,6 +3,14 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.2.2 (21 October 2026)
+
+- **Split a cost paid more than one way.** Open the cost and choose *Paid more than one way?
+  Split it*: R1,300 becomes R650 cash and R650 from the bank (or any number of parts, up to
+  ten), each saying where it was paid from. Each part keeps the job, type, supplier and slip;
+  VAT is shared out in proportion. The bank part can then be matched to its statement line.
+  A cost already matched to a statement line is unmatched first.
+
 ## 1.2.1 (21 October 2026)
 
 - **Telling Shap a suggestion is wrong.** Every place that suggests something now takes a

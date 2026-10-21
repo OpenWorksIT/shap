@@ -210,6 +210,9 @@ export function CostForm({ initial, projectId, plannedItem, onSaved, onDeleted }
         </div>
       </div>
       <Field label="Note (optional)">{(p) => <input {...p} className="input" value={f.note} onChange={(e) => set('note', e.target.value)} />}</Field>
+      {f.id && isOwner && initial?.amountCents != null && (
+        <SplitCost id={f.id} totalCents={initial.amountCents} sourceId={initial.sourceId} sources={sources} onSplit={() => onSaved?.()} />
+      )}
       {f.id && isOwner && <Twins id={f.id} onMerged={(gone) => (gone ? onDeleted?.() : onSaved?.())} />}
       {error && <div className="banner alert small">{error}</div>}
       <div className="row">
@@ -291,6 +294,82 @@ function Twins({ id, onMerged }: { id: string; onMerged: (thisOneGone: boolean) 
           </div>
         ))
       )}
+    </div>
+  );
+}
+
+/** One purchase paid more than one way (part cash, part EFT): split it, one cost per payment. */
+function SplitCost({ id, totalCents, sourceId, sources, onSplit }: { id: string; totalCents: number; sourceId: string | null; sources: { id: string; name: string }[]; onSplit: () => void }) {
+  const toast = useToast();
+  const half = Math.round(totalCents / 2);
+  const [parts, setParts] = useState<{ amountCents: number | null; sourceId: string }[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  if (!parts)
+    return (
+      <button
+        type="button"
+        className="btn quiet small"
+        style={{ alignSelf: 'flex-start' }}
+        onClick={() => setParts([{ amountCents: half, sourceId: sourceId ?? '' }, { amountCents: totalCents - half, sourceId: '' }])}
+      >
+        Paid more than one way? Split it
+      </button>
+    );
+  const sum = parts.reduce((t, p) => t + (p.amountCents ?? 0), 0);
+  const left = totalCents - sum;
+  const set = (i: number, change: Partial<{ amountCents: number | null; sourceId: string }>) => setParts((ps) => ps!.map((p, j) => (j === i ? { ...p, ...change } : p)));
+  const save = async () => {
+    setBusy(true);
+    try {
+      const r = await api<{ ids: string[] }>(`/api/costs/${id}/split`, {
+        body: { parts: parts.map((p) => ({ amountCents: p.amountCents ?? 0, sourceId: p.sourceId || null })) },
+      });
+      toast(`Split into ${r.ids.length} costs`);
+      onSplit();
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Couldn’t split it', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="panel panel-pad stack" style={{ gap: 8 }}>
+      <strong className="small">Split {formatZar(totalCents)} into one cost per payment</strong>
+      <span className="xs muted">Each part keeps the job, type, supplier and slip, and says where that part was paid from.</span>
+      {parts.map((p, i) => (
+        <div key={i} className="row wrap" style={{ gap: 6 }}>
+          <div style={{ width: 140 }}>
+            <MoneyInput value={p.amountCents} onChange={(c) => set(i, { amountCents: c })} />
+          </div>
+          <select className="select auto" value={p.sourceId} onChange={(e) => set(i, { sourceId: e.target.value })} aria-label="Paid from">
+            <option value="">Not sure yet</option>
+            {sources.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+          {parts.length > 2 && (
+            <button type="button" className="btn quiet small" onClick={() => setParts((ps) => ps!.filter((_, j) => j !== i))}>
+              Remove
+            </button>
+          )}
+        </div>
+      ))}
+      <div className="row wrap small" style={{ gap: 8 }}>
+        {parts.length < 10 && (
+          <button type="button" className="btn quiet small" onClick={() => setParts((ps) => [...ps!, { amountCents: left > 0 ? left : null, sourceId: '' }])}>
+            Add a part
+          </button>
+        )}
+        <span className={`grow ${left ? 'warn-text' : 'muted'}`}>{left ? `${formatZar(Math.abs(left))} ${left > 0 ? 'still to place' : 'too much'}` : 'Adds up'}</span>
+        <button type="button" className="btn quiet small" onClick={() => setParts(null)}>
+          Cancel
+        </button>
+        <button type="button" className="btn small primary" disabled={busy || left !== 0 || parts.some((p) => !p.amountCents)} onClick={() => void save()}>
+          {busy ? 'Splitting…' : 'Split'}
+        </button>
+      </div>
     </div>
   );
 }
