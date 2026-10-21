@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { App } from './App';
 import { ToastProvider } from './components/ui';
 import { UpdateBanner } from './components/UpdateBanner';
+import { DemoBanner } from './components/Demo';
 import './styles.css';
 import { registerSW } from 'virtual:pwa-register';
 
@@ -27,6 +28,7 @@ createRoot(document.getElementById('root')!).render(
     <BrowserRouter>
       <ToastProvider>
         <UpdateBanner />
+        <DemoBanner />
         <App />
       </ToastProvider>
     </BrowserRouter>

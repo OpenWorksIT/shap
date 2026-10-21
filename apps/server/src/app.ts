@@ -25,18 +25,23 @@ import { registerWorkerRoutes } from './modules/workers.js';
 import { registerYearEndRoutes } from './modules/yearend.js';
 import { registerBankRoutes } from './modules/bank/routes.js';
 import { appVersion, registerSystemRoutes } from './modules/system.js';
+import { DEMO_COOKIE, registerDemoRoutes } from './modules/demo.js';
+import { dbScope, DemoUnavailable, inDemo, routedDb } from './db/routing.js';
 import { registerStatementRoutes } from './modules/statements.js';
 import { registerCompanyFileRoutes } from './modules/company-file.js';
 
 export interface BuildOptions {
   config: Config;
   sql: Sql;
+  /** The demo company's database, if there is one. */
+  demoSql?: Sql | null;
   logger?: boolean | object;
   mailer?: Mailer;
 }
 
 export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstance; ctx: Ctx }> {
-  const { config, sql } = opts;
+  const { config } = opts;
+  const sql = routedDb(opts.sql, opts.demoSql ?? null);
   const app = Fastify({
     logger: opts.logger ?? false,
     trustProxy: config.TRUST_PROXY,
@@ -44,15 +49,24 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
     bodyLimit: config.UPLOAD_MB * 1024 * 1024 * 1.4,
   });
 
+  const realMailer = opts.mailer ?? createMailer(config.SMTP_URL, config.MAIL_FROM, app.log);
   const ctx: Ctx = {
     config,
     sql,
-    mailer: opts.mailer ?? createMailer(config.SMTP_URL, config.MAIL_FROM, app.log),
+    dbs: { real: opts.sql, demo: opts.demoSql ?? null },
+    // The demo company's clients are made up: nothing is ever emailed from it.
+    mailer: { send: async (m) => (inDemo() ? void app.log.info({ to: m.to }, 'demo company: email not sent') : realMailer.send(m)) },
     secrets: new Secrets(config.secretsKey),
   };
 
   await app.register(cookie);
   await app.register(rateLimit, { global: false });
+
+  // Which company this request is for: the demo company while its cookie is set. Everything the
+  // request does (every query) runs inside this scope.
+  app.addHook('onRequest', (req, _reply, done) => {
+    dbScope.run({ demo: req.cookies?.[DEMO_COOKIE] === '1' }, done);
+  });
 
   // CORS only for explicitly configured origins (e.g. a future Capacitor app).
   app.addHook('onRequest', async (req, reply) => {
@@ -93,6 +107,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   });
 
   app.setErrorHandler((err: Error, req, reply) => {
+    if (err instanceof DemoUnavailable) return reply.code(503).send({ error: err.message, code: 'demo_unavailable' });
     if (err instanceof HttpError) {
       return reply.code(err.statusCode).send({ error: err.message, code: err.code, details: err.details });
     }
@@ -115,6 +130,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   });
 
   registerAuth(app, ctx);
+  registerDemoRoutes(app, ctx);
   registerSettingsRoutes(app, ctx);
   registerDashboardRoutes(app, ctx);
   registerClientRoutes(app, ctx);

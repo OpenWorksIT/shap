@@ -77,7 +77,7 @@ backup() { # backup daily|manual|pre-update
   put backingUp "$(jq -n --arg at "$(now)" '{at: $at}')"
   install -d -m 0750 -o root -g "$APP_GID" "$BACKUPS"
   cd "$VPS" || return 1
-  dbs="$(docker compose exec -T db psql -U shap -d postgres -Atc "select datname from pg_database where datname = 'shap' or datname like 'shap\_%' order by 1")" || ok=false
+  dbs="$(docker compose exec -T db psql -U shap -d postgres -Atc "select datname from pg_database where (datname = 'shap' or datname like 'shap\_%') and datname not like '%\_demo' order by 1")" || ok=false
   for db in $dbs; do
     out="$BACKUPS/$db-$kind-$stamp.dump"
     if docker compose exec -T db pg_dump -U shap -d "$db" -Fc > "$out.part" && docker compose exec -T db pg_restore --list < "$out.part" > /dev/null; then
@@ -87,6 +87,7 @@ backup() { # backup daily|manual|pre-update
       ok=false; rm -f "$out.part"
     fi
   done
+  # (The demo company, shap_demo, is made up and rebuilt on demand: never backed up.)
   # Keep the last $KEEP_DAILY nightly backups and the last 5 of the others, per database.
   for db in $dbs; do
     ls -1t "$BACKUPS/$db"-daily-*.dump 2>/dev/null | tail -n +"$((KEEP_DAILY + 1))" | xargs -r rm -f --

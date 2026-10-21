@@ -1,4 +1,5 @@
 import { hash, verify } from '@node-rs/argon2';
+import { inDemo } from './db/routing.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { loginInput, type Role } from '@shap/shared';
 import { z } from 'zod';
@@ -11,6 +12,9 @@ import { newRecoveryCodes, newTotpSecret, normaliseRecoveryCode, otpauthUrl, ver
 import { parse } from './lib/validate.js';
 
 export const SESSION_COOKIE = 'shap_session';
+/** While showing the demo company, its own sign-in rides in a separate cookie; yours stays as it was. */
+export const DEMO_SESSION_COOKIE = 'shap_demo_session';
+const sessionCookie = () => (inDemo() ? DEMO_SESSION_COOKIE : SESSION_COOKIE);
 
 export interface AuthUser {
   id: string;
@@ -40,7 +44,7 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
 
   const tokenFrom = (req: FastifyRequest) => {
     const header = req.headers.authorization;
-    return header?.startsWith('Bearer ') ? header.slice(7) : req.cookies[SESSION_COOKIE];
+    return header?.startsWith('Bearer ') ? header.slice(7) : req.cookies[sessionCookie()];
   };
 
   app.addHook('onRequest', async (req) => {
@@ -76,7 +80,7 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
     `;
     await sql`update users set last_login_at = now() where id = ${user.id}`;
     await audit(sql, { userId: user.id, action: 'login', entity: 'user', entityId: user.id, ip: req.ip, details: { method } });
-    reply.setCookie(SESSION_COOKIE, token, {
+    reply.setCookie(sessionCookie(), token, {
       httpOnly: true,
       sameSite: 'lax',
       secure: config.COOKIE_SECURE,
@@ -226,7 +230,7 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/auth/logout', async (req, reply) => {
     const token = tokenFrom(req);
     if (token) await sql`delete from sessions where token_hash = ${sha256(token)}`;
-    reply.clearCookie(SESSION_COOKIE, { path: '/' });
+    reply.clearCookie(sessionCookie(), { path: '/' });
     return { ok: true };
   });
 

@@ -5,6 +5,13 @@ const envSchema = z.object({
   HOST: z.string().default('0.0.0.0'),
   PORT: z.coerce.number().int().default(8080),
   DATABASE_URL: z.string().default('postgres://postgres@localhost:5432/shap'),
+  /** The demo company's database (Settings → Show the demo company). Default: the real one's name + "_demo". */
+  DEMO_DATABASE_URL: z.string().default(''),
+  /** Set to false to turn the demo company off. */
+  DEMO_ENABLED: z
+    .string()
+    .default('true')
+    .transform((v) => v !== 'false' && v !== '0'),
   /** Address people use to reach Shap (used in emailed links). */
   PUBLIC_URL: z.string().url().default('http://localhost:5173'),
   /** Extra origins allowed to call the API with credentials (e.g. a future Capacitor app). */

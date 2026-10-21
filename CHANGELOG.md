@@ -3,6 +3,20 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.5.0 (21 October 2026)
+
+- **Show the demo company.** Settings → *Show the demo company* swaps this phone or browser over
+  to a made-up company (Demo Builders: jobs, quotes, invoices, workers, a year of books) so you
+  can show Shap to someone without your own figures on screen. A blue bar across the top says
+  it's the demo the whole time.
+  - It's a separate database next to yours: nothing from your books can show, and anything a
+    visitor adds or changes stays in the demo. It never emails anyone, and the server's
+    updates and backups can't be reached from it.
+  - **Back to my books** asks for your password, in case the phone was handed over.
+  - **Reset demo** puts it back as new, with its dates brought up to today.
+  - Shap creates the demo database itself the first time (nothing to set up). It isn't
+    backed up. `DEMO_ENABLED=false` turns it off.
+
 ## 1.4.0 (21 October 2026)
 
 - **Monthly costs.** Shap learns which running costs come every month (insurance, bank fees,

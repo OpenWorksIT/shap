@@ -1789,3 +1789,39 @@ button.list-row {
   color: var(--ink);
   border-bottom: 1px solid var(--line, rgba(0, 0, 0, 0.08));
 }
+
+/* The demo company is showing: made-up figures. */
+.demo-banner {
+  position: sticky;
+  top: 0;
+  z-index: 59;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 16px;
+  font-size: var(--fs-sm);
+  background: #2f5d8a;
+  color: #fff;
+}
+.demo-banner .btn.quiet {
+  color: #fff;
+}
+.demo-banner .input {
+  background: #fff;
+  color: #1f2b33;
+}
+.demo-banner > .grow {
+  flex: 1 1 220px;
+}
+.demo-banner form {
+  flex: 1 1 260px;
+}
+.demo-banner form .input {
+  flex: 1;
+  min-width: 0;
+}
+.demo-banner .warn-text {
+  flex-basis: 100%;
+  color: #ffd9d6;
+}

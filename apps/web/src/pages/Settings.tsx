@@ -26,6 +26,7 @@ import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
 import type { Brand, Settings } from '../lib/types';
 import { SystemSettings } from './System';
+import { ShowDemoButton } from '../components/Demo';
 
 type Tab = 'company' | 'invoicing' | 'lists' | 'users' | 'import' | 'system';
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -33,9 +34,10 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 
 export default function SettingsPage() {
   const [params, setParams] = useSearchParams();
   const tab = (params.get('tab') as Tab) || 'company';
+  const { isOwner } = useAuthed();
   return (
     <div className="stack-lg">
-      <PageHead title="Settings" />
+      <PageHead title="Settings" actions={isOwner ? <ShowDemoButton /> : undefined} />
       <div className="tabs-scroll">
         <Tabs<Tab>
           value={tab}
