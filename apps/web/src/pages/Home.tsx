@@ -21,6 +21,7 @@ interface Dashboard {
   uncapturedCosts: { n: number; total: number };
   statementsMissing?: { sourceId: string; sourceName: string; months: string[] }[];
   duplicateCosts?: number;
+  recurringMissing?: { key: string; label: string; months: string[]; usualCents: number; onStatement: boolean }[];
   bankCents: number;
   ownerLoanCents: number;
   projects: ProjectRow[];
@@ -86,6 +87,23 @@ function OwnerHome() {
           <strong>{data.unallocatedLabour.n} labour day{data.unallocatedLabour.n === 1 ? '' : 's'}</strong> not on a job or general work (<Money cents={data.unallocatedLabour.cost} whole />)
         </span>
         Allocate
+        <Icon name="chevronRight" size={16} />
+      </Link>
+    ),
+    (data.recurringMissing ?? []).length > 0 && (
+      <Link key="rec" to="/costs?kind=recurring" className="attention">
+        <Icon name="alert" size={18} />
+        <span className="grow">
+          <strong>
+            {data.recurringMissing!.length} monthly cost{data.recurringMissing!.length === 1 ? '' : 's'} missing:
+          </strong>{' '}
+          {data
+            .recurringMissing!.slice(0, 3)
+            .map((r) => `${r.label} (${r.months.map((m) => monthLabel(m, false)).join(', ')}${r.onStatement ? ', on the statement' : ''})`)
+            .join(', ')}
+          {data.recurringMissing!.length > 3 ? '…' : ''}
+        </span>
+        Check
         <Icon name="chevronRight" size={16} />
       </Link>
     ),

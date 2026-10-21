@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { addMonths, ASSET_CATEGORIES, ASSET_CATEGORY_LABELS, ASSET_DEFAULT_LIFE_MONTHS, financialYear, formatDate, formatZar, monthEnd, monthStart, todayIso, type AssetCategory } from '@shap/shared';
 import { CostForm, costDraftFrom } from '../components/CostForm';
 import { DuplicateCosts } from '../components/DuplicateCosts';
+import { RecurringCosts } from '../components/RecurringCosts';
 import { ProjectSelect } from '../components/Pickers';
 import { PageHead } from '../components/Shell';
 import { Drawer, Empty, ErrorBox, Field, Icon, Loading, Money, useToast } from '../components/ui';
@@ -74,6 +75,21 @@ export default function CostsPage() {
     setParams(n, { replace: true });
   };
 
+  if (kind === 'recurring')
+    return (
+      <div className="stack-lg">
+        <PageHead
+          title="Monthly costs"
+          actions={
+            <button className="btn" onClick={() => setParam('kind', null)}>
+              All costs
+            </button>
+          }
+        />
+        <RecurringCosts />
+      </div>
+    );
+
   if (kind === 'duplicates')
     return (
       <div className="stack-lg">
@@ -96,6 +112,9 @@ export default function CostsPage() {
         sub={data ? `${rows.length} costs · ${formatZar(total)}` : undefined}
         actions={
           <>
+            <button className="btn" onClick={() => setParam('kind', 'recurring')}>
+              Monthly costs
+            </button>
             {isOwner && (
               <Link className="btn" to="/accounts?tab=bank">
                 <Icon name="upload" size={18} />

@@ -6,6 +6,7 @@ import { getSettings, today } from '../lib/books.js';
 import { paymentStateSql } from './documents.js';
 import { missingStatements } from './statements.js';
 import { findDuplicates } from './duplicates.js';
+import { findRecurring } from './recurring.js';
 import { projectSummarySql, totals, type ProjectSummary } from './projects.js';
 
 export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -100,6 +101,10 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
       uncapturedCosts: uncaptured[0],
       statementsMissing: await missingStatements(sql),
       duplicateCosts: (await findDuplicates(sql)).length,
+      // Monthly costs that didn't show up (insurance, bank fees…).
+      recurringMissing: (await findRecurring(sql))
+        .filter((r) => r.status === 'missing')
+        .map((r) => ({ key: r.key, label: r.label, months: r.missingMonths, usualCents: r.usualCents, onStatement: Boolean(r.onStatement) })),
       bankCents: bal('bank'),
       ownerLoanCents: -bal('owner_loan'),
       projects: projects.map((p) => ({ ...p, ...totals(p as unknown as ProjectSummary) })),

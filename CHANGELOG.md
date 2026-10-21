@@ -3,6 +3,19 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.4.0 (21 October 2026)
+
+- **Monthly costs.** Shap learns which running costs come every month (insurance, bank fees,
+  subscriptions, cellphone, rent) from what you've captured: any cost type and supplier seen
+  three months in a row. When one doesn't show up (a few days after its usual day this month,
+  or a month that was skipped altogether), Home says so until it's sorted. Costs → *Monthly
+  costs* shows each with its usual amount and day and the last seven months.
+  - **Add it**: opens a cost already filled in (amount, type, supplier, account, date).
+  - **On the statement, not captured yet**: when a bank line looks like the missing one.
+  - **Skip** a month (a payment holiday), or **Stop watching** one you cancelled.
+  - Gone for more than three months, it's taken as stopped and the warnings end. Job
+    materials aren't watched: they come and go with the work.
+
 ## 1.3.0 (21 October 2026)
 
 - **Intangible assets.** The asset register takes *Patents & trade marks* and *Software

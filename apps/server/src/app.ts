@@ -14,6 +14,7 @@ import { createMailer, type Mailer } from './lib/mailer.js';
 import { registerClientRoutes } from './modules/clients.js';
 import { registerCostRoutes } from './modules/costs.js';
 import { registerDuplicateRoutes } from './modules/duplicates.js';
+import { registerRecurringRoutes } from './modules/recurring.js';
 import { registerDashboardRoutes } from './modules/dashboard.js';
 import { registerDocumentRoutes } from './modules/documents.js';
 import { registerImportRoutes } from './modules/import/routes.js';
@@ -120,6 +121,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   registerProjectRoutes(app, ctx);
   registerWorkerRoutes(app, ctx);
   registerDuplicateRoutes(app, ctx);
+  registerRecurringRoutes(app, ctx);
   registerCostRoutes(app, ctx);
   registerDocumentRoutes(app, ctx);
   registerReportRoutes(app, ctx);
