@@ -113,6 +113,14 @@ See [deploy/test/README.md](deploy/test/README.md) for a fixed address and the p
 [docs/deployment.md](docs/deployment.md): Docker Compose with Postgres, Shap and Caddy (automatic
 HTTPS), two-factor sign-in, and nightly encrypted backups.
 
+## Rather not run it yourself?
+
+[OpenWorks IT](https://openworks.co.za) can host Shap for you on a South African server, bring
+your tracker across, keep it updated and backed up, and add what your business needs as it grows.
+You pay for the hosting and the looking after, never for a licence, and the code stays open: you
+can take your data and run it yourself whenever you like. Ask on
+[WhatsApp](https://wa.me/27767689155) or at [info@openworks.co.za](mailto:info@openworks.co.za).
+
 ## Develop
 
 You need Node 22+ and PostgreSQL 15+.
@@ -149,9 +157,13 @@ deploy/test     PC test stack with a Cloudflare tunnel (like Steady's and Sorted
 deploy/backup   pg_dump + restic backups (systemd timer)
 ```
 
-Same foundations as [Sorted](https://github.com/OpenWorksIT/sorted): Fastify, Postgres and a React
-PWA, sessions and two-factor sign-in (TOTP with recovery codes, secrets encrypted at rest,
-Argon2id passwords), and an append-only audit log.
+Built on Fastify, Postgres and a React PWA, with sessions and two-factor sign-in (TOTP with
+recovery codes, secrets encrypted at rest, Argon2id passwords), and an append-only audit log.
+
+## Security
+
+Found a security problem? Please report it privately rather than in a public issue; see
+[SECURITY.md](SECURITY.md).
 
 ## Licence
 
