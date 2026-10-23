@@ -7,8 +7,10 @@ reports about its security seriously, and we're grateful for them.
 
 Please **don't open a public issue** for a security problem. Report it privately instead:
 
-- **Email** [info@openworks.co.za](mailto:info@openworks.co.za) with "Shap security" in the
-  subject.
+- **On GitHub:** use [Report a vulnerability](https://github.com/OpenWorksIT/shap/security/advisories/new)
+  under the repository's *Security* tab. Only the maintainers see it.
+- **By email:** [info@openworks.co.za](mailto:info@openworks.co.za) with "Shap security" in the
+  subject, if you'd rather not use GitHub.
 
 Tell us what you found, which version (Settings → Updates & backups shows it, or the `version` in
 `package.json`), and how to reproduce it. A proof of concept helps but isn't required.
