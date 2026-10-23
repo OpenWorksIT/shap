@@ -1,7 +1,7 @@
 import { hash, verify } from '@node-rs/argon2';
 import { inDemo } from './db/routing.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { loginInput, type Role } from '@shap/shared';
+import { loginInput, passwordProblem, type Role } from '@shap/shared';
 import { z } from 'zod';
 import type { Ctx } from './context.js';
 import type { Db } from './db/index.js';
@@ -27,6 +27,43 @@ declare module 'fastify' {
   interface FastifyRequest {
     user: AuthUser | null;
   }
+}
+
+/**
+ * Guessing is limited per account as well as per address: someone trying passwords from many
+ * addresses (a botnet) still gets only a handful of tries at any one account. Counted from the
+ * audit log, so it holds across restarts.
+ */
+const LIMITS = { login: { tries: 8, minutes: 15 }, mfa: { tries: 6, minutes: 15 }, password: { tries: 6, minutes: 15 } };
+const tooMany = (minutes: number) =>
+  new HttpError(429, `Too many wrong tries. Wait ${minutes} minutes and try again, or ask the owner to reset it.`, 'too_many_attempts');
+
+async function failures(db: Db, action: string, where: { email?: string; userId?: string }, minutes: number): Promise<number> {
+  const [r] = where.email
+    ? await db<{ n: number }[]>`select count(*)::int as n from audit_log where action = ${action} and details->>'email' = ${where.email} and at > now() - make_interval(mins => ${minutes})`
+    : await db<{ n: number }[]>`select count(*)::int as n from audit_log where action = ${action} and entity_id = ${where.userId!} and at > now() - make_interval(mins => ${minutes})`;
+  return r!.n;
+}
+
+/**
+ * Re-checks the signed-in person's password before something that would let a stolen session
+ * take over (changing your own email or password, a full backup, replacing everything). Wrong
+ * tries are counted like sign-in failures.
+ */
+export async function confirmPassword(db: Db, userId: string, password: string | undefined, ip: string): Promise<void> {
+  if ((await failures(db, 'password_failed', { userId }, LIMITS.password.minutes)) >= LIMITS.password.tries) throw tooMany(LIMITS.password.minutes);
+  const [row] = await db<{ passwordHash: string }[]>`select password_hash from users where id = ${userId} and active`;
+  if (!row || !password || !(await verify(row.passwordHash, password).catch(() => false))) {
+    await audit(db, { userId, action: 'password_failed', entity: 'user', entityId: userId, ip });
+    throw badRequest(password ? 'Your password is incorrect' : 'Enter your password to confirm');
+  }
+}
+
+/** The new password, if it's acceptable. */
+export function checkNewPassword(password: string, who: { email?: string; name?: string }): string {
+  const problem = passwordProblem(password, who);
+  if (problem) throw badRequest(problem);
+  return password;
 }
 
 export function hashPassword(password: string): Promise<string> {
@@ -102,6 +139,11 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
   // ---- Step 1: password ------------------------------------------------------
   app.post('/api/auth/login', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
     const input = parse(loginInput, req.body);
+    // Same answer whether or not the email exists, so this doesn't reveal who has an account.
+    if ((await failures(sql, 'login_failed', { email: input.email }, LIMITS.login.minutes)) >= LIMITS.login.tries) {
+      await verify(await getDummyHash(), input.password).catch(() => false);
+      throw tooMany(LIMITS.login.minutes);
+    }
     const rows = await sql<(AuthUser & { passwordHash: string; active: boolean; totpEnabledAt: Date | null })[]>`
       select id, name, email, role, password_hash, active, totp_enabled_at from users where email = ${input.email}
     `;
@@ -133,6 +175,8 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
     `;
     if (!row?.totpSecretEnc) throw unauthorized('Please sign in again.');
     const { totpSecretEnc, totpLastStep, ...user } = row;
+    // Six-digit codes can't be guessed in a handful of tries; they can in a million.
+    if ((await failures(sql, 'mfa_failed', { userId: user.id }, LIMITS.mfa.minutes)) >= LIMITS.mfa.tries) throw tooMany(LIMITS.mfa.minutes);
 
     const isRecovery = /[a-z]/i.test(code);
     if (isRecovery) {
@@ -159,8 +203,12 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
   });
 
   // ---- Setting up an authenticator (at sign-in when required, or later from the account screen) ----
-  app.post('/api/auth/mfa/setup', async (req) => {
+  app.post('/api/auth/mfa/setup', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req) => {
     if (!req.user) throw unauthorized();
+    // Replacing an authenticator you already have takes your password: otherwise someone with
+    // your open session could move your two-factor to their own phone.
+    const [cur] = await sql<{ on: boolean }[]>`select totp_enabled_at is not null as on from users where id = ${req.user.id}`;
+    if (cur?.on) await confirmPassword(sql, req.user.id, parse(z.object({ password: z.string().max(200).optional() }), req.body ?? {}).password, req.ip);
     return enrolChallenge(req.user);
   });
 
@@ -219,11 +267,24 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
     if (!req.user) throw unauthorized();
     if (config.mfaRequired) throw forbidden('Two-factor sign-in is required on this server.');
     const { password } = parse(z.object({ password: z.string().min(1) }), req.body);
-    const [row] = await sql<{ passwordHash: string }[]>`select password_hash from users where id = ${req.user.id}`;
-    if (!(await verify(row!.passwordHash, password).catch(() => false))) throw unauthorized('Password is incorrect');
+    await confirmPassword(sql, req.user.id, password, req.ip);
     await sql`update users set totp_secret_enc = null, totp_enabled_at = null, totp_last_step = null where id = ${req.user.id}`;
     await sql`delete from recovery_codes where user_id = ${req.user.id}`;
     await audit(sql, { userId: req.user.id, action: 'mfa_disabled', entity: 'user', entityId: req.user.id, ip: req.ip });
+    return { ok: true };
+  });
+
+  /** Change your own password: your current one first. Your other sign-ins are ended. */
+  app.post('/api/auth/password', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req) => {
+    if (!req.user) throw unauthorized();
+    const { currentPassword, newPassword } = parse(z.object({ currentPassword: z.string().max(200), newPassword: z.string().max(200) }), req.body);
+    await confirmPassword(sql, req.user.id, currentPassword, req.ip);
+    checkNewPassword(newPassword, req.user);
+    await sql.begin(async (tx) => {
+      await tx`update users set password_hash = ${await hashPassword(newPassword)} where id = ${req.user!.id}`;
+      await endOtherSessions(tx, req.user!.id, tokenFrom(req));
+      await audit(tx, { userId: req.user!.id, action: 'password_changed', entity: 'user', entityId: req.user!.id, ip: req.ip });
+    });
     return { ok: true };
   });
 
@@ -238,6 +299,17 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
     if (!req.user) throw unauthorized();
     return { user: req.user };
   });
+}
+
+/** Signs a person out everywhere except this browser (after a password change). */
+export async function endOtherSessions(db: Db, userId: string, keepToken: string | undefined) {
+  await db`delete from sessions where user_id = ${userId} and token_hash <> ${keepToken ? sha256(keepToken) : ''}`;
+}
+
+/** This request's session token (cookie or bearer), to keep it when ending the others. */
+export function sessionToken(req: FastifyRequest): string | undefined {
+  const header = req.headers.authorization;
+  return header?.startsWith('Bearer ') ? header.slice(7) : req.cookies[sessionCookie()];
 }
 
 // Hash of a random string, used to equalise timing for unknown emails.

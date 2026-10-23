@@ -9,7 +9,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { requireRole, userOrThrow } from '../auth.js';
+import { confirmPassword, requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Tx } from '../db/index.js';
 import { audit } from '../lib/audit.js';
@@ -202,7 +202,17 @@ export async function restoreCompanyFile(tx: Tx, raw: unknown) {
 
 export function registerCompanyFileRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
+  // The company file is all your books: it takes your password, for a link that works two minutes.
+  app.post('/api/company-file/link', { preHandler: requireRole('owner'), config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req) => {
+    const user = userOrThrow(req);
+    await confirmPassword(sql, user.id, parse(z.object({ password: z.string().max(200).optional() }), req.body ?? {}).password, req.ip);
+    return { url: `/api/company-file?t=${encodeURIComponent(ctx.secrets.signToken('company-file', { uid: user.id }, 120))}` };
+  });
+
   app.get('/api/company-file', { preHandler: requireRole('owner') }, async (req, reply) => {
+    const { t } = parse(z.object({ t: z.string().max(2000).default('') }), req.query);
+    const link = ctx.secrets.verifyToken<{ uid: string }>('company-file', t);
+    if (!link || link.uid !== req.user?.id) throw badRequest('That download link has expired. Choose Download again.');
     const file = await exportCompanyFile(sql);
     const name = String((file.settings as Record<string, unknown>).companyName ?? 'company').replace(/[^\w -]/g, '').trim() || 'company';
     reply.header('content-type', 'application/json; charset=utf-8');
@@ -212,7 +222,9 @@ export function registerCompanyFileRoutes(app: FastifyInstance, ctx: Ctx): void 
 
   app.post('/api/company-file', { preHandler: requireRole('owner') }, async (req) => {
     const user = userOrThrow(req);
-    const { file } = parse(z.object({ file: z.unknown() }), req.body);
+    const { file, password } = parse(z.object({ file: z.unknown(), password: z.string().max(200).optional() }), req.body);
+    // Replacing everything takes your password.
+    await confirmPassword(sql, user.id, password, req.ip);
     const result = await sql.begin(async (tx) => {
       const r = await restoreCompanyFile(tx, file);
       await audit(tx, { userId: user.id, action: 'restore_company_file', entity: 'settings', ip: req.ip, details: r });

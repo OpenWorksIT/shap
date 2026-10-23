@@ -3,6 +3,32 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.6.0 (23 October 2026)
+
+Security: a full review and break-in testing of sign-in, sessions and every route. Update
+soon.
+
+- **Password guessing is limited per account**, not only per address: eight wrong passwords in
+  15 minutes and that account waits, however many addresses the guesses come from. Two-factor
+  codes the same (six wrong tries). An email that has no account behaves exactly the same, so
+  this doesn't reveal who has one.
+- **An open session can't take your account.** Changing your own email or password, moving
+  your two-factor to a new phone, resetting your own two-factor, downloading a backup, saving
+  or loading the company file, and leaving the demo company all ask for your password first.
+- **Change your own password**: tap your name (top right) → *Change my password*. Everyone
+  else signed in as you is signed out; you stay in.
+- **Better passwords**: still at least 10 characters, but the passwords people guess first
+  (and ones made of your own name or email) are refused, with a hint as you type.
+- **Other websites can't act with your session**: every change must come from Shap's own pages.
+- **Site staff** no longer see a job's quoted figures or the bank details on your trading
+  names, and can open only the costs and slips they captured.
+- **Uploads must really be photos or PDFs**; spreadsheet exports neutralise anything that
+  would run as a formula; the app's pages carry a content security policy (only Shap's own
+  scripts, never inside another site's frame); the address used for sign-in limits can't be
+  faked through a forwarded header.
+- Every one of these is now a test, along with a check of all 151 routes: nothing opens when
+  signed out, the accountant can't change anything, site staff can only log work.
+
 ## 1.5.0 (21 October 2026)
 
 - **Show the demo company.** Settings → *Show the demo company* swaps this phone or browser over

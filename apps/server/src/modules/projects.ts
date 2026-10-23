@@ -152,7 +152,11 @@ export function registerProjectRoutes(app: FastifyInstance, ctx: Ctx): void {
         (select coalesce(sum(c.amount_cents), 0) from costs c where c.planned_item_id = i.id)::bigint as bought_cents
       from planned_items i where i.project_id = ${id} order by i.sort, i.created_at
     `;
-    if (!seesMoney(user)) return { project, planned };
+    if (!seesMoney(user)) {
+      // Site capture sees the job and its parts list, not what it was quoted for.
+      const { estLabourCents: _l, estMaterialsCents: _m, estDemoCents: _d, ...site } = project as Record<string, unknown>;
+      return { project: site, planned };
+    }
 
     const [summary] = await sql.unsafe(`select * from (${projectSummarySql}) s where s.id = $1`, [id]);
     const [labour, costs, documents, workers] = await Promise.all([

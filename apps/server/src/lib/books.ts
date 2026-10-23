@@ -73,7 +73,10 @@ export const isIsoDate = (s: string | undefined): s is string => !!s && /^\d{4}-
 export function toCsv(header: string[], rows: (string | number | null | undefined)[][]): string {
   const cell = (v: string | number | null | undefined) => {
     if (v == null) return '';
-    const s = String(v);
+    let s = String(v);
+    // A cell starting with = + - @ is a formula to Excel and LibreOffice: a description typed as
+    // "=HYPERLINK(...)" could run when the accountant opens the export. Numbers stay numbers.
+    if (/^[=+\-@\t\r]/.test(s) && !/^-?\d+(\.\d+)?$/.test(s)) s = `'${s}`;
     return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   return '\uFEFF' + [header, ...rows].map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n';

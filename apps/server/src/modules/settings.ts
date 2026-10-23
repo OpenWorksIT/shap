@@ -10,7 +10,7 @@ import {
   workTypeInput,
 } from '@shap/shared';
 import { z } from 'zod';
-import { createUser, hashPassword, requireRole, seesMoney, userOrThrow } from '../auth.js';
+import { checkNewPassword, confirmPassword, createUser, endOtherSessions, hashPassword, requireRole, seesMoney, sessionToken, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { pgCode, PG, type Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
@@ -35,9 +35,18 @@ export async function referenceData(db: Db, money: boolean) {
 }
 
 /** Saves an uploaded file (receipt photo, logo). Returns its id. */
+/** The first bytes each allowed kind of file starts with: a file must be what it says it is. */
+const SIGNATURES: Record<string, (b: Buffer) => boolean> = {
+  'image/jpeg': (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+  'image/png': (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+  'image/webp': (b) => b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP',
+  'application/pdf': (b) => b.subarray(0, 5).toString('latin1') === '%PDF-',
+};
+
 export async function saveAttachment(db: Db, input: z.infer<typeof attachmentInput>): Promise<string> {
   const bytes = Buffer.from(input.dataBase64, 'base64');
   if (bytes.length === 0) throw badRequest('That file is empty');
+  if (!SIGNATURES[input.mime]?.(bytes)) throw badRequest('That file isn’t a photo (JPEG, PNG, WebP) or a PDF');
   if (bytes.length > 6 * 1024 * 1024) throw badRequest('That file is too big (6 MB at most). Photos are shrunk on the phone before upload.');
   const [row] = await db<{ id: string }[]>`
     insert into attachments (filename, mime, size, bytes) values (${input.filename}, ${input.mime}, ${bytes.length}, ${bytes}) returning id
@@ -54,7 +63,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!seesMoney(user)) {
       // Site capture sees names and pickers, not the company's numbering or bank details.
       const s = ref.settings;
-      return { ...ref, settings: { companyName: s.companyName, tradingName: s.tradingName, fyEndMonth: s.fyEndMonth, vatRegistered: s.vatRegistered, vatRateBp: s.vatRateBp, defaultCostSourceId: s.defaultCostSourceId, defaultWageSourceId: s.defaultWageSourceId, defaultReceiptSourceId: s.defaultReceiptSourceId, lockDate: s.lockDate } };
+      return { ...ref, brands: ref.brands.map(({ bankDetails: _b, ...b }) => b), settings: { companyName: s.companyName, tradingName: s.tradingName, fyEndMonth: s.fyEndMonth, vatRegistered: s.vatRegistered, vatRateBp: s.vatRateBp, defaultCostSourceId: s.defaultCostSourceId, defaultWageSourceId: s.defaultWageSourceId, defaultReceiptSourceId: s.defaultReceiptSourceId, lockDate: s.lockDate } };
     }
     return ref;
   });
@@ -128,8 +137,13 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { id };
   });
   app.get('/api/attachments/:id', { preHandler: requireRole() }, async (req, reply) => {
+    const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
-    const [row] = await sql<{ filename: string; mime: string; bytes: Buffer }[]>`select filename, mime, bytes from attachments where id = ${id}`;
+    // Site capture opens the slips on costs they captured; statements and the rest are for the owner and accountant.
+    const [row] = seesMoney(user)
+      ? await sql<{ filename: string; mime: string; bytes: Buffer }[]>`select filename, mime, bytes from attachments where id = ${id}`
+      : await sql<{ filename: string; mime: string; bytes: Buffer }[]>`select a.filename, a.mime, a.bytes from attachments a
+          where a.id = ${id} and exists (select 1 from costs c where c.receipt_id = a.id and c.created_by = ${user.id})`;
     if (!row) throw notFound('File');
     reply.header('content-type', row.mime);
     reply.header('content-disposition', `inline; filename="${row.filename.replace(/[^\w.\- ]/g, '_')}"`);
@@ -200,6 +214,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = userOrThrow(req);
     const input = parse(userInput, req.body);
     if (!input.password) throw badRequest('Set a starting password (at least 10 characters)');
+    checkNewPassword(input.password, input);
     try {
       const u = await createUser(sql, { name: input.name, email: input.email, password: input.password, role: input.role });
       await audit(sql, { userId: me.id, action: 'create', entity: 'user', entityId: u.id, ip: req.ip, details: { role: input.role } });
@@ -214,11 +229,16 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = parse(idParam, req.params);
     const input = parse(userInput, req.body);
     if (id === me.id && (input.role !== 'owner' || input.active === false)) throw badRequest('You can’t remove your own owner access');
+    // Your own email or password: your current password too, so an open session left on a
+    // phone can't be used to lock you out of your own books.
+    if (id === me.id && (input.password || input.email !== me.email)) await confirmPassword(sql, me.id, input.currentPassword, req.ip);
+    if (input.password) checkNewPassword(input.password, input);
     await sql.begin(async (tx) => {
       await tx`update users set name = ${input.name}, email = ${input.email}, role = ${input.role}, active = ${input.active ?? true} where id = ${id}`;
       if (input.password) {
         await tx`update users set password_hash = ${await hashPassword(input.password)} where id = ${id}`;
-        await tx`delete from sessions where user_id = ${id}`;
+        // Everyone signed in as them is signed out (you stay signed in, if it's yours).
+        await endOtherSessions(tx, id, id === me.id ? sessionToken(req) : undefined);
       }
       if (input.active === false) await tx`delete from sessions where user_id = ${id}`;
       await audit(tx, { userId: me.id, action: 'update', entity: 'user', entityId: id, ip: req.ip, details: { role: input.role, passwordReset: Boolean(input.password) } });
@@ -228,6 +248,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/users/:id/reset-mfa', { preHandler: requireRole('owner') }, async (req) => {
     const me = userOrThrow(req);
     const { id } = parse(idParam, req.params);
+    if (id === me.id) await confirmPassword(sql, me.id, parse(z.object({ password: z.string().max(200).optional() }), req.body ?? {}).password, req.ip);
     await sql`update users set totp_secret_enc = null, totp_enabled_at = null, totp_last_step = null where id = ${id}`;
     await sql`delete from recovery_codes where user_id = ${id}`;
     await audit(sql, { userId: me.id, action: 'mfa_reset', entity: 'user', entityId: id, ip: req.ip });

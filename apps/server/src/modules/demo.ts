@@ -3,10 +3,9 @@
  * a made-up company (its own database) so you can show Shap to someone without your figures on
  * screen. "Back to my books" asks for your password, in case the phone was handed over.
  */
-import { verify } from '@node-rs/argon2';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { DEMO_SESSION_COOKIE, requireRole, SESSION_COOKIE, userOrThrow } from '../auth.js';
+import { confirmPassword, DEMO_SESSION_COOKIE, requireRole, SESSION_COOKIE, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Sql } from '../db/index.js';
 import { inDemo } from '../db/routing.js';
@@ -71,12 +70,13 @@ export function registerDemoRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { password } = parse(z.object({ password: z.string().default('') }), req.body);
     const realToken = req.cookies[SESSION_COOKIE];
     const [me] = realToken
-      ? await dbs.real<{ id: string; passwordHash: string }[]>`
-          select u.id, u.password_hash from sessions s join users u on u.id = s.user_id
+      ? await dbs.real<{ id: string }[]>`
+          select u.id from sessions s join users u on u.id = s.user_id
           where s.token_hash = ${sha256(realToken)} and s.expires_at > now() and u.active`
       : [];
-    // A wrong password isn't "signed out" (that would drop the page to the sign-in screen).
-    if (me && !(await verify(me.passwordHash, password).catch(() => false))) throw badRequest('Password is incorrect');
+    // Checked against your real account (wrong tries count towards its limit). A wrong password
+    // is a 400, not "signed out", so the page stays where it is.
+    if (me) await confirmPassword(dbs.real, me.id, password, req.ip);
     const demoToken = req.cookies[DEMO_SESSION_COOKIE];
     if (demoToken && dbs.demo) await dbs.demo`delete from sessions where token_hash = ${sha256(demoToken)}`.catch(() => undefined);
     reply.clearCookie(DEMO_COOKIE, { path: '/' });

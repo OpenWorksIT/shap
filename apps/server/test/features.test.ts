@@ -362,7 +362,11 @@ describe('bank statements on file', () => {
 
 describe('the company file', () => {
   it('saves the set-up and loads it back, merging', async () => {
-    const res = await owner.call({ method: 'GET', url: '/api/company-file' });
+    // Without a fresh link (your password), no file.
+    expect((await owner.call({ method: 'GET', url: '/api/company-file' })).statusCode).toBe(400);
+    expect((await owner.call({ method: 'POST', url: '/api/company-file/link', payload: { password: 'wrong-one' } })).statusCode).toBe(400);
+    const { url } = await owner.post('/api/company-file/link', { password: 'test-password-1' });
+    const res = await owner.call({ method: 'GET', url });
     expect(res.statusCode).toBe(200);
     const file = res.json();
     expect(file.format).toBe('shap-company/1');
@@ -374,7 +378,8 @@ describe('the company file', () => {
     file.defaultBrand = 'Gamma';
     file.clients.find((c: { name: string }) => c.name === 'Brand Client').email = 'new@example.com';
     file.jobs = [{ name: 'Beta network job', client: null, brand: 'Gamma' }];
-    const r = await owner.post('/api/company-file', { file });
+    expect((await owner.call({ method: 'POST', url: '/api/company-file', payload: { file } })).statusCode).toBe(400);
+    const r = await owner.post('/api/company-file', { file, password: 'test-password-1' });
     expect(r.restored).toMatchObject({ jobsBranded: 1, yearEnds: 1 });
     const refData = await owner.get('/api/reference');
     const gamma = refData.brands.find((b: { name: string }) => b.name === 'Gamma');
@@ -388,7 +393,7 @@ describe('the company file', () => {
   });
 
   it('refuses something that isn’t a company file', async () => {
-    const r = await owner.call({ method: 'POST', url: '/api/company-file', payload: { file: { hello: 'world' } } });
+    const r = await owner.call({ method: 'POST', url: '/api/company-file', payload: { file: { hello: 'world' }, password: 'test-password-1' } });
     expect(r.statusCode).toBe(400);
   });
 });

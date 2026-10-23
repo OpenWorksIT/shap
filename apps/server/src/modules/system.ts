@@ -9,7 +9,7 @@ import { createReadStream, existsSync, readFileSync } from 'node:fs';
 import { readdir, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { requireRole, userOrThrow } from '../auth.js';
+import { confirmPassword, requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, notFound } from '../lib/errors.js';
@@ -91,9 +91,25 @@ export function registerSystemRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { ok: true };
   });
 
+  /**
+   * A backup is everything: downloading one takes your password, and gives a link that works
+   * for two minutes, for you only.
+   */
+  app.post('/api/system/backups/:name/link', { ...owner, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req) => {
+    const user = userOrThrow(req);
+    const { name } = parse(z.object({ name: z.string() }), req.params);
+    if (!BACKUP_NAME.test(name)) throw notFound('Backup');
+    await confirmPassword(ctx.dbs.real, user.id, parse(z.object({ password: z.string().max(200).optional() }), req.body ?? {}).password, req.ip);
+    const t = ctx.secrets.signToken('backup-download', { name, uid: user.id }, 120);
+    return { url: `/api/system/backups/${encodeURIComponent(name)}?t=${encodeURIComponent(t)}` };
+  });
+
   app.get('/api/system/backups/:name', owner, async (req, reply) => {
     const { name } = parse(z.object({ name: z.string() }), req.params);
     if (!BACKUP_NAME.test(name)) throw notFound('Backup');
+    const { t } = parse(z.object({ t: z.string().max(2000).default('') }), req.query);
+    const link = ctx.secrets.verifyToken<{ name: string; uid: string }>('backup-download', t);
+    if (!link || link.name !== name || link.uid !== req.user?.id) throw badRequest('That download link has expired. Choose the backup again.');
     const path = join(BACKUP_DIR, name);
     if (!existsSync(path)) throw notFound('Backup');
     const user = userOrThrow(req);

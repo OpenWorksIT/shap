@@ -84,7 +84,7 @@ describe('the demo company', () => {
   it('needs the owner’s password to get back to the real books', async () => {
     const wrong = await demo('POST', '/api/demo/leave', { password: 'not-it' });
     expect(wrong.statusCode).toBe(400);
-    expect(wrong.json().error).toMatch(/Password is incorrect/);
+    expect(wrong.json().error).toMatch(/password is incorrect/i);
     expect((await demo('GET', '/api/clients')).body.includes(MARK)).toBe(false);
     const ok = await demo('POST', '/api/demo/leave', { password: 'test-password-1' });
     expect(ok.statusCode).toBe(200);

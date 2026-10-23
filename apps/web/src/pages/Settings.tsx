@@ -8,6 +8,7 @@ import {
   formatDate,
   formatZar,
   monthLabel,
+  passwordProblem,
   ROLE_HINTS,
   ROLE_LABELS,
   ROLES,
@@ -27,6 +28,7 @@ import { useAuthed } from '../lib/session';
 import type { Brand, Settings } from '../lib/types';
 import { SystemSettings } from './System';
 import { ShowDemoButton } from '../components/Demo';
+import { usePasswordPrompt } from '../components/PasswordPrompt';
 
 type Tab = 'company' | 'invoicing' | 'lists' | 'users' | 'import' | 'system';
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -501,12 +503,18 @@ function Users() {
 
 function UserDrawer({ user, onClose, onSaved }: { user: UserRow | null; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
-  const [f, setF] = useState({ name: user?.name ?? '', email: user?.email ?? '', role: (user?.role ?? 'capture') as Role, password: '', active: user?.active ?? true });
+  const { user: me } = useAuthed();
+  const [f, setF] = useState({ name: user?.name ?? '', email: user?.email ?? '', role: (user?.role ?? 'capture') as Role, password: '', active: user?.active ?? true, currentPassword: '' });
   const [error, setError] = useState('');
+  const [passwordPrompt, askPassword] = usePasswordPrompt();
+  const isMe = user?.id === me.id;
+  // Changing your own email or password takes your current one (in case someone else has your phone).
+  const needsCurrent = isMe && (Boolean(f.password) || f.email.trim().toLowerCase() !== user?.email);
+  const problem = f.password ? passwordProblem(f.password, f) : null;
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     try {
-      const body = { ...f, password: f.password || undefined };
+      const body = { ...f, password: f.password || undefined, currentPassword: needsCurrent ? f.currentPassword : undefined };
       if (user) await api(`/api/users/${user.id}`, { method: 'PUT', body });
       else await api('/api/users', { body });
       toast('Saved');
@@ -533,9 +541,14 @@ function UserDrawer({ user, onClose, onSaved }: { user: UserRow | null; onClose:
             </label>
           ))}
         </div>
-        <Field label={user ? 'New password (leave blank to keep)' : 'Starting password'} hint="At least 10 characters. Tell them to change it.">
+        <Field label={user ? 'New password (leave blank to keep)' : 'Starting password'} hint={problem ?? (isMe ? 'At least 10 characters.' : 'At least 10 characters. They can change it under their name, top right.')} error={problem ?? undefined}>
           {(p) => <input {...p} className="input" type="text" autoComplete="new-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} required={!user} minLength={user ? undefined : 10} />}
         </Field>
+        {needsCurrent && (
+          <Field label="Your current password" hint="To change your own email or password.">
+            {(p) => <input {...p} className="input" type="password" autoComplete="current-password" value={f.currentPassword} onChange={(e) => setF({ ...f, currentPassword: e.target.value })} required />}
+          </Field>
+        )}
         {user && (
           <label className="check">
             <input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} />
@@ -546,12 +559,27 @@ function UserDrawer({ user, onClose, onSaved }: { user: UserRow | null; onClose:
         <div className="row wrap">
           <button className="btn primary">Save</button>
           {user?.mfa && (
-            <button type="button" className="btn" onClick={() => void api(`/api/users/${user.id}/reset-mfa`, { body: {} }).then(() => (toast('Two-factor reset; they set it up again at next sign-in'), onSaved()))}>
+            <button
+              type="button"
+              className="btn"
+              onClick={async () => {
+                const password = isMe ? await askPassword('Reset your two-factor', 'Enter your password to reset your own two-factor sign-in.') : undefined;
+                if (isMe && !password) return;
+                try {
+                  await api(`/api/users/${user.id}/reset-mfa`, { body: { password } });
+                  toast('Two-factor reset; they set it up again at next sign-in');
+                  onSaved();
+                } catch (err) {
+                  setError(err instanceof ApiError ? err.message : 'Couldn’t reset it');
+                }
+              }}
+            >
               Reset two-factor (lost phone)
             </button>
           )}
         </div>
       </form>
+      {passwordPrompt}
     </Drawer>
   );
 }
@@ -956,6 +984,7 @@ function BrandDrawer({ brand, onClose }: { brand: Brand | null; onClose: () => v
 /* ---------------------------------------------------------------- company file */
 function CompanyFile() {
   const { refreshReference } = useAuthed();
+  const [passwordPrompt, askPassword] = usePasswordPrompt();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Record<string, number> | null>(null);
@@ -966,7 +995,9 @@ function CompanyFile() {
     setError('');
     try {
       const json = JSON.parse(await file.text());
-      const r = await api<{ restored: Record<string, number> }>('/api/company-file', { body: { file: json } });
+      const password = await askPassword('Load a company file', 'Loading a company file changes your setup. Enter your password to go ahead.');
+      if (!password) return;
+      const r = await api<{ restored: Record<string, number> }>('/api/company-file', { body: { file: json, password } });
       setResult(r.restored);
       await refreshReference();
       toast('Company file loaded');
@@ -986,10 +1017,23 @@ function CompanyFile() {
         deleted. Load it <strong>after</strong> importing the tracker, so it can link jobs to clients.
       </p>
       <div className="row wrap">
-        <a className="btn" href={apiUrl('/api/company-file')}>
+        <button
+          className="btn"
+          onClick={async () => {
+            const password = await askPassword('Save the company file', 'Enter your password to download your company file.');
+            if (!password) return;
+            try {
+              const r = await api<{ url: string }>('/api/company-file/link', { body: { password } });
+              window.location.assign(apiUrl(r.url));
+            } catch (err) {
+              setError(err instanceof ApiError ? err.message : 'Couldn’t download it');
+            }
+          }}
+        >
           <Icon name="download" size={18} />
           Save company file
-        </a>
+        </button>
+        {passwordPrompt}
         <label className="btn primary">
           <Icon name="upload" size={18} />
           {busy ? 'Loading…' : 'Load a company file'}

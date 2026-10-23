@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { formatDate } from '@shap/shared';
 import { ErrorBox, Icon, Loading, useToast } from '../components/ui';
+import { usePasswordPrompt } from '../components/PasswordPrompt';
 import { api, ApiError, apiUrl } from '../lib/api';
 
 interface Check {
@@ -56,6 +57,7 @@ function newSections(changelog: string, running: string): string {
  */
 export function SystemSettings() {
   const toast = useToast();
+  const [passwordPrompt, askPassword] = usePasswordPrompt();
   const [info, setInfo] = useState<SystemInfo | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [offline, setOffline] = useState(false);
@@ -123,6 +125,7 @@ export function SystemSettings() {
 
   return (
     <div className="stack-lg narrow-wide">
+      {passwordPrompt}
       <section className="panel panel-pad stack">
         <h3>Version</h3>
         <p className="row wrap" style={{ gap: 8 }}>
@@ -218,10 +221,22 @@ export function SystemSettings() {
                     </td>
                     <td className="num small">{size(b.sizeBytes)}</td>
                     <td className="num">
-                      <a className="btn quiet small" href={apiUrl(`/api/system/backups/${b.name}`)} download>
+                      <button
+                        className="btn quiet small"
+                        onClick={async () => {
+                          const password = await askPassword('Download a backup', 'A backup is everything in your books. Enter your password to download it.');
+                          if (!password) return;
+                          try {
+                            const r = await api<{ url: string }>(`/api/system/backups/${encodeURIComponent(b.name)}/link`, { body: { password } });
+                            window.location.assign(apiUrl(r.url));
+                          } catch (err) {
+                            toast(err instanceof ApiError ? err.message : 'Couldn’t download it', 'error');
+                          }
+                        }}
+                      >
                         <Icon name="download" size={14} />
                         Download
-                      </a>
+                      </button>
                     </td>
                   </tr>
                 ))}

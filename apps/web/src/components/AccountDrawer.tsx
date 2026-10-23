@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { api, ApiError } from '../lib/api';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
 import { AuthenticatorSetup, CodeInput, RecoveryCodes } from './TwoFactor';
-import { Drawer, useToast } from './ui';
+import { Drawer, Field, useToast } from './ui';
 
 interface MfaStatus {
   enabled: boolean;
@@ -11,7 +11,7 @@ interface MfaStatus {
   recoveryCodesLeft: number;
 }
 
-import { ROLE_LABELS } from '@shap/shared';
+import { passwordProblem, ROLE_LABELS } from '@shap/shared';
 
 /** Your own account: two-factor sign-in, recovery codes, sign out. */
 export function AccountDrawer({ onClose }: { onClose: () => void }) {
@@ -160,7 +160,71 @@ export function AccountDrawer({ onClose }: { onClose: () => void }) {
             </form>
           )}
         </section>
+        <ChangePassword />
       </div>
     </Drawer>
+  );
+}
+
+/** Your own password: the current one first. Signs you out everywhere else. */
+function ChangePassword() {
+  const { user } = useAuthed();
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState({ current: '', next: '', again: '' });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const problem = f.next ? passwordProblem(f.next, user) : null;
+  if (!open)
+    return (
+      <section className="stack">
+        <h3>Your password</h3>
+        <div className="row">
+          <button className="btn" onClick={() => setOpen(true)}>
+            Change my password
+          </button>
+        </div>
+      </section>
+    );
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    if (f.next !== f.again) return setError('The new passwords don’t match');
+    setBusy(true);
+    setError('');
+    try {
+      await api('/api/auth/password', { body: { currentPassword: f.current, newPassword: f.next } });
+      toast('Password changed. You’re signed out on your other devices.');
+      setOpen(false);
+      setF({ current: '', next: '', again: '' });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Couldn’t change it');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="stack">
+      <h3>Your password</h3>
+      <form className="stack" onSubmit={save}>
+        <Field label="Current password">
+          {(p) => <input {...p} className="input" type="password" autoComplete="current-password" value={f.current} onChange={(e) => setF({ ...f, current: e.target.value })} autoFocus />}
+        </Field>
+        <Field label="New password" hint={problem ?? 'At least 10 characters. A few unrelated words together is strong and easy to remember.'} error={problem ?? undefined}>
+          {(p) => <input {...p} className="input" type="password" autoComplete="new-password" value={f.next} onChange={(e) => setF({ ...f, next: e.target.value })} />}
+        </Field>
+        <Field label="New password again">
+          {(p) => <input {...p} className="input" type="password" autoComplete="new-password" value={f.again} onChange={(e) => setF({ ...f, again: e.target.value })} />}
+        </Field>
+        {error && <div className="banner alert small">{error}</div>}
+        <div className="row">
+          <button className="btn primary" disabled={busy || !f.current || !f.next || Boolean(problem)}>
+            {busy ? 'Saving…' : 'Change password'}
+          </button>
+          <button type="button" className="btn quiet" onClick={() => setOpen(false)}>
+            Cancel
+          </button>
+        </div>
+      </form>
+    </section>
   );
 }

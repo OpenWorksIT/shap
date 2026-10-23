@@ -33,6 +33,8 @@ export const userInput = z.object({
   role: z.enum(ROLES),
   password: z.string().min(10, 'At least 10 characters').max(200).optional(),
   active: z.boolean().optional(),
+  /** Changing your own email or password: your current password, in case someone else has your session. */
+  currentPassword: z.string().max(200).optional(),
 });
 
 export const settingsInput = z.object({

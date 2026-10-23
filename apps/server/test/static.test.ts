@@ -18,6 +18,8 @@ describe.skipIf(!existsSync(resolve(dist, 'index.html')))('serving the app', () 
       const r = await env.app.inject({ url });
       expect(r.statusCode).toBe(200);
       expect(r.headers['cache-control']).toBe('no-cache');
+      // Only Shap's own scripts run, and it can't be framed by another site.
+      expect(String(r.headers['content-security-policy'])).toMatch(/script-src 'self'.*frame-ancestors 'none'/);
     }
   });
 });

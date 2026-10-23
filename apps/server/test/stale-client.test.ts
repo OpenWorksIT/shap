@@ -25,7 +25,8 @@ describe('a page opened before an update', () => {
     const ok = await owner.call({ method: 'POST', url: '/api/clients', payload: { name: 'Fresh Co' }, headers: { 'x-shap-version': appVersion() } });
     expect(ok.statusCode).toBe(200);
     // A page from before versions were sent at all.
-    const ancient = await env.app.inject({ method: 'POST', url: '/api/clients', payload: { name: 'Old Co' }, cookies: { shap_session: (await env.app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: 'owner@example.co.za', password: 'test-password-1' } })).cookies.find((c) => c.name === 'shap_session')!.value } });
+    const session = (await env.app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: 'owner@example.co.za', password: 'test-password-1' }, headers: { 'x-shap-version': appVersion() } })).cookies.find((c) => c.name === 'shap_session')!.value;
+    const ancient = await env.app.inject({ method: 'POST', url: '/api/clients', payload: { name: 'Old Co' }, cookies: { shap_session: session } });
     expect(ancient.statusCode).toBe(409);
     // The phone app ships its own screens and isn't reloaded this way.
     const native = await owner.call({ method: 'POST', url: '/api/clients', payload: { name: 'Phone Co' }, headers: { 'x-shap-version': '0.0.1', 'x-shap-client': 'native' } });

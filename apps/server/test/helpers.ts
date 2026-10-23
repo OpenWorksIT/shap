@@ -43,7 +43,7 @@ export async function setup(opts: { demo?: boolean; env?: Record<string, string>
 
 /** Signs in and returns helpers that carry the session cookie. */
 export async function login(app: FastifyInstance, email: string) {
-  const res = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email, password: 'test-password-1' } });
+  const res = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email, password: 'test-password-1' }, headers: { 'x-shap-version': appVersion() } });
   if (res.statusCode !== 200) throw new Error(`login failed for ${email}: ${res.body}`);
   const cookie = res.cookies.find((c) => c.name === 'shap_session')!.value;
   // As the web app does: it says which version it is.

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { assignSourceInput, costInput, vatIncluded } from '@shap/shared';
 import { z } from 'zod';
-import { requireRole, userOrThrow } from '../auth.js';
+import { requireRole, seesMoney, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { audit } from '../lib/audit.js';
 import { assertOpen, getSettings, isIsoDate, q } from '../lib/books.js';
@@ -72,8 +72,10 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   app.get('/api/costs/:id', { preHandler: requireRole() }, async (req) => {
+    const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
-    const [row] = await sql`select c.*, a.id as asset_id from costs c left join assets a on a.cost_id = c.id where c.id = ${id}`;
+    const [row] = await sql`select c.*, a.id as asset_id from costs c left join assets a on a.cost_id = c.id
+      where c.id = ${id} and (${seesMoney(user)} or c.created_by = ${user.id})`;
     if (!row) throw notFound('Cost');
     return row;
   });

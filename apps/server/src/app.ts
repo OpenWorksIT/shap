@@ -30,6 +30,21 @@ import { dbScope, DemoUnavailable, inDemo, routedDb } from './db/routing.js';
 import { registerStatementRoutes } from './modules/statements.js';
 import { registerCompanyFileRoutes } from './modules/company-file.js';
 
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'self'",
+  "worker-src 'self'",
+  "manifest-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join('; ');
+
 export interface BuildOptions {
   config: Config;
   sql: Sql;
@@ -44,7 +59,9 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   const sql = routedDb(opts.sql, opts.demoSql ?? null);
   const app = Fastify({
     logger: opts.logger ?? false,
-    trustProxy: config.TRUST_PROXY,
+    // Behind exactly one proxy (Caddy): the client is the address it saw, not whatever a
+    // client claims in its own X-Forwarded-For (which would let anyone dodge the sign-in limits).
+    trustProxy: config.TRUST_PROXY ? (_address: string, hop: number) => hop < 1 : false,
     // Room for a tracker spreadsheet or a receipt photo, sent as base64 JSON.
     bodyLimit: config.UPLOAD_MB * 1024 * 1024 * 1.4,
   });
@@ -61,6 +78,8 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
 
   await app.register(cookie);
   await app.register(rateLimit, { global: false });
+  // JSON only: a plain-text body is what a cross-site form can send.
+  app.removeContentTypeParser('text/plain');
 
   // Which company this request is for: the demo company while its cookie is set. Everything the
   // request does (every query) runs inside this scope.
@@ -90,8 +109,10 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   app.addHook('onRequest', async (req, reply) => {
     if (!req.url.startsWith('/api/') || req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return;
     const theirs = req.headers['x-shap-version'];
-    // Pages from before 1.1.7 don't say their version at all; the phone app signs in with a token.
-    const oldPage = theirs === undefined && !req.headers.authorization && !req.url.startsWith('/api/auth/');
+    // Shap's own pages always send their version; a form or script on another site can't add that
+    // header (browsers only allow it from Shap's own address), so a change without it is refused.
+    // This is what stops another site from acting with your session. The phone app uses a token.
+    const oldPage = theirs === undefined && !req.headers.authorization;
     if (oldPage || (typeof theirs === 'string' && theirs !== version && req.headers['x-shap-client'] !== 'native')) {
       return reply.code(409).send({ error: 'Shap was updated while this page was open. Reload the page, then try again.', code: 'stale_client' });
     }
@@ -99,6 +120,8 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
 
   app.addHook('onSend', async (req, reply, payload) => {
     if (req.url.startsWith('/api/')) reply.header('x-shap-version', version);
+    // The app's pages: only Shap's own scripts, styles and images; never inside another site's frame.
+    else if (!reply.getHeader('content-security-policy')) reply.header('content-security-policy', CSP);
     reply.header('x-content-type-options', 'nosniff');
     reply.header('referrer-policy', 'strict-origin-when-cross-origin');
     reply.header('x-frame-options', 'SAMEORIGIN');

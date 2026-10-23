@@ -18,7 +18,7 @@ afterAll(() => env.close());
 describe('Settings → Updates & backups', () => {
   it('shows the version, and says so when the server side isn’t set up', async () => {
     const s = await owner.get('/api/system');
-    expect(s).toMatchObject({ version: '1.5.0', gitSha: 'abc1234', managed: false, backups: [] });
+    expect(s).toMatchObject({ version: '1.6.0', gitSha: 'abc1234', managed: false, backups: [] });
     const r = await owner.call({ method: 'POST', url: '/api/system/request', payload: { action: 'update' } });
     expect(r.statusCode).toBe(400);
   });
@@ -38,7 +38,12 @@ describe('Settings → Updates & backups', () => {
     writeFileSync(join(backups, 'notes.txt'), 'not a backup');
     const s = await owner.get('/api/system');
     expect(s.backups.map((b: { name: string }) => b.name)).toEqual(['shap-daily-2026-10-19_0230.dump']);
-    const dl = await owner.call({ method: 'GET', url: '/api/system/backups/shap-daily-2026-10-19_0230.dump' });
+    // A backup is everything: it takes your password, for a link that's only good for you, briefly.
+    expect((await owner.call({ method: 'GET', url: '/api/system/backups/shap-daily-2026-10-19_0230.dump' })).statusCode).toBe(400);
+    expect((await owner.call({ method: 'POST', url: '/api/system/backups/shap-daily-2026-10-19_0230.dump/link', payload: { password: 'nope-nope-1' } })).statusCode).toBe(400);
+    const { url } = await owner.post('/api/system/backups/shap-daily-2026-10-19_0230.dump/link', { password: 'test-password-1' });
+    expect((await owner.call({ method: 'GET', url: url.replace('shap-daily', 'shap-manual') })).statusCode).toBe(400);
+    const dl = await owner.call({ method: 'GET', url });
     expect(dl.statusCode).toBe(200);
     expect(dl.body).toBe('PGDMP fake');
     expect((await owner.call({ method: 'GET', url: '/api/system/backups/notes.txt' })).statusCode).toBe(404);
