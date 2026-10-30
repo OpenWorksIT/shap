@@ -1,6 +1,7 @@
 import { useMemo, useState, type CSSProperties } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { formatDate, formatZar } from '@shap/shared';
+import { MonthlyList } from '../components/MonthlyInvoice';
 import { PageHead } from '../components/Shell';
 import { DocChip, Empty, ErrorBox, Icon, Loading, Money, Segmented, Tabs } from '../components/ui';
 import { apiUrl } from '../lib/api';
@@ -102,6 +103,7 @@ export default function DocumentsPage() {
           <input className="input" placeholder="Number, client or job" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search" />
         </div>
       </div>
+      {kind === 'invoice' && isOwner && <MonthlyList />}
       <ErrorBox error={error} onRetry={reload} />
       {loading && !data ? (
         <Loading />

@@ -3,6 +3,7 @@ import { loadConfig } from './config.js';
 import { createDb } from './db/index.js';
 import { migrate } from './db/migrate.js';
 import { demoUrl, ensureDatabase } from './db/routing.js';
+import { startMonthlyTimer } from './modules/monthly.js';
 
 const config = loadConfig();
 const sql = createDb(config.DATABASE_URL);
@@ -28,13 +29,15 @@ if (config.DEMO_ENABLED) {
   }
 }
 
-const { app } = await buildApp({ config, sql, demoSql, logger });
+const { app, ctx } = await buildApp({ config, sql, demoSql, logger });
 
 // Apply pending migrations on start so an update is just "pull and restart".
 await migrate(sql, (m) => app.log.info(m));
 if (demoSql) await migrate(demoSql, (m) => app.log.info(`demo company: ${m}`)).catch((err) => app.log.warn({ err }, 'demo company: migrations failed'));
 
+let stopMonthly: (() => void) | undefined;
 const shutdown = async () => {
+  stopMonthly?.();
   await app.close();
   await sql.end({ timeout: 5 });
   await demoSql?.end({ timeout: 5 });
@@ -44,4 +47,10 @@ process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
 await app.listen({ host: config.HOST, port: config.PORT });
+// Monthly invoices go out on their day without anyone opening Shap.
+stopMonthly = startMonthlyTimer(ctx, app.log);
 app.log.info(`Two-factor sign-in: ${config.mfaRequired ? 'required' : 'optional'} · Email: ${config.SMTP_URL ? 'on' : 'off (logged only)'}`);
+// Say straight away if the mailbox settings don't work, rather than at the first invoice.
+void ctx.mailer.check?.().then((problem) =>
+  problem ? app.log.error(`Email: ${problem}. Quotes and invoices can't be emailed until SMTP_URL is fixed.`) : config.SMTP_URL && app.log.info('Email: signed in to the mail server'),
+);

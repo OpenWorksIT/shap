@@ -61,9 +61,30 @@ icon. Sessions last 30 days of not using it (`SESSION_TTL_HOURS`).
 
 ## 5. Email (optional)
 
-To email quotes and invoices from Shap, set `SMTP_URL` and `MAIL_FROM` in `.env` and run
-`docker compose up -d`. Without it, use **Share PDF**, which hands the PDF to WhatsApp or email
-on a phone and downloads it on a PC.
+To email quotes and invoices from Shap (and send monthly invoices by themselves), give it a
+mailbox to send from. Any mailbox with SMTP works: the one that comes with your domain's
+hosting is fine. In `/opt/shap/deploy/vps/.env`:
+
+```bash
+# Port 465 (TLS from the start): smtps://   Port 587 (STARTTLS): smtp://
+# The username is usually the full email address. Write @ as %40 and any other
+# symbol in the password URL-encoded: # → %23, / → %2F, : → %3A, $ → %24, % → %25, @ → %40.
+SMTP_URL=smtps://invoices%40yourdomain.co.za:the-password@mail.yourdomain.co.za:465
+MAIL_FROM=Your Company <invoices@yourdomain.co.za>
+```
+
+Then `sudo docker compose up -d` (or **Settings → Updates & backups → Update**). The startup log
+says `Email: on`. Email an invoice to yourself to check.
+
+Each email shows the invoice's trading name as the sender (with the `MAIL_FROM` address), and
+replies go to that trading name's email (Settings → Trading names), or the company email. So
+one mailbox serves every trading name. To keep it out of spam folders, the sending domain's
+DNS should have SPF (and ideally DKIM) records that include the mail server; your mail host
+lists them.
+
+Without email, use **Share PDF**, which hands the PDF to WhatsApp or email on a phone and
+downloads it on a PC. Monthly invoices set to email are then made and issued but not sent, and
+Home says so.
 
 ## Another company on the same server
 

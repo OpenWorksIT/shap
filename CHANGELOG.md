@@ -3,6 +3,27 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.7.0 (30 October 2026)
+
+- **Monthly invoices.** On an invoice, *Make monthly…*: pick the day of the month and whether
+  Shap emails it to the client by itself or leaves a draft for you to check. On that day it
+  makes a copy of the latest invoice in the series, with the next number and any month in the
+  heading, lines or message (“October 2026”, “Oct 2026”) moved on. Change the latest invoice
+  (a new price, say) and the next ones follow. The 31st becomes the last day of short months;
+  an optional end date stops it; *Stop* and *Start again* are on the invoice.
+  - Never twice for the same month, and if the server was off it catches up (up to three
+    months). Making an old invoice monthly starts from today, never filling in the months
+    between.
+  - It waits while the books are closed for that date, and Home says why.
+  - Home lists the ones that didn’t work (with the reason) and the drafts waiting for you.
+    *Try again* on the invoice sends any that were made but not emailed.
+  - Quotes & invoices lists every monthly invoice and when the next one is due.
+- **Email setup**: the email shows the invoice’s trading name as the sender, so one mailbox
+  serves every trading name (replies still go to that trading name’s email). Shap checks the
+  mailbox when it starts and logs what’s wrong if it can’t sign in, and a failed email now says
+  why (wrong password, server not found, wrong port) instead of “Something went wrong”. Setup
+  steps: *docs/deployment.md*, “Email”.
+
 ## 1.6.0 (23 October 2026)
 
 Security: a full review and break-in testing of sign-in, sessions and every route. Update

@@ -7,6 +7,7 @@ import { paymentStateSql } from './documents.js';
 import { missingStatements } from './statements.js';
 import { findDuplicates } from './duplicates.js';
 import { findRecurring } from './recurring.js';
+import { monthlyAttention } from './monthly.js';
 import { projectSummarySql, totals, type ProjectSummary } from './projects.js';
 
 export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -101,6 +102,7 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
       uncapturedCosts: uncaptured[0],
       statementsMissing: await missingStatements(sql),
       duplicateCosts: (await findDuplicates(sql)).length,
+      monthlyInvoices: await monthlyAttention(sql),
       // Monthly costs that didn't show up (insurance, bank fees…).
       recurringMissing: (await findRecurring(sql))
         .filter((r) => r.status === 'missing')

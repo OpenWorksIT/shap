@@ -14,6 +14,7 @@ import {
   type LineCategory,
   type PaymentMethod,
 } from '@shap/shared';
+import { MonthlyDrawer, MonthlyPanel, type MonthlyState } from '../components/MonthlyInvoice';
 import { BrandSelect, ProjectSelect, useHasBrands } from '../components/Pickers';
 import { PageHead } from '../components/Shell';
 import { DocChip, Drawer, ErrorBox, Field, Icon, Loading, Money, MoneyInput, Segmented, useToast } from '../components/ui';
@@ -88,7 +89,8 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
   const [dirty, setDirty] = useState(!detail);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [drawer, setDrawer] = useState<null | 'pay' | 'email' | 'charge' | 'writeoff'>(null);
+  const [drawer, setDrawer] = useState<null | 'pay' | 'email' | 'charge' | 'writeoff' | 'monthly'>(null);
+  const monthly = useApi<MonthlyState>(doc?.kind === 'invoice' && doc.status !== 'void' && isOwner ? `/api/documents/${doc.id}/monthly` : null);
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => (setD((x) => ({ ...x, [k]: v })), setDirty(true));
 
   // A new document for a job: take the job's client and name.
@@ -564,6 +566,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
               </div>
             )}
           </section>
+          {doc && monthly.data && <MonthlyPanel doc={doc} data={monthly.data} reload={monthly.reload} onChange={() => setDrawer('monthly')} />}
           {detail && detail.receipts.length > 0 && (
             <section className="panel">
               <div className="panel-head strong">Payments received</div>
@@ -603,6 +606,15 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
             setDrawer(null);
             void action('write-off', payload, `Invoice ${doc.number} marked delinquent`);
           }}
+        />
+      )}
+      {drawer === 'monthly' && doc && monthly.data && (
+        <MonthlyDrawer
+          doc={{ ...doc, brandName: doc.brandName ?? (settings.tradingName || settings.companyName) }}
+          schedule={monthly.data.schedule}
+          emailOn={monthly.data.emailOn}
+          onClose={() => setDrawer(null)}
+          onSaved={() => (setDrawer(null), void monthly.reload())}
         />
       )}
       {drawer === 'pay' && doc && <PaymentDrawer invoiceId={doc.id} balance={total - paid} onClose={() => setDrawer(null)} onSaved={() => (setDrawer(null), void reload())} />}

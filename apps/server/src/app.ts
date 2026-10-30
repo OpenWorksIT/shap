@@ -15,6 +15,7 @@ import { registerClientRoutes } from './modules/clients.js';
 import { registerCostRoutes } from './modules/costs.js';
 import { registerDuplicateRoutes } from './modules/duplicates.js';
 import { registerRecurringRoutes } from './modules/recurring.js';
+import { registerMonthlyRoutes } from './modules/monthly.js';
 import { registerDashboardRoutes } from './modules/dashboard.js';
 import { registerDocumentRoutes } from './modules/documents.js';
 import { registerImportRoutes } from './modules/import/routes.js';
@@ -72,7 +73,10 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
     sql,
     dbs: { real: opts.sql, demo: opts.demoSql ?? null },
     // The demo company's clients are made up: nothing is ever emailed from it.
-    mailer: { send: async (m) => (inDemo() ? void app.log.info({ to: m.to }, 'demo company: email not sent') : realMailer.send(m)) },
+    mailer: {
+      send: async (m) => (inDemo() ? void app.log.info({ to: m.to }, 'demo company: email not sent') : realMailer.send(m)),
+      check: async () => (realMailer.check ? realMailer.check() : null),
+    },
     secrets: new Secrets(config.secretsKey),
   };
 
@@ -163,6 +167,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   registerRecurringRoutes(app, ctx);
   registerCostRoutes(app, ctx);
   registerDocumentRoutes(app, ctx);
+  registerMonthlyRoutes(app, ctx);
   registerReportRoutes(app, ctx);
   registerImportRoutes(app, ctx);
   registerYearEndRoutes(app, ctx);

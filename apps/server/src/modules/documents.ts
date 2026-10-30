@@ -3,6 +3,7 @@ import { addDays, documentInput, lineTotal, quoteStatusInput, receiptInput, writ
 import { z } from 'zod';
 import { requireRole, userOrThrow, type AuthUser } from '../auth.js';
 import type { Ctx } from '../context.js';
+import type { Mailer } from '../lib/mailer.js';
 import { pgCode, PG, type Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
 import { assertOpen, formatNumber, getSettings, q, today } from '../lib/books.js';
@@ -154,6 +155,44 @@ export async function loadDocument(db: Db, id: string) {
     select r.*, s.name as source_name from receipts r join payment_sources s on s.id = r.source_id
     where r.invoice_id = ${id} order by r.date, r.created_at`;
   return { doc, lines, receipts };
+}
+
+/** A quote or invoice as its PDF, under its trading name, with the file name clients see. */
+export async function documentPdf(db: Db, id: string) {
+  const data = await loadDocument(db, id);
+  const settings = await getSettings(db);
+  const brand = await loadBrand(db, data.doc.brandId ?? settings.defaultBrandId);
+  let logo: Buffer | null = null;
+  const logoId = brand?.logoId ?? settings.logoId;
+  if (logoId) {
+    const [a] = await db<{ bytes: Buffer }[]>`select bytes from attachments where id = ${logoId}`;
+    logo = a?.bytes ?? null;
+  }
+  const pdf = await renderDocumentPdf({ ...data, settings, brand, logo });
+  const label = data.doc.kind === 'invoice' ? (settings.vatRegistered ? 'Tax invoice' : 'Invoice') : 'Quote';
+  const filename = `${brand ? `${brand.name} ` : ''}${label} ${data.doc.number}${data.doc.clientName ? ` - ${data.doc.clientName}` : ''}.pdf`.replace(/[^\w.\- ]/g, '');
+  return { pdf, filename, data, settings, brand };
+}
+
+/**
+ * Emails a quote or invoice with its PDF. It goes out under the trading name (as the sender's
+ * name, with replies to the trading name's own email), whichever mailbox actually sends it.
+ */
+export async function emailDocument(db: Db, mailer: Mailer, id: string, to: string, message: string): Promise<string> {
+  const { pdf, filename, data, settings, brand } = await documentPdf(db, id);
+  const what = data.doc.kind === 'invoice' ? 'Invoice' : 'Quote';
+  const from = brand?.name || settings.tradingName || settings.companyName;
+  await mailer.send({
+    to,
+    fromName: from || undefined,
+    replyTo: brand?.email || settings.email || undefined,
+    subject: `${what} ${data.doc.number} from ${from}`,
+    text: message || `Good day,\n\nPlease find ${what.toLowerCase()} ${data.doc.number} attached.\n\nKind regards,\n${from}`,
+    attachments: [{ filename, content: pdf, contentType: 'application/pdf' }],
+  });
+  if (data.doc.kind === 'quote' && data.doc.status === 'draft') await db`update documents set status = 'sent', sent_at = now() where id = ${id}`;
+  else await db`update documents set sent_at = coalesce(sent_at, now()) where id = ${id}`;
+  return data.doc.kind;
 }
 
 export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -412,21 +451,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   // ---- PDF and email
-  const pdfFor = async (id: string) => {
-    const data = await loadDocument(sql, id);
-    const settings = await getSettings(sql);
-    const brand = await loadBrand(sql, data.doc.brandId ?? settings.defaultBrandId);
-    let logo: Buffer | null = null;
-    const logoId = brand?.logoId ?? settings.logoId;
-    if (logoId) {
-      const [a] = await sql<{ bytes: Buffer }[]>`select bytes from attachments where id = ${logoId}`;
-      logo = a?.bytes ?? null;
-    }
-    const pdf = await renderDocumentPdf({ ...data, settings, brand, logo });
-    const label = data.doc.kind === 'invoice' ? (settings.vatRegistered ? 'Tax invoice' : 'Invoice') : 'Quote';
-    const filename = `${brand ? `${brand.name} ` : ''}${label} ${data.doc.number}${data.doc.clientName ? ` - ${data.doc.clientName}` : ''}.pdf`.replace(/[^\w.\- ]/g, '');
-    return { pdf, filename, data, settings, brand };
-  };
+  const pdfFor = (id: string) => documentPdf(sql, id);
 
   app.get('/api/documents/:id/pdf', { preHandler: requireRole('owner', 'accountant') }, async (req, reply) => {
     const { id } = parse(idParam, req.params);
@@ -441,18 +466,8 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = parse(idParam, req.params);
     const input = parse(z.object({ to: z.string().trim().email('Enter the client’s email'), message: z.string().max(4000).default('') }), req.body);
     if (!ctx.config.SMTP_URL) throw badRequest('Email isn’t set up on this server (SMTP_URL). Use Share or Download instead.');
-    const { pdf, filename, data, settings, brand } = await pdfFor(id);
-    const what = data.doc.kind === 'invoice' ? 'Invoice' : 'Quote';
-    await ctx.mailer.send({
-      to: input.to,
-      replyTo: brand?.email || settings.email || undefined,
-      subject: `${what} ${data.doc.number} from ${brand?.name || settings.tradingName || settings.companyName}`,
-      text: input.message || `Good day,\n\nPlease find ${what.toLowerCase()} ${data.doc.number} attached.\n\nKind regards,\n${brand?.name || settings.tradingName || settings.companyName}`,
-      attachments: [{ filename, content: pdf, contentType: 'application/pdf' }],
-    });
-    if (data.doc.kind === 'quote' && data.doc.status === 'draft') await sql`update documents set status = 'sent', sent_at = now() where id = ${id}`;
-    else await sql`update documents set sent_at = coalesce(sent_at, now()) where id = ${id}`;
-    await audit(sql, { userId: user.id, action: 'email', entity: data.doc.kind, entityId: id, ip: req.ip, details: { to: input.to } });
+    const kind = await emailDocument(sql, ctx.mailer, id, input.to, input.message);
+    await audit(sql, { userId: user.id, action: 'email', entity: kind, entityId: id, ip: req.ip, details: { to: input.to } });
     return { ok: true };
   });
 }

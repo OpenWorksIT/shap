@@ -21,6 +21,10 @@ interface Dashboard {
   uncapturedCosts: { n: number; total: number };
   statementsMissing?: { sourceId: string; sourceName: string; months: string[] }[];
   duplicateCosts?: number;
+  monthlyInvoices?: {
+    failed: { id: string; documentId: string; title: string; clientName: string | null; error: string }[];
+    waiting: { id: string; scheduleId: string; number: string; clientName: string | null; mode: string }[];
+  };
   recurringMissing?: { key: string; label: string; months: string[]; usualCents: number; onStatement: boolean }[];
   bankCents: number;
   ownerLoanCents: number;
@@ -90,6 +94,30 @@ function OwnerHome() {
         <Icon name="chevronRight" size={16} />
       </Link>
     ),
+    ...(data.monthlyInvoices?.failed ?? []).map((f) => (
+      <Link key={`mf-${f.id}`} to={`/documents/${f.documentId}`} className="attention">
+        <Icon name="mail" size={18} />
+        <span className="grow">
+          <strong>Monthly invoice{f.clientName ? ` for ${f.clientName}` : ''}</strong> didn’t work: {f.error}
+        </span>
+        Fix
+        <Icon name="chevronRight" size={16} />
+      </Link>
+    )),
+    ...(data.monthlyInvoices?.waiting ?? [])
+      // One that failed already says so above.
+      .filter((w) => !data.monthlyInvoices!.failed.some((f) => f.id === w.scheduleId))
+      .map((w) => (
+        <Link key={`mw-${w.id}`} to={`/documents/${w.id}`} className="attention">
+          <Icon name="mail" size={18} />
+          <span className="grow">
+            <strong>Monthly invoice {w.number}</strong>
+            {w.clientName ? ` for ${w.clientName}` : ''} {w.mode === 'draft' ? 'is ready for you to check and send' : 'was made but not emailed'}
+          </span>
+          {w.mode === 'draft' ? 'Check' : 'Send'}
+          <Icon name="chevronRight" size={16} />
+        </Link>
+      )),
     (data.recurringMissing ?? []).length > 0 && (
       <Link key="rec" to="/costs?kind=recurring" className="attention">
         <Icon name="alert" size={18} />
