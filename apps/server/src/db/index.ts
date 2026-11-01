@@ -1,4 +1,6 @@
+import { PGlite } from '@electric-sql/pglite';
 import postgres from 'postgres';
+import { createPgliteSql } from './pglite-sql.js';
 
 export type Sql = postgres.Sql<{}>;
 export type Tx = postgres.TransactionSql<{}>;
@@ -6,6 +8,11 @@ export type Tx = postgres.TransactionSql<{}>;
 export type Db = Sql | Tx;
 
 export function createDb(url: string, opts: { max?: number } = {}): Sql {
+  // On the phone (and in its tests): Postgres in WebAssembly. "pglite:memory" or "pglite:<dir>".
+  if (url.startsWith('pglite:')) {
+    const where = url.slice('pglite:'.length);
+    return createPgliteSql(new PGlite(where === 'memory' ? undefined : where)) as unknown as Sql;
+  }
   return postgres(url, {
     max: opts.max ?? 10,
     // The ledger is one large view over small tables. Postgres's JIT judges it by the plan's
