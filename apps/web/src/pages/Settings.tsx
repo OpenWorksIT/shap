@@ -21,7 +21,7 @@ import {
 } from '@shap/shared';
 import { PageHead } from '../components/Shell';
 import { Drawer, ErrorBox, Field, Icon, Loading, Tabs, useToast } from '../components/ui';
-import { api, ApiError } from '../lib/api';
+import { api, ApiError, APP_VERSION } from '../lib/api';
 import { fileToBase64, shrinkImage } from '../lib/files';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
@@ -61,7 +61,23 @@ export default function SettingsPage() {
       {tab === 'invoicing' && <SettingsForm section="invoicing" />}
       {tab === 'sections' && <Sections />}
       {tab === 'lists' && <Lists />}
+      <About />
     </div>
+  );
+}
+
+function About() {
+  return (
+    <section className="panel panel-pad stack narrow-wide">
+      <h3>About Shap Pocket</h3>
+      <p className="small">
+        Version {APP_VERSION}. Free and open source (AGPL-3.0 with an app store exception), by OpenWorks IT. Your books stay on this phone: there’s no Shap server.
+      </p>
+      <p className="small">
+        Source code: <a href="https://github.com/OpenWorksIT/shap-pocket" target="_blank" rel="noreferrer">github.com/OpenWorksIT/shap-pocket</a>
+      </p>
+      <p className="xs muted">Tax figures follow SARS’s published tables but aren’t tax advice: check with your accountant or SARS.</p>
+    </section>
   );
 }
 
@@ -115,12 +131,16 @@ function BusinessSettings() {
 function Sections() {
   const { settings, refreshReference } = useAuthed();
   const toast = useToast();
-  const toggle = async (k: (typeof FEATURE_KEYS)[number], on: boolean) => {
+  const [on, setOn] = useState<Record<string, boolean>>(() => Object.fromEntries(FEATURE_KEYS.map((k) => [k, featureOn(settings.features, k)])));
+  const toggle = async (k: (typeof FEATURE_KEYS)[number], value: boolean) => {
+    const next = { ...on, [k]: value };
+    setOn(next);
     try {
-      await saveSettings(settings, { features: { ...settings.features, [k]: on } });
+      await saveSettings(settings, { features: next });
       await refreshReference();
-      toast(`${FEATURES[k].label} ${on ? 'on' : 'off'}`);
+      toast(`${FEATURES[k].label} ${value ? 'on' : 'off'}`);
     } catch (err) {
+      setOn(on);
       toast(err instanceof ApiError ? err.message : 'Couldn’t save', 'error');
     }
   };
@@ -134,7 +154,7 @@ function Sections() {
         {FEATURE_KEYS.map((k) => (
           <li key={k} className="list-row">
             <label className="check grow">
-              <input type="checkbox" checked={featureOn(settings.features, k)} onChange={(e) => void toggle(k, e.target.checked)} />
+              <input type="checkbox" checked={on[k]} onChange={(e) => void toggle(k, e.target.checked)} />
               <span>
                 {FEATURES[k].label}
                 <div className="xs muted">{FEATURES[k].hint}</div>

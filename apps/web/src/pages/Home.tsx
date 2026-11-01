@@ -5,6 +5,7 @@ import { PageHead } from '../components/Shell';
 import { DocChip, Empty, ErrorBox, Icon, Kpi, Loading, Money, ProjectChip } from '../components/ui';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
+import { lastBackup } from '../lib/backup';
 import type { ProjectRow } from '../lib/types';
 
 interface Dashboard {
@@ -46,7 +47,19 @@ function OwnerHome() {
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   if (!data) return <Loading />;
   const ytdMargin = data.yearToDate.incomeCents ? data.yearToDate.grossProfitCents / data.yearToDate.incomeCents : null;
+  const lastSaved = lastBackup();
+  const backupDays = lastSaved ? Math.floor((Date.now() - lastSaved.getTime()) / 86_400_000) : null;
   const needs = [
+    (backupDays === null ? data.owing.invoices.length > 0 || data.yearToDate.incomeCents !== 0 : backupDays > 7) && (
+      <Link key="backup" to="/backup" className="attention">
+        <Icon name="upload" size={18} />
+        <span className="grow">
+          <strong>{backupDays === null ? 'No backup yet.' : `Last backup ${backupDays} days ago.`}</strong> Your books are only on this phone: save a copy to your cloud drive.
+        </span>
+        Back up
+        <Icon name="chevronRight" size={16} />
+      </Link>
+    ),
     (data.vat?.state === 'over' || data.vat?.state === 'near') && (
       <Link key="vat" to="/settings" className="attention">
         <Icon name="alert" size={18} />
