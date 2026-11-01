@@ -1,10 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { ROLE_LABELS } from '@shap/shared';
 import { useAuthed } from '../lib/session';
-import { AccountDrawer } from './AccountDrawer';
 import { Logo } from './Logo';
-import { Avatar, Icon } from './ui';
+import { Icon } from './ui';
 
 interface Item {
   to: string;
@@ -14,26 +12,26 @@ interface Item {
 }
 
 export function Shell({ children }: { children: ReactNode }) {
-  const { user, settings, isOwner, seesMoney } = useAuthed();
-  const [account, setAccount] = useState(false);
+  const { settings, has } = useAuthed();
   const [more, setMore] = useState(false);
   const location = useLocation();
   useEffect(() => setMore(false), [location.pathname]);
 
   const all: (Item & { show: boolean })[] = [
     { to: '/', label: 'Home', icon: 'home', end: true, show: true },
-    { to: '/log', label: 'Log', icon: 'log', show: user.role !== 'accountant' },
-    { to: '/jobs', label: 'Jobs', icon: 'jobs', show: true },
-    { to: '/workers', label: 'Workers', icon: 'workers', show: seesMoney },
-    { to: '/costs', label: 'Costs', icon: 'costs', show: seesMoney },
-    { to: '/documents', label: 'Quotes & invoices', icon: 'docs', show: seesMoney },
-    { to: '/clients', label: 'Clients', icon: 'clients', show: seesMoney },
-    { to: '/accounts', label: 'Accounts', icon: 'accounts', show: seesMoney },
-    { to: '/settings', label: 'Settings', icon: 'settings', show: isOwner },
+    { to: '/log', label: 'Add', icon: 'log', show: true },
+    { to: '/jobs', label: 'Jobs', icon: 'jobs', show: has('jobs') },
+    { to: '/workers', label: 'Workers', icon: 'workers', show: has('workers') },
+    { to: '/costs', label: 'Costs', icon: 'costs', show: true },
+    { to: '/documents', label: has('quotes') ? 'Quotes & invoices' : 'Invoices', icon: 'docs', show: true },
+    { to: '/clients', label: 'Clients', icon: 'clients', show: true },
+    { to: '/accounts', label: 'Accounts', icon: 'accounts', show: true },
+    { to: '/backup', label: 'Backup', icon: 'upload', show: true },
+    { to: '/settings', label: 'Settings', icon: 'settings', show: true },
   ];
   const items = all.filter((i) => i.show);
   // Phones: four tabs plus "More". Log sits in the middle, where a thumb finds it.
-  const tabKeys = seesMoney ? ['/', '/jobs', '/log', '/documents'] : ['/', '/log', '/jobs'];
+  const tabKeys = ['/', has('jobs') ? '/jobs' : '/costs', '/log', '/documents'];
   const tabs = tabKeys.map((k) => items.find((i) => i.to === k)).filter(Boolean) as Item[];
   const overflow = items.filter((i) => !tabKeys.includes(i.to));
 
@@ -52,23 +50,15 @@ export function Shell({ children }: { children: ReactNode }) {
             </NavLink>
           ))}
         </nav>
-        <button className="me" onClick={() => setAccount(true)} aria-label="Your account">
-          <Avatar name={user.name} size={34} />
-          <span className="grow">
-            <span className="strong small" style={{ display: 'block' }}>
-              {user.name}
-            </span>
-            <span className="faint xs">{ROLE_LABELS[user.role]}</span>
-          </span>
-        </button>
+
       </aside>
 
       <header className="mobile-top">
         <Logo size={26} />
         <span className="grow ellipsis small muted">{settings.tradingName || settings.companyName}</span>
-        <button className="btn quiet small" onClick={() => setAccount(true)} aria-label="Your account">
-          <Avatar name={user.name} size={30} />
-        </button>
+        <NavLink to="/settings" className="btn quiet small" aria-label="Settings">
+          <Icon name="settings" size={22} />
+        </NavLink>
       </header>
 
       <main className="main" id="main">
@@ -106,7 +96,6 @@ export function Shell({ children }: { children: ReactNode }) {
           </div>
         </>
       )}
-      {account && <AccountDrawer onClose={() => setAccount(false)} />}
     </div>
   );
 }

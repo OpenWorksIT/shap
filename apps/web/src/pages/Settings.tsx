@@ -21,56 +21,129 @@ import {
 } from '@shap/shared';
 import { PageHead } from '../components/Shell';
 import { Drawer, ErrorBox, Field, Icon, Loading, Tabs, useToast } from '../components/ui';
-import { api, ApiError, apiUrl } from '../lib/api';
+import { api, ApiError } from '../lib/api';
 import { fileToBase64, shrinkImage } from '../lib/files';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
 import type { Brand, Settings } from '../lib/types';
-import { SystemSettings } from './System';
-import { ShowDemoButton } from '../components/Demo';
-import { usePasswordPrompt } from '../components/PasswordPrompt';
+import { BusinessFields, LogoField } from '../components/BusinessForm';
+import { ApiImage } from '../components/Files';
+import { FEATURES, FEATURE_KEYS, featureOn } from '@shap/shared';
 
-type Tab = 'company' | 'invoicing' | 'lists' | 'users' | 'import' | 'system';
+type Tab = 'business' | 'invoicing' | 'sections' | 'lists';
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 export default function SettingsPage() {
   const [params, setParams] = useSearchParams();
-  const tab = (params.get('tab') as Tab) || 'company';
-  const { isOwner } = useAuthed();
+  const tab = (params.get('tab') as Tab) || 'business';
+  const { has } = useAuthed();
   return (
     <div className="stack-lg">
-      <PageHead title="Settings" actions={isOwner ? <ShowDemoButton /> : undefined} />
+      <PageHead title="Settings" />
       <div className="tabs-scroll">
         <Tabs<Tab>
           value={tab}
           onChange={(t) => setParams({ tab: t }, { replace: true })}
           tabs={[
-            { value: 'company', label: 'Company' },
-            { value: 'invoicing', label: 'Invoicing & books' },
+            { value: 'business', label: 'Your business' },
+            { value: 'invoicing', label: 'Invoicing & tax' },
+            { value: 'sections', label: 'What you use' },
             { value: 'lists', label: 'Lists' },
-            { value: 'users', label: 'People who sign in' },
-            { value: 'import', label: 'Import & company file' },
-            { value: 'system', label: 'Updates & backups' },
           ]}
         />
       </div>
-      {tab === 'company' && (
+      {tab === 'business' && (
         <>
-          <SettingsForm section="company" />
-          <TradingNames />
+          <BusinessSettings />
+          {has('brands') && <TradingNames />}
         </>
       )}
       {tab === 'invoicing' && <SettingsForm section="invoicing" />}
+      {tab === 'sections' && <Sections />}
       {tab === 'lists' && <Lists />}
-      {tab === 'users' && <Users />}
-      {tab === 'system' && <SystemSettings />}
-      {tab === 'import' && (
-        <>
-          <ImportTracker />
-          <CompanyFile />
-        </>
-      )}
     </div>
+  );
+}
+
+/** Saves settings: everything as it is, with these changes. */
+async function saveSettings(settings: Settings, changes: Partial<Settings>) {
+  const { logoId: _l, ...rest } = { ...settings, ...changes } as Settings & { logoId: string | null };
+  await api('/api/settings', { method: 'PUT', body: rest });
+}
+
+function BusinessSettings() {
+  const { settings, refreshReference } = useAuthed();
+  const toast = useToast();
+  const [f, setF] = useState<Settings>({ ...settings });
+  const [logoId, setLogoId] = useState(settings.logoId);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setF((x) => ({ ...x, [k]: v }));
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      await saveSettings(settings, { ...f, fyEndMonth: f.businessType === 'sole_prop' ? 2 : f.fyEndMonth });
+      await refreshReference();
+      toast('Saved');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Couldn’t save');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form className="stack-lg narrow-wide" onSubmit={save}>
+      <section className="panel panel-pad stack">
+        <h3>Your business</h3>
+        <BusinessFields f={f} set={set as never} />
+      </section>
+      <section className="panel panel-pad stack">
+        <h3>Logo</h3>
+        <LogoField logoId={logoId} layout={f.logoLayout} accent={f.accent} onLogo={(id) => (setLogoId(id), void refreshReference())} onLayout={(l) => set('logoLayout', l)} />
+      </section>
+      {error && <div className="banner alert small">{error}</div>}
+      <button className="btn primary big block" disabled={busy}>
+        {busy ? 'Saving…' : 'Save'}
+      </button>
+    </form>
+  );
+}
+
+/** Switch parts of the app off that a business like yours doesn't need. */
+function Sections() {
+  const { settings, refreshReference } = useAuthed();
+  const toast = useToast();
+  const toggle = async (k: (typeof FEATURE_KEYS)[number], on: boolean) => {
+    try {
+      await saveSettings(settings, { features: { ...settings.features, [k]: on } });
+      await refreshReference();
+      toast(`${FEATURES[k].label} ${on ? 'on' : 'off'}`);
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Couldn’t save', 'error');
+    }
+  };
+  return (
+    <section className="panel narrow-wide">
+      <div className="panel-head">
+        <strong>What you use</strong>
+        <div className="xs muted">Switch off what a business like yours doesn’t need. Nothing is deleted: switch it on again and it’s all still there.</div>
+      </div>
+      <ul className="list">
+        {FEATURE_KEYS.map((k) => (
+          <li key={k} className="list-row">
+            <label className="check grow">
+              <input type="checkbox" checked={featureOn(settings.features, k)} onChange={(e) => void toggle(k, e.target.checked)} />
+              <span>
+                {FEATURES[k].label}
+                <div className="xs muted">{FEATURES[k].hint}</div>
+              </span>
+            </label>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -459,410 +532,6 @@ function ListDrawer({ kind, row, onClose, onSaved }: { kind: ListKind; row: Reco
 }
 
 /* ---------------------------------------------------------------- users */
-interface UserRow {
-  id: string;
-  name: string;
-  email: string;
-  role: Role;
-  active: boolean;
-  lastLoginAt: string | null;
-  mfa: boolean;
-}
-
-function Users() {
-  const { user } = useAuthed();
-  const { data, error, reload } = useApi<UserRow[]>('/api/users');
-  const [edit, setEdit] = useState<UserRow | 'new' | null>(null);
-  return (
-    <div className="stack">
-      <div className="spread">
-        <p className="small muted">Give your foreman a site login to log days and costs, and your accountant a read-only one.</p>
-        <button className="btn primary" onClick={() => setEdit('new')}>
-          <Icon name="plus" size={18} />
-          Add someone
-        </button>
-      </div>
-      <ErrorBox error={error} />
-      {!data ? (
-        <Loading />
-      ) : (
-        <section className="panel table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Access</th>
-                <th className="hide-sm">Two-factor</th>
-                <th className="hide-sm">Last signed in</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((u) => (
-                <tr key={u.id} className={`clickable ${u.active ? '' : 'inactive'}`} onClick={() => setEdit(u)}>
-                  <td>
-                    <strong>{u.name}</strong>
-                    {u.id === user.id && <span className="muted"> (you)</span>}
-                    <div className="xs muted">{u.email}</div>
-                  </td>
-                  <td>{ROLE_LABELS[u.role]}</td>
-                  <td className="hide-sm">{u.mfa ? 'On' : 'Off'}</td>
-                  <td className="hide-sm">{u.lastLoginAt ? formatDate(u.lastLoginAt.slice(0, 10)) : 'Never'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      )}
-      {edit && <UserDrawer user={edit === 'new' ? null : edit} onClose={() => setEdit(null)} onSaved={reload} />}
-    </div>
-  );
-}
-
-function UserDrawer({ user, onClose, onSaved }: { user: UserRow | null; onClose: () => void; onSaved: () => void }) {
-  const toast = useToast();
-  const { user: me } = useAuthed();
-  const [f, setF] = useState({ name: user?.name ?? '', email: user?.email ?? '', role: (user?.role ?? 'capture') as Role, password: '', active: user?.active ?? true, currentPassword: '' });
-  const [error, setError] = useState('');
-  const [passwordPrompt, askPassword] = usePasswordPrompt();
-  const isMe = user?.id === me.id;
-  // Changing your own email or password takes your current one (in case someone else has your phone).
-  const needsCurrent = isMe && (Boolean(f.password) || f.email.trim().toLowerCase() !== user?.email);
-  const problem = f.password ? passwordProblem(f.password, f) : null;
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    try {
-      const body = { ...f, password: f.password || undefined, currentPassword: needsCurrent ? f.currentPassword : undefined };
-      if (user) await api(`/api/users/${user.id}`, { method: 'PUT', body });
-      else await api('/api/users', { body });
-      toast('Saved');
-      onSaved();
-      onClose();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Couldn’t save');
-    }
-  };
-  return (
-    <Drawer title={user ? user.name : 'Add someone'} onClose={onClose}>
-      <form className="stack" onSubmit={submit}>
-        <Field label="Name">{(p) => <input {...p} className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required />}</Field>
-        <Field label="Email (they sign in with this)">{(p) => <input {...p} className="input" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} required />}</Field>
-        <div className="field">
-          <span className="label">Access</span>
-          {ROLES.map((r) => (
-            <label key={r} className="check">
-              <input type="radio" name="role" checked={f.role === r} onChange={() => setF({ ...f, role: r })} />
-              <span>
-                {ROLE_LABELS[r]}
-                <div className="xs muted">{ROLE_HINTS[r]}</div>
-              </span>
-            </label>
-          ))}
-        </div>
-        <Field label={user ? 'New password (leave blank to keep)' : 'Starting password'} hint={problem ?? (isMe ? 'At least 10 characters.' : 'At least 10 characters. They can change it under their name, top right.')} error={problem ?? undefined}>
-          {(p) => <input {...p} className="input" type="text" autoComplete="new-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} required={!user} minLength={user ? undefined : 10} />}
-        </Field>
-        {needsCurrent && (
-          <Field label="Your current password" hint="To change your own email or password.">
-            {(p) => <input {...p} className="input" type="password" autoComplete="current-password" value={f.currentPassword} onChange={(e) => setF({ ...f, currentPassword: e.target.value })} required />}
-          </Field>
-        )}
-        {user && (
-          <label className="check">
-            <input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} />
-            Can sign in
-          </label>
-        )}
-        {error && <div className="banner alert small">{error}</div>}
-        <div className="row wrap">
-          <button className="btn primary">Save</button>
-          {user?.mfa && (
-            <button
-              type="button"
-              className="btn"
-              onClick={async () => {
-                const password = isMe ? await askPassword('Reset your two-factor', 'Enter your password to reset your own two-factor sign-in.') : undefined;
-                if (isMe && !password) return;
-                try {
-                  await api(`/api/users/${user.id}/reset-mfa`, { body: { password } });
-                  toast('Two-factor reset; they set it up again at next sign-in');
-                  onSaved();
-                } catch (err) {
-                  setError(err instanceof ApiError ? err.message : 'Couldn’t reset it');
-                }
-              }}
-            >
-              Reset two-factor (lost phone)
-            </button>
-          )}
-        </div>
-      </form>
-      {passwordPrompt}
-    </Drawer>
-  );
-}
-
-/* ---------------------------------------------------------------- tracker import */
-interface Preview {
-  clients: number;
-  projects: number;
-  projectsNotOnSheet: string[];
-  invoices: number;
-  costs: number;
-  workers: string[];
-  labour: number;
-  unallocatedLabour: number;
-  wagePayments: number;
-  savings: number;
-  accounts: string[];
-  types: string[];
-  trialBalance: { date: string; bankCents: number; ownerLoanCents: number; shareCapitalCents: number } | null;
-  warnings: string[];
-  skipped: { costsWithoutAmount: number; labourPlaceholders: number; savingsRows: number };
-  firstDate: string | null;
-  lastDate: string | null;
-  companyEmpty: boolean;
-}
-interface Result {
-  counts: Record<string, number>;
-  jobsChecked: number;
-  jobDifferences: { name: string; field: string; sheetCents: number; shapCents: number }[];
-  warnings: string[];
-  checks: { month: string; sheet: { invoicedCents: number; partsCents: number; labourCents: number }; shap: { invoicedCents: number; partsCents: number; labourCents: number } }[];
-  agreement: { date: string; lines: { account: string; amountCents: number }[]; note: string } | null;
-  sourceMapping: { account: string; source: string; postsTo: string }[];
-}
-
-function ImportTracker() {
-  const { refreshReference } = useAuthed();
-  const toast = useToast();
-  const [file, setFile] = useState<{ name: string; data: string } | null>(null);
-  const [preview, setPreview] = useState<Preview | null>(null);
-  const [result, setResult] = useState<Result | null>(null);
-  const [opts, setOpts] = useState({ replace: false, agreeTrialBalance: true });
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-
-  const choose = async (f: File | undefined) => {
-    if (!f) return;
-    setBusy(true);
-    setError('');
-    setResult(null);
-    try {
-      const data = await fileToBase64(f);
-      setFile({ name: f.name, data });
-      const r = await api<{ preview: Preview }>('/api/import/tracker', { body: { dataBase64: data, apply: false } });
-      setPreview(r.preview);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Couldn’t read that file');
-    } finally {
-      setBusy(false);
-    }
-  };
-  const run = async () => {
-    if (!file) return;
-    setBusy(true);
-    setError('');
-    try {
-      const r = await api<{ result: Result }>('/api/import/tracker', { body: { dataBase64: file.data, apply: true, ...opts } });
-      setResult(r.result);
-      await refreshReference();
-      toast('Tracker imported');
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'The import failed; nothing was changed');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (result) return <ImportResult r={result} />;
-  return (
-    <div className="stack-lg narrow-wide">
-      <section className="panel panel-pad stack">
-        <h3>Bring your project tracker across</h3>
-        <p className="small">
-          Upload the Excel tracker (Per Project, Costs, Wages List…). Shap reads it, shows you what it found, and imports it in one go: clients, jobs and their
-          invoices and payments, costs, workers, days and wage payments, savings. Nothing changes until you press Import.
-        </p>
-        <label className="btn primary big">
-          <Icon name="upload" size={18} />
-          {busy && !preview ? 'Reading…' : file ? `Choose another file (${file.name})` : 'Choose the .xlsx file'}
-          <input type="file" accept=".xlsx" hidden onChange={(e) => void choose(e.target.files?.[0])} disabled={busy} />
-        </label>
-        {error && <div className="banner alert small">{error}</div>}
-      </section>
-      {preview && (
-        <>
-          <section className="panel panel-pad stack">
-            <h3>What’s in it</h3>
-            <div className="kpis compact">
-              <div className="kpi"><div className="kpi-label">Jobs</div><div className="kpi-value">{preview.projects}</div><div className="kpi-sub">{preview.invoices} invoiced</div></div>
-              <div className="kpi"><div className="kpi-label">Costs</div><div className="kpi-value">{preview.costs}</div></div>
-              <div className="kpi"><div className="kpi-label">Labour days</div><div className="kpi-value">{preview.labour}</div><div className="kpi-sub">{preview.unallocatedLabour} without a job</div></div>
-              <div className="kpi"><div className="kpi-label">Wage payments</div><div className="kpi-value">{preview.wagePayments}</div></div>
-              <div className="kpi"><div className="kpi-label">Clients</div><div className="kpi-value">{preview.clients}</div></div>
-            </div>
-            <p className="small muted">
-              {preview.firstDate && `From ${formatDate(preview.firstDate)} to ${formatDate(preview.lastDate)}. `}Workers: {preview.workers.join(', ')}.
-            </p>
-            {preview.warnings.length > 0 && (
-              <ul className="small warn-list">
-                {preview.warnings.map((w) => (
-                  <li key={w}>{w}</li>
-                ))}
-              </ul>
-            )}
-          </section>
-          <section className="panel panel-pad stack">
-            <h3>Before you import</h3>
-            <p className="small muted">
-              Costs with a blank “Account” come in as <em>not captured yet</em>: Shap won’t guess what paid them. Afterwards, Costs → “Not captured yet” lets you
-              tick them off in batches.
-            </p>
-            {preview.trialBalance && (
-              <label className="check">
-                <input type="checkbox" checked={opts.agreeTrialBalance} onChange={(e) => setOpts({ ...opts, agreeTrialBalance: e.target.checked })} />
-                <span>
-                  Agree the books to the trial balance at {formatDate(preview.trialBalance.date)}
-                  <div className="xs muted">
-                    Bank {formatZar(preview.trialBalance.bankCents)}, loan {formatZar(preview.trialBalance.ownerLoanCents)}, share capital {formatZar(preview.trialBalance.shareCapitalCents)}. One journal does it; anything left over goes to Suspense.
-                  </div>
-                </span>
-              </label>
-            )}
-            {!preview.companyEmpty && (
-              <label className="check">
-                <input type="checkbox" checked={opts.replace} onChange={(e) => setOpts({ ...opts, replace: e.target.checked })} />
-                <span>
-                  Replace what’s there
-                  <div className="xs muted">Shap already has jobs or costs. Ticking this deletes them (and their invoices) first. Settings, users and lists stay.</div>
-                </span>
-              </label>
-            )}
-            <button className="btn primary big" disabled={busy || (!preview.companyEmpty && !opts.replace)} onClick={() => void run()}>
-              {busy ? 'Importing…' : 'Import'}
-            </button>
-          </section>
-        </>
-      )}
-    </div>
-  );
-}
-
-function ImportResult({ r }: { r: Result }) {
-  const off = r.checks.filter((c) => c.sheet.invoicedCents !== c.shap.invoicedCents || c.sheet.partsCents !== c.shap.partsCents || c.sheet.labourCents !== c.shap.labourCents);
-  const sum = (k: 'invoicedCents' | 'partsCents' | 'labourCents', w: 'sheet' | 'shap') => r.checks.reduce((s, c) => s + c[w][k], 0);
-  const cell = (a: number, b: number) => (a === b ? <span className="ok-text">✓</span> : <span>{formatZar(b - a, { cents: false })}</span>);
-  return (
-    <div className="stack-lg narrow-wide">
-      <div className="banner ok">
-        Imported {r.counts.projects} jobs, {r.counts.invoices} invoices, {r.counts.costs} costs, {r.counts.labour} labour days and {r.counts.wagePayments} wage payments for {r.counts.workers} workers.
-      </div>
-      <section className="panel panel-pad stack">
-        <h3>Checked against your sheets</h3>
-        <p className="small">
-          <strong>Per Project:</strong> {r.jobsChecked} jobs checked, {r.jobDifferences.length ? `${r.jobDifferences.length} differ` : 'every job’s labour and parts agree'} (to within a rand of rounding).
-        </p>
-        {r.jobDifferences.length > 0 && (
-          <ul className="small">
-            {r.jobDifferences.map((j) => (
-              <li key={j.name + j.field}>
-                {j.name} {j.field}: sheet {formatZar(j.sheetCents)}, Shap {formatZar(j.shapCents)}
-              </li>
-            ))}
-          </ul>
-        )}
-        {r.checks.length > 0 && (
-          <>
-            <p className="small">
-              <strong>Trade Statement</strong>, all months together: invoiced {cell(sum('invoicedCents', 'sheet'), sum('invoicedCents', 'shap'))}, parts{' '}
-              {cell(sum('partsCents', 'sheet'), sum('partsCents', 'shap'))}, labour {cell(sum('labourCents', 'sheet'), sum('labourCents', 'shap'))}.
-              {off.length > 0 && ' Months can differ where a slip or a day was dated after the job’s invoice: Shap counts it in the month it happened, the pivot in the invoice month.'}
-            </p>
-            {off.length > 0 && (
-              <details>
-                <summary className="small">Month by month (Shap minus sheet)</summary>
-                <div className="table-wrap">
-                  <table className="table">
-                    <thead>
-                      <tr>
-                        <th>Month</th>
-                        <th className="num">Invoiced</th>
-                        <th className="num">Parts</th>
-                        <th className="num">Labour</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {r.checks.map((c) => (
-                        <tr key={c.month}>
-                          <td>{monthLabel(c.month)}</td>
-                          <td className="num">{cell(c.sheet.invoicedCents, c.shap.invoicedCents)}</td>
-                          <td className="num">{cell(c.sheet.partsCents, c.shap.partsCents)}</td>
-                          <td className="num">{cell(c.sheet.labourCents, c.shap.labourCents)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </details>
-            )}
-          </>
-        )}
-      </section>
-      {r.agreement && (
-        <section className="panel panel-pad stack">
-          <h3>Year end {formatDate(r.agreement.date)}</h3>
-          <p className="small">{r.agreement.note}</p>
-          <table className="table">
-            <tbody>
-              {r.agreement.lines.map((l) => (
-                <tr key={l.account}>
-                  <td>{l.account}</td>
-                  <td className="num">{l.amountCents > 0 ? `Dr ${formatZar(l.amountCents)}` : `Cr ${formatZar(-l.amountCents)}`}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      )}
-      <section className="panel panel-pad stack">
-        <h3>How the “Account” column was read</h3>
-        <table className="table">
-          <tbody>
-            {r.sourceMapping.map((m) => (
-              <tr key={m.account}>
-                <td>{m.account}</td>
-                <td>{m.source}</td>
-                <td className="muted">{m.postsTo}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
-      <section className="panel panel-pad stack">
-        <h3>Next</h3>
-        <ol className="small next-steps">
-          <li>If you have a company file, load it below: trading names, logos, bank details, clients and agreed year ends in one go. Otherwise set up Settings → Company → Trading names.</li>
-          <li>Import your client list from Invoice Ninja (Clients → Import details) to swap codes for real names and emails.</li>
-          {r.counts.uncapturedCosts ? <li>Say how the {r.counts.uncapturedCosts} costs with a blank account were paid (Costs → Not captured yet).</li> : null}
-          <li>Enter your accountant’s figures for past years under Accounts → Year end, so the books start where the statements end.</li>
-          <li>{r.counts.unallocatedLabour ? `Allocate the ${r.counts.unallocatedLabour} labour days that had no job (Workers → Allocate).` : 'All labour is on a job.'}</li>
-          <li>Under Accounts → Balance checks, enter today’s bank balance and your loan balance; one tap posts the money that moved between them.</li>
-        </ol>
-        {r.warnings.length > 0 && (
-          <details>
-            <summary className="small">Notes from the import ({r.warnings.length})</summary>
-            <ul className="small">
-              {r.warnings.map((w) => (
-                <li key={w}>{w}</li>
-              ))}
-            </ul>
-          </details>
-        )}
-      </section>
-    </div>
-  );
-}
-
 /* ---------------------------------------------------------------- trading names */
 function TradingNames() {
   const { ref } = useAuthed();
@@ -884,7 +553,7 @@ function TradingNames() {
           <li key={b.id}>
             <button className={`list-row ${b.active ? '' : 'inactive'}`} onClick={() => setEdit(b)}>
               <span className="brand-swatch" style={{ background: b.accent }} />
-              {b.logoId ? <img src={apiUrl(`/api/attachments/${b.logoId}`)} alt="" className="brand-logo" /> : <span className="brand-logo empty">No logo</span>}
+              {b.logoId ? <ApiImage path={`/api/attachments/${b.logoId}`} alt="" className="brand-logo" /> : <span className="brand-logo empty">No logo</span>}
               <span className="grow">
                 <strong>{b.name}</strong>
                 {ref.settings.defaultBrandId === b.id && <span className="chip" style={{ marginLeft: 8 }}>default</span>}
@@ -969,7 +638,7 @@ function BrandDrawer({ brand, onClose }: { brand: Brand | null; onClose: () => v
           <span className="label">Logo</span>
           {brand ? (
             <div className="row wrap">
-              {logoId && <img src={apiUrl(`/api/attachments/${logoId}`)} alt={`${f.name} logo`} className="logo-preview" />}
+              {logoId && <ApiImage path={`/api/attachments/${logoId}`} alt={`${f.name} logo`} className="logo-preview" />}
               <label className="btn">
                 <Icon name="upload" size={18} />
                 {logoId ? 'Replace logo' : 'Upload a logo'}
@@ -995,75 +664,6 @@ function BrandDrawer({ brand, onClose }: { brand: Brand | null; onClose: () => v
         <button className="btn primary big block">Save</button>
       </form>
     </Drawer>
-  );
-}
-
-/* ---------------------------------------------------------------- company file */
-function CompanyFile() {
-  const { refreshReference } = useAuthed();
-  const [passwordPrompt, askPassword] = usePasswordPrompt();
-  const toast = useToast();
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<Record<string, number> | null>(null);
-  const [error, setError] = useState('');
-  const load = async (file: File | undefined) => {
-    if (!file) return;
-    setBusy(true);
-    setError('');
-    try {
-      const json = JSON.parse(await file.text());
-      const password = await askPassword('Load a company file', 'Loading a company file changes your setup. Enter your password to go ahead.');
-      if (!password) return;
-      const r = await api<{ restored: Record<string, number> }>('/api/company-file', { body: { file: json, password } });
-      setResult(r.restored);
-      await refreshReference();
-      toast('Company file loaded');
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : err instanceof SyntaxError ? 'That isn’t a Shap company file' : 'Couldn’t load that file');
-    } finally {
-      setBusy(false);
-    }
-  };
-  const labels: Record<string, string> = { brands: 'trading names', clients: 'clients', jobsLinked: 'jobs linked to a client', jobsBranded: 'jobs given a trading name', yearEnds: 'agreed year ends' };
-  return (
-    <section className="panel panel-pad stack narrow-wide">
-      <h3>Company file</h3>
-      <p className="small">
-        Everything that sets Shap up, without the day-to-day records: trading names and logos, company details, numbering and terms, your lists and
-        accounts, clients, and the accountant’s agreed year ends. Save one to keep a copy or move to another server. Loading one merges it in; nothing is
-        deleted. Load it <strong>after</strong> importing the tracker, so it can link jobs to clients.
-      </p>
-      <div className="row wrap">
-        <button
-          className="btn"
-          onClick={async () => {
-            const password = await askPassword('Save the company file', 'Enter your password to download your company file.');
-            if (!password) return;
-            try {
-              const r = await api<{ url: string }>('/api/company-file/link', { body: { password } });
-              window.location.assign(apiUrl(r.url));
-            } catch (err) {
-              setError(err instanceof ApiError ? err.message : 'Couldn’t download it');
-            }
-          }}
-        >
-          <Icon name="download" size={18} />
-          Save company file
-        </button>
-        {passwordPrompt}
-        <label className="btn primary">
-          <Icon name="upload" size={18} />
-          {busy ? 'Loading…' : 'Load a company file'}
-          <input type="file" accept=".json,application/json" hidden onChange={(e) => void load(e.target.files?.[0])} disabled={busy} />
-        </label>
-      </div>
-      {error && <div className="banner alert small">{error}</div>}
-      {result && (
-        <div className="banner ok small">
-          Loaded: {Object.entries(result).map(([k, v]) => `${v} ${labels[k] ?? k}`).join(', ') || 'settings'}.
-        </div>
-      )}
-    </section>
   );
 }
 

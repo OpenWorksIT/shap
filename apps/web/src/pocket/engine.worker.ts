@@ -20,18 +20,21 @@ export type EngineRequest =
   | { id: number; op: 'call'; method: string; url: string; body?: unknown }
   | { id: number; op: 'dump' }
   | { id: number; op: 'restore'; data: Blob }
-  | { id: number; op: 'erase' };
+  | { id: number; op: 'erase' }
+  | { id: number; op: 'status' };
 export type EngineReply = { id: number; ok: true; result: unknown } | { id: number; ok: false; error: string };
 
 let pg: PGlite | null = null;
 let app: App | null = null;
 let starting: Promise<void> | null = null;
+/** True when this start made new, empty books (first open, or the phone's storage was cleared). */
+let fresh = false;
 
 async function start(from?: Blob) {
   pg = new PGlite(DATA_DIR, from ? { loadDataDir: from } : {});
   await pg.waitReady;
   const sql = createDb(pg);
-  await migrate(sql, MIGRATIONS);
+  fresh = (await migrate(sql, MIGRATIONS)).includes(MIGRATIONS.map((m) => m.name).sort()[0]!);
   app = (await buildApp({ sql })).app;
 }
 
@@ -59,7 +62,7 @@ async function dropStore() {
 
 self.onmessage = async (e: MessageEvent<EngineRequest>) => {
   const m = e.data;
-  const reply = (r: Omit<EngineReply, 'id'>, transfer: Transferable[] = []) => (self as unknown as Worker).postMessage({ id: m.id, ...r }, transfer);
+  const reply = (r: { ok: true; result: unknown } | { ok: false; error: string }, transfer: Transferable[] = []) => (self as unknown as Worker).postMessage({ id: m.id, ...r }, transfer);
   try {
     await ready();
     if (m.op === 'call') {
@@ -79,6 +82,8 @@ self.onmessage = async (e: MessageEvent<EngineRequest>) => {
       starting = start(m.data);
       await starting;
       reply({ ok: true, result: null });
+    } else if (m.op === 'status') {
+      reply({ ok: true, result: { fresh } });
     } else if (m.op === 'erase') {
       await dropStore();
       starting = start();

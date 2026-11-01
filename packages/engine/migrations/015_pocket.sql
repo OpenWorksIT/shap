@@ -6,6 +6,8 @@ alter table settings add column setup_done boolean not null default false;
 -- Where the logo sits in the heading of quotes and invoices: zoom and offset, set by dragging it.
 alter table settings add column logo_layout jsonb not null default '{}';
 alter table brands add column logo_layout jsonb not null default '{}';
+-- The colour of headings and the amount-due box, when there's one trading name.
+alter table settings add column accent text not null default '#e8731c';
 -- Most people starting books on a phone trade in their own name. The first-run questions ask.
 update settings set business_type = 'sole_prop', fy_end_month = 2, company_name = '' where not setup_done and company_name = 'My company';
 update accounts set type = 'equity', name = 'Owner’s capital and drawings' where system_key = 'owner_loan' and name = 'Owner’s loan account';

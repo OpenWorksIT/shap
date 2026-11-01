@@ -50,6 +50,7 @@ export const settingsInput = z.object({
   businessType: z.enum(['company', 'sole_prop']).default('company'),
   features: z.record(z.string(), z.boolean()).default({}),
   setupDone: z.boolean().optional(),
+  accent: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Use a colour like #e8731c').default('#e8731c'),
   logoLayout: z.object({ zoom: z.number().min(0.2).max(5), x: z.number().min(-1).max(1), y: z.number().min(-1).max(1) }).partial().default({}),
   vatRegistered: z.boolean().default(false),
   vatRateBp: z.number().int().min(0).max(5000).default(1500),
@@ -318,6 +319,7 @@ export const brandInput = z.object({
   bankDetails: text(600).default(''),
   accent: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Use a colour like #e8731c').default('#e8731c'),
   active: z.boolean().default(true),
+  logoLayout: z.object({ zoom: z.number().min(0.2).max(5), x: z.number().min(-1).max(1), y: z.number().min(-1).max(1) }).partial().default({}),
 });
 
 export const assignSourceInput = z.object({

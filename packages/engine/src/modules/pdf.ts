@@ -14,7 +14,17 @@ export interface BrandRow {
   logoId: string | null;
   accent: string;
   active: boolean;
+  logoLayout?: LogoLayout;
 }
+
+/** Where the logo sits in its box at the top left: zoom 1 fits it; x and y move it by a share of the box. */
+export interface LogoLayout {
+  zoom?: number;
+  x?: number;
+  y?: number;
+}
+/** The logo's box in the heading, in points. The app's logo placer uses the same shape. */
+export const LOGO_BOX = { w: 210, h: 78 } as const;
 
 export interface PdfDocument {
   doc: {
@@ -97,7 +107,8 @@ function tint(hex: string, amount: number): string {
  */
 export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   const { doc, lines, settings, brand, logo } = data;
-  const accent = brand?.accent && /^#[0-9a-f]{6}$/i.test(brand.accent) ? brand.accent : '#e8731c';
+  const chosen = brand?.accent || settings.accent;
+  const accent = chosen && /^#[0-9a-f]{6}$/i.test(chosen) ? chosen : '#e8731c';
   const soft = tint(accent, 0.9);
   const tradingName = brand?.name || settings.tradingName || settings.companyName;
   const legal = brand?.legalLine || (tradingName !== settings.companyName ? `${settings.companyName} t/a ${tradingName}` : settings.companyName);
@@ -135,8 +146,14 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   let logoBottom = y;
   if (logo) {
     try {
-      pdf.image(logo, L, y, { fit: [210, 78] });
-      logoBottom = y + 78;
+      const lay = brand?.logoLayout ?? settings.logoLayout ?? {};
+      const img = (pdf as unknown as { openImage(src: unknown): { width: number; height: number } }).openImage(logo);
+      const scale = Math.min(LOGO_BOX.w / img.width, LOGO_BOX.h / img.height) * (lay.zoom ?? 1);
+      pdf.save();
+      pdf.rect(L, y, LOGO_BOX.w, LOGO_BOX.h).clip();
+      pdf.image(img as never, L + (lay.x ?? 0) * LOGO_BOX.w, y + (lay.y ?? 0) * LOGO_BOX.h, { width: img.width * scale, height: img.height * scale });
+      pdf.restore();
+      logoBottom = y + LOGO_BOX.h;
     } catch {
       /* unreadable image: carry on without it */
     }

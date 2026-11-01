@@ -1848,3 +1848,73 @@ button.list-row {
   flex-basis: 100%;
   color: #ffd9d6;
 }
+
+/* ---------- Shap Pocket ---------- */
+.lock-screen {
+  min-height: 100dvh;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 16px;
+  padding: 24px;
+  background: var(--paper);
+  text-align: center;
+}
+.logo-sheet {
+  position: relative;
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+.logo-box {
+  position: relative;
+  width: min(62%, 320px);
+  aspect-ratio: 210 / 78;
+  overflow: hidden;
+  outline: 1.5px dashed var(--ink-3);
+  outline-offset: 1px;
+  cursor: grab;
+  user-select: none;
+}
+.logo-box img {
+  position: absolute;
+  max-width: none;
+  pointer-events: none;
+}
+.logo-sheet-heading {
+  font-weight: 700;
+  font-size: clamp(14px, 4.5vw, 22px);
+  letter-spacing: 0.02em;
+}
+.welcome {
+  min-height: 100dvh;
+  display: grid;
+  justify-items: center;
+  align-items: start;
+  padding: max(24px, env(safe-area-inset-top)) 16px 32px;
+  background: var(--paper);
+}
+.welcome-card {
+  width: 100%;
+  max-width: 520px;
+}
+.choice {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1.5px solid var(--rule);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+.choice.on {
+  border-color: var(--brand-orange);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-orange) 18%, transparent);
+}

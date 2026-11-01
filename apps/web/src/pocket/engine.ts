@@ -38,12 +38,81 @@ function send<T>(op: Op): Promise<T> {
   });
 }
 
-export const call = (method: string, url: string, body?: unknown) => send<EngineResponse>({ op: 'call', method, url, body });
+const rawCall = (method: string, url: string, body?: unknown) => send<EngineResponse>({ op: 'call', method, url, body });
+
+/**
+ * Every request waits for the books to be open. On a phone, opening also checks the safety
+ * copy: if the phone's web storage came back empty (iOS can clear it when storage runs low),
+ * the books are put back from the copy kept in the app's own files.
+ */
+let opened: Promise<void> | null = null;
+function open(): Promise<void> {
+  return (opened ??= (async () => {
+    const { fresh } = await send<{ fresh: boolean }>({ op: 'status' });
+    if (fresh) {
+      const copy = await readSafetyCopy();
+      if (copy) await send<null>({ op: 'restore', data: copy });
+    }
+  })());
+}
+
+export async function call(method: string, url: string, body?: unknown): Promise<EngineResponse> {
+  await open();
+  const r = await rawCall(method, url, body);
+  if (method !== 'GET' && r.status < 400) scheduleSafetyCopy();
+  return r;
+}
 /** The whole database as one compressed file: what a backup is. */
 export const dump = () => send<Blob>({ op: 'dump' });
 /** Replaces the books with a backup (checked first; nothing changes if it won't open). */
-export const restore = (data: Blob) => send<null>({ op: 'restore', data });
-export const erase = () => send<null>({ op: 'erase' });
+export const restore = async (data: Blob) => {
+  await send<null>({ op: 'restore', data });
+  await writeSafetyCopy();
+};
+export const erase = async () => {
+  await send<null>({ op: 'erase' });
+  await writeSafetyCopy();
+};
+
+// ---------------------------------------------------------------- the safety copy
+// A second copy of the books in the app's private files on the phone, refreshed a little while
+// after each change. It's not a backup (it goes if the app is deleted or the phone is lost):
+// that's what Backup to iCloud / Google Drive / OneDrive / Proton Drive is for.
+const SAFETY = 'books/safety-copy.tar.gz';
+let timer: ReturnType<typeof setTimeout> | null = null;
+function scheduleSafetyCopy() {
+  if (timer) clearTimeout(timer);
+  timer = setTimeout(() => void writeSafetyCopy(), 15_000);
+}
+async function native() {
+  const { Capacitor } = await import('@capacitor/core');
+  if (!Capacitor.isNativePlatform()) return null;
+  return import('@capacitor/filesystem');
+}
+async function writeSafetyCopy() {
+  const fs = await native();
+  if (!fs) return;
+  try {
+    const blob = await dump();
+    const buf = new Uint8Array(await blob.arrayBuffer());
+    let bin = '';
+    for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+    await fs.Filesystem.writeFile({ path: SAFETY, data: btoa(bin), directory: fs.Directory.Library ?? fs.Directory.Data, recursive: true });
+  } catch (err) {
+    console.warn('safety copy not written', err);
+  }
+}
+async function readSafetyCopy(): Promise<Blob | null> {
+  const fs = await native();
+  if (!fs) return null;
+  try {
+    const r = await fs.Filesystem.readFile({ path: SAFETY, directory: fs.Directory.Library ?? fs.Directory.Data });
+    const data = typeof r.data === 'string' ? Uint8Array.from(atob(r.data), (c) => c.charCodeAt(0)) : new Uint8Array(await r.data.arrayBuffer());
+    return new Blob([data], { type: 'application/gzip' });
+  } catch {
+    return null;
+  }
+}
 
 /** A file from the engine (PDF, CSV, photo), with the name it should be saved as. */
 export async function fetchBlob(path: string): Promise<{ blob: Blob; filename: string }> {

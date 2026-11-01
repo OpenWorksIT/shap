@@ -19,6 +19,7 @@ export interface SettingsRow {
   features: Record<string, boolean>;
   setupDone: boolean;
   logoLayout: { zoom?: number; x?: number; y?: number };
+  accent: string;
   vatRegistered: boolean;
   vatRateBp: number;
   fyEndMonth: number;
