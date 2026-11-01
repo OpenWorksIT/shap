@@ -14,12 +14,11 @@ import {
   type LineCategory,
   type PaymentMethod,
 } from '@shap/shared';
-import { MonthlyDrawer, MonthlyPanel, type MonthlyState } from '../components/MonthlyInvoice';
 import { BrandSelect, ProjectSelect, useHasBrands } from '../components/Pickers';
 import { PageHead } from '../components/Shell';
 import { DocChip, Drawer, ErrorBox, Field, Icon, Loading, Money, MoneyInput, Segmented, useToast } from '../components/ui';
-import { api, ApiError, apiUrl } from '../lib/api';
-import { shareOrDownload } from '../lib/files';
+import { api, ApiError, apiBlob } from '../lib/api';
+import { openFile, shareFile } from '../lib/native';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
 import type { ClientRow, DocDetail, DocLine, ProjectRow } from '../lib/types';
@@ -89,8 +88,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
   const [dirty, setDirty] = useState(!detail);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [drawer, setDrawer] = useState<null | 'pay' | 'email' | 'charge' | 'writeoff' | 'monthly'>(null);
-  const monthly = useApi<MonthlyState>(doc?.kind === 'invoice' && doc.status !== 'void' && isOwner ? `/api/documents/${doc.id}/monthly` : null);
+  const [drawer, setDrawer] = useState<null | 'pay' | 'charge' | 'writeoff'>(null);
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => (setD((x) => ({ ...x, [k]: v })), setDirty(true));
 
   // A new document for a job: take the job's client and name.
@@ -207,13 +205,23 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
     });
 
   const label = kind === 'invoice' ? 'Invoice' : 'Quote';
-  const pdfName = `${label} ${doc?.number ?? ''}.pdf`;
+  const from = settings.tradingName || settings.companyName;
+  /** The PDF to the share sheet (WhatsApp, Gmail, Outlook…), with a short note for the message. */
   const share = () =>
     run(async () => {
       if (dirty) await save();
-      const how = await shareOrDownload(apiUrl(`/api/documents/${doc!.id}/pdf`), pdfName, `${label} ${doc!.number}`);
-      if (how === 'downloaded') toast('PDF downloaded');
-      if (kind === 'quote' && doc!.status === 'draft') await api(`/api/documents/${doc!.id}/status`, { body: { status: 'sent' } }).then(() => reload());
+      const { blob, filename } = await apiBlob(`/api/documents/${doc!.id}/pdf`);
+      const what = `${kind === 'invoice' ? (settings.vatRegistered ? 'tax invoice' : 'invoice') : 'quote'} ${doc!.number}`;
+      const text = `Good day${doc!.clientName ? ` ${doc!.clientName}` : ''},\n\nPlease find ${what} attached.\n\nKind regards,\n${from}`;
+      const how = await shareFile(blob, filename, `${label} ${doc!.number}`, text);
+      if (how === 'downloaded') toast('PDF saved');
+      if (how !== 'cancelled') await api(`/api/documents/${doc!.id}/shared`, { body: {} }).then(() => reload());
+    });
+  const view = () =>
+    run(async () => {
+      if (dirty) await save();
+      const { blob, filename } = await apiBlob(`/api/documents/${doc!.id}/pdf`);
+      await openFile(blob, filename);
     });
 
   return (
@@ -239,20 +247,14 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
         actions={
           doc && (
             <>
-              <button className="btn" onClick={() => void share()} disabled={busy}>
+              <button className="btn primary" onClick={() => void share()} disabled={busy}>
                 <Icon name="share" size={18} />
-                Share PDF
+                Send
               </button>
-              <a className="btn quiet" href={apiUrl(`/api/documents/${doc.id}/pdf`)} target="_blank" rel="noreferrer">
+              <button className="btn quiet" onClick={() => void view()} disabled={busy}>
                 <Icon name="print" size={18} />
                 View
-              </a>
-              {isOwner && (
-                <button className="btn quiet" onClick={() => setDrawer('email')}>
-                  <Icon name="mail" size={18} />
-                  Email
-                </button>
-              )}
+              </button>
             </>
           )
         }
@@ -566,7 +568,6 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
               </div>
             )}
           </section>
-          {doc && monthly.data && <MonthlyPanel doc={doc} data={monthly.data} reload={monthly.reload} onChange={() => setDrawer('monthly')} />}
           {detail && detail.receipts.length > 0 && (
             <section className="panel">
               <div className="panel-head strong">Payments received</div>
@@ -608,17 +609,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
           }}
         />
       )}
-      {drawer === 'monthly' && doc && monthly.data && (
-        <MonthlyDrawer
-          doc={{ ...doc, brandName: doc.brandName ?? (settings.tradingName || settings.companyName) }}
-          schedule={monthly.data.schedule}
-          emailOn={monthly.data.emailOn}
-          onClose={() => setDrawer(null)}
-          onSaved={() => (setDrawer(null), void monthly.reload())}
-        />
-      )}
       {drawer === 'pay' && doc && <PaymentDrawer invoiceId={doc.id} balance={total - paid} onClose={() => setDrawer(null)} onSaved={() => (setDrawer(null), void reload())} />}
-      {drawer === 'email' && doc && <EmailDrawer docId={doc.id} defaultTo={doc.clientEmail ?? ''} label={`${label} ${doc.number}`} onClose={() => setDrawer(null)} onSent={reload} />}
       {drawer === 'charge' && project.data && (
         <ChargeDrawer
           summary={project.data.summary}
@@ -739,42 +730,6 @@ function PaymentDrawer({ invoiceId, balance, onClose, onSaved }: { invoiceId: st
         <Field label="Reference (optional)">{(p) => <input {...p} className="input" value={reference} onChange={(e) => setReference(e.target.value)} />}</Field>
         {error && <div className="banner alert small">{error}</div>}
         <button className="btn primary big block">Record payment</button>
-      </form>
-    </Drawer>
-  );
-}
-
-function EmailDrawer({ docId, defaultTo, label, onClose, onSent }: { docId: string; defaultTo: string; label: string; onClose: () => void; onSent: () => void }) {
-  const toast = useToast();
-  const [to, setTo] = useState(defaultTo);
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    try {
-      await api(`/api/documents/${docId}/email`, { body: { to, message } });
-      toast(`${label} emailed to ${to}`);
-      onSent();
-      onClose();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Couldn’t send');
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Drawer title={`Email ${label}`} onClose={onClose}>
-      <form className="stack" onSubmit={submit}>
-        <Field label="To">{(p) => <input {...p} className="input" type="email" value={to} onChange={(e) => setTo(e.target.value)} required />}</Field>
-        <Field label="Message (optional)" hint="Leave blank for a short standard note. The PDF is attached.">
-          {(p) => <textarea {...p} className="textarea" rows={5} value={message} onChange={(e) => setMessage(e.target.value)} />}
-        </Field>
-        {error && <div className="banner alert small">{error}</div>}
-        <button className="btn primary big block" disabled={busy}>
-          {busy ? 'Sending…' : 'Send'}
-        </button>
       </form>
     </Drawer>
   );

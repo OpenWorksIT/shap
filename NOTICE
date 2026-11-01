@@ -1,0 +1,39 @@
+Shap Pocket
+Copyright (C) 2026 Complete Construction Solutions (Pty) Ltd, trading as OpenWorks IT
+
+This program is free software: you can redistribute it and/or modify it under the terms of
+the GNU Affero General Public License as published by the Free Software Foundation, either
+version 3 of the License, or (at your option) any later version. See LICENSE.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+See the GNU Affero General Public License for more details.
+
+
+Additional permission under GNU AGPL version 3 section 7 (app store exception)
+------------------------------------------------------------------------------
+
+As an additional permission under section 7 of the GNU Affero General Public License,
+version 3, the copyright holders of Shap Pocket give you permission to convey this program,
+or a work based on it, in object code form through an application distribution platform
+(such as Apple's App Store or Google Play) whose terms of service or usage rules impose
+restrictions on users (for example on the number of devices, on copying, on redistribution
+or on reverse engineering) that would otherwise conflict with the terms of this License,
+provided that:
+
+  1. the Corresponding Source of the conveyed version is made available to anyone, free of
+     charge, under the terms of the GNU Affero General Public License version 3 (or any later
+     version), for example in a public source code repository; and
+
+  2. the conveyed version, or its store listing, tells recipients where that Corresponding
+     Source can be obtained.
+
+The restrictions imposed by such a platform's terms are not further restrictions imposed by
+the copyright holders, and do not limit the rights that the GNU Affero General Public License
+grants to anyone who obtains this program or its Corresponding Source from any other source.
+
+If you modify this program, you may extend this exception to your version, but you are not
+obliged to do so. If you do not wish to do so, delete this exception statement from your
+version.
+
+Third-party components included in the app keep their own licences; see THIRD-PARTY.md.

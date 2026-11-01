@@ -7,7 +7,8 @@ import { RecurringCosts } from '../components/RecurringCosts';
 import { ProjectSelect } from '../components/Pickers';
 import { PageHead } from '../components/Shell';
 import { Drawer, Empty, ErrorBox, Field, Icon, Loading, Money, useToast } from '../components/ui';
-import { api, ApiError, apiUrl } from '../lib/api';
+import { api, ApiError } from '../lib/api';
+import { FileButton } from '../components/Files';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
 import type { CostRow } from '../lib/types';
@@ -121,10 +122,10 @@ export default function CostsPage() {
                 Bank statement
               </Link>
             )}
-            <a className="btn" href={apiUrl(`/api/export/costs?${qs}`)}>
-              <Icon name="download" size={18} />
+            <FileButton path={`/api/export/costs?${qs}`} title="Costs (CSV)">
+              <Icon name="share" size={18} />
               CSV
-            </a>
+            </FileButton>
             {isOwner && (
               <button className="btn primary" onClick={() => setDrawer('new')}>
                 <Icon name="plus" size={18} />
@@ -232,9 +233,9 @@ export default function CostsPage() {
                   <td>
                     {c.description}
                     {c.receiptId && (
-                      <a className="slip-link" href={apiUrl(`/api/attachments/${c.receiptId}`)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} aria-label="View slip">
+                      <FileButton className="slip-link" path={`/api/attachments/${c.receiptId}`} mode="open" aria-label="View slip">
                         <Icon name="camera" size={14} />
-                      </a>
+                      </FileButton>
                     )}
                     <div className="xs muted">
                       {c.supplier}

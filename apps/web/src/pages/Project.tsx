@@ -6,7 +6,8 @@ import { LabourEntryForm, LabourForm } from '../components/LabourForm';
 import { ProjectDrawer } from '../components/ProjectForm';
 import { PageHead } from '../components/Shell';
 import { DocChip, Drawer, Empty, ErrorBox, Field, Icon, Loading, Money, MoneyInput, ProjectChip, Tabs, useToast } from '../components/ui';
-import { api, ApiError, apiUrl } from '../lib/api';
+import { api, ApiError } from '../lib/api';
+import { FileButton } from '../components/Files';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
 import type { CostRow, DocRow, LabourEntry, PlannedItem, ProjectRow } from '../lib/types';
@@ -186,9 +187,9 @@ export default function ProjectPage() {
                       {c.description}
                       {c.supplier && <span className="muted"> · {c.supplier}</span>}
                       {c.receiptId && (
-                        <a className="slip-link" href={apiUrl(`/api/attachments/${c.receiptId}`)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} aria-label="View slip">
+                        <FileButton className="slip-link" path={`/api/attachments/${c.receiptId}`} mode="open" aria-label="View slip">
                           <Icon name="camera" size={14} />
-                        </a>
+                        </FileButton>
                       )}
                     </td>
                     <td className="hide-sm">{c.categoryName}</td>

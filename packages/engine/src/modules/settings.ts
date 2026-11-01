@@ -75,7 +75,9 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     // A sole proprietor's tax year is SARS's year for individuals: it ends in February.
     if (input.businessType === 'sole_prop') input.fyEndMonth = 2;
     await sql.begin(async (tx) => {
-      await tx`update settings set ${tx({ ...input, lockDate: input.lockDate ?? null, updatedAt: new Date() } as never)} where id`;
+      const row: Record<string, unknown> = { ...input, features: tx.json(input.features), logoLayout: tx.json(input.logoLayout), lockDate: input.lockDate ?? null, updatedAt: new Date() };
+      for (const k of Object.keys(row)) if (row[k] === undefined) delete row[k];
+      await tx`update settings set ${tx(row as never)} where id`;
       await applyBusinessType(tx, input.businessType);
     });
     await audit(sql, { userId: user.id, action: 'update', entity: 'settings', ip: req.ip });

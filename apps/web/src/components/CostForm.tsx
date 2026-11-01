@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { formatDate, formatZar, todayIso, vatIncluded } from '@shap/shared';
-import { api, ApiError, apiUrl } from '../lib/api';
+import { api, ApiError } from '../lib/api';
+import { FileButton } from './Files';
 import { shrinkImage } from '../lib/files';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
@@ -203,9 +204,9 @@ export function CostForm({ initial, projectId, plannedItem, onSaved, onDeleted }
           </label>
           {uploading && <span className="small muted">Uploading…</span>}
           {f.receiptId && !uploading && (
-            <a className="btn quiet small" href={apiUrl(`/api/attachments/${f.receiptId}`)} target="_blank" rel="noreferrer">
+            <FileButton className="btn quiet small" path={`/api/attachments/${f.receiptId}`} mode="open">
               View slip
-            </a>
+            </FileButton>
           )}
         </div>
       </div>

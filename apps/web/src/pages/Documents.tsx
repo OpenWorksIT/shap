@@ -4,7 +4,7 @@ import { formatDate, formatZar } from '@shap/shared';
 import { MonthlyList } from '../components/MonthlyInvoice';
 import { PageHead } from '../components/Shell';
 import { DocChip, Empty, ErrorBox, Icon, Loading, Money, Segmented, Tabs } from '../components/ui';
-import { apiUrl } from '../lib/api';
+import { FileButton } from '../components/Files';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
 import type { DocRow } from '../lib/types';
@@ -44,10 +44,10 @@ export default function DocumentsPage() {
         sub={kind === 'invoice' && data ? `Still owed on these: ${formatZar(owing)}` : undefined}
         actions={
           <>
-            <a className="btn" href={apiUrl('/api/export/invoices?from=2000-01-01')}>
-              <Icon name="download" size={18} />
+            <FileButton path="/api/export/invoices?from=2000-01-01" title="Invoices (CSV)">
+              <Icon name="share" size={18} />
               CSV
-            </a>
+            </FileButton>
             {isOwner && (
               <>
                 <button className="btn" onClick={() => navigate('/documents/new?kind=quote')}>

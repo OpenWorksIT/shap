@@ -6,6 +6,11 @@ import type { Sql } from '../src/db/index.js';
 import { migrate, type Migration } from '../src/db/migrate.js';
 import { createPgliteSql } from '../src/db/pglite-sql.js';
 import type { App } from '../src/http.js';
+import { setPdfFonts } from '../src/modules/pdf.js';
+
+// The app's typeface on quotes and invoices, as the app hands it in.
+const fontDir = join(import.meta.dirname, '..', '..', '..', 'node_modules', '@fontsource', 'atkinson-hyperlegible-next', 'files');
+setPdfFonts({ regular: readFileSync(join(fontDir, 'atkinson-hyperlegible-next-latin-400-normal.woff')), bold: readFileSync(join(fontDir, 'atkinson-hyperlegible-next-latin-700-normal.woff')) });
 
 export interface TestEnv {
   app: App;
@@ -25,14 +30,27 @@ let template: Promise<PGlite> | null = null;
 function migrated(): Promise<PGlite> {
   return (template ??= (async () => {
     const pg = new PGlite();
-    await migrate(createPgliteSql(pg) as unknown as Sql, migrationsFromDisk());
+    const sql = createPgliteSql(pg) as unknown as Sql;
+    await migrate(sql, migrationsFromDisk());
+    // Shap's tests were written for a company; tests of a fresh phone use setup({ fresh: true }).
+    {
+      await sql`update settings set company_name = 'Test Builders (Pty) Ltd', business_type = 'company', setup_done = true`;
+      await sql`update accounts set type = 'liability', name = 'Owner’s loan account' where system_key = 'owner_loan'`;
+    }
     return pg;
   })());
 }
 
-/** A fresh, empty set of books on a phone. */
-export async function setup(): Promise<TestEnv> {
-  const pg = await (await migrated()).clone();
+/** Books exactly as a new phone has them, before the first-run questions. */
+async function freshBooks(): Promise<PGlite> {
+  const pg = new PGlite();
+  await migrate(createPgliteSql(pg) as unknown as Sql, migrationsFromDisk());
+  return pg;
+}
+
+/** A fresh, empty set of books (set up as a company, as Shap's tests expect). */
+export async function setup(opts: { fresh?: boolean } = {}): Promise<TestEnv> {
+  const pg = opts.fresh ? await freshBooks() : await (await migrated()).clone();
   const sql = createPgliteSql(pg) as unknown as Sql;
   const { app } = await buildApp({ sql });
   return { app, sql, close: async () => void (await pg.close()) };

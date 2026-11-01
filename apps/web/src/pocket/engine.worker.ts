@@ -1,0 +1,91 @@
+/**
+ * The books, in a background thread: PGlite (Postgres in WebAssembly) kept in the phone's
+ * storage, and Shap's routes on top. The screens talk to it through engine.ts.
+ */
+import { Buffer } from 'buffer';
+(globalThis as { Buffer?: unknown }).Buffer ??= Buffer;
+
+import { PGlite } from '@electric-sql/pglite';
+import { buildApp, createDb, migrate, setPdfFonts, type App, type Migration } from '@shap/engine';
+import regularUrl from '@fontsource/atkinson-hyperlegible-next/files/atkinson-hyperlegible-next-latin-400-normal.woff?url';
+import boldUrl from '@fontsource/atkinson-hyperlegible-next/files/atkinson-hyperlegible-next-latin-700-normal.woff?url';
+
+const MIGRATIONS: Migration[] = Object.entries(
+  import.meta.glob('../../../../packages/engine/migrations/*.sql', { query: '?raw', import: 'default', eager: true }) as Record<string, string>,
+).map(([path, body]) => ({ name: path.split('/').pop()!, body }));
+
+export const DATA_DIR = 'idb://shap-pocket';
+
+export type EngineRequest =
+  | { id: number; op: 'call'; method: string; url: string; body?: unknown }
+  | { id: number; op: 'dump' }
+  | { id: number; op: 'restore'; data: Blob }
+  | { id: number; op: 'erase' };
+export type EngineReply = { id: number; ok: true; result: unknown } | { id: number; ok: false; error: string };
+
+let pg: PGlite | null = null;
+let app: App | null = null;
+let starting: Promise<void> | null = null;
+
+async function start(from?: Blob) {
+  pg = new PGlite(DATA_DIR, from ? { loadDataDir: from } : {});
+  await pg.waitReady;
+  const sql = createDb(pg);
+  await migrate(sql, MIGRATIONS);
+  app = (await buildApp({ sql })).app;
+}
+
+async function fonts() {
+  const get = async (u: string) => new Uint8Array(await (await fetch(u)).arrayBuffer());
+  try {
+    setPdfFonts({ regular: await get(regularUrl), bold: await get(boldUrl) });
+  } catch {
+    /* Helvetica it is */
+  }
+}
+
+const ready = () => (starting ??= Promise.all([start(), fonts()]).then(() => undefined));
+
+/** Throws away the stored database (before a restore, or "erase everything"). */
+async function dropStore() {
+  await pg?.close();
+  pg = null;
+  app = null;
+  await new Promise<void>((resolve) => {
+    const r = indexedDB.deleteDatabase('/pglite' + DATA_DIR.slice('idb://'.length - 1));
+    r.onsuccess = r.onerror = r.onblocked = () => resolve();
+  });
+}
+
+self.onmessage = async (e: MessageEvent<EngineRequest>) => {
+  const m = e.data;
+  const reply = (r: Omit<EngineReply, 'id'>, transfer: Transferable[] = []) => (self as unknown as Worker).postMessage({ id: m.id, ...r }, transfer);
+  try {
+    await ready();
+    if (m.op === 'call') {
+      const r = await app!.handle(m.method, m.url, m.body);
+      const bytes = r.body instanceof Uint8Array ? r.body : null;
+      // Bytes go across as a copy we own, so they can be handed over rather than cloned.
+      const body = bytes ? bytes.slice().buffer : r.body;
+      reply({ ok: true, result: { status: r.status, headers: r.headers, body, bytes: Boolean(bytes) } }, bytes ? [body as ArrayBuffer] : []);
+    } else if (m.op === 'dump') {
+      reply({ ok: true, result: await pg!.dumpDataDir('gzip') });
+    } else if (m.op === 'restore') {
+      // Check the backup opens before letting go of what's here.
+      const test = new PGlite({ loadDataDir: m.data });
+      await test.query('select count(*) from settings');
+      await test.close();
+      await dropStore();
+      starting = start(m.data);
+      await starting;
+      reply({ ok: true, result: null });
+    } else if (m.op === 'erase') {
+      await dropStore();
+      starting = start();
+      await starting;
+      reply({ ok: true, result: null });
+    }
+  } catch (err) {
+    reply({ ok: false, error: (err as Error).message || String(err) });
+  }
+};

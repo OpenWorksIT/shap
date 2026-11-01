@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { addMonths, formatDate, monthLabel, todayIso } from '@shap/shared';
 import { Empty, ErrorBox, Field, Icon, Loading, useToast } from '../components/ui';
-import { api, ApiError, apiUrl } from '../lib/api';
+import { api, ApiError } from '../lib/api';
+import { FileButton } from '../components/Files';
 import { fileToBase64 } from '../lib/files';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
@@ -113,10 +114,10 @@ export function StatementFiles() {
                     {f.filename} · uploaded {formatDate(f.createdAt.slice(0, 10))}
                   </div>
                 </span>
-                <a className="btn quiet small" href={apiUrl(`/api/attachments/${f.attachmentId}`)} target="_blank" rel="noreferrer">
+                <FileButton className="btn quiet small" path={`/api/attachments/${f.attachmentId}`} mode="open">
                   <Icon name="download" size={14} />
                   Open
-                </a>
+                </FileButton>
                 {isOwner && (
                   <button
                     className="btn quiet small"

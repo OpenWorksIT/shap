@@ -19,6 +19,9 @@ export interface Settings {
   bankDetails: string;
   logoId: string | null;
   businessType: 'company' | 'sole_prop';
+  features: Record<string, boolean>;
+  setupDone: boolean;
+  logoLayout: { zoom?: number; x?: number; y?: number };
   vatRegistered: boolean;
   vatRateBp: number;
   fyEndMonth: number;

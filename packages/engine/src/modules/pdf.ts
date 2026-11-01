@@ -1,5 +1,3 @@
-import { createRequire } from 'node:module';
-import { existsSync } from 'node:fs';
 import PDFDocument from 'pdfkit';
 import { formatDate, formatZar, LINE_CATEGORY_LABELS, type LineCategory } from '@shap/shared';
 import type { SettingsRow } from '../lib/books.js';
@@ -70,19 +68,15 @@ const MUTED = '#66737b';
 const RULE = '#e2ddd5';
 const ZEBRA = '#faf8f5';
 
-// Atkinson Hyperlegible (the app's typeface), from the fontsource package; Helvetica if it's missing.
-const require = createRequire(import.meta.url);
-function fontPath(weight: 400 | 700): string | null {
-  try {
-    const dir = require.resolve('@fontsource/atkinson-hyperlegible-next/package.json').replace(/package\.json$/, 'files/');
-    const p = `${dir}atkinson-hyperlegible-next-latin-${weight}-normal.woff`;
-    return existsSync(p) ? p : null;
-  } catch {
-    return null;
-  }
+// Atkinson Hyperlegible (the app's typeface), handed in by whoever starts the engine (the app
+// bundles the font files; the tests read them from disk). Helvetica until then.
+type FontData = ArrayBuffer | Uint8Array;
+let REGULAR: FontData | null = null;
+let BOLD: FontData | null = null;
+export function setPdfFonts(fonts: { regular: FontData; bold: FontData } | null) {
+  REGULAR = fonts?.regular ?? null;
+  BOLD = fonts?.bold ?? null;
 }
-const REGULAR = fontPath(400);
-const BOLD = fontPath(700);
 
 const qtyText = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0+$/, '').replace(/\.$/, ''));
 
@@ -122,8 +116,8 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
 
   const regular = REGULAR ? 'Body' : 'Helvetica';
   const bold = BOLD ? 'BodyBold' : 'Helvetica-Bold';
-  if (REGULAR) pdf.registerFont('Body', REGULAR);
-  if (BOLD) pdf.registerFont('BodyBold', BOLD);
+  if (REGULAR) pdf.registerFont('Body', REGULAR as never);
+  if (BOLD) pdf.registerFont('BodyBold', BOLD as never);
 
   const W = pdf.page.width;
   const L = 44;

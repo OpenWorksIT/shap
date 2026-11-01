@@ -17,7 +17,8 @@ import {
 } from '@shap/shared';
 import { PageHead } from '../components/Shell';
 import { Drawer, Empty, ErrorBox, Field, Icon, Loading, Money, MoneyInput, Segmented, Tabs, useToast } from '../components/ui';
-import { api, ApiError, apiUrl } from '../lib/api';
+import { api, ApiError } from '../lib/api';
+import { FileButton } from '../components/Files';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
 import type { Account, StatementLine, Totals } from '../lib/types';
@@ -165,10 +166,10 @@ function IncomeStatement() {
         <PeriodPicker from={range.from} to={range.to} onChange={(from, to) => setRange({ from, to })} />
         <div className="row">
           <Segmented<'total' | 'month'> label="View" value={view} onChange={setView} options={[{ value: 'total', label: 'Total' }, { value: 'month', label: 'By month' }]} />
-          <a className="btn small" href={apiUrl(`/api/reports/income-statement?${qs}&format=csv`)}>
-            <Icon name="download" size={16} />
+          <FileButton className="btn small" path={`/api/reports/income-statement?${qs}&format=csv`}>
+            <Icon name="share" size={16} />
             CSV
-          </a>
+          </FileButton>
         </div>
       </div>
       <ErrorBox error={error} />
@@ -276,10 +277,10 @@ function BalanceSheet({ onAccount }: { onAccount: (id: string) => void }) {
     <div className="stack">
       <div className="spread wrap">
         <DatePicker date={date} onChange={setDate} />
-        <a className="btn small" href={apiUrl(`/api/reports/balance-sheet?date=${date}&format=csv`)}>
-          <Icon name="download" size={16} />
+        <FileButton className="btn small" path={`/api/reports/balance-sheet?date=${date}&format=csv`}>
+          <Icon name="share" size={16} />
           CSV
-        </a>
+        </FileButton>
       </div>
       <ErrorBox error={error} />
       {!data ? (
@@ -367,10 +368,10 @@ function TrialBalance({ onAccount }: { onAccount: (id: string) => void }) {
     <div className="stack">
       <div className="spread wrap">
         <DatePicker date={date} onChange={setDate} />
-        <a className="btn small" href={apiUrl(`/api/reports/trial-balance?date=${date}&format=csv`)}>
-          <Icon name="download" size={16} />
+        <FileButton className="btn small" path={`/api/reports/trial-balance?date=${date}&format=csv`}>
+          <Icon name="share" size={16} />
           CSV
-        </a>
+        </FileButton>
       </div>
       <ErrorBox error={error} />
       {!data ? (
@@ -463,10 +464,10 @@ function Ledger() {
           n.set('to', t);
           setParams(n, { replace: true });
         }} />
-        <a className="btn small" href={apiUrl(`/api/reports/ledger?${qs}&format=csv`)}>
-          <Icon name="download" size={16} />
+        <FileButton className="btn small" path={`/api/reports/ledger?${qs}&format=csv`}>
+          <Icon name="share" size={16} />
           CSV
-        </a>
+        </FileButton>
       </div>
       <ErrorBox error={error} />
       {!data ? (
@@ -1109,14 +1110,14 @@ function Exports() {
         <ul className="list">
           {items.map(([label, href, sub]) => (
             <li key={label}>
-              <a className="list-row" href={apiUrl(href)}>
+              <FileButton className="list-row" path={href} title={label}>
                 <Icon name="download" size={18} />
                 <span className="grow">
                   <strong>{label}</strong>
                   {sub && <div className="xs muted">{sub}</div>}
                 </span>
                 <span className="small muted">CSV</span>
-              </a>
+              </FileButton>
             </li>
           ))}
         </ul>
