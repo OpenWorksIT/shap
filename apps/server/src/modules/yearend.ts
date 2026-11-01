@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { addMonths, companyTax, financialYear, isoDate, monthEnd, monthsBetween, taxEstimateInput, yearEndInput, type AccountType } from '@shap/shared';
+import { addMonths, companyTax, estimateTax, financialYear, isoDate, monthEnd, monthsBetween, taxEstimateInput, yearEndInput, type AccountType } from '@shap/shared';
 import { z } from 'zod';
 import { requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -117,7 +117,8 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
         coalesce((select sum(l.amount_cents) from ledger l where l.account_id = a.id and l.date between ${prev.start}::date and ${prev.end}::date), 0)::bigint as prior
       from accounts a where a.type in ('income', 'cost_of_sales', 'expense') and coalesce(a.system_key, '') <> 'income_tax'
       order by a.code`;
-    const always = new Set(['director_salary', 'depreciation']);
+    // A sole proprietor doesn't pay themselves a salary: what they take out is drawings, not a cost.
+    const always = new Set(settings.businessType === 'sole_prop' ? ['depreciation'] : ['director_salary', 'depreciation']);
     const lines = rows
       .filter((r) => r.actual !== 0 || r.prior !== 0 || always.has(r.systemKey ?? ''))
       .map((r) => {
@@ -139,19 +140,18 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
       where a.type in ('income', 'cost_of_sales', 'expense') and coalesce(a.system_key, '') <> 'income_tax' and l.date < ${fy.start}::date`;
     const assessedLoss = Math.max(0, prior!.t); // debit-positive: a net loss is positive
     const saved = await sql`select id, period, as_at, taxable_income_cents, tax_cents, payable_cents, note, created_at from tax_estimates where fy_end = ${fy.end} order by created_at desc`;
-    return { fy, asAt, months, prev, lines, assessedLossCents: assessedLoss, saved, exampleTaxOn100k: companyTax(10_000_000, fy.end, true) };
+    return { fy, asAt, months, prev, lines, assessedLossCents: assessedLoss, saved, businessType: settings.businessType, exampleTaxOn100k: companyTax(10_000_000, fy.end, true) };
   });
 
   app.post('/api/tax-estimates', owner, async (req) => {
     const user = userOrThrow(req);
     const input = parse(taxEstimateInput, req.body);
     const income = input.lines.reduce((s, l) => s + (l.type === 'income' ? l.projectedCents : -l.projectedCents), 0);
-    const taxable = Math.max(0, income - input.assessedLossCents);
-    const tax = companyTax(taxable, input.fyEnd, input.sbc);
+    const { taxableCents: taxable, taxCents: tax } = estimateTax({ ...input, profitCents: income });
     const payable = Math.max(0, (input.period === 1 ? Math.round(tax / 2) : tax) - input.paidCents);
     const [row] = await sql`
       insert into tax_estimates (fy_end, period, as_at, lines, taxable_income_cents, tax_cents, payable_cents, note, created_by)
-      values (${input.fyEnd}, ${input.period}, ${input.asAt}, ${sql.json({ lines: input.lines, assessedLossCents: input.assessedLossCents, paidCents: input.paidCents, sbc: input.sbc } as never)},
+      values (${input.fyEnd}, ${input.period}, ${input.asAt}, ${sql.json({ lines: input.lines, assessedLossCents: input.assessedLossCents, paidCents: input.paidCents, sbc: input.sbc, kind: input.kind, ageBand: input.ageBand, otherIncomeCents: input.otherIncomeCents, retirementCents: input.retirementCents } as never)},
               ${taxable}, ${tax}, ${payable}, ${input.note}, ${user.id})
       returning id`;
     await audit(sql, { userId: user.id, action: 'create', entity: 'tax_estimate', entityId: row!.id, ip: req.ip });

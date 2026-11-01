@@ -725,7 +725,7 @@ interface AssetRow {
 }
 
 function Assets() {
-  const { isOwner } = useAuthed();
+  const { isOwner, words } = useAuthed();
   const { data, error, reload } = useApi<AssetRow[]>('/api/assets');
   const [open, setOpen] = useState<AssetRow | 'new' | null>(null);
   const totals = (data ?? []).filter((a) => !a.disposedOn).reduce((t, a) => ({ cost: t.cost + a.costCents, acc: t.acc + a.accumulatedCents }), { cost: 0, acc: 0 });
@@ -803,7 +803,7 @@ function Assets() {
         </section>
       ) : (
         <div className="panel">
-          <Empty title="No assets yet">Add one here, or open a cost and choose “This is an asset”. A bakkie you sold to the company goes here too, paid from your loan account.</Empty>
+          <Empty title="No assets yet">Add one here, or open a cost and choose “This is an asset”. A bakkie you sold to {words.business} goes here too, paid from your {words.ownerAccount}.</Empty>
         </div>
       )}
       {open && <AssetDrawer asset={open === 'new' ? null : open} onClose={() => setOpen(null)} onSaved={reload} />}
@@ -812,7 +812,7 @@ function Assets() {
 }
 
 function AssetDrawer({ asset, onClose, onSaved }: { asset: AssetRow | null; onClose: () => void; onSaved: () => void }) {
-  const { ref, isOwner } = useAuthed();
+  const { ref, isOwner, words } = useAuthed();
   const toast = useToast();
   const [f, setF] = useState({
     name: asset?.name ?? '',
@@ -880,7 +880,7 @@ function AssetDrawer({ asset, onClose, onSaved }: { asset: AssetRow | null; onCl
         ) : (
           <div className="form-grid">
             <Field label="Cost">{(p) => <MoneyInput {...p} value={f.costCents} onChange={(c) => setF({ ...f, costCents: c })} />}</Field>
-            <Field label="Paid from" hint="“Paid personally” if you sold it to the company: it goes onto your loan account.">
+            <Field label="Paid from" hint={`“Paid personally” if you sold it to ${words.business}: it goes onto your ${words.ownerAccount}.`}>
               {(p) => (
                 <select {...p} className="select" value={f.sourceId ?? ''} onChange={(e) => setF({ ...f, sourceId: e.target.value || null })}>
                   {ref.sources.map((s) => (
@@ -950,10 +950,10 @@ interface Check {
 }
 
 function BalanceChecks() {
-  const { ref, isOwner } = useAuthed();
+  const { ref, isOwner, words } = useAuthed();
   const toast = useToast();
   const { data, error, reload } = useApi<Check[]>('/api/balance-checks');
-  const checkable = ref.accounts.filter((a) => a.type === 'asset' || a.type === 'liability');
+  const checkable = ref.accounts.filter((a) => a.type === 'asset' || a.type === 'liability' || a.systemKey === 'owner_loan');
   const [f, setF] = useState({ accountId: ref.accounts.find((a) => a.systemKey === 'bank')?.id ?? '', date: todayIso(), statementBalanceCents: null as number | null, note: '' });
   const [fixing, setFixing] = useState<Check | null>(null);
   const [against, setAgainst] = useState(ref.accounts.find((a) => a.systemKey === 'owner_loan')?.id ?? '');
@@ -983,7 +983,7 @@ function BalanceChecks() {
   return (
     <div className="stack">
       <div className="banner small">
-        Check the books against your statements now and then: the bank, each card, and your loan account. Money moved between accounts (a card paid off from
+        Check the books against your statements now and then: the bank, each card, and your {words.ownerAccount}. Money moved between accounts (a card paid off from
         the bank, the company repaying you) isn’t a cost, so if you didn’t record it as a journal it shows up here as a difference. One tap posts it.
       </div>
       {isOwner && (
@@ -1000,7 +1000,7 @@ function BalanceChecks() {
             )}
           </Field>
           <Field label="Statement date">{(p) => <input {...p} className="input" type="date" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />}</Field>
-          <Field label={acct?.type === 'liability' ? 'Amount owed on the statement' : 'Balance on the statement'}>
+          <Field label={acct?.type === 'liability' || acct?.systemKey === 'owner_loan' ? 'Amount owed on the statement' : 'Balance on the statement'}>
             {(p) => <MoneyInput {...p} value={f.statementBalanceCents} onChange={(c) => setF({ ...f, statementBalanceCents: c })} allowNegative />}
           </Field>
           <div className="field">
@@ -1061,7 +1061,7 @@ function BalanceChecks() {
       {fixing && (
         <Drawer title={`Agree ${fixing.accountName}`} sub={`Difference ${formatZar(fixing.statementBalanceCents - fixing.booksCents)} at ${formatDate(fixing.date)}`} onClose={() => setFixing(null)}>
           <div className="stack">
-            <p className="small">Where did the difference go? Usually the bank and your loan account move together: the company paid you back, or paid your card.</p>
+            <p className="small">Where did the difference go? Usually the bank and your {words.ownerAccount} move together: {words.business} paid you back, or paid your card.</p>
             <Field label="Post the difference against">
               {(p) => (
                 <select {...p} className="select" value={against} onChange={(e) => setAgainst(e.target.value)}>

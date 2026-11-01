@@ -21,6 +21,7 @@ interface Dashboard {
   uncapturedCosts: { n: number; total: number };
   statementsMissing?: { sourceId: string; sourceName: string; months: string[] }[];
   duplicateCosts?: number;
+  vat?: { state: 'over' | 'near' | 'voluntary' | null; last12Cents: number; pace12Cents: number; compulsoryCents: number };
   monthlyInvoices?: {
     failed: { id: string; documentId: string; title: string; clientName: string | null; error: string }[];
     waiting: { id: string; scheduleId: string; number: string; clientName: string | null; mode: string }[];
@@ -84,6 +85,27 @@ function OwnerHome() {
   if (!data) return <Loading />;
   const ytdMargin = data.yearToDate.incomeCents ? data.yearToDate.grossProfitCents / data.yearToDate.incomeCents : null;
   const needs = [
+    (data.vat?.state === 'over' || data.vat?.state === 'near') && (
+      <Link key="vat" to="/settings" className="attention">
+        <Icon name="alert" size={18} />
+        <span className="grow">
+          {data.vat.state === 'over' ? (
+            <>
+              <strong>Register for VAT:</strong> <Money cents={data.vat.last12Cents} whole /> of income in the last 12 months is over the{' '}
+              <Money cents={data.vat.compulsoryCents} whole /> line. SARS expects you to register within 21 days of passing it.
+            </>
+          ) : (
+            <>
+              <strong>Nearing the VAT line:</strong> <Money cents={data.vat.last12Cents} whole /> in the last 12 months
+              {data.vat.pace12Cents > data.vat.compulsoryCents ? <>, and lately running at <Money cents={data.vat.pace12Cents} whole /> a year</> : null}. Registration is
+              compulsory past <Money cents={data.vat.compulsoryCents} whole />.
+            </>
+          )}
+        </span>
+        Check
+        <Icon name="chevronRight" size={16} />
+      </Link>
+    ),
     data.unallocatedLabour.n > 0 && (
       <Link key="lab" to="/workers?tab=allocate" className="attention">
         <Icon name="alert" size={18} />

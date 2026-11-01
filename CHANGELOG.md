@@ -3,6 +3,24 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.8.0 (1 November 2026)
+
+- **Sole proprietors.** Settings → Invoicing & books → *This business is*: a company, or just
+  you trading in your own name. For a sole proprietor:
+  - the provisional tax estimate uses SARS's **tables for individuals** (2027: 18% to
+    R245 100 … 45% above R1 878 600) with the rebates for your age, plus any other taxable
+    income (a salary, interest, rent) and your retirement annuity deduction (up to 27.5% of
+    income, at most R350 000);
+  - the year ends in February (SARS's year for individuals);
+  - the owner's loan account becomes **Owner's capital and drawings**, shown under equity:
+    what you take out is drawings, not a cost. A name you gave it yourself stays.
+- **VAT threshold watch.** Not registered for VAT? Shap adds up the last 12 months' income
+  and warns on Home when it's within 20% of the line where registering becomes compulsory,
+  or the last three months are running past it, and says plainly when it's over (register
+  within 21 days). The line is **R2.3 million from 1 April 2026** (R1 million before); you may
+  register voluntarily from R120 000. Settings shows where you stand. VAT stays a switch.
+- The provisional tax sheet fits a phone screen.
+
 ## 1.7.0 (30 October 2026)
 
 - **Monthly invoices.** On an invoice, *Make monthly…*: pick the day of the month and whether

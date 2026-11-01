@@ -13,7 +13,7 @@ import { confirmPassword, requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Tx } from '../db/index.js';
 import { audit } from '../lib/audit.js';
-import { getSettings } from '../lib/books.js';
+import { applyBusinessType, getSettings } from '../lib/books.js';
 import { badRequest } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 
@@ -43,12 +43,12 @@ const fileSchema = z.object({
 export type CompanyFile = z.input<typeof fileSchema>;
 
 const SETTINGS_KEYS = [
-  'companyName', 'tradingName', 'regNumber', 'vatNumber', 'address', 'phone', 'email', 'website', 'bankDetails', 'vatRegistered', 'vatRateBp', 'fyEndMonth',
+  'companyName', 'tradingName', 'regNumber', 'vatNumber', 'address', 'phone', 'email', 'website', 'bankDetails', 'businessType', 'vatRegistered', 'vatRateBp', 'fyEndMonth',
   'invoicePrefix', 'invoicePad', 'quotePrefix', 'quotePad', 'paymentDays', 'quoteValidDays', 'invoiceTerms', 'quoteTerms', 'markupBp', 'lockDate',
 ] as const;
 const SETTINGS_COLUMNS: Record<(typeof SETTINGS_KEYS)[number], string> = {
   companyName: 'company_name', tradingName: 'trading_name', regNumber: 'reg_number', vatNumber: 'vat_number', address: 'address', phone: 'phone', email: 'email',
-  website: 'website', bankDetails: 'bank_details', vatRegistered: 'vat_registered', vatRateBp: 'vat_rate_bp', fyEndMonth: 'fy_end_month', invoicePrefix: 'invoice_prefix',
+  website: 'website', bankDetails: 'bank_details', businessType: 'business_type', vatRegistered: 'vat_registered', vatRateBp: 'vat_rate_bp', fyEndMonth: 'fy_end_month', invoicePrefix: 'invoice_prefix',
   invoicePad: 'invoice_pad', quotePrefix: 'quote_prefix', quotePad: 'quote_pad', paymentDays: 'payment_days', quoteValidDays: 'quote_valid_days',
   invoiceTerms: 'invoice_terms', quoteTerms: 'quote_terms', markupBp: 'markup_bp', lockDate: 'lock_date',
 };
@@ -105,8 +105,10 @@ export async function restoreCompanyFile(tx: Tx, raw: unknown) {
       if (typeof v === 'string' && v) await tx`update settings set lock_date = greatest(coalesce(lock_date, ${v}::date), ${v}::date) where id`;
       continue;
     }
+    if (k === 'businessType' && v !== 'company' && v !== 'sole_prop') continue;
     await tx`update settings set ${tx(SETTINGS_COLUMNS[k])} = ${v as never} where id`;
   }
+  await applyBusinessType(tx, (await getSettings(tx)).businessType);
 
   // Trading names
   for (const b of file.brands) {

@@ -15,6 +15,7 @@ import { registerClientRoutes } from './modules/clients.js';
 import { registerCostRoutes } from './modules/costs.js';
 import { registerDuplicateRoutes } from './modules/duplicates.js';
 import { registerRecurringRoutes } from './modules/recurring.js';
+import { registerVatRoutes } from './modules/vat.js';
 import { registerMonthlyRoutes } from './modules/monthly.js';
 import { registerDashboardRoutes } from './modules/dashboard.js';
 import { registerDocumentRoutes } from './modules/documents.js';
@@ -168,6 +169,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   registerCostRoutes(app, ctx);
   registerDocumentRoutes(app, ctx);
   registerMonthlyRoutes(app, ctx);
+  registerVatRoutes(app, ctx);
   registerReportRoutes(app, ctx);
   registerImportRoutes(app, ctx);
   registerYearEndRoutes(app, ctx);

@@ -47,6 +47,7 @@ export const settingsInput = z.object({
   email: z.string().trim().max(120).default(''),
   website: text(120).default(''),
   bankDetails: text(600).default(''),
+  businessType: z.enum(['company', 'sole_prop']).default('company'),
   vatRegistered: z.boolean().default(false),
   vatRateBp: z.number().int().min(0).max(5000).default(1500),
   fyEndMonth: z.number().int().min(1).max(12).default(2),
@@ -348,4 +349,9 @@ export const taxEstimateInput = z.object({
   assessedLossCents: positiveCents.default(0),
   paidCents: positiveCents.default(0),
   sbc: z.boolean().default(true),
+  /** Sole proprietors: taxed as individuals. */
+  kind: z.enum(['company', 'individual']).default('company'),
+  ageBand: z.enum(['under65', '65to74', '75plus']).default('under65'),
+  otherIncomeCents: positiveCents.default(0),
+  retirementCents: positiveCents.default(0),
 });

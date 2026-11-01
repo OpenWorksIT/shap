@@ -18,6 +18,7 @@ export interface Settings {
   website: string;
   bankDetails: string;
   logoId: string | null;
+  businessType: 'company' | 'sole_prop';
   vatRegistered: boolean;
   vatRateBp: number;
   fyEndMonth: number;

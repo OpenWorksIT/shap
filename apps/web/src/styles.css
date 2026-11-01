@@ -1632,6 +1632,29 @@ button.list-row {
   font-weight: 600;
   background: var(--sunken);
 }
+/* Phones: the label column gives way so the amounts stay on screen. */
+@media (max-width: 600px) {
+  .tax-sheet .money-input {
+    max-width: 118px;
+  }
+  .tax-sheet select {
+    max-width: 100%;
+    min-width: 0;
+  }
+  .tax-sheet td:first-child {
+    overflow-wrap: anywhere;
+  }
+  .tax-calc {
+    table-layout: fixed;
+    width: 100%;
+  }
+  .tax-calc td:last-child {
+    width: 128px;
+  }
+  .tax-calc select {
+    width: 100%;
+  }
+}
 @media print {
   .no-print,
   .tabs-scroll {

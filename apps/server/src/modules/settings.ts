@@ -14,11 +14,12 @@ import { checkNewPassword, confirmPassword, createUser, endOtherSessions, hashPa
 import type { Ctx } from '../context.js';
 import { pgCode, PG, type Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
-import { getSettings } from '../lib/books.js';
+import { applyBusinessType, getSettings } from '../lib/books.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 
 const idParam = z.object({ id: z.string().uuid() });
+
 
 export async function referenceData(db: Db, money: boolean) {
   const [settings, sources, categories, workTypes, accounts, brands] = await Promise.all([
@@ -71,7 +72,12 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.put('/api/settings', { preHandler: requireRole('owner') }, async (req) => {
     const user = userOrThrow(req);
     const input = parse(settingsInput, req.body);
-    await sql`update settings set ${sql({ ...input, lockDate: input.lockDate ?? null, updatedAt: new Date() } as never)} where id`;
+    // A sole proprietor's tax year is SARS's year for individuals: it ends in February.
+    if (input.businessType === 'sole_prop') input.fyEndMonth = 2;
+    await sql.begin(async (tx) => {
+      await tx`update settings set ${tx({ ...input, lockDate: input.lockDate ?? null, updatedAt: new Date() } as never)} where id`;
+      await applyBusinessType(tx, input.businessType);
+    });
     await audit(sql, { userId: user.id, action: 'update', entity: 'settings', ip: req.ip });
     return getSettings(sql);
   });

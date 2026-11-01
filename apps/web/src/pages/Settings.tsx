@@ -171,7 +171,23 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
             <Field label="Quote terms">{(p) => <textarea {...p} className="textarea" rows={3} value={f.quoteTerms} onChange={(e) => set('quoteTerms', e.target.value)} />}</Field>
           </section>
           <section className="panel panel-pad stack">
-            <h3>VAT and the financial year</h3>
+            <h3>Tax, VAT and the financial year</h3>
+            <Field label="This business is">
+              {(p) => (
+                <select {...p} className="select" value={f.businessType} onChange={(e) => {
+                  const v = e.target.value as Settings['businessType'];
+                  setF((x) => ({ ...x, businessType: v, fyEndMonth: v === 'sole_prop' ? 2 : x.fyEndMonth }));
+                }}>
+                  <option value="company">A company (Pty Ltd)</option>
+                  <option value="sole_prop">Just me (sole proprietor)</option>
+                </select>
+              )}
+            </Field>
+            <p className="xs muted">
+              {f.businessType === 'sole_prop'
+                ? 'The profit is taxed as your own income, on the tables for individuals, and the year ends in February. Money you put in or take out goes to your owner’s account (capital and drawings): what you take out is not a cost.'
+                : 'The company pays company tax (small business corporation rates if it qualifies). Money between you and the company goes on your loan account.'}
+            </p>
             <label className="check">
               <input type="checkbox" checked={f.vatRegistered} onChange={(e) => set('vatRegistered', e.target.checked)} />
               <span>
@@ -179,11 +195,12 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
                 <div className="xs muted">New invoices add VAT and say “Tax invoice”; costs can record the VAT you claim back. Existing invoices keep what they had.</div>
               </span>
             </label>
+            {!f.vatRegistered && <VatThreshold />}
             <div className="form-grid">
               {f.vatRegistered && <Field label="VAT rate (%)">{(p) => <input {...p} className="input" type="number" step="0.5" value={f.vatRateBp / 100} onChange={(e) => set('vatRateBp', Math.round(Number(e.target.value) * 100))} />}</Field>}
-              <Field label="Financial year ends in">
+              <Field label="Financial year ends in" hint={f.businessType === 'sole_prop' ? 'February: SARS’s tax year for individuals' : undefined}>
                 {(p) => (
-                  <select {...p} className="select" value={f.fyEndMonth} onChange={(e) => set('fyEndMonth', Number(e.target.value))}>
+                  <select {...p} className="select" value={f.fyEndMonth} onChange={(e) => set('fyEndMonth', Number(e.target.value))} disabled={f.businessType === 'sole_prop'}>
                     {MONTHS.map((m, i) => (
                       <option key={m} value={i + 1}>
                         {m}
@@ -221,7 +238,7 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
 type ListKind = 'sources' | 'categories' | 'work-types' | 'accounts';
 
 function Lists() {
-  const { ref, refreshReference } = useAuthed();
+  const { ref, refreshReference, words } = useAuthed();
   const [edit, setEdit] = useState<{ kind: ListKind; row: Record<string, unknown> | null } | null>(null);
   const acc = (id: string) => ref.accounts.find((a) => a.id === id);
   return (
@@ -230,7 +247,7 @@ function Lists() {
         <div className="panel-head spread">
           <span>
             <strong>Paid from / paid into</strong>
-            <div className="xs muted">Your bank account, each card, cash. Each one says which account in the books it belongs to: cards in your own name go to your loan account.</div>
+            <div className="xs muted">Your bank account, each card, cash. Each one says which account in the books it belongs to: cards in your own name go to your {words.ownerAccount}.</div>
           </span>
           <button className="btn small" onClick={() => setEdit({ kind: 'sources', row: null })}>
             <Icon name="plus" size={14} />
@@ -1047,5 +1064,26 @@ function CompanyFile() {
         </div>
       )}
     </section>
+  );
+}
+
+/** Not registered for VAT: how close the last 12 months are to the point where you must. */
+function VatThreshold() {
+  const { data } = useApi<{ last12Cents: number; pace12Cents: number; compulsoryCents: number; voluntaryCents: number; state: 'over' | 'near' | 'voluntary' | null }>('/api/vat/threshold');
+  if (!data) return null;
+  const pct = Math.min(100, Math.round((data.last12Cents / data.compulsoryCents) * 100));
+  return (
+    <div className={`banner small${data.state === 'over' || data.state === 'near' ? ' alert' : ''}`}>
+      <strong>{formatZar(data.last12Cents)}</strong> of income in the last 12 months ({pct}% of the {formatZar(data.compulsoryCents)} at which VAT registration is
+      compulsory).{' '}
+      {data.state === 'over'
+        ? 'That’s over the line: you must register with SARS within 21 days of passing it.'
+        : data.state === 'near'
+          ? `Getting close${data.pace12Cents > data.compulsoryCents ? `: the last three months are running at ${formatZar(data.pace12Cents)} a year` : ''}. Talk to your accountant about registering before you pass it.`
+          : data.state === 'voluntary'
+            ? `You may register voluntarily (from ${formatZar(data.voluntaryCents)}), but you don’t have to yet.`
+            : 'Nothing to do yet.'}{' '}
+      <span className="muted">Shap counts all income in the books, so exempt income (interest, residential rent) makes this a little high.</span>
+    </div>
   );
 }

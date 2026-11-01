@@ -15,6 +15,7 @@ export interface SettingsRow {
   bankDetails: string;
   logoId: string | null;
   defaultBrandId: string | null;
+  businessType: 'company' | 'sole_prop';
   vatRegistered: boolean;
   vatRateBp: number;
   fyEndMonth: number;
@@ -83,3 +84,18 @@ export function toCsv(header: string[], rows: (string | number | null | undefine
 }
 
 export const centsToCsv = (c: number | null | undefined) => (c == null ? '' : (c / 100).toFixed(2));
+
+const OWNER_ACCOUNT = {
+  company: { name: 'Owner’s loan account', type: 'liability' },
+  sole_prop: { name: 'Owner’s capital and drawings', type: 'equity' },
+} as const;
+/**
+ * The owner's account: for a company, what it owes the director (a loan); for a sole
+ * proprietor, what the owner has put in less what they've taken out (equity). Only the
+ * standard name changes; a name you chose yourself stays.
+ */
+export async function applyBusinessType(db: Db, type: 'company' | 'sole_prop') {
+  const to = OWNER_ACCOUNT[type];
+  const from = OWNER_ACCOUNT[type === 'company' ? 'sole_prop' : 'company'];
+  await db`update accounts set type = ${to.type}, name = case when name = ${from.name} then ${to.name} else name end where system_key = 'owner_loan'`;
+}

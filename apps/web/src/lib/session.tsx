@@ -117,5 +117,7 @@ export function useAuthed() {
     settings,
     isOwner: s.user!.role === 'owner',
     seesMoney: s.user!.role !== 'capture',
+    /** How to say the owner's account and the business, for a company or a sole proprietor. */
+    words: settings.businessType === 'sole_prop' ? { ownerAccount: 'owner’s account', business: 'the business' } : { ownerAccount: 'loan account', business: 'the company' },
   };
 }

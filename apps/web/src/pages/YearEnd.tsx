@@ -1,5 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ACCOUNT_TYPE_LABELS, addMonths, companyTax, financialYear, formatAmount, formatDate, formatZar, sbcTableFor, todayIso, type AccountType } from '@shap/shared';
+import {
+  ACCOUNT_TYPE_LABELS,
+  addMonths,
+  AGE_BAND_LABELS,
+  estimateTax,
+  financialYear,
+  formatAmount,
+  formatDate,
+  formatZar,
+  individualTableFor,
+  individualThreshold,
+  sbcTableFor,
+  todayIso,
+  type AccountType,
+  type AgeBand,
+} from '@shap/shared';
 import { ErrorBox, Icon, Loading, MoneyInput, useToast } from '../components/ui';
 import { api, ApiError } from '../lib/api';
 import { useApi } from '../lib/hooks';
@@ -245,6 +260,7 @@ interface TaxData {
   months: number;
   lines: TaxLine[];
   assessedLossCents: number;
+  businessType?: 'company' | 'sole_prop';
   saved: { id: string; period: number; asAt: string; taxableIncomeCents: number; taxCents: number; payableCents: number; note: string; createdAt: string }[];
 }
 
@@ -265,6 +281,9 @@ export function ProvisionalTax() {
   const [proj, setProj] = useState<Record<string, number>>({});
   const [loss, setLoss] = useState(0);
   const [sbc, setSbc] = useState(true);
+  const [ageBand, setAgeBand] = useState<AgeBand>('under65');
+  const [otherIncome, setOtherIncome] = useState(0);
+  const [retirement, setRetirement] = useState(0);
   const [period, setPeriod] = useState(1);
   const [paid, setPaid] = useState(0);
   const [note, setNote] = useState('');
@@ -290,8 +309,11 @@ export function ProvisionalTax() {
     return { income, cos, gross: income - cos, exp, net: income - cos - exp };
   });
   const net = totals[2]!.net;
-  const taxable = Math.max(0, net - loss);
-  const tax = companyTax(taxable, data.fy.end, sbc);
+  const individual = data.businessType === 'sole_prop';
+  const kind = individual ? ('individual' as const) : ('company' as const);
+  const est = estimateTax({ kind, profitCents: net, assessedLossCents: loss, fyEnd: data.fy.end, sbc, ageBand, otherIncomeCents: otherIncome, retirementCents: retirement });
+  const taxable = est.taxableCents;
+  const tax = est.taxCents;
   const due = period === 1 ? Math.round(tax / 2) : tax;
   const payable = Math.max(0, due - (period === 1 ? 0 : paid));
   const bands = sbcTableFor(data.fy.end);
@@ -305,6 +327,10 @@ export function ProvisionalTax() {
           asAt: data.asAt,
           note,
           sbc,
+          kind,
+          ageBand,
+          otherIncomeCents: individual ? otherIncome : 0,
+          retirementCents: individual ? retirement : 0,
           assessedLossCents: loss,
           paidCents: period === 1 ? 0 : paid,
           lines: data.lines.map((l) => ({ accountId: l.accountId, name: l.name, type: l.type, actualCents: l.actualCents, projectedCents: p(l) })),
@@ -357,8 +383,8 @@ export function ProvisionalTax() {
     <div className="stack-lg">
       <section className="panel panel-pad stack no-print">
         <p className="small">
-          Shap takes this year’s figures to date, projects them to twelve months at the same monthly rate, and works out the tax on the small business
-          corporation table. Change any projected figure (a big job you know is coming, a cost that won’t repeat) before saving. Your accountant still files
+          Shap takes this year’s figures to date, projects them to twelve months at the same monthly rate, and works out the tax
+          {individual ? ' on SARS’s tables for individuals (a sole proprietor’s profit is your own income).' : ' on the small business corporation table.'} Change any projected figure (a big job you know is coming, a cost that won’t repeat) before saving. Your accountant still files
           the IRP6; this gets you the number to talk about.
         </p>
         <div className="toolbar wrap">
@@ -411,7 +437,7 @@ export function ProvisionalTax() {
 
       <section className="panel panel-pad stack narrow-wide">
         <h3>Tax</h3>
-        <table className="table tax-sheet">
+        <table className="table tax-sheet tax-calc">
           <tbody>
             <tr>
               <td>Estimated net profit</td>
@@ -424,26 +450,68 @@ export function ProvisionalTax() {
               </td>
               <td className="num">{isOwner ? <MoneyInput value={loss} onChange={(c) => setLoss(c ?? 0)} aria-label="Assessed loss brought forward" /> : formatZar(loss)}</td>
             </tr>
+            {individual && (
+              <>
+                <tr>
+                  <td>
+                    Plus: other taxable income
+                    <div className="xs muted">A salary, interest above the exemption, rent: anything SARS taxes that isn’t in these books.</div>
+                  </td>
+                  <td className="num">{isOwner ? <MoneyInput value={otherIncome} onChange={(c) => setOtherIncome(c ?? 0)} aria-label="Other taxable income" /> : formatZar(otherIncome)}</td>
+                </tr>
+                <tr>
+                  <td>
+                    Less: retirement annuity contributions
+                    <div className="xs muted">
+                      Paid this year. Deductible up to 27.5% of income, at most R350 000{est.retirementDeductionCents < retirement ? `: ${formatZar(est.retirementDeductionCents)} counts` : ''}.
+                    </div>
+                  </td>
+                  <td className="num">{isOwner ? <MoneyInput value={retirement} onChange={(c) => setRetirement(c ?? 0)} aria-label="Retirement annuity contributions" /> : formatZar(retirement)}</td>
+                </tr>
+              </>
+            )}
             <tr className="sub">
               <td>Taxable income</td>
               <td className="num">{formatZar(taxable)}</td>
             </tr>
-            <tr>
-              <td>
-                <label className="check">
-                  <input type="checkbox" checked={sbc} onChange={(e) => setSbc(e.target.checked)} />
-                  <span>
-                    Small business corporation rates
-                    <div className="xs muted">
-                      {sbc
-                        ? bands.map((b, i) => (i === 0 ? `0% to R${b.upTo!.toLocaleString('en-ZA')}` : `${Math.round(b.rate * 100)}% above R${b.over.toLocaleString('en-ZA')}`)).join(', ')
-                        : 'Flat 27% company rate'}
-                    </div>
-                  </span>
-                </label>
-              </td>
-              <td className="num">{formatZar(tax)}</td>
-            </tr>
+            {individual ? (
+              <tr>
+                <td>
+                  <div className="row wrap">
+                    <span>Tax, your age on {formatDate(data.fy.end)}</span>
+                    <select className="select auto" value={ageBand} onChange={(e) => setAgeBand(e.target.value as AgeBand)} aria-label="Age">
+                      {(Object.keys(AGE_BAND_LABELS) as AgeBand[]).map((a) => (
+                        <option key={a} value={a}>
+                          {AGE_BAND_LABELS[a]}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="xs muted">
+                    {individualTableFor(data.fy.end).label} table, after rebates. Nothing is due below {formatZar(individualThreshold(data.fy.end, ageBand), { cents: false })}.
+                    Medical scheme credits aren’t included: they lower it further.
+                  </div>
+                </td>
+                <td className="num">{formatZar(tax)}</td>
+              </tr>
+            ) : (
+              <tr>
+                <td>
+                  <label className="check">
+                    <input type="checkbox" checked={sbc} onChange={(e) => setSbc(e.target.checked)} />
+                    <span>
+                      Small business corporation rates
+                      <div className="xs muted">
+                        {sbc
+                          ? bands.map((b, i) => (i === 0 ? `0% to R${b.upTo!.toLocaleString('en-ZA')}` : `${Math.round(b.rate * 100)}% above R${b.over.toLocaleString('en-ZA')}`)).join(', ')
+                          : 'Flat 27% company rate'}
+                      </div>
+                    </span>
+                  </label>
+                </td>
+                <td className="num">{formatZar(tax)}</td>
+              </tr>
+            )}
             <tr>
               <td>
                 <div className="row wrap">
@@ -470,7 +538,9 @@ export function ProvisionalTax() {
           </tbody>
         </table>
         <p className="xs muted">
-          Rates from SARS for years of assessment ending {data.fy.end >= '2026-04-01' ? 'on or after 1 April 2026' : '1 April 2023 to 31 March 2026'}.
+          {individual
+            ? `Rates from SARS’s tables for individuals, year of assessment ${individualTableFor(data.fy.end).label}.`
+            : `Rates from SARS for years of assessment ending ${data.fy.end >= '2026-04-01' ? 'on or after 1 April 2026' : '1 April 2023 to 31 March 2026'}.`}
         </p>
         {isOwner && (
           <div className="stack no-print">
