@@ -75,7 +75,15 @@ export default function BackupPage() {
           <Icon name="upload" size={18} />
           {busy === 'backup' ? 'Making the backup…' : 'Back up now'}
         </button>
-        <p className="xs muted">Shap also keeps a safety copy inside the app, so a phone update or low storage doesn’t lose your books. That copy goes if the app is deleted or the phone is lost: back up as well, at least once a week.</p>
+        <p className="xs muted">
+          Shap also keeps a safety copy inside the app, so a phone update or low storage doesn’t lose your books.{' '}
+          {platform() === 'ios'
+            ? 'If your iPhone backs up to iCloud, that copy goes along with it.'
+            : platform() === 'android'
+              ? 'If your phone backs up to Google, that copy usually goes along with it (Google keeps up to 25 MB per app).'
+              : ''}{' '}
+          Still back up here at least once a week: it’s a file you control, and it moves your books to a new phone, iPhone or Android.
+        </p>
       </section>
 
       <section className="panel panel-pad stack">
