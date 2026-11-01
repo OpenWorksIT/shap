@@ -33,6 +33,9 @@ describe('a new phone', () => {
     expect(pdf.statusCode).toBe(200);
     expect(pdf.headers['content-type']).toBe('application/pdf');
     expect(new TextDecoder().decode(pdf.rawPayload.subarray(0, 5))).toBe('%PDF-');
+    // One name on the door: no placeholder trading name in the file name.
+    expect(pdf.headers['content-disposition']).toContain('filename="Quote ');
+    expect((await me.get('/api/reference')).brands).toHaveLength(0);
   });
 
   it('has no sign-in, users, demo, email or server routes', () => {

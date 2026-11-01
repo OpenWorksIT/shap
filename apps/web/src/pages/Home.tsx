@@ -37,49 +37,11 @@ interface CaptureDashboard {
 }
 
 export default function HomePage() {
-  const { seesMoney, user } = useAuthed();
-  if (!seesMoney) return <CaptureHome name={user.name} />;
   return <OwnerHome />;
 }
 
-function CaptureHome({ name }: { name: string }) {
-  const { data } = useApi<CaptureDashboard>('/api/dashboard');
-  return (
-    <div className="narrow stack-lg">
-      <PageHead title={`Howzit, ${name.split(' ')[0]}`} sub="What are you logging?" />
-      <div className="quick-actions">
-        <Link to="/log?tab=labour" className="quick">
-          <Icon name="workers" size={26} />
-          Day’s work
-        </Link>
-        <Link to="/log?tab=cost" className="quick">
-          <Icon name="camera" size={26} />
-          Cost & slip
-        </Link>
-      </div>
-      <section className="panel">
-        <div className="panel-head strong">What you logged lately</div>
-        {data?.recentLabour.length ? (
-          <ul className="list">
-            {data.recentLabour.map((r, i) => (
-              <li key={i} className="list-row">
-                <span className="grow">
-                  <strong>{r.workerName}</strong> · {r.job}
-                </span>
-                <span className="small muted">{formatDate(r.date)}</span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <Empty title="Nothing yet">Days you log show up here.</Empty>
-        )}
-      </section>
-    </div>
-  );
-}
-
 function OwnerHome() {
-  const { settings, isOwner } = useAuthed();
+  const { settings, isOwner, has } = useAuthed();
   const { data, error, reload } = useApi<Dashboard>('/api/dashboard');
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   if (!data) return <Loading />;
@@ -106,7 +68,7 @@ function OwnerHome() {
         <Icon name="chevronRight" size={16} />
       </Link>
     ),
-    data.unallocatedLabour.n > 0 && (
+    has('workers') && data.unallocatedLabour.n > 0 && (
       <Link key="lab" to="/workers?tab=allocate" className="attention">
         <Icon name="alert" size={18} />
         <span className="grow">
@@ -170,7 +132,7 @@ function OwnerHome() {
         <Icon name="chevronRight" size={16} />
       </Link>
     ),
-    data.materialsWithoutJob.n > 0 && (
+    has('jobs') && data.materialsWithoutJob.n > 0 && (
       <Link key="mat" to="/costs?kind=materials-unallocated" className="attention">
         <Icon name="alert" size={18} />
         <span className="grow">
@@ -223,10 +185,10 @@ function OwnerHome() {
             <>
               <Link to="/log" className="btn primary">
                 <Icon name="plus" size={18} />
-                Log
+                Add a cost
               </Link>
-              <Link to="/documents/new?kind=quote" className="btn">
-                New quote
+              <Link to={`/documents/new?kind=${has('quotes') ? 'quote' : 'invoice'}`} className="btn">
+                {has('quotes') ? 'New quote' : 'New invoice'}
               </Link>
             </>
           )
@@ -238,11 +200,11 @@ function OwnerHome() {
         <Kpi label="Gross profit" value={<Money cents={data.yearToDate.grossProfitCents} whole />} sub={`${formatPercent(ytdMargin)} of invoiced`} />
         <Kpi label="Net profit to date" value={<Money cents={data.yearToDate.profitCents} whole />} sub={`after ${formatZar(data.yearToDate.expensesCents, { cents: false })} running costs`} tone={data.yearToDate.profitCents < 0 ? 'bad' : undefined} />
         <Kpi label="Clients owe you" value={<Money cents={data.owing.totalCents} whole />} sub={data.owing.overdue ? `${data.owing.overdue} overdue` : 'nothing overdue'} tone={data.owing.overdue ? 'warn' : undefined} />
-        <Kpi
+        {has('workers') && <Kpi
           label={data.owedToWorkersCents < 0 ? 'Advanced to workers' : 'You owe workers'}
           value={<Money cents={Math.abs(data.owedToWorkersCents)} whole />}
           sub={data.owedToWorkersCents < 0 ? 'paid ahead of days worked' : 'earned, not yet paid'}
-        />
+        />}
       </div>
 
       {needs.length > 0 && <div className="stack" style={{ gap: 8 }}>{needs}</div>}
@@ -287,6 +249,7 @@ function OwnerHome() {
         </section>
       </div>
 
+      {has('jobs') && (
       <section className="panel">
         <div className="panel-head spread">
           <strong>Jobs on the go</strong>
@@ -341,6 +304,7 @@ function OwnerHome() {
           <Empty title="No open jobs">Start one from Jobs, or with a new quote.</Empty>
         )}
       </section>
+      )}
     </div>
   );
 }

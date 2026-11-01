@@ -16,7 +16,7 @@ import type { CostRow } from '../lib/types';
 type Period = 'month' | 'last' | 'fy' | 'lastfy' | 'all';
 
 export default function CostsPage() {
-  const { ref, settings, isOwner } = useAuthed();
+  const { ref, settings, isOwner, has } = useAuthed();
   const [params, setParams] = useSearchParams();
   const period = (params.get('period') as Period) || (params.get('kind') || params.get('source') === 'none' ? 'all' : 'month');
   const category = params.get('category') ?? '';
@@ -180,9 +180,11 @@ export default function CostsPage() {
             </option>
           ))}
         </select>
-        <div className="auto-w">
-          <ProjectSelect value={project} onChange={(v) => setParam('project', v)} emptyLabel="Any job" />
-        </div>
+        {has('jobs') && (
+          <div className="auto-w">
+            <ProjectSelect value={project} onChange={(v) => setParam('project', v)} emptyLabel="Any job" />
+          </div>
+        )}
         <div className="search">
           <Icon name="search" size={18} />
           <input className="input" placeholder="Search" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search costs" />
@@ -280,12 +282,16 @@ export default function CostsPage() {
           <span className="grow">
             <strong>{picked.size}</strong> selected · {formatZar(rows.filter((r) => picked.has(r.id)).reduce((s, r) => s + r.amountCents, 0))}
           </span>
-          <div className="auto-w">
-            <ProjectSelect value={toJob} onChange={setToJob} emptyLabel="Put on a job…" />
-          </div>
-          <button className="btn primary" disabled={!toJob} onClick={() => void bulk({ projectId: toJob }, 'put on the job')}>
-            Put on job
-          </button>
+          {has('jobs') && (
+            <>
+              <div className="auto-w">
+                <ProjectSelect value={toJob} onChange={setToJob} emptyLabel="Put on a job…" />
+              </div>
+              <button className="btn primary" disabled={!toJob} onClick={() => void bulk({ projectId: toJob }, 'put on the job')}>
+                Put on job
+              </button>
+            </>
+          )}
           <button className="btn" onClick={() => void bulk({ noJob: true }, 'marked as not for a job')}>
             Not for a job
           </button>

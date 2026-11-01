@@ -275,10 +275,10 @@ export default function ProjectPage() {
 /** Quoted / spent / invoiced, split into labour, materials and demo, as on the tracker's Per Project sheet. */
 function Breakdown({ s }: { s: ProjectRow }) {
   const rows: [string, number, number, number][] = [
-    ['Labour', s.quotedLabourCents, s.actualLabourCents, s.invoicedLabourCents],
-    ['Materials', s.quotedMaterialsCents, s.actualMaterialsCents, s.invoicedMaterialsCents],
-    ['Demo', s.quotedDemoCents, s.actualDemoCents, s.invoicedDemoCents],
+    ['Work / time', s.quotedLabourCents, s.actualLabourCents, s.invoicedLabourCents],
+    ['Parts / materials', s.quotedMaterialsCents, s.actualMaterialsCents, s.invoicedMaterialsCents],
   ];
+  if (s.quotedDemoCents || s.actualDemoCents || s.invoicedDemoCents) rows.push(['Demolition', s.quotedDemoCents, s.actualDemoCents, s.invoicedDemoCents]);
   if (s.quotedOtherCents || s.actualOtherCents || s.invoicedOtherCents) rows.push(['Other', s.quotedOtherCents, s.actualOtherCents, s.invoicedOtherCents]);
   return (
     <div className="breakdown">

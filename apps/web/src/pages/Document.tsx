@@ -6,6 +6,7 @@ import {
   formatZar,
   LINE_CATEGORIES,
   LINE_CATEGORY_LABELS,
+  LINE_CATEGORIES_OFFERED,
   lineTotal,
   PAYMENT_METHOD_LABELS,
   PAYMENT_METHODS,
@@ -59,7 +60,7 @@ export default function DocumentPage() {
 }
 
 function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | null; kind: 'quote' | 'invoice'; projectFromUrl: string | null; reload: () => Promise<void> }) {
-  const { settings, isOwner } = useAuthed();
+  const { settings, isOwner, has } = useAuthed();
   const toast = useToast();
   const navigate = useNavigate();
   const clients = useApi<ClientRow[]>(isOwner ? '/api/clients' : null);
@@ -113,7 +114,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
   const byCat = useMemo(() => LINE_CATEGORIES.map((c) => [c, d.lines.filter((l) => l.category === c).reduce((s, l) => s + lineTotal(toQty(l.qty), l.unitPriceCents ?? 0), 0)] as const).filter(([, v]) => v), [d.lines]);
 
   const addLine = (category: LineCategory) =>
-    set('lines', [...d.lines, { key: key(), category, description: category === 'labour' ? 'Labour' : '', qty: '1', unit: category === 'labour' ? 'days' : '', unitPriceCents: null }]);
+    set('lines', [...d.lines, { key: key(), category, description: '', qty: '1', unit: '', unitPriceCents: null }]);
   const updLine = (k: string, patch: Partial<DraftLine>) => set('lines', d.lines.map((l) => (l.key === k ? { ...l, ...patch } : l)));
   const moveLine = (k: string, dir: -1 | 1) => {
     const i = d.lines.findIndex((l) => l.key === k);
@@ -269,7 +270,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
         <div className="stack-lg">
           <section className="panel panel-pad stack">
             <div className="form-grid">
-              <Field label="Job">
+              {has('jobs') && <Field label="Job">
                 {(p) => (
                   <ProjectSelect
                     {...p}
@@ -280,7 +281,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
                     onCreate={editable ? () => void createJob() : undefined}
                   />
                 )}
-              </Field>
+              </Field>}
               <Field label="Client">
                 {(p) => (
                   <select {...p} className="select" value={d.clientId ?? ''} onChange={(e) => set('clientId', e.target.value || null)} disabled={!editable}>
@@ -322,7 +323,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
               {d.lines.map((l, i) => (
                 <div key={l.key} className="line">
                   <select className="select line-cat" value={l.category} onChange={(e) => updLine(l.key, { category: e.target.value as LineCategory })} aria-label="Line type" disabled={!editable}>
-                    {LINE_CATEGORIES.map((c) => (
+                    {LINE_CATEGORIES.filter((c) => LINE_CATEGORIES_OFFERED.includes(c) || c === l.category).map((c) => (
                       <option key={c} value={c}>
                         {LINE_CATEGORY_LABELS[c]}
                       </option>
@@ -355,7 +356,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
             </div>
             {editable && (
               <div className="panel-pad row wrap">
-                {LINE_CATEGORIES.map((c) => (
+                {LINE_CATEGORIES_OFFERED.map((c) => (
                   <button key={c} type="button" className="btn small" onClick={() => addLine(c)}>
                     <Icon name="plus" size={14} />
                     {LINE_CATEGORY_LABELS[c]}
@@ -677,7 +678,7 @@ function ChargeDrawer({ summary: s, markupBp, onClose, onAdd }: { summary: Proje
 }
 
 function PaymentDrawer({ invoiceId, balance, onClose, onSaved }: { invoiceId: string; balance: number; onClose: () => void; onSaved: () => void }) {
-  const { ref, settings } = useAuthed();
+  const { ref, settings, has } = useAuthed();
   const toast = useToast();
   const [amount, setAmount] = useState<number | null>(balance > 0 ? balance : null);
   const [date, setDate] = useState(todayIso());

@@ -43,7 +43,7 @@ export function costDraftFrom(c: CostRow): CostDraft {
 
 /** Add or change a cost. On a phone: amount first, a photo of the slip, then the details. */
 export function CostForm({ initial, projectId, plannedItem, onSaved, onDeleted }: { initial?: CostDraft; projectId?: string; plannedItem?: PlannedItem; onSaved?: () => void; onDeleted?: () => void }) {
-  const { ref, settings, isOwner } = useAuthed();
+  const { ref, settings, isOwner, has } = useAuthed();
   const toast = useToast();
   const suppliers = useApi<string[]>('/api/costs/suppliers');
   const cats = ref.categories.filter((c) => c.active || c.id === initial?.categoryId);
@@ -157,9 +157,9 @@ export function CostForm({ initial, projectId, plannedItem, onSaved, onDeleted }
           )}
         </Field>
       </div>
-      <Field label={isJobCost ? 'Job' : 'Job (optional)'} hint={isJobCost && !f.projectId ? 'Parts without a job can’t be charged on. Pick the job if you know it.' : undefined}>
+      {has('jobs') && <Field label={isJobCost ? 'Job' : 'Job (optional)'} hint={isJobCost && !f.projectId ? 'Parts without a job can’t be charged on. Pick the job if you know it.' : undefined}>
         {(p) => <ProjectSelect {...p} value={f.projectId} onChange={(v) => setF((x) => ({ ...x, projectId: v, plannedItemId: null }))} emptyLabel={isJobCost ? 'Choose the job…' : 'Not for a job'} />}
-      </Field>
+      </Field>}
       {isOwner && f.projectId && openPlanned.length > 0 && (
         <Field label="Planned part (optional)" hint="Ticks it off the job’s parts list.">
           {(p) => (

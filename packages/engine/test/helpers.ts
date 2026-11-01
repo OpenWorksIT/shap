@@ -34,7 +34,10 @@ function migrated(): Promise<PGlite> {
     await migrate(sql, migrationsFromDisk());
     // Shap's tests were written for a company; tests of a fresh phone use setup({ fresh: true }).
     {
-      await sql`update settings set company_name = 'Test Builders (Pty) Ltd', business_type = 'company', setup_done = true`;
+      await sql`update settings set company_name = 'Test Builders (Pty) Ltd', business_type = 'company', setup_done = true, features = '{"brands": true, "workers": true}'`;
+      // As Shap starts: the letterhead is the first trading name.
+      await sql`insert into brands (name, sort) values ('Test Builders (Pty) Ltd', 1)`;
+      await sql`update settings set default_brand_id = (select id from brands limit 1)`;
       await sql`update accounts set type = 'liability', name = 'Owner’s loan account' where system_key = 'owner_loan'`;
     }
     return pg;

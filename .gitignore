@@ -9,13 +9,9 @@ coverage/
 # Never commit a real tracker or exports: they hold the company's figures.
 *.xlsx
 *.csv
-deploy/test/.env
-deploy/vps/.env
-# Per-server files written by deploy/vps/add-company.sh (keys and passwords live in companies/).
-deploy/vps/companies/
-deploy/vps/companies.yml
-deploy/vps/sites/*.caddy
 # Company files hold your clients and figures.
 *.company.json
 shap-company*.json
 *company file*.json
+# Built by apps/web/scripts/fresh-books.mjs
+apps/web/public/fresh-books.tar.gz

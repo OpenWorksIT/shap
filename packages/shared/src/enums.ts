@@ -25,10 +25,12 @@ export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
 /** The three ways a job's money is split, as in the tracker, plus anything else. */
 export const LINE_CATEGORIES = ['labour', 'materials', 'demo', 'other'] as const;
 export type LineCategory = (typeof LINE_CATEGORIES)[number];
+/** The ones offered for new lines (demolition is a builder's: kept for old lines only). */
+export const LINE_CATEGORIES_OFFERED: readonly LineCategory[] = ['labour', 'materials', 'other'];
 export const LINE_CATEGORY_LABELS: Record<LineCategory, string> = {
-  labour: 'Labour',
-  materials: 'Materials',
-  demo: 'Demo',
+  labour: 'Work / time',
+  materials: 'Parts / materials',
+  demo: 'Demolition',
   other: 'Other',
 };
 

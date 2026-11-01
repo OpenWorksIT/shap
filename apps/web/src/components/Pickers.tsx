@@ -111,6 +111,6 @@ export function BrandSelect({
 }
 
 export function useHasBrands(): boolean {
-  const { ref } = useAuthed();
-  return ref.brands.filter((b) => b.active).length > 1;
+  const { ref, has } = useAuthed();
+  return has('brands') && ref.brands.filter((b) => b.active).length > 1;
 }

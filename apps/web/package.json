@@ -6,9 +6,10 @@
   "license": "AGPL-3.0-or-later",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node scripts/fresh-books.mjs && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "fresh-books": "node scripts/fresh-books.mjs"
   },
   "dependencies": {
     "@aparajita/capacitor-biometric-auth": "10.0.0",

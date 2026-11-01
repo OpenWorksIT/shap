@@ -1,5 +1,5 @@
 import type { App as FastifyInstance } from '../http.js';
-import { addDays, documentInput, lineTotal, quoteStatusInput, receiptInput, writeOffInput, type DocKind } from '@shap/shared';
+import { addDays, documentInput, featureOn, lineTotal, quoteStatusInput, receiptInput, writeOffInput, type DocKind } from '@shap/shared';
 import { z } from 'zod';
 import { requireRole, userOrThrow, type AuthUser } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -160,7 +160,8 @@ export async function loadDocument(db: Db, id: string) {
 export async function documentPdf(db: Db, id: string) {
   const data = await loadDocument(db, id);
   const settings = await getSettings(db);
-  const brand = await loadBrand(db, data.doc.brandId ?? settings.defaultBrandId);
+  // One name on the door (trading names switched off): the business's own details and logo.
+  const brand = featureOn(settings.features, 'brands') ? await loadBrand(db, data.doc.brandId ?? settings.defaultBrandId) : null;
   let logo: Buffer | null = null;
   const logoId = brand?.logoId ?? settings.logoId;
   if (logoId) {

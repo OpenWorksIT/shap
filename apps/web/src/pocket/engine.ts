@@ -48,7 +48,7 @@ const rawCall = (method: string, url: string, body?: unknown) => send<EngineResp
 let opened: Promise<void> | null = null;
 function open(): Promise<void> {
   return (opened ??= (async () => {
-    const { fresh } = await send<{ fresh: boolean }>({ op: 'status' });
+    const { fresh } = await send<{ fresh: boolean }>({ op: 'status', template: new URL('fresh-books.tar.gz', document.baseURI).href });
     if (fresh) {
       const copy = await readSafetyCopy();
       if (copy) await send<null>({ op: 'restore', data: copy });

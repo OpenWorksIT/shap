@@ -21,7 +21,7 @@ export type EngineRequest =
   | { id: number; op: 'dump' }
   | { id: number; op: 'restore'; data: Blob }
   | { id: number; op: 'erase' }
-  | { id: number; op: 'status' };
+  | { id: number; op: 'status'; template?: string };
 export type EngineReply = { id: number; ok: true; result: unknown } | { id: number; ok: false; error: string };
 
 let pg: PGlite | null = null;
@@ -30,11 +30,33 @@ let starting: Promise<void> | null = null;
 /** True when this start made new, empty books (first open, or the phone's storage was cleared). */
 let fresh = false;
 
+/** Empty, migrated books made at build time (scripts/fresh-books.mjs): a quick first open. */
+let templateUrl: string | null = null;
+async function storeExists(): Promise<boolean> {
+  const list = await (indexedDB as IDBFactory & { databases?: () => Promise<{ name?: string }[]> }).databases?.();
+  return list ? list.some((d) => d.name === STORE) : true;
+}
+const STORE = '/pglite/' + DATA_DIR.slice('idb://'.length);
+
 async function start(from?: Blob) {
+  fresh = false;
+  if (!from && templateUrl && !(await storeExists())) {
+    try {
+      const r = await fetch(templateUrl);
+      if (r.ok) {
+        from = await r.blob();
+        fresh = true;
+      }
+    } catch {
+      /* migrate from scratch instead */
+    }
+  }
+  const usedTemplate = fresh;
   pg = new PGlite(DATA_DIR, from ? { loadDataDir: from } : {});
   await pg.waitReady;
   const sql = createDb(pg);
-  fresh = (await migrate(sql, MIGRATIONS)).includes(MIGRATIONS.map((m) => m.name).sort()[0]!);
+  fresh = usedTemplate || (await migrate(sql, MIGRATIONS)).includes(MIGRATIONS.map((m) => m.name).sort()[0]!);
+  if (usedTemplate) await migrate(sql, MIGRATIONS);
   app = (await buildApp({ sql })).app;
 }
 
@@ -55,7 +77,7 @@ async function dropStore() {
   pg = null;
   app = null;
   await new Promise<void>((resolve) => {
-    const r = indexedDB.deleteDatabase('/pglite' + DATA_DIR.slice('idb://'.length - 1));
+    const r = indexedDB.deleteDatabase(STORE);
     r.onsuccess = r.onerror = r.onblocked = () => resolve();
   });
 }
@@ -64,6 +86,7 @@ self.onmessage = async (e: MessageEvent<EngineRequest>) => {
   const m = e.data;
   const reply = (r: { ok: true; result: unknown } | { ok: false; error: string }, transfer: Transferable[] = []) => (self as unknown as Worker).postMessage({ id: m.id, ...r }, transfer);
   try {
+    if (m.op === 'status' && m.template) templateUrl = m.template;
     await ready();
     if (m.op === 'call') {
       const r = await app!.handle(m.method, m.url, m.body);

@@ -32,6 +32,7 @@ export default function AccountsPage() {
   const [params, setParams] = useSearchParams();
   const tab = (params.get('tab') as Tab) || 'income';
   const go = (t: Tab, extra: Record<string, string> = {}) => setParams({ tab: t, ...extra }, { replace: false });
+  const { has } = useAuthed();
   return (
     <div className="stack-lg">
       <PageHead title="Accounts" sub="Built live from your invoices, costs, labour and payments." />
@@ -40,18 +41,18 @@ export default function AccountsPage() {
           value={tab}
           onChange={(t) => go(t)}
           tabs={[
-            { value: 'income', label: 'Income statement' },
-            { value: 'balance', label: 'Balance sheet' },
-            { value: 'trial', label: 'Trial balance' },
-            { value: 'ledger', label: 'Ledger' },
-            { value: 'journals', label: 'Journals' },
-            { value: 'assets', label: 'Assets' },
-            { value: 'bank', label: 'Bank statements' },
-            { value: 'files', label: 'Statement PDFs' },
-            { value: 'checks', label: 'Balance checks' },
-            { value: 'yearend', label: 'Year end' },
-            { value: 'tax', label: 'Provisional tax' },
-            { value: 'export', label: 'Export' },
+            { value: 'income' as Tab, label: 'Income statement' },
+            { value: 'balance' as Tab, label: 'Balance sheet' },
+            { value: 'tax' as Tab, label: 'Tax estimate' },
+            ...(has('bank') ? [{ value: 'bank' as Tab, label: 'Bank statements' }] : []),
+            ...(has('assets') ? [{ value: 'assets' as Tab, label: 'Assets' }] : []),
+            { value: 'yearend' as Tab, label: 'Year end' },
+            { value: 'export' as Tab, label: 'Export' },
+            { value: 'checks' as Tab, label: 'Balance checks' },
+            ...(has('bank') ? [{ value: 'files' as Tab, label: 'Statement PDFs' }] : []),
+            { value: 'trial' as Tab, label: 'Trial balance' },
+            { value: 'ledger' as Tab, label: 'Ledger' },
+            { value: 'journals' as Tab, label: 'Journals' },
           ]}
         />
       </div>
@@ -1087,6 +1088,7 @@ function BalanceChecks() {
 /* ---------------------------------------------------------------- exports */
 function Exports() {
   const { fy, today } = usePeriods();
+  const workers = useAuthed().has('workers');
   const [range, setRange] = useState({ from: fy.start, to: today });
   const qs = `from=${range.from}&to=${range.to}`;
   const items: [string, string, ReactNode][] = useMemo(
@@ -1098,10 +1100,14 @@ function Exports() {
       ['Invoices', `/api/export/invoices?${qs}`, 'With amounts paid and owing'],
       ['Payments received', `/api/export/receipts?${qs}`, ''],
       ['Costs', `/api/export/costs?${qs}`, 'With type, job and how it was paid'],
-      ['Labour days', `/api/export/labour?${qs}`, 'Who worked where, wages and allowances'],
-      ['Wage payments', `/api/export/wage-payments?${qs}`, ''],
+      ...(workers
+        ? ([
+            ['Labour days', `/api/export/labour?${qs}`, 'Who worked where, wages and allowances'],
+            ['Wage payments', `/api/export/wage-payments?${qs}`, ''],
+          ] as [string, string, ReactNode][])
+        : []),
     ],
-    [qs, range.to],
+    [qs, range.to, workers],
   );
   return (
     <div className="stack">
