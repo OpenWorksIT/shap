@@ -1,9 +1,0 @@
-[Unit]
-Description=Off-site copy of Shap backups (restic)
-After=docker.service
-
-[Service]
-Type=oneshot
-Environment=RESTIC_REPOSITORY=
-Environment=RESTIC_PASSWORD_FILE=/root/.restic-password
-ExecStart=/opt/shap/deploy/backup/backup.sh
