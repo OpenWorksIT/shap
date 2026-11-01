@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Shap Pocket</string>
+    <string name="title_activity_main">Shap Pocket</string>
+    <string name="package_name">za.co.openworks.shappocket</string>
+    <string name="custom_url_scheme">za.co.openworks.shappocket</string>
+</resources>

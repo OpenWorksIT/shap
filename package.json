@@ -1,7 +1,7 @@
 {
   "name": "shap-pocket",
   "private": true,
-  "version": "1.8.0",
+  "version": "1.0.0",
   "description": "Shap Pocket: the books for a one-person South African business, on your phone. Free and open source.",
   "license": "AGPL-3.0-or-later",
   "workspaces": [
