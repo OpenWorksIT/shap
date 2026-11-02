@@ -14,7 +14,7 @@ import { requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
-import { assertOpen, centsToCsv, getSettings, isIsoDate, q, toCsv, today } from '../lib/books.js';
+import { assertOpen, centsToCsv, getSettings, isIsoDate, q, toCsv, today, freshTotals } from '../lib/books.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 
@@ -31,11 +31,12 @@ interface AccountRow {
 }
 
 export async function accountBalances(db: Db, opts: { from?: string | null; to: string }) {
+  await freshTotals(db);
   return db<(AccountRow & { balanceCents: number; postings: number })[]>`
     select a.id, a.code, a.name, a.type, a.system_key, a.active,
-      coalesce(sum(l.amount_cents), 0)::bigint as balance_cents, count(l.account_id)::int as postings
+      coalesce(sum(l.amount_cents), 0)::bigint as balance_cents, coalesce(sum(l.postings), 0)::int as postings
     from accounts a
-    left join ledger l on l.account_id = a.id and l.date <= ${opts.to}::date and (${opts.from ?? null}::date is null or l.date >= ${opts.from ?? null}::date)
+    left join ledger_totals l on l.account_id = a.id and l.date <= ${opts.to}::date and (${opts.from ?? null}::date is null or l.date >= ${opts.from ?? null}::date)
     group by a.id order by a.code`;
 }
 
@@ -43,11 +44,13 @@ export async function accountBalances(db: Db, opts: { from?: string | null; to: 
 export async function trialBalance(db: Db, date: string) {
   const settings = await getSettings(db);
   const fy = financialYear(date, settings.fyEndMonth);
+  // Up to date before the three run side by side (on separate connections on a server).
+  await freshTotals(db);
   const [all, pl, prior] = await Promise.all([
     accountBalances(db, { to: date }),
     accountBalances(db, { from: fy.start, to: date }),
     db<{ total: number }[]>`
-      select coalesce(sum(l.amount_cents), 0)::bigint as total from ledger l join accounts a on a.id = l.account_id
+      select coalesce(sum(l.amount_cents), 0)::bigint as total from ledger_totals l join accounts a on a.id = l.account_id
       where a.type in ('income', 'cost_of_sales', 'expense') and l.date < ${fy.start}::date`,
   ]);
   const plMap = new Map(pl.map((a) => [a.id, a]));
@@ -66,9 +69,10 @@ export async function trialBalance(db: Db, date: string) {
 /** Income statement for a period, optionally with a column per month (the tracker's Trade Statement). */
 export async function incomeStatement(db: Db, from: string, to: string, byMonth: boolean) {
   const months = byMonth ? monthsBetween(from, to) : [];
+  await freshTotals(db);
   const rows = await db<{ accountId: string; month: string; total: number }[]>`
     select l.account_id, to_char(l.date, 'YYYY-MM') as month, sum(l.amount_cents)::bigint as total
-    from ledger l join accounts a on a.id = l.account_id
+    from ledger_totals l join accounts a on a.id = l.account_id
     where a.type in ('income', 'cost_of_sales', 'expense') and l.date between ${from}::date and ${to}::date
     group by 1, 2`;
   const accounts = await db<AccountRow[]>`select * from accounts where type in ('income', 'cost_of_sales', 'expense') order by code`;
@@ -236,8 +240,9 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
     const isPl = PL.includes(a.type);
     // P&L accounts start each financial year at zero.
     const openFrom = isPl ? financialYear(f, settings.fyEndMonth).start : null;
+    await freshTotals(sql);
     const [opening] = await sql<{ total: number }[]>`
-      select coalesce(sum(amount_cents), 0)::bigint as total from ledger
+      select coalesce(sum(amount_cents), 0)::bigint as total from ledger_totals
       where account_id = ${a.id} and date < ${f}::date and (${openFrom}::date is null or date >= ${openFrom}::date)`;
     const rows = await sql<{ date: string; amountCents: number; source: string; sourceId: string; memo: string; projectId: string | null }[]>`
       select l.date, l.amount_cents, l.source, l.source_id, l.memo, l.project_id, p.name as project_name
@@ -322,10 +327,11 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   // ---- statement balance checks (bank, cards, the owner's loan)
   app.get('/api/balance-checks', readers, async () => {
+    await freshTotals(sql);
     return sql`
       select b.*, a.code, a.name as account_name, a.type as account_type,
         ((case when a.type = 'asset' then 1 else -1 end)
-          * (select coalesce(sum(l.amount_cents), 0) from ledger l where l.account_id = b.account_id and l.date <= b.date))::bigint as books_cents
+          * (select coalesce(sum(l.amount_cents), 0) from ledger_totals l where l.account_id = b.account_id and l.date <= b.date))::bigint as books_cents
       from balance_checks b join accounts a on a.id = b.account_id order by b.date desc, a.code`;
   });
   app.post('/api/balance-checks', owner, async (req) => {

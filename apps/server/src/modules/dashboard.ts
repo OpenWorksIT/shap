@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { addMonths, featureOn, financialYear, monthEnd, monthLabel, monthStart, monthsBetween } from '@shap/shared';
 import { requireRole, seesMoney, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
-import { getSettings, today } from '../lib/books.js';
+import { getSettings, today, freshTotals } from '../lib/books.js';
 import { paymentStateSql } from './documents.js';
 import { missingStatements } from './statements.js';
 import { findDuplicates } from './duplicates.js';
@@ -32,6 +32,7 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
     const on = (k: Parameters<typeof featureOn>[1]) => featureOn(settings.features, k);
     const none = Promise.resolve([] as never[]);
 
+    await freshTotals(sql);
     const [series, owing, workers, unallocated, materialsNoJob, balances, projects, uncaptured] = await Promise.all([
       // Last 12 months: invoiced, cost of sales, running costs
       sql<{ month: string; income: number; cos: number; expenses: number }[]>`
@@ -39,7 +40,7 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
           (-sum(l.amount_cents) filter (where a.type = 'income'))::bigint as income,
           (sum(l.amount_cents) filter (where a.type = 'cost_of_sales'))::bigint as cos,
           (sum(l.amount_cents) filter (where a.type = 'expense'))::bigint as expenses
-        from ledger l join accounts a on a.id = l.account_id
+        from ledger_totals l join accounts a on a.id = l.account_id
         where l.date between ${firstMonth}::date and ${monthEnd(now)}::date and a.type in ('income', 'cost_of_sales', 'expense')
         group by 1 order by 1`,
       sql.unsafe(`
@@ -62,7 +63,7 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
         where k.kind = 'materials' and c.project_id is null and not c.no_job and c.date >= ${fy.start}::date`,
       sql<{ key: string; balance: number }[]>`
         select a.system_key as key, coalesce(sum(l.amount_cents), 0)::bigint as balance from accounts a
-        left join ledger l on l.account_id = a.id and l.date <= ${now}::date
+        left join ledger_totals l on l.account_id = a.id and l.date <= ${now}::date
         where a.system_key in ('bank', 'owner_loan', 'receivables', 'wages_payable') group by a.system_key`,
       !on('jobs') ? none : sql.unsafe(`
         select p.id, p.number, p.name, p.status, c.name as client_name, s.*

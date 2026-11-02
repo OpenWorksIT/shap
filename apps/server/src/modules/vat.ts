@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { requireRole } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db } from '../db/index.js';
-import { getSettings, today } from '../lib/books.js';
+import { getSettings, today, freshTotals } from '../lib/books.js';
 
 /**
  * Taxable supplies, roughly: income in the books over the last 12 months (VAT excluded),
@@ -16,11 +16,12 @@ export async function vatStatus(db: Db, on = today()) {
   const from = addMonths(on, -12);
   const lastFull = monthEnd(addMonths(on, -1));
   const paceFrom = monthStart(addMonths(lastFull, -2));
+  await freshTotals(db);
   const [r] = await db<{ last12: number; last3: number }[]>`
     select
       coalesce(-sum(l.amount_cents) filter (where l.date > ${from}::date and l.date <= ${on}::date), 0)::bigint as last12,
       coalesce(-sum(l.amount_cents) filter (where l.date between ${paceFrom}::date and ${lastFull}::date), 0)::bigint as last3
-    from ledger l join accounts a on a.id = l.account_id
+    from ledger_totals l join accounts a on a.id = l.account_id
     where a.type = 'income' and coalesce(a.system_key, '') <> 'disposal_gain_loss'`;
   const last12Cents = Number(r!.last12);
   const pace12Cents = Number(r!.last3) * 4;

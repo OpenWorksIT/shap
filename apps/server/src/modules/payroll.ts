@@ -33,7 +33,7 @@ import type { Ctx } from '../context.js';
 import type { Db, Tx } from '../db/index.js';
 import type { FastifyInstance } from 'fastify';
 import { audit } from '../lib/audit.js';
-import { assertOpen, centsToCsv, getSettings, q, today, toCsv } from '../lib/books.js';
+import { assertOpen, centsToCsv, getSettings, q, today, toCsv, freshTotals } from '../lib/books.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 import { shapFooter, usePdfFonts } from './pdf.js';
@@ -124,8 +124,9 @@ export async function sarsSummary(db: Db) {
 
 /** Profits the company can still pay out: all profit ever, less dividends already declared. */
 export async function distributable(db: Db): Promise<number> {
+  await freshTotals(db);
   const [r] = await db<{ t: number }[]>`
-    select coalesce(sum(l.amount_cents), 0)::bigint as t from ledger l join accounts a on a.id = l.account_id
+    select coalesce(sum(l.amount_cents), 0)::bigint as t from ledger_totals l join accounts a on a.id = l.account_id
     where a.type in ('income', 'cost_of_sales', 'expense') or a.system_key in ('retained_earnings', 'dividends')`;
   return -Number(r!.t);
 }
