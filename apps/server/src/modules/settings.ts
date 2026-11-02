@@ -15,6 +15,8 @@ import type { Ctx } from '../context.js';
 import { pgCode, PG, type Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
 import { applyBusinessType, getSettings } from '../lib/books.js';
+import { FEATURE_KEYS, featureOn } from '@shap/shared';
+import { reportUsage } from './feedback.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 
@@ -75,11 +77,15 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     // A sole proprietor's tax year is SARS's year for individuals: it ends in February.
     if (input.businessType === 'sole_prop') input.fyEndMonth = 2;
     await sql.begin(async (tx) => {
-      await tx`update settings set ${tx({ ...input, lockDate: input.lockDate ?? null, updatedAt: new Date() } as never)} where id`;
+      const row: Record<string, unknown> = { ...input, features: tx.json(input.features as never), logoLayout: tx.json(input.logoLayout as never), lockDate: input.lockDate ?? null, updatedAt: new Date() };
+      for (const k of Object.keys(row)) if (row[k] === undefined) delete row[k];
+      await tx`update settings set ${tx(row as never)} where id`;
       await applyBusinessType(tx, input.businessType);
     });
     await audit(sql, { userId: user.id, action: 'update', entity: 'settings', ip: req.ip });
-    return getSettings(sql);
+    const saved = await getSettings(sql);
+    if (saved.usageConsent) void reportUsage(ctx, { ...saved, features: FEATURE_KEYS.filter((k) => featureOn(saved.features, k)) }, req.log);
+    return saved;
   });
 
   // ---- logo for quotes and invoices
@@ -101,7 +107,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     const input = parse(brandInput, req.body);
     try {
       const [next] = await sql<{ n: number }[]>`select coalesce(max(sort), 0) + 1 as n from brands`;
-      const [row] = await sql`insert into brands ${sql({ ...input, sort: next!.n })} returning *`;
+      const [row] = await sql`insert into brands ${sql({ ...input, logoLayout: sql.json(input.logoLayout as never), sort: next!.n } as never)} returning *`;
       await audit(sql, { userId: user.id, action: 'create', entity: 'brand', entityId: row!.id, ip: req.ip });
       return row;
     } catch (err) {
@@ -114,7 +120,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = parse(idParam, req.params);
     const input = parse(brandInput, req.body);
     try {
-      const [row] = await sql`update brands set ${sql(input)} where id = ${id} returning *`;
+      const [row] = await sql`update brands set ${sql({ ...input, logoLayout: sql.json(input.logoLayout as never) } as never)} where id = ${id} returning *`;
       if (!row) throw notFound('Trading name');
       await audit(sql, { userId: user.id, action: 'update', entity: 'brand', entityId: id, ip: req.ip });
       return row;

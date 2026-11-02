@@ -4,3 +4,6 @@ export * from './money.js';
 export * from './dates.js';
 export * from './tax.js';
 export * from './passwords.js';
+export * from './features.js';
+export * from './payroll.js';
+export * from './setup.js';

@@ -1,0 +1,711 @@
+/**
+ * Payroll: employees, monthly pay runs (PAYE, UIF, SDL worked out on SARS's tables), payslips,
+ * what SARS is owed and paying it; and, for a company, dividends to its shareholders.
+ */
+import { useState, type FormEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { AGE_BAND_LABELS, formatDate, formatZar, todayIso, type AgeBand } from '@shap/shared';
+import { FileButton } from '../components/Files';
+import { PageHead } from '../components/Shell';
+import { Drawer, Empty, ErrorBox, Field, Icon, Loading, Money, MoneyInput, Tabs, useToast } from '../components/ui';
+import { api, ApiError } from '../lib/api';
+import { useApi } from '../lib/hooks';
+import { useAuthed } from '../lib/session';
+
+type Tab = 'runs' | 'people' | 'sars' | 'dividends';
+
+interface Employee {
+  id: string;
+  name: string;
+  idNumber: string;
+  taxNumber: string;
+  isDirector: boolean;
+  salaryCents: number;
+  ageBand: AgeBand;
+  medicalMembers: number;
+  uif: boolean;
+  startDate: string;
+  endDate: string | null;
+  bankDetails: string;
+  active: boolean;
+}
+interface RunRow {
+  id: string;
+  period: string;
+  payDate: string;
+  status: 'draft' | 'final';
+  grossCents: number;
+  payeCents: number;
+  uifCents: number;
+  sdlCents: number;
+  netCents: number;
+  people: number;
+}
+interface Line {
+  employeeId: string;
+  name: string;
+  isDirector: boolean;
+  salaryCents: number;
+  extraCents: number;
+  grossCents: number;
+  payeCents: number;
+  uifEmployeeCents: number;
+  uifEmployerCents: number;
+  sdlCents: number;
+  netCents: number;
+  note: string;
+}
+
+const monthName = (period: string) => new Date(`${period}-01T00:00:00Z`).toLocaleDateString('en-ZA', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+const thisPeriod = () => todayIso().slice(0, 7);
+
+export default function PayrollPage() {
+  const { settings, has } = useAuthed();
+  const [params, setParams] = useSearchParams();
+  const company = settings.businessType === 'company';
+  const dividends = company && has('dividends');
+  const payroll = has('payroll');
+  const fallback: Tab = payroll ? 'runs' : 'dividends';
+  const tab = (params.get('tab') as Tab) || fallback;
+  const tabs = [
+    ...(payroll
+      ? [
+          { value: 'runs' as Tab, label: 'Pay runs' },
+          { value: 'people' as Tab, label: 'Employees' },
+        ]
+      : []),
+    { value: 'sars' as Tab, label: 'SARS' },
+    ...(dividends ? [{ value: 'dividends' as Tab, label: 'Dividends' }] : []),
+  ];
+  return (
+    <div className="stack-lg">
+      <PageHead title={payroll ? 'Payroll' : 'Dividends'} sub={payroll ? 'Salaries with PAYE, UIF and SDL worked out for you, and payslips to send.' : undefined} />
+      <Tabs<Tab> value={tab} onChange={(t) => setParams({ tab: t }, { replace: true })} tabs={tabs} />
+      {tab === 'runs' && payroll && <Runs />}
+      {tab === 'people' && payroll && <Employees />}
+      {tab === 'sars' && <Sars />}
+      {tab === 'dividends' && dividends && <Dividends />}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------- pay runs */
+function Runs() {
+  const { ref } = useAuthed();
+  const toast = useToast();
+  const { data, error, reload } = useApi<RunRow[]>('/api/pay-runs');
+  const [open, setOpen] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const bank = ref.sources.find((s) => s.kind === 'bank' && s.active) ?? ref.sources[0];
+  const next = (() => {
+    const have = new Set((data ?? []).map((r) => r.period));
+    let p = thisPeriod();
+    while (have.has(p)) {
+      const [y, m] = p.split('-').map(Number) as [number, number];
+      p = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+    }
+    return p;
+  })();
+  const start = async () => {
+    setBusy(true);
+    try {
+      const [y, m] = next.split('-').map(Number) as [number, number];
+      const payDate = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+      const r = await api<{ id: string }>('/api/pay-runs', { body: { period: next, payDate, sourceId: bank?.id } });
+      await reload();
+      setOpen(r.id);
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Couldn’t start the pay run', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (error) return <ErrorBox error={error} onRetry={reload} />;
+  if (!data) return <Loading />;
+  return (
+    <div className="stack">
+      <div className="row">
+        <button className="btn primary" onClick={() => void start()} disabled={busy}>
+          <Icon name="plus" size={18} />
+          Pay {monthName(next)}
+        </button>
+      </div>
+      {data.length ? (
+        <section className="panel">
+          <ul className="list">
+            {data.map((r) => (
+              <li key={r.id}>
+                <button className="list-row" onClick={() => setOpen(r.id)}>
+                  <span className="grow">
+                    <strong>{monthName(r.period)}</strong> {r.status === 'draft' && <span className="chip d-draft">draft</span>}
+                    <div className="xs muted">
+                      {r.people} paid on {formatDate(r.payDate)} · PAYE {formatZar(r.payeCents)} · UIF {formatZar(r.uifCents)}
+                    </div>
+                  </span>
+                  <Money cents={r.netCents} />
+                  <Icon name="chevronRight" size={16} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : (
+        <Empty title="No pay runs yet">Add your employees, then pay the month. Shap works out PAYE, UIF and SDL on SARS’s tables and makes the payslips.</Empty>
+      )}
+      {open && <RunDrawer id={open} onClose={() => (setOpen(null), void reload())} />}
+    </div>
+  );
+}
+
+function RunDrawer({ id, onClose }: { id: string; onClose: () => void }) {
+  const { ref } = useAuthed();
+  const toast = useToast();
+  const { data, error, reload } = useApi<{ run: { id: string; period: string; payDate: string; status: string; sourceId: string }; lines: Line[] }>(`/api/pay-runs/${id}`);
+  const [edit, setEdit] = useState<Line | null>(null);
+  const [busy, setBusy] = useState(false);
+  const act = async (fn: () => Promise<unknown>, done?: string) => {
+    setBusy(true);
+    try {
+      await fn();
+      await reload();
+      if (done) toast(done);
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Something went wrong', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (error) return <Drawer title="Pay run" onClose={onClose}><ErrorBox error={error} onRetry={reload} /></Drawer>;
+  if (!data) return <Drawer title="Pay run" onClose={onClose}><Loading /></Drawer>;
+  const { run, lines } = data;
+  const draft = run.status === 'draft';
+  const total = (k: keyof Line) => lines.reduce((s, l) => s + Number(l[k] ?? 0), 0);
+  return (
+    <Drawer title={monthName(run.period)} sub={draft ? 'Draft: check it, then finalise' : `Paid ${formatDate(run.payDate)}`} onClose={onClose} wide>
+      <div className="stack">
+        {draft && (
+          <div className="form-grid">
+            <Field label="Pay date">
+              {(p) => <input {...p} className="input" type="date" value={run.payDate} onChange={(e) => void act(() => api(`/api/pay-runs/${id}`, { method: 'PUT', body: { payDate: e.target.value, sourceId: run.sourceId } }))} />}
+            </Field>
+            <Field label="Paid from">
+              {(p) => (
+                <select {...p} className="select" value={run.sourceId} onChange={(e) => void act(() => api(`/api/pay-runs/${id}`, { method: 'PUT', body: { payDate: run.payDate, sourceId: e.target.value } }))}>
+                  {ref.sources.filter((s) => s.active).map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </Field>
+          </div>
+        )}
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Employee</th>
+                <th className="num hide-sm">Gross</th>
+                <th className="num">PAYE</th>
+                <th className="num hide-sm">UIF</th>
+                <th className="num">Net</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {lines.map((l) => (
+                <tr key={l.employeeId}>
+                  <td>
+                    {draft ? (
+                      <button className="link-btn" onClick={() => setEdit(l)}>
+                        {l.name}
+                      </button>
+                    ) : (
+                      l.name
+                    )}
+                    {l.extraCents > 0 && <div className="xs muted">+ {formatZar(l.extraCents)} {l.note || 'bonus'}</div>}
+                  </td>
+                  <td className="num hide-sm"><Money cents={l.grossCents} /></td>
+                  <td className="num"><Money cents={l.payeCents} /></td>
+                  <td className="num hide-sm"><Money cents={l.uifEmployeeCents} /></td>
+                  <td className="num strong"><Money cents={l.netCents} /></td>
+                  <td>
+                    <FileButton className="btn quiet small" path={`/api/pay-runs/${id}/payslip/${l.employeeId}`} title={`Payslip ${l.name}`} aria-label={`Payslip for ${l.name}`}>
+                      <Icon name="share" size={14} />
+                    </FileButton>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="sub">
+                <td>Total</td>
+                <td className="num hide-sm"><Money cents={total('grossCents')} /></td>
+                <td className="num"><Money cents={total('payeCents')} /></td>
+                <td className="num hide-sm"><Money cents={total('uifEmployeeCents')} /></td>
+                <td className="num"><Money cents={total('netCents')} /></td>
+                <td />
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <p className="xs muted">
+          Also paid by you: UIF {formatZar(total('uifEmployerCents'))}
+          {total('sdlCents') ? `, SDL ${formatZar(total('sdlCents'))}` : ''}. SARS is owed {formatZar(total('payeCents') + total('uifEmployeeCents') + total('uifEmployerCents') + total('sdlCents'))} for this month (EMP201), by the 7th.
+        </p>
+        {draft ? (
+          <div className="row wrap">
+            <button className="btn primary" disabled={busy} onClick={() => void act(() => api(`/api/pay-runs/${id}/finalise`, { body: {} }), 'Pay run final: it’s in the books')}>
+              <Icon name="check" size={18} />
+              Finalise (pays net from {ref.sources.find((s) => s.id === run.sourceId)?.name ?? 'the bank'})
+            </button>
+            <button className="btn quiet danger" disabled={busy} onClick={() => confirm('Delete this draft pay run?') && void act(() => api(`/api/pay-runs/${id}`, { method: 'DELETE' })).then(onClose)}>
+              Delete draft
+            </button>
+          </div>
+        ) : (
+          <button className="btn quiet" disabled={busy} onClick={() => confirm('Reopen this pay run? It comes out of the books until you finalise it again.') && void act(() => api(`/api/pay-runs/${id}/reopen`, { body: {} }), 'Reopened')}>
+            Reopen to change it
+          </button>
+        )}
+      </div>
+      {edit && (
+        <LineDrawer
+          line={edit}
+          onClose={() => setEdit(null)}
+          onSave={(body) =>
+            void act(() => api(`/api/pay-runs/${id}/lines/${edit.employeeId}`, { method: 'PUT', body })).then(() => setEdit(null))
+          }
+          onRemove={() => void act(() => api(`/api/pay-runs/${id}/lines/${edit.employeeId}`, { method: 'DELETE' })).then(() => setEdit(null))}
+        />
+      )}
+    </Drawer>
+  );
+}
+
+function LineDrawer({ line, onClose, onSave, onRemove }: { line: Line; onClose: () => void; onSave: (b: { salaryCents: number; extraCents: number; note: string }) => void; onRemove: () => void }) {
+  const [salary, setSalary] = useState<number | null>(line.salaryCents);
+  const [extra, setExtra] = useState<number | null>(line.extraCents || null);
+  const [note, setNote] = useState(line.note);
+  return (
+    <Drawer title={line.name} sub="This month only" onClose={onClose}>
+      <form className="stack" onSubmit={(e) => (e.preventDefault(), onSave({ salaryCents: salary ?? 0, extraCents: extra ?? 0, note }))}>
+        <Field label="Salary this month" hint="Less for a part month or unpaid leave">{(p) => <MoneyInput {...p} value={salary} onChange={setSalary} />}</Field>
+        <Field label="Bonus, overtime or commission (optional)">{(p) => <MoneyInput {...p} value={extra} onChange={setExtra} />}</Field>
+        {Boolean(extra) && <Field label="What it’s for">{(p) => <input {...p} className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Year-end bonus" />}</Field>}
+        <button className="btn primary big block">Work it out</button>
+        <button type="button" className="btn quiet danger" onClick={onRemove}>
+          Not paid this month
+        </button>
+      </form>
+    </Drawer>
+  );
+}
+
+/* ---------------------------------------------------------------- employees */
+function Employees() {
+  const { data, error, reload } = useApi<Employee[]>('/api/employees');
+  const [edit, setEdit] = useState<Employee | 'new' | null>(null);
+  if (error) return <ErrorBox error={error} onRetry={reload} />;
+  if (!data) return <Loading />;
+  return (
+    <div className="stack">
+      <div className="row">
+        <button className="btn primary" onClick={() => setEdit('new')}>
+          <Icon name="plus" size={18} />
+          Add an employee
+        </button>
+      </div>
+      {data.length ? (
+        <section className="panel">
+          <ul className="list">
+            {data.map((e) => (
+              <li key={e.id}>
+                <button className={`list-row ${e.active ? '' : 'inactive'}`} onClick={() => setEdit(e)}>
+                  <span className="grow">
+                    <strong>{e.name}</strong> {e.isDirector && <span className="chip">director</span>}
+                    <div className="xs muted">
+                      Since {formatDate(e.startDate)}
+                      {e.endDate ? ` · left ${formatDate(e.endDate)}` : ''}
+                      {e.uif ? '' : ' · no UIF'}
+                    </div>
+                  </span>
+                  <Money cents={e.salaryCents} />
+                  <Icon name="chevronRight" size={16} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : (
+        <Empty title="No employees yet">Add the people on a monthly salary. Day-rate helpers go under Casual workers instead.</Empty>
+      )}
+      {edit && <EmployeeDrawer employee={edit === 'new' ? null : edit} onClose={() => setEdit(null)} onSaved={() => (setEdit(null), void reload())} />}
+    </div>
+  );
+}
+
+function EmployeeDrawer({ employee: e, onClose, onSaved }: { employee: Employee | null; onClose: () => void; onSaved: () => void }) {
+  const { settings } = useAuthed();
+  const toast = useToast();
+  const [f, setF] = useState({
+    name: e?.name ?? '',
+    idNumber: e?.idNumber ?? '',
+    taxNumber: e?.taxNumber ?? '',
+    isDirector: e?.isDirector ?? false,
+    salaryCents: e?.salaryCents ?? (null as number | null),
+    ageBand: e?.ageBand ?? ('under65' as AgeBand),
+    medicalMembers: e?.medicalMembers ?? 0,
+    uif: e?.uif ?? true,
+    startDate: e?.startDate ?? todayIso(),
+    endDate: e?.endDate ?? '',
+    bankDetails: e?.bankDetails ?? '',
+    active: e?.active ?? true,
+  });
+  const [error, setError] = useState('');
+  const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((x) => ({ ...x, [k]: v }));
+  const save = async (ev: FormEvent) => {
+    ev.preventDefault();
+    const body = { ...f, salaryCents: f.salaryCents ?? 0, endDate: f.endDate || null };
+    try {
+      if (e) await api(`/api/employees/${e.id}`, { method: 'PUT', body });
+      else await api('/api/employees', { body });
+      toast('Saved');
+      onSaved();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Couldn’t save');
+    }
+  };
+  return (
+    <Drawer title={e ? e.name : 'New employee'} onClose={onClose}>
+      <form className="stack" onSubmit={save}>
+        <Field label="Name">{(p) => <input {...p} className="input" value={f.name} onChange={(x) => set('name', x.target.value)} required />}</Field>
+        <Field label="Monthly salary (before tax)">{(p) => <MoneyInput {...p} value={f.salaryCents} onChange={(c) => set('salaryCents', c)} />}</Field>
+        <div className="form-grid">
+          <Field label="Started">{(p) => <input {...p} className="input" type="date" value={f.startDate} onChange={(x) => set('startDate', x.target.value)} required />}</Field>
+          <Field label="Left (if they have)">{(p) => <input {...p} className="input" type="date" value={f.endDate} onChange={(x) => set('endDate', x.target.value)} />}</Field>
+          <Field label="ID number" hint="For their IRP5">{(p) => <input {...p} className="input" value={f.idNumber} onChange={(x) => set('idNumber', x.target.value)} />}</Field>
+          <Field label="Tax number">{(p) => <input {...p} className="input" value={f.taxNumber} onChange={(x) => set('taxNumber', x.target.value)} />}</Field>
+          <Field label="Age at the end of February" hint="Older employees get bigger rebates">
+            {(p) => (
+              <select {...p} className="select" value={f.ageBand} onChange={(x) => set('ageBand', x.target.value as AgeBand)}>
+                {(Object.keys(AGE_BAND_LABELS) as AgeBand[]).map((a) => (
+                  <option key={a} value={a}>
+                    {AGE_BAND_LABELS[a]}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
+          <Field label="People on their medical aid" hint="Only if it’s paid through payroll; 0 if not">
+            {(p) => <input {...p} className="input" type="number" min={0} max={20} value={f.medicalMembers} onChange={(x) => set('medicalMembers', Number(x.target.value))} />}
+          </Field>
+        </div>
+        {settings.businessType === 'company' && (
+          <label className="check">
+            <input type="checkbox" checked={f.isDirector} onChange={(x) => set('isDirector', x.target.checked)} />
+            <span>
+              A director of the company
+              <div className="xs muted">Their pay goes to Director’s remuneration in the books.</div>
+            </span>
+          </label>
+        )}
+        <label className="check">
+          <input type="checkbox" checked={f.uif} onChange={(x) => set('uif', x.target.checked)} />
+          <span>
+            UIF applies
+            <div className="xs muted">Untick for someone working under 24 hours a month, or a non-executive director. Ask your accountant if unsure.</div>
+          </span>
+        </label>
+        <Field label="Their bank details (optional)">{(p) => <textarea {...p} className="textarea" rows={2} value={f.bankDetails} onChange={(x) => set('bankDetails', x.target.value)} />}</Field>
+        {e && (
+          <label className="check">
+            <input type="checkbox" checked={f.active} onChange={(x) => set('active', x.target.checked)} />
+            Still employed
+          </label>
+        )}
+        {error && <div className="banner alert small">{error}</div>}
+        <button className="btn primary big block">Save</button>
+      </form>
+    </Drawer>
+  );
+}
+
+/* ---------------------------------------------------------------- SARS */
+interface SarsData {
+  emp201: { period: string; payeCents: number; uifCents: number; sdlCents: number; totalCents: number; paidCents: number; dueOn: string }[];
+  dividendsTax: { period: string; dwtCents: number; paidCents: number; dueOn: string }[];
+}
+function Sars() {
+  const { ref, has } = useAuthed();
+  const toast = useToast();
+  const { data, error, reload } = useApi<SarsData>('/api/payroll/sars');
+  const [pay, setPay] = useState<{ kind: 'emp201' | 'dwt'; period: string; owing: number } | null>(null);
+  if (error) return <ErrorBox error={error} onRetry={reload} />;
+  if (!data) return <Loading />;
+  const today = todayIso();
+  const row = (kind: 'emp201' | 'dwt', period: string, label: string, total: number, paid: number, dueOn: string) => {
+    const owing = total - paid;
+    return (
+      <li key={`${kind}-${period}`} className="list-row">
+        <span className="grow">
+          <strong>{label}</strong>
+          <div className={`xs ${owing > 0 && dueOn < today ? 'warn-text' : 'muted'}`}>
+            {owing > 0 ? `${formatZar(owing)} due by ${formatDate(dueOn)}${dueOn < today ? ' (late)' : ''}` : `Paid ${formatZar(paid)}`}
+          </div>
+        </span>
+        {owing > 0 && (
+          <button className="btn small" onClick={() => setPay({ kind, period, owing })}>
+            Paid SARS
+          </button>
+        )}
+      </li>
+    );
+  };
+  const empty = !data.emp201.length && !data.dividendsTax.length;
+  return (
+    <div className="stack">
+      {empty ? (
+        <Empty title="Nothing owed to SARS yet">After a pay run is final, its PAYE, UIF and SDL show here with the EMP201 due date.</Empty>
+      ) : (
+        <section className="panel">
+          <ul className="list">
+            {data.emp201.map((r) => row('emp201', r.period, `${monthName(r.period)}: PAYE ${formatZar(r.payeCents)}, UIF ${formatZar(r.uifCents)}${r.sdlCents ? `, SDL ${formatZar(r.sdlCents)}` : ''}`, r.totalCents, r.paidCents, r.dueOn))}
+            {data.dividendsTax.map((r) => row('dwt', r.period, `Dividends tax, ${monthName(r.period)}`, r.dwtCents, r.paidCents, r.dueOn))}
+          </ul>
+        </section>
+      )}
+      <p className="xs muted">
+        Declare and pay on SARS eFiling: the EMP201 each month (by the 7th), and the dividends tax return (DTR01/02) by the end of the month after a dividend. Then tap Paid SARS so the books match.
+      </p>
+      {has('payroll') && (
+        <FileButton className="btn" path={`/api/payroll/year?date=${today}&format=csv`} title="Payroll tax year totals">
+          <Icon name="share" size={16} />
+          This tax year’s totals per employee (for IRP5s)
+        </FileButton>
+      )}
+      {pay && (
+        <SarsPayDrawer
+          pay={pay}
+          sources={ref.sources.filter((s) => s.active)}
+          onClose={() => setPay(null)}
+          onSaved={() => (setPay(null), void reload(), toast('Recorded'))}
+        />
+      )}
+    </div>
+  );
+}
+
+function SarsPayDrawer({ pay, sources, onClose, onSaved }: { pay: { kind: 'emp201' | 'dwt'; period: string; owing: number }; sources: { id: string; name: string; kind: string }[]; onClose: () => void; onSaved: () => void }) {
+  const [amount, setAmount] = useState<number | null>(pay.owing);
+  const [date, setDate] = useState(todayIso());
+  const [sourceId, setSourceId] = useState(sources.find((s) => s.kind === 'bank')?.id ?? sources[0]?.id ?? '');
+  const [reference, setReference] = useState('');
+  const [error, setError] = useState('');
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    try {
+      await api('/api/sars-payments', { body: { kind: pay.kind, period: pay.period, date, amountCents: amount ?? 0, sourceId, reference } });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Couldn’t save');
+    }
+  };
+  return (
+    <Drawer title={pay.kind === 'emp201' ? `EMP201 ${monthName(pay.period)}` : `Dividends tax ${monthName(pay.period)}`} onClose={onClose}>
+      <form className="stack" onSubmit={save}>
+        <Field label="Amount paid">{(p) => <MoneyInput {...p} value={amount} onChange={setAmount} />}</Field>
+        <Field label="Date paid">{(p) => <input {...p} className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />}</Field>
+        <Field label="Paid from">
+          {(p) => (
+            <select {...p} className="select" value={sourceId} onChange={(e) => setSourceId(e.target.value)}>
+              {sources.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          )}
+        </Field>
+        <Field label="SARS payment reference (optional)">{(p) => <input {...p} className="input" value={reference} onChange={(e) => setReference(e.target.value)} />}</Field>
+        {error && <div className="banner alert small">{error}</div>}
+        <button className="btn primary big block">Save</button>
+      </form>
+    </Drawer>
+  );
+}
+
+/* ---------------------------------------------------------------- dividends */
+interface Dividend {
+  id: string;
+  declaredOn: string;
+  paidOn: string | null;
+  shareholder: string;
+  grossCents: number;
+  dwtCents: number;
+  netCents: number;
+  exempt: boolean;
+  sourceName: string | null;
+}
+function Dividends() {
+  const { ref, settings } = useAuthed();
+  const toast = useToast();
+  const { data, error, reload } = useApi<{ dividends: Dividend[]; availableCents: number }>('/api/dividends');
+  const [open, setOpen] = useState(false);
+  const [paying, setPaying] = useState<Dividend | null>(null);
+  if (error) return <ErrorBox error={error} onRetry={reload} />;
+  if (!data) return <Loading />;
+  return (
+    <div className="stack">
+      <section className="panel panel-pad stack">
+        <p className="small">
+          Profits available to pay out: <strong>{formatZar(data.availableCents)}</strong>
+          <span className="xs muted"> (all profit in the books, less dividends already declared)</span>
+        </p>
+        <p className="xs muted">
+          The directors must be satisfied the company stays solvent and can pay its debts after the dividend (Companies Act, section 46). 20% dividends tax is withheld and paid to SARS; the shareholder gets the rest.
+        </p>
+        <div>
+          <button className="btn primary" onClick={() => setOpen(true)}>
+            <Icon name="plus" size={18} />
+            Declare a dividend
+          </button>
+        </div>
+      </section>
+      {data.dividends.length > 0 && (
+        <section className="panel">
+          <ul className="list">
+            {data.dividends.map((d) => (
+              <li key={d.id} className="list-row">
+                <span className="grow">
+                  <strong>{d.shareholder}</strong> · {formatZar(d.grossCents)}
+                  <div className="xs muted">
+                    Declared {formatDate(d.declaredOn)} ·{' '}
+                    {d.paidOn ? `paid ${formatDate(d.paidOn)}: ${formatZar(d.netCents)} after ${d.exempt ? 'no' : formatZar(d.dwtCents)} dividends tax` : 'not paid yet'}
+                  </div>
+                </span>
+                {!d.paidOn && (
+                  <button className="btn small" onClick={() => setPaying(d)}>
+                    Paid
+                  </button>
+                )}
+                <button
+                  className="btn quiet small"
+                  aria-label="Delete dividend"
+                  onClick={() => confirm('Delete this dividend? It comes out of the books.') && void api(`/api/dividends/${d.id}`, { method: 'DELETE' }).then(reload).catch((e: Error) => toast(e.message, 'error'))}
+                >
+                  <Icon name="trash" size={14} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {open && <DividendDrawer available={data.availableCents} defaultName={settings.companyName ? 'You' : ''} onClose={() => setOpen(false)} onSaved={() => (setOpen(false), void reload(), toast('Dividend in the books'))} />}
+      {paying && (
+        <PayDividendDrawer
+          d={paying}
+          sources={ref.sources.filter((s) => s.active)}
+          onClose={() => setPaying(null)}
+          onSaved={() => (setPaying(null), void reload())}
+        />
+      )}
+    </div>
+  );
+}
+
+function DividendDrawer({ available, defaultName, onClose, onSaved }: { available: number; defaultName: string; onClose: () => void; onSaved: () => void }) {
+  const { ref } = useAuthed();
+  const sources = ref.sources.filter((s) => s.active);
+  const [f, setF] = useState({ declaredOn: todayIso(), paidNow: true, shareholder: defaultName, grossCents: null as number | null, exempt: false, sourceId: sources.find((s) => s.kind === 'bank')?.id ?? sources[0]?.id ?? '', note: '' });
+  const [error, setError] = useState('');
+  const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((x) => ({ ...x, [k]: v }));
+  const tax = f.exempt ? 0 : Math.round((f.grossCents ?? 0) * 0.2);
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    try {
+      await api('/api/dividends', {
+        body: { declaredOn: f.declaredOn, paidOn: f.paidNow ? f.declaredOn : null, shareholder: f.shareholder, grossCents: f.grossCents ?? 0, exempt: f.exempt, sourceId: f.paidNow ? f.sourceId : null, note: f.note },
+      });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Couldn’t save');
+    }
+  };
+  return (
+    <Drawer title="Declare a dividend" onClose={onClose}>
+      <form className="stack" onSubmit={save}>
+        <Field label="Paid to (shareholder)">{(p) => <input {...p} className="input" value={f.shareholder} onChange={(e) => set('shareholder', e.target.value)} required />}</Field>
+        <Field label="Dividend (before tax)">{(p) => <MoneyInput {...p} value={f.grossCents} onChange={(c) => set('grossCents', c)} />}</Field>
+        {(f.grossCents ?? 0) > available && <div className="banner alert small">That’s more than the profits available ({formatZar(available)}). Check with your accountant first.</div>}
+        <Field label="Declared on">{(p) => <input {...p} className="input" type="date" value={f.declaredOn} onChange={(e) => set('declaredOn', e.target.value)} />}</Field>
+        <label className="check">
+          <input type="checkbox" checked={f.exempt} onChange={(e) => set('exempt', e.target.checked)} />
+          <span>
+            The shareholder is a South African company
+            <div className="xs muted">Then there’s no dividends tax (they must give you the exemption declaration).</div>
+          </span>
+        </label>
+        <label className="check">
+          <input type="checkbox" checked={f.paidNow} onChange={(e) => set('paidNow', e.target.checked)} />
+          Paid the same day
+        </label>
+        {f.paidNow && (
+          <Field label="Paid from">
+            {(p) => (
+              <select {...p} className="select" value={f.sourceId} onChange={(e) => set('sourceId', e.target.value)}>
+                {sources.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
+        )}
+        {(f.grossCents ?? 0) > 0 && (
+          <p className="small">
+            Dividends tax {formatZar(tax)} (to SARS) · the shareholder gets <strong>{formatZar((f.grossCents ?? 0) - tax)}</strong>
+          </p>
+        )}
+        {error && <div className="banner alert small">{error}</div>}
+        <button className="btn primary big block">Declare</button>
+      </form>
+    </Drawer>
+  );
+}
+
+function PayDividendDrawer({ d, sources, onClose, onSaved }: { d: Dividend; sources: { id: string; name: string; kind: string }[]; onClose: () => void; onSaved: () => void }) {
+  const [paidOn, setPaidOn] = useState(todayIso());
+  const [sourceId, setSourceId] = useState(sources.find((s) => s.kind === 'bank')?.id ?? sources[0]?.id ?? '');
+  const [error, setError] = useState('');
+  return (
+    <Drawer title={`Pay ${d.shareholder}`} sub={`${formatZar(d.netCents)} after dividends tax`} onClose={onClose}>
+      <form
+        className="stack"
+        onSubmit={(e) => {
+          e.preventDefault();
+          api(`/api/dividends/${d.id}/pay`, { body: { paidOn, sourceId } })
+            .then(onSaved)
+            .catch((err) => setError(err instanceof ApiError ? err.message : 'Couldn’t save'));
+        }}
+      >
+        <Field label="Paid on">{(p) => <input {...p} className="input" type="date" value={paidOn} onChange={(e) => setPaidOn(e.target.value)} />}</Field>
+        <Field label="Paid from">
+          {(p) => (
+            <select {...p} className="select" value={sourceId} onChange={(e) => setSourceId(e.target.value)}>
+              {sources.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          )}
+        </Field>
+        {error && <div className="banner alert small">{error}</div>}
+        <button className="btn primary big block">Save</button>
+      </form>
+    </Drawer>
+  );
+}

@@ -16,6 +16,16 @@ export interface SettingsRow {
   logoId: string | null;
   defaultBrandId: string | null;
   businessType: 'company' | 'sole_prop';
+  features: Record<string, boolean>;
+  setupDone: boolean;
+  logoLayout: { zoom?: number; x?: number; y?: number };
+  accent: string;
+  tone: 'casual' | 'formal';
+  industry: string;
+  usageConsent: boolean;
+  installId: string;
+  sdl: boolean;
+  payLink: string;
   vatRegistered: boolean;
   vatRateBp: number;
   fyEndMonth: number;

@@ -31,6 +31,7 @@ export default function AccountsPage() {
   const [params, setParams] = useSearchParams();
   const tab = (params.get('tab') as Tab) || 'income';
   const go = (t: Tab, extra: Record<string, string> = {}) => setParams({ tab: t, ...extra }, { replace: false });
+  const { has } = useAuthed();
   return (
     <div className="stack-lg">
       <PageHead title="Accounts" sub="Built live from your invoices, costs, labour and payments." />
@@ -44,9 +45,8 @@ export default function AccountsPage() {
             { value: 'trial', label: 'Trial balance' },
             { value: 'ledger', label: 'Ledger' },
             { value: 'journals', label: 'Journals' },
-            { value: 'assets', label: 'Assets' },
-            { value: 'bank', label: 'Bank statements' },
-            { value: 'files', label: 'Statement PDFs' },
+            ...(has('assets') ? [{ value: 'assets' as Tab, label: 'Assets' }] : []),
+            ...(has('bank') ? [{ value: 'bank' as Tab, label: 'Bank statements' }, { value: 'files' as Tab, label: 'Statement PDFs' }] : []),
             { value: 'checks', label: 'Balance checks' },
             { value: 'yearend', label: 'Year end' },
             { value: 'tax', label: 'Provisional tax' },

@@ -36,6 +36,12 @@ const envSchema = z.object({
   /** Everyone must set up an authenticator app. Defaults to on in production. */
   MFA_REQUIRED: z.enum(['true', 'false']).optional(),
   /** Email (sending quotes and invoices). Without SMTP_URL, emails are only logged. */
+  // In-app feedback and bug reports are written here as folders (see modules/feedback.ts).
+  FEEDBACK_DIR: z.string().default('./feedback'),
+  /** This server collects feedback and anonymous usage notes from Shap Pocket and other Shaps (OpenWorks' own). */
+  COLLECT: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  /** Where feedback and usage notes go to reach OpenWorks (blank: nowhere). */
+  COLLECTOR_URL: z.string().default('https://shap.openworks.co.za/collect'),
   SMTP_URL: z.string().default(''),
   MAIL_FROM: z.string().default('Shap <no-reply@example.com>'),
   /** Largest upload (tracker import, receipt photo), in megabytes. */

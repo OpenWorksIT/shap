@@ -16,6 +16,11 @@ import { registerCostRoutes } from './modules/costs.js';
 import { registerDuplicateRoutes } from './modules/duplicates.js';
 import { registerRecurringRoutes } from './modules/recurring.js';
 import { registerVatRoutes } from './modules/vat.js';
+import { registerPayrollRoutes } from './modules/payroll.js';
+import { registerFeedbackRoutes } from './modules/feedback.js';
+import { setPdfFonts } from './modules/pdf.js';
+import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
 import { registerMonthlyRoutes } from './modules/monthly.js';
 import { registerDashboardRoutes } from './modules/dashboard.js';
 import { registerDocumentRoutes } from './modules/documents.js';
@@ -54,6 +59,14 @@ export interface BuildOptions {
   demoSql?: Sql | null;
   logger?: boolean | object;
   mailer?: Mailer;
+}
+
+// The app's typeface on quotes, invoices and payslips (Helvetica if the font package is missing).
+try {
+  const dir = createRequire(import.meta.url).resolve('@fontsource/atkinson-hyperlegible-next/package.json').replace(/package\.json$/, 'files/');
+  setPdfFonts({ regular: readFileSync(`${dir}atkinson-hyperlegible-next-latin-400-normal.woff`), bold: readFileSync(`${dir}atkinson-hyperlegible-next-latin-700-normal.woff`) });
+} catch {
+  /* Helvetica */
 }
 
 export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstance; ctx: Ctx }> {
@@ -170,6 +183,8 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   registerDocumentRoutes(app, ctx);
   registerMonthlyRoutes(app, ctx);
   registerVatRoutes(app, ctx);
+  registerPayrollRoutes(app, ctx);
+  registerFeedbackRoutes(app, ctx);
   registerReportRoutes(app, ctx);
   registerImportRoutes(app, ctx);
   registerYearEndRoutes(app, ctx);

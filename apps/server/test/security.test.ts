@@ -155,8 +155,9 @@ describe('breaking in', () => {
     }
     const open = new Set(['GET /api/health', 'GET /api/demo/status', 'POST /api/auth/login', 'POST /api/auth/mfa/verify', 'POST /api/auth/mfa/enrol', 'POST /api/auth/logout', 'POST /api/demo/leave']);
     // What site staff may do besides read their pickers: log days and costs, attach slips, look after their own sign-in.
-    const siteMay = new Set(['POST /api/costs', 'PUT /api/costs/:id', 'POST /api/labour', 'PUT /api/labour/:id', 'POST /api/attachments', 'POST /api/auth/mfa/setup', 'POST /api/auth/mfa/disable', 'POST /api/auth/mfa/recovery-codes', 'POST /api/auth/password']);
-    const accountantMay = new Set(['POST /api/auth/mfa/setup', 'POST /api/auth/mfa/disable', 'POST /api/auth/mfa/recovery-codes', 'POST /api/auth/password']);
+    const siteMay = new Set(['POST /api/costs', 'PUT /api/costs/:id', 'POST /api/labour', 'PUT /api/labour/:id', 'POST /api/attachments', 'POST /api/auth/mfa/setup', 'POST /api/auth/mfa/disable', 'POST /api/auth/mfa/recovery-codes', 'POST /api/auth/password', 'POST /api/feedback']);
+    // Everyone signed in can send feedback.
+    const accountantMay = new Set(['POST /api/auth/mfa/setup', 'POST /api/auth/mfa/disable', 'POST /api/auth/mfa/recovery-codes', 'POST /api/auth/password', 'POST /api/feedback']);
     const site = await login(env.app, 'site@example.co.za');
     const acc = await login(env.app, 'accountant@example.co.za');
     const id = '00000000-0000-4000-8000-000000000000';

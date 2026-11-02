@@ -5,27 +5,32 @@ import { PayForm } from '../components/PayForm';
 import { PageHead } from '../components/Shell';
 import { Tabs } from '../components/ui';
 import { useAuthed } from '../lib/session';
+import { say } from '../lib/words';
 
 type Tab = 'labour' | 'cost' | 'pay';
 
 /** The phone screen: log the crew's day, add a cost with a photo of the slip, pay someone. */
 export default function LogPage() {
-  const { isOwner } = useAuthed();
+  const { isOwner, has } = useAuthed();
+  const workers = has('workers');
   const [params, setParams] = useSearchParams();
-  const tab = (params.get('tab') as Tab) || 'labour';
+  const asked = params.get('tab') as Tab | null;
+  const tab: Tab = asked && (workers || asked === 'cost') ? asked : workers ? 'labour' : 'cost';
   const setTab = (t: Tab) => setParams({ tab: t }, { replace: true });
   return (
     <div className="narrow stack-lg">
-      <PageHead title="Log" sub="Capture it on site, while it’s fresh." />
-      <Tabs<Tab>
-        value={tab}
-        onChange={setTab}
-        tabs={[
-          { value: 'labour', label: 'Day’s work' },
-          { value: 'cost', label: 'Cost' },
-          ...(isOwner ? [{ value: 'pay' as Tab, label: 'Pay a worker' }] : []),
-        ]}
-      />
+      <PageHead title="Log" sub={say('addSub')} />
+      {workers && (
+        <Tabs<Tab>
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            { value: 'labour', label: 'Day’s work' },
+            { value: 'cost', label: 'Cost' },
+            ...(isOwner ? [{ value: 'pay' as Tab, label: 'Pay a worker' }] : []),
+          ]}
+        />
+      )}
       <div className="panel panel-pad">
         {tab === 'labour' && <LabourForm />}
         {tab === 'cost' && <CostForm key="new-cost" />}

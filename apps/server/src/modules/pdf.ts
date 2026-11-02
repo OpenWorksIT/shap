@@ -1,5 +1,3 @@
-import { createRequire } from 'node:module';
-import { existsSync } from 'node:fs';
 import PDFDocument from 'pdfkit';
 import { formatDate, formatZar, LINE_CATEGORY_LABELS, type LineCategory } from '@shap/shared';
 import type { SettingsRow } from '../lib/books.js';
@@ -16,7 +14,17 @@ export interface BrandRow {
   logoId: string | null;
   accent: string;
   active: boolean;
+  logoLayout?: LogoLayout;
 }
+
+/** Where the logo sits in its box at the top left: zoom 1 fits it; x and y move it by a share of the box. */
+export interface LogoLayout {
+  zoom?: number;
+  x?: number;
+  y?: number;
+}
+/** The logo's box in the heading, in points. The app's logo placer uses the same shape. */
+export const LOGO_BOX = { w: 210, h: 78 } as const;
 
 export interface PdfDocument {
   doc: {
@@ -29,6 +37,7 @@ export interface PdfDocument {
     title: string;
     notes: string;
     terms: string;
+    payLink?: string;
     vatRateBp: number;
     subtotalCents: number;
     vatCents: number;
@@ -70,19 +79,22 @@ const MUTED = '#66737b';
 const RULE = '#e2ddd5';
 const ZEBRA = '#faf8f5';
 
-// Atkinson Hyperlegible (the app's typeface), from the fontsource package; Helvetica if it's missing.
-const require = createRequire(import.meta.url);
-function fontPath(weight: 400 | 700): string | null {
-  try {
-    const dir = require.resolve('@fontsource/atkinson-hyperlegible-next/package.json').replace(/package\.json$/, 'files/');
-    const p = `${dir}atkinson-hyperlegible-next-latin-${weight}-normal.woff`;
-    return existsSync(p) ? p : null;
-  } catch {
-    return null;
-  }
+// Atkinson Hyperlegible (the app's typeface), handed in by whoever starts the engine (the app
+// bundles the font files; the tests read them from disk). Helvetica until then.
+type FontData = ArrayBuffer | Uint8Array;
+let REGULAR: FontData | null = null;
+let BOLD: FontData | null = null;
+export function setPdfFonts(fonts: { regular: FontData; bold: FontData } | null) {
+  REGULAR = fonts?.regular ?? null;
+  BOLD = fonts?.bold ?? null;
 }
-const REGULAR = fontPath(400);
-const BOLD = fontPath(700);
+
+/** Registers the app's typeface on a PDF; returns the font names to use. */
+export function usePdfFonts(pdf: PDFKit.PDFDocument): { regular: string; bold: string } {
+  if (REGULAR) pdf.registerFont('Body', REGULAR as never);
+  if (BOLD) pdf.registerFont('BodyBold', BOLD as never);
+  return { regular: REGULAR ? 'Body' : 'Helvetica', bold: BOLD ? 'BodyBold' : 'Helvetica-Bold' };
+}
 
 const qtyText = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0+$/, '').replace(/\.$/, ''));
 
@@ -103,7 +115,8 @@ function tint(hex: string, amount: number): string {
  */
 export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   const { doc, lines, settings, brand, logo } = data;
-  const accent = brand?.accent && /^#[0-9a-f]{6}$/i.test(brand.accent) ? brand.accent : '#e8731c';
+  const chosen = brand?.accent || settings.accent;
+  const accent = chosen && /^#[0-9a-f]{6}$/i.test(chosen) ? chosen : '#e8731c';
   const soft = tint(accent, 0.9);
   const tradingName = brand?.name || settings.tradingName || settings.companyName;
   const legal = brand?.legalLine || (tradingName !== settings.companyName ? `${settings.companyName} t/a ${tradingName}` : settings.companyName);
@@ -122,8 +135,8 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
 
   const regular = REGULAR ? 'Body' : 'Helvetica';
   const bold = BOLD ? 'BodyBold' : 'Helvetica-Bold';
-  if (REGULAR) pdf.registerFont('Body', REGULAR);
-  if (BOLD) pdf.registerFont('BodyBold', BOLD);
+  if (REGULAR) pdf.registerFont('Body', REGULAR as never);
+  if (BOLD) pdf.registerFont('BodyBold', BOLD as never);
 
   const W = pdf.page.width;
   const L = 44;
@@ -141,8 +154,14 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   let logoBottom = y;
   if (logo) {
     try {
-      pdf.image(logo, L, y, { fit: [210, 78] });
-      logoBottom = y + 78;
+      const lay = brand?.logoLayout ?? settings.logoLayout ?? {};
+      const img = (pdf as unknown as { openImage(src: unknown): { width: number; height: number } }).openImage(logo);
+      const scale = Math.min(LOGO_BOX.w / img.width, LOGO_BOX.h / img.height) * (lay.zoom ?? 1);
+      pdf.save();
+      pdf.rect(L, y, LOGO_BOX.w, LOGO_BOX.h).clip();
+      pdf.image(img as never, L + (lay.x ?? 0) * LOGO_BOX.w, y + (lay.y ?? 0) * LOGO_BOX.h, { width: img.width * scale, height: img.height * scale });
+      pdf.restore();
+      logoBottom = y + LOGO_BOX.h;
     } catch {
       /* unreadable image: carry on without it */
     }
@@ -286,8 +305,11 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   const bigAmount = isInvoice ? (depositDue ? deposit - doc.paidCents : Math.max(balance, 0)) : doc.totalCents;
   const totalsH = totals.length * 16 + 44;
   const bankText = isInvoice && contact.bank ? `${contact.bank}\nReference: ${doc.number}` : '';
+  // A card payment link (Yoco, SnapScan…): this invoice's, or the business's usual one, while it's unpaid.
+  const payLink = isInvoice && balance > 0 ? (doc.payLink || settings.payLink || '').trim() : '';
   pdf.font(regular).fontSize(9);
-  const bankH = bankText ? pdf.heightOfString(bankText, { width: 230, lineGap: 1.5 }) + 34 : 0;
+  const linkH = payLink ? pdf.heightOfString(payLink, { width: 230 }) + 22 : 0;
+  const bankH = bankText || payLink ? (bankText ? pdf.heightOfString(bankText, { width: 230, lineGap: 1.5 }) + 34 : 14) + linkH : 0;
   ensure(Math.max(totalsH, bankH) + 10);
   const tx = R - 230;
   let ty = y;
@@ -300,10 +322,18 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   pdf.roundedRect(tx - 10, ty, 240, 34, 5).fill(accent);
   pdf.font(bold).fontSize(9).fillColor('#ffffff').text(bigLabel.toUpperCase(), tx, ty + 12, { width: 120, characterSpacing: 0.8 });
   pdf.font(bold).fontSize(14).fillColor('#ffffff').text(formatZar(bigAmount), tx + 90, ty + 9, { width: 130, align: 'right' });
-  if (bankText) {
+  if (bankText || payLink) {
     pdf.roundedRect(L, y, 250, bankH, 5).lineWidth(1).strokeColor(tint(accent, 0.6)).stroke();
-    label('Please pay into', L + 12, y + 10);
-    pdf.font(regular).fontSize(9).fillColor(INK).text(bankText, L + 12, y + 23, { width: 230, lineGap: 1.5 });
+    let by = y + 10;
+    if (bankText) {
+      label('Please pay into', L + 12, by);
+      pdf.font(regular).fontSize(9).fillColor(INK).text(bankText, L + 12, by + 13, { width: 230, lineGap: 1.5 });
+      by = pdf.y + 10;
+    }
+    if (payLink) {
+      label('Or pay by card', L + 12, by);
+      pdf.font(bold).fontSize(9).fillColor(accent).text(payLink, L + 12, by + 13, { width: 230, link: payLink, underline: true });
+    }
   }
   y = Math.max(ty + 34, y + bankH) + 22;
 

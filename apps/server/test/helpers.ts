@@ -26,6 +26,11 @@ export async function setup(opts: { demo?: boolean; env?: Record<string, string>
     await createUser(sql, { name: 'Owner', email: 'owner@example.co.za', password: 'test-password-1', role: 'owner' });
     await createUser(sql, { name: 'Site', email: 'site@example.co.za', password: 'test-password-1', role: 'capture' });
     await createUser(sql, { name: 'Accountant', email: 'accountant@example.co.za', password: 'test-password-1', role: 'accountant' });
+    // Set up as a company that's been using Shap: the letterhead as its first trading name,
+    // casual workers and trading names switched on.
+    await sql`update settings set setup_done = true, features = ${sql.json({ brands: true, workers: true })}`;
+    await sql`insert into brands (name, sort) select company_name, 1 from settings`;
+    await sql`update settings set default_brand_id = (select id from brands limit 1)`;
   }
   const mails: Mail[] = [];
   const { app } = await buildApp({ config, sql, mailer: { send: async (m) => void mails.push(m) } });

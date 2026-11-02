@@ -12,7 +12,7 @@ import type { DocRow } from '../lib/types';
 type Kind = 'invoice' | 'quote';
 
 export default function DocumentsPage() {
-  const { isOwner, ref } = useAuthed();
+  const { isOwner, ref, has } = useAuthed();
   const brands = ref.brands.filter((b) => b.active);
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -50,9 +50,11 @@ export default function DocumentsPage() {
             </a>
             {isOwner && (
               <>
-                <button className="btn" onClick={() => navigate('/documents/new?kind=quote')}>
-                  New quote
-                </button>
+                {has('quotes') && (
+                  <button className="btn" onClick={() => navigate('/documents/new?kind=quote')}>
+                    New quote
+                  </button>
+                )}
                 <button className="btn primary" onClick={() => navigate('/documents/new?kind=invoice')}>
                   <Icon name="plus" size={18} />
                   New invoice
@@ -62,14 +64,14 @@ export default function DocumentsPage() {
           </>
         }
       />
-      <Tabs<Kind>
+      {has('quotes') && <Tabs<Kind>
         value={kind}
         onChange={(k) => setParams({ kind: k }, { replace: true })}
         tabs={[
           { value: 'invoice', label: 'Invoices' },
           { value: 'quote', label: 'Quotes' },
         ]}
-      />
+      />}
       <div className="toolbar">
         {kind === 'invoice' ? (
           <Segmented

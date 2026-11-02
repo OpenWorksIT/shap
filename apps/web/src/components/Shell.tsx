@@ -14,7 +14,7 @@ interface Item {
 }
 
 export function Shell({ children }: { children: ReactNode }) {
-  const { user, settings, isOwner, seesMoney } = useAuthed();
+  const { user, settings, isOwner, seesMoney, has } = useAuthed();
   const [account, setAccount] = useState(false);
   const [more, setMore] = useState(false);
   const location = useLocation();
@@ -23,8 +23,9 @@ export function Shell({ children }: { children: ReactNode }) {
   const all: (Item & { show: boolean })[] = [
     { to: '/', label: 'Home', icon: 'home', end: true, show: true },
     { to: '/log', label: 'Log', icon: 'log', show: user.role !== 'accountant' },
-    { to: '/jobs', label: 'Jobs', icon: 'jobs', show: true },
-    { to: '/workers', label: 'Workers', icon: 'workers', show: seesMoney },
+    { to: '/jobs', label: 'Jobs', icon: 'jobs', show: has('jobs') },
+    { to: '/workers', label: 'Workers', icon: 'workers', show: seesMoney && has('workers') },
+    { to: '/payroll', label: has('payroll') ? 'Payroll' : 'Dividends', icon: 'money', show: seesMoney && (has('payroll') || (settings.businessType === 'company' && has('dividends'))) },
     { to: '/costs', label: 'Costs', icon: 'costs', show: seesMoney },
     { to: '/documents', label: 'Quotes & invoices', icon: 'docs', show: seesMoney },
     { to: '/clients', label: 'Clients', icon: 'clients', show: seesMoney },
@@ -33,7 +34,7 @@ export function Shell({ children }: { children: ReactNode }) {
   ];
   const items = all.filter((i) => i.show);
   // Phones: four tabs plus "More". Log sits in the middle, where a thumb finds it.
-  const tabKeys = seesMoney ? ['/', '/jobs', '/log', '/documents'] : ['/', '/log', '/jobs'];
+  const tabKeys = seesMoney ? ['/', has('jobs') ? '/jobs' : '/costs', '/log', '/documents'] : has('jobs') ? ['/', '/log', '/jobs'] : ['/', '/log'];
   const tabs = tabKeys.map((k) => items.find((i) => i.to === k)).filter(Boolean) as Item[];
   const overflow = items.filter((i) => !tabKeys.includes(i.to));
 

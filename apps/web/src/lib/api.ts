@@ -98,3 +98,15 @@ function safeJson(text: string): unknown {
     return text;
   }
 }
+
+/** A file from the server (a PDF, a spreadsheet, a photo) with the name it should be saved as. */
+export async function apiBlob(path: string): Promise<{ blob: Blob; filename: string }> {
+  const res = await fetch(apiUrl(path), { credentials: NATIVE ? 'omit' : 'same-origin', headers: authHeaders() });
+  if (!res.ok) {
+    const d = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new ApiError(res.status, d.error ?? 'Couldn’t fetch the file', 'error');
+  }
+  const blob = await res.blob();
+  const named = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1];
+  return { blob, filename: named ?? 'Shap file' };
+}

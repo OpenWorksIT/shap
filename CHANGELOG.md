@@ -3,6 +3,34 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.9.0 (2 November 2026)
+
+- **Payroll.** Settings → What you use → *Payroll*. Employees on a monthly salary; each month's
+  pay run works out PAYE on SARS's tables (annualised, with the rebates for their age and medical
+  scheme credits), UIF (1% + 1%, up to R17 712 a month) and, if you're registered, SDL. Add a
+  bonus or overtime for the month, finalise, and it's in the books (salaries or director's
+  remuneration, PAYE/UIF/SDL owed, net pay from the bank). Payslip PDFs to share, the EMP201
+  amount with its due date (7th), *Paid SARS* to clear it, and the tax year's totals per
+  employee for IRP5s. Home reminds you when SARS is due or late.
+- **Dividends** (companies). Declare a dividend to a shareholder (you): 20% dividends tax is
+  withheld and owed to SARS by the end of the next month; paid now or later; shows the profits
+  available to pay out.
+- **New books start with a few questions**: company or sole proprietor (and VAT), what you do,
+  employees / casual labour / dividends, how your work runs (quote → job → invoice, quote →
+  invoice, or just invoices), logo, invoice details, formal or casual. Shap switches on only
+  what you need. Your existing books are untouched: everything you use stays on.
+- **What you use** (Settings): switch jobs, quotes, casual workers, payroll, dividends, bank
+  statements, assets and trading names on or off.
+- **Formal or casual**: "Howzit" and "Lekker!" or "Good morning" and plain confirmations.
+- **Feedback button** on every screen (from Sorted): love it, don't like it, or a bug with a
+  masked screenshot and the steps before it. The owner reads them under Settings → Feedback;
+  they're passed on to OpenWorks too (`COLLECTOR_URL=off` to stop that).
+- **Card payment link** (Yoco, SnapScan…): a usual one in Settings and one per invoice, printed
+  on unpaid invoices and added to the email.
+- **Logo placing**: drag, size and centre the logo in its box on the PDF (per trading name, or
+  for the business when there's one name).
+- OpenWorks' server (`COLLECT=true`) receives feedback and anonymous usage notes from Shap Pocket.
+
 ## 1.8.0 (1 November 2026)
 
 - **Sole proprietors.** Settings → Invoicing & books → *This business is*: a company, or just

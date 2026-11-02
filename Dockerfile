@@ -15,7 +15,8 @@ ARG GIT_SHA=""
 ENV GIT_SHA=$GIT_SHA
 ENV NODE_ENV=production \
     PORT=8080 \
-    WEB_DIST=/app/apps/web/dist
+    WEB_DIST=/app/apps/web/dist \
+    FEEDBACK_DIR=/data/feedback
 WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/packages ./packages
@@ -24,6 +25,8 @@ COPY --from=build /app/apps/server/migrations ./apps/server/migrations
 COPY --from=build /app/apps/server/package.json ./apps/server/
 COPY --from=build /app/apps/web/dist ./apps/web/dist
 COPY --from=build /app/package.json ./
+# Feedback and bug reports (a volume in docker-compose), written by the app's user.
+RUN mkdir -p /data/feedback && chown node:node /data/feedback
 USER node
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s CMD node -e "fetch('http://127.0.0.1:8080/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"

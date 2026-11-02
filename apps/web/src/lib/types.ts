@@ -19,6 +19,16 @@ export interface Settings {
   bankDetails: string;
   logoId: string | null;
   businessType: 'company' | 'sole_prop';
+  features: Record<string, boolean>;
+  setupDone: boolean;
+  logoLayout: { zoom?: number; x?: number; y?: number };
+  accent: string;
+  tone: 'casual' | 'formal';
+  industry: string;
+  usageConsent: boolean;
+  installId?: string;
+  sdl: boolean;
+  payLink: string;
   vatRegistered: boolean;
   vatRateBp: number;
   fyEndMonth: number;
@@ -52,6 +62,7 @@ export interface Brand {
   logoId: string | null;
   accent: string;
   active: boolean;
+  logoLayout?: { zoom?: number; x?: number; y?: number };
 }
 
 export interface Source {

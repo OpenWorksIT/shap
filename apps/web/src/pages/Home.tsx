@@ -5,6 +5,7 @@ import { PageHead } from '../components/Shell';
 import { DocChip, Empty, ErrorBox, Icon, Kpi, Loading, Money, ProjectChip } from '../components/ui';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
+import { greeting, say } from '../lib/words';
 import type { ProjectRow } from '../lib/types';
 
 interface Dashboard {
@@ -26,6 +27,7 @@ interface Dashboard {
     failed: { id: string; documentId: string; title: string; clientName: string | null; error: string }[];
     waiting: { id: string; scheduleId: string; number: string; clientName: string | null; mode: string }[];
   };
+  sarsDue?: { kind: 'emp201' | 'dwt'; period: string; owingCents: number; dueOn: string; late: boolean }[];
   recurringMissing?: { key: string; label: string; months: string[]; usualCents: number; onStatement: boolean }[];
   bankCents: number;
   ownerLoanCents: number;
@@ -79,12 +81,23 @@ function CaptureHome({ name }: { name: string }) {
 }
 
 function OwnerHome() {
-  const { settings, isOwner } = useAuthed();
+  const { settings, isOwner, has } = useAuthed();
   const { data, error, reload } = useApi<Dashboard>('/api/dashboard');
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   if (!data) return <Loading />;
   const ytdMargin = data.yearToDate.incomeCents ? data.yearToDate.grossProfitCents / data.yearToDate.incomeCents : null;
   const needs = [
+    ...(data.sarsDue ?? []).map((d) => (
+      <Link key={`sars-${d.kind}-${d.period}`} to="/payroll?tab=sars" className="attention">
+        <Icon name="alert" size={18} />
+        <span className="grow">
+          <strong>SARS: {d.kind === 'emp201' ? `PAYE, UIF and SDL for ${monthLabel(d.period)}` : `dividends tax for ${monthLabel(d.period)}`}</strong>, <Money cents={d.owingCents} />{' '}
+          {d.late ? `was due ${formatDate(d.dueOn)}` : `due by ${formatDate(d.dueOn)}`}
+        </span>
+        Pay
+        <Icon name="chevronRight" size={16} />
+      </Link>
+    )),
     (data.vat?.state === 'over' || data.vat?.state === 'near') && (
       <Link key="vat" to="/settings" className="attention">
         <Icon name="alert" size={18} />
@@ -106,7 +119,7 @@ function OwnerHome() {
         <Icon name="chevronRight" size={16} />
       </Link>
     ),
-    data.unallocatedLabour.n > 0 && (
+    has('workers') && data.unallocatedLabour.n > 0 && (
       <Link key="lab" to="/workers?tab=allocate" className="attention">
         <Icon name="alert" size={18} />
         <span className="grow">
@@ -170,7 +183,7 @@ function OwnerHome() {
         <Icon name="chevronRight" size={16} />
       </Link>
     ),
-    data.materialsWithoutJob.n > 0 && (
+    has('jobs') && data.materialsWithoutJob.n > 0 && (
       <Link key="mat" to="/costs?kind=materials-unallocated" className="attention">
         <Icon name="alert" size={18} />
         <span className="grow">
@@ -216,7 +229,7 @@ function OwnerHome() {
   return (
     <div className="stack-lg">
       <PageHead
-        title="Howzit"
+        title={greeting()}
         sub={`${settings.tradingName || settings.companyName} · ${data.financialYear.label} (${formatDate(data.financialYear.start)} to ${formatDate(data.financialYear.end)})`}
         actions={
           isOwner && (
@@ -238,11 +251,11 @@ function OwnerHome() {
         <Kpi label="Gross profit" value={<Money cents={data.yearToDate.grossProfitCents} whole />} sub={`${formatPercent(ytdMargin)} of invoiced`} />
         <Kpi label="Net profit to date" value={<Money cents={data.yearToDate.profitCents} whole />} sub={`after ${formatZar(data.yearToDate.expensesCents, { cents: false })} running costs`} tone={data.yearToDate.profitCents < 0 ? 'bad' : undefined} />
         <Kpi label="Clients owe you" value={<Money cents={data.owing.totalCents} whole />} sub={data.owing.overdue ? `${data.owing.overdue} overdue` : 'nothing overdue'} tone={data.owing.overdue ? 'warn' : undefined} />
-        <Kpi
+        {has('workers') && <Kpi
           label={data.owedToWorkersCents < 0 ? 'Advanced to workers' : 'You owe workers'}
           value={<Money cents={Math.abs(data.owedToWorkersCents)} whole />}
           sub={data.owedToWorkersCents < 0 ? 'paid ahead of days worked' : 'earned, not yet paid'}
-        />
+        />}
       </div>
 
       {needs.length > 0 && <div className="stack" style={{ gap: 8 }}>{needs}</div>}
@@ -282,11 +295,12 @@ function OwnerHome() {
               ))}
             </ul>
           ) : (
-            <Empty title="All paid up" />
+            <Empty title={say('allPaid')} />
           )}
         </section>
       </div>
 
+      {has('jobs') && (
       <section className="panel">
         <div className="panel-head spread">
           <strong>Jobs on the go</strong>
@@ -341,6 +355,7 @@ function OwnerHome() {
           <Empty title="No open jobs">Start one from Jobs, or with a new quote.</Empty>
         )}
       </section>
+      )}
     </div>
   );
 }

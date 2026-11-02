@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { flavour } from '../lib/words';
 import { centsToInput, DOC_STATUS_LABELS, formatZar, parseZarToCents, PROJECT_STATUS_LABELS, type ProjectStatus } from '@shap/shared';
 
 /* ---------- Icons (inline, stroke-based) ---------- */
@@ -24,6 +25,7 @@ const paths: Record<string, ReactNode> = {
   print: <><path d="M7 9V3.5h10V9M7 17H4.5V10a1 1 0 0 1 1-1h13a1 1 0 0 1 1 1v7H17" /><rect x="7" y="14" width="10" height="7" /></>,
   download: <><path d="M12 3.5v12M7 11l5 5 5-5" /><path d="M4 20.5h16" /></>,
   share: <><circle cx="18" cy="5.5" r="2.5" /><circle cx="6" cy="12" r="2.5" /><circle cx="18" cy="18.5" r="2.5" /><path d="M8.2 10.8l7.6-4M8.2 13.2l7.6 4" /></>,
+  chat: <path d="M4 5.5h16v10H9l-5 4z" />,
   mail: <><rect x="3" y="5.5" width="18" height="13" rx="2" /><path d="M3.5 7l8.5 6 8.5-6" /></>,
   camera: <><path d="M4 8h3l2-2.5h6L17 8h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></>,
   trash: <><path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13" /></>,
@@ -271,7 +273,8 @@ const ToastCtx = createContext<(text: ReactNode, tone?: Toast['tone']) => void>(
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const push = useCallback((text: ReactNode, tone?: Toast['tone']) => {
+  const push = useCallback((raw: ReactNode, tone?: Toast['tone']) => {
+    const text = typeof raw === 'string' && tone !== 'error' ? flavour(raw) : raw;
     const id = Date.now() + Math.random();
     setToasts((t) => [...t.slice(-3), { id, text, tone }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), tone === 'error' ? 8000 : 4000);

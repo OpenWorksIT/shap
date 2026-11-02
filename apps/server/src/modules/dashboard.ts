@@ -9,6 +9,7 @@ import { findDuplicates } from './duplicates.js';
 import { findRecurring } from './recurring.js';
 import { monthlyAttention } from './monthly.js';
 import { vatStatus } from './vat.js';
+import { payrollAttention } from './payroll.js';
 import { projectSummarySql, totals, type ProjectSummary } from './projects.js';
 
 export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -105,6 +106,7 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
       duplicateCosts: (await findDuplicates(sql)).length,
       monthlyInvoices: await monthlyAttention(sql),
       vat: await vatStatus(sql, now),
+      sarsDue: await payrollAttention(sql, now),
       // Monthly costs that didn't show up (insurance, bank fees…).
       recurringMissing: (await findRecurring(sql))
         .filter((r) => r.status === 'missing')

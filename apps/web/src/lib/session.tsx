@@ -1,5 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { featureOn, type Feature } from '@shap/shared';
 import { api, setNativeToken, setUnauthorizedHandler } from './api';
+import { setTone } from './words';
 import type { Reference, Settings, User } from './types';
 
 /** What the password step asks for next. */
@@ -32,7 +34,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
 
   const refreshReference = useCallback(async () => {
-    setRef(await api<Reference>('/api/reference'));
+    const r = await api<Reference>('/api/reference');
+    setTone((r.settings as Settings).tone);
+    setRef(r);
   }, []);
 
   const enter = useCallback(
@@ -117,6 +121,8 @@ export function useAuthed() {
     settings,
     isOwner: s.user!.role === 'owner',
     seesMoney: s.user!.role !== 'capture',
+    /** Is this part of the app switched on? */
+    has: (f: Feature) => featureOn(settings.features, f),
     /** How to say the owner's account and the business, for a company or a sole proprietor. */
     words: settings.businessType === 'sole_prop' ? { ownerAccount: 'owner’s account', business: 'the business' } : { ownerAccount: 'loan account', business: 'the company' },
   };

@@ -1,6 +1,9 @@
 import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { FeedbackButton } from './components/Feedback';
 import { Shell } from './components/Shell';
+import { featureOn } from '@shap/shared';
+import type { Settings } from './lib/types';
 import { Loading } from './components/ui';
 import { SessionProvider, useSession } from './lib/session';
 import { LoginPage } from './pages/Login';
@@ -18,6 +21,8 @@ const ClientsPage = lazy(() => import('./pages/Clients'));
 const ClientPage = lazy(() => import('./pages/Clients').then((m) => ({ default: m.ClientPage })));
 const AccountsPage = lazy(() => import('./pages/Accounts'));
 const SettingsPage = lazy(() => import('./pages/Settings'));
+const PayrollPage = lazy(() => import('./pages/Payroll'));
+const WelcomePage = lazy(() => import('./pages/Welcome'));
 
 export function App() {
   return (
@@ -42,18 +47,25 @@ function Authed() {
     );
   }
   const money = user.role !== 'capture';
+  const settings = ref.settings as Settings;
+  const has = (f: Parameters<typeof featureOn>[1]) => featureOn(settings.features, f);
+  // New books: the owner answers the first-run questions; everyone else waits for that.
+  if (!settings.setupDone && user.role === 'owner') return <WelcomePage canRestore={false} />;
+  const pays = has('payroll') || (settings.businessType === 'company' && has('dividends'));
   return (
     <Shell>
+      <FeedbackButton />
       <Suspense fallback={<Loading />}>
         <Routes>
           <Route path="/" element={<HomePage />} />
           {user.role !== 'accountant' && <Route path="/log" element={<LogPage />} />}
-          <Route path="/jobs" element={<ProjectsPage />} />
-          <Route path="/jobs/:id" element={<ProjectPage />} />
+          {has('jobs') && <Route path="/jobs" element={<ProjectsPage />} />}
+          {has('jobs') && <Route path="/jobs/:id" element={<ProjectPage />} />}
           {money && (
             <>
-              <Route path="/workers" element={<WorkersPage />} />
-              <Route path="/workers/:id" element={<WorkerPage />} />
+              {has('workers') && <Route path="/workers" element={<WorkersPage />} />}
+              {has('workers') && <Route path="/workers/:id" element={<WorkerPage />} />}
+              {pays && <Route path="/payroll" element={<PayrollPage />} />}
               <Route path="/costs" element={<CostsPage />} />
               <Route path="/documents" element={<DocumentsPage />} />
               <Route path="/documents/new" element={<DocumentPage />} />

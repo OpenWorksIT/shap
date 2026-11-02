@@ -86,6 +86,22 @@ Without email, use **Share PDF**, which hands the PDF to WhatsApp or email on a 
 downloads it on a PC. Monthly invoices set to email are then made and issued but not sent, and
 Home says so.
 
+## 6. Feedback and bug reports
+
+Every screen has a **Feedback** button (love it, don't like it, bug found). Reports are kept on
+your server in the `feedback` volume (`/data/feedback`, one folder per report with a masked
+screenshot for bugs and the steps that led up to it) and shown to the owner under
+**Settings → Feedback**. They're also passed on to OpenWorks, who make Shap (a screenshot only
+if it was masked); set `COLLECTOR_URL=off` in `.env` to keep them on your server only.
+
+If the owner agrees (Settings → What you use), Shap also tells OpenWorks, anonymously, what kind
+of business uses it and which parts are switched on: never names, clients or figures.
+
+OpenWorks' own server runs with `COLLECT=true`, which also receives feedback and these notes from
+Shap Pocket (the phone app has no server of its own) at `/collect/feedback` and `/collect/usage`.
+Both are open to anyone, limited per address and per day, and only accept words, a small
+screenshot and the anonymous fields.
+
 ## Another company on the same server
 
 Shap can run a second business (a friend's, say) on the same VPS without a second server. Each

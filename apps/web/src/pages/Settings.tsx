@@ -27,16 +27,21 @@ import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
 import type { Brand, Settings } from '../lib/types';
 import { SystemSettings } from './System';
+import { FeedbackInbox } from './FeedbackInbox';
+import { LogoPlacer } from '../components/LogoPlacer';
+import { LogoField } from '../components/BusinessForm';
+import { FEATURES, FEATURE_KEYS, featureOn, INDUSTRIES } from '@shap/shared';
+import { setTone, type Tone } from '../lib/words';
 import { ShowDemoButton } from '../components/Demo';
 import { usePasswordPrompt } from '../components/PasswordPrompt';
 
-type Tab = 'company' | 'invoicing' | 'lists' | 'users' | 'import' | 'system';
+type Tab = 'company' | 'invoicing' | 'sections' | 'lists' | 'users' | 'import' | 'system' | 'feedback';
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 export default function SettingsPage() {
   const [params, setParams] = useSearchParams();
   const tab = (params.get('tab') as Tab) || 'company';
-  const { isOwner } = useAuthed();
+  const { isOwner, has } = useAuthed();
   return (
     <div className="stack-lg">
       <PageHead title="Settings" actions={isOwner ? <ShowDemoButton /> : undefined} />
@@ -47,20 +52,24 @@ export default function SettingsPage() {
           tabs={[
             { value: 'company', label: 'Company' },
             { value: 'invoicing', label: 'Invoicing & books' },
+            { value: 'sections', label: 'What you use' },
             { value: 'lists', label: 'Lists' },
             { value: 'users', label: 'People who sign in' },
             { value: 'import', label: 'Import & company file' },
             { value: 'system', label: 'Updates & backups' },
+            { value: 'feedback', label: 'Feedback' },
           ]}
         />
       </div>
       {tab === 'company' && (
         <>
           <SettingsForm section="company" />
-          <TradingNames />
+          {has('brands') ? <TradingNames /> : <BusinessDetails />}
         </>
       )}
       {tab === 'invoicing' && <SettingsForm section="invoicing" />}
+      {tab === 'sections' && <Sections />}
+      {tab === 'feedback' && <FeedbackInbox />}
       {tab === 'lists' && <Lists />}
       {tab === 'users' && <Users />}
       {tab === 'system' && <SystemSettings />}
@@ -120,7 +129,7 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
         <>
           <section className="panel panel-pad stack">
             <h3>The company</h3>
-            <p className="xs muted">The registered company. How it presents itself on quotes and invoices (name, logo, contacts, bank) is set per trading name below.</p>
+            <p className="xs muted">The registered company. How it presents itself on quotes and invoices (name, logo, contacts, bank) is set below.</p>
             <div className="form-grid">
               {text('companyName', 'Registered name', 'e.g. Example Builders (Pty) Ltd')}
               {text('regNumber', 'Registration number')}
@@ -167,6 +176,9 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
                 {(p) => <input {...p} className="input" type="number" min={0} step={1} value={f.markupBp / 100} onChange={(e) => set('markupBp', Math.round(Number(e.target.value) * 100))} />}
               </Field>
             </div>
+            <Field label="Card payment link (optional)" hint="A Yoco (or SnapScan) payment link: printed on unpaid invoices and added to the email. Any invoice can have its own.">
+              {(p) => <input {...p} className="input" type="url" inputMode="url" value={f.payLink} onChange={(e) => set('payLink', e.target.value)} placeholder="https://pay.yoco.com/…" />}
+            </Field>
             <Field label="Invoice terms">{(p) => <textarea {...p} className="textarea" rows={3} value={f.invoiceTerms} onChange={(e) => set('invoiceTerms', e.target.value)} />}</Field>
             <Field label="Quote terms">{(p) => <textarea {...p} className="textarea" rows={3} value={f.quoteTerms} onChange={(e) => set('quoteTerms', e.target.value)} />}</Field>
           </section>
@@ -913,10 +925,11 @@ function BrandDrawer({ brand, onClose }: { brand: Brand | null; onClose: () => v
     bankDetails: brand?.bankDetails ?? '',
     accent: brand?.accent ?? '#e8731c',
     active: brand?.active ?? true,
+    logoLayout: brand?.logoLayout ?? {},
   });
   const [logoId, setLogoId] = useState(brand?.logoId ?? null);
   const [error, setError] = useState('');
-  const set = (k: keyof typeof f, v: string | boolean) => setF((x) => ({ ...x, [k]: v }));
+  const set = (k: keyof typeof f, v: string | boolean | Brand['logoLayout']) => setF((x) => ({ ...x, [k]: v }));
   const save = async (e: FormEvent) => {
     e.preventDefault();
     try {
@@ -968,8 +981,9 @@ function BrandDrawer({ brand, onClose }: { brand: Brand | null; onClose: () => v
         <div className="field">
           <span className="label">Logo</span>
           {brand ? (
-            <div className="row wrap">
-              {logoId && <img src={apiUrl(`/api/attachments/${logoId}`)} alt={`${f.name} logo`} className="logo-preview" />}
+            <div className="stack">
+              {logoId && <LogoPlacer path={`/api/attachments/${logoId}`} layout={f.logoLayout ?? {}} onChange={(l) => set('logoLayout', l)} accent={f.accent} />}
+              <div className="row wrap">
               <label className="btn">
                 <Icon name="upload" size={18} />
                 {logoId ? 'Replace logo' : 'Upload a logo'}
@@ -980,6 +994,7 @@ function BrandDrawer({ brand, onClose }: { brand: Brand | null; onClose: () => v
                   Remove
                 </button>
               )}
+              </div>
             </div>
           ) : (
             <span className="xs muted">Save first, then add the logo. A wide logo (wider than tall) suits the invoice best.</span>
@@ -1084,6 +1099,165 @@ function VatThreshold() {
             ? `You may register voluntarily (from ${formatZar(data.voluntaryCents)}), but you don’t have to yet.`
             : 'Nothing to do yet.'}{' '}
       <span className="muted">Shap counts all income in the books, so exempt income (interest, residential rent) makes this a little high.</span>
+    </div>
+  );
+}
+
+
+/** Saves settings: everything as it is, with these changes. */
+async function saveSettings(settings: Settings, changes: Partial<Settings>) {
+  const { logoId: _l, ...rest } = { ...settings, ...changes } as Settings & { logoId: string | null };
+  await api('/api/settings', { method: 'PUT', body: { ...rest, lockDate: rest.lockDate ?? null } });
+}
+
+/** One name on the door (trading names off): how the business appears on its quotes and invoices. */
+function BusinessDetails() {
+  const { settings, refreshReference } = useAuthed();
+  const toast = useToast();
+  const [f, setF] = useState<Settings>({ ...settings });
+  const [logoId, setLogoId] = useState(settings.logoId);
+  const [error, setError] = useState('');
+  const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setF((x) => ({ ...x, [k]: v }));
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    setError('');
+    try {
+      await saveSettings(settings, f);
+      await refreshReference();
+      toast('Saved');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Couldn’t save');
+    }
+  };
+  const text = (k: 'tradingName' | 'phone' | 'email' | 'website', label: string, type = 'text') => (
+    <Field label={label}>{(p) => <input {...p} className="input" type={type} value={f[k]} onChange={(e) => set(k, e.target.value)} />}</Field>
+  );
+  return (
+    <form className="stack-lg narrow-wide" onSubmit={save}>
+      <section className="panel panel-pad stack">
+        <h3>On your quotes and invoices</h3>
+        <p className="xs muted">Several names on the door? Switch on “More than one trading name” under What you use.</p>
+        <div className="form-grid">
+          {text('tradingName', 'Trading as (optional)')}
+          {text('phone', 'Phone', 'tel')}
+          {text('email', 'Email', 'email')}
+          {text('website', 'Website')}
+        </div>
+        <Field label="Address">{(p) => <textarea {...p} className="textarea" rows={3} value={f.address} onChange={(e) => set('address', e.target.value)} />}</Field>
+        <Field label="Bank details" hint="Printed on invoices">{(p) => <textarea {...p} className="textarea" rows={3} value={f.bankDetails} onChange={(e) => set('bankDetails', e.target.value)} />}</Field>
+        <Field label="Colour" hint="Headings and the amount-due box on the PDF">
+          {(p) => (
+            <div className="row">
+              <input {...p} type="color" value={f.accent} onChange={(e) => set('accent', e.target.value)} className="color-input" />
+              <input className="input" value={f.accent} onChange={(e) => set('accent', e.target.value)} style={{ maxWidth: 120 }} aria-label="Colour code" />
+            </div>
+          )}
+        </Field>
+      </section>
+      <section className="panel panel-pad stack">
+        <h3>Logo</h3>
+        <LogoField logoId={logoId} layout={f.logoLayout ?? {}} accent={f.accent} onLogo={(id) => (setLogoId(id), void refreshReference())} onLayout={(l) => set('logoLayout', l)} />
+      </section>
+      {error && <div className="banner alert small">{error}</div>}
+      <button className="btn primary big block">Save</button>
+    </form>
+  );
+}
+
+/** Switch parts of the app off that a business like yours doesn't need; how Shap talks; what it may share. */
+function Sections() {
+  const { settings, refreshReference } = useAuthed();
+  const toast = useToast();
+  const [on, setOn] = useState<Record<string, boolean>>(() => Object.fromEntries(FEATURE_KEYS.map((k) => [k, featureOn(settings.features, k)])));
+  const [prefs, setPrefs] = useState({ tone: settings.tone, industry: settings.industry, usageConsent: settings.usageConsent, sdl: settings.sdl });
+  const save = async (changes: Partial<Settings>, done: string) => {
+    try {
+      await saveSettings(settings, changes);
+      await refreshReference();
+      toast(done);
+      return true;
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Couldn’t save', 'error');
+      return false;
+    }
+  };
+  const toggle = async (k: (typeof FEATURE_KEYS)[number], value: boolean) => {
+    const next = { ...on, [k]: value };
+    setOn(next);
+    if (!(await save({ features: next }, `${FEATURES[k].label} ${value ? 'on' : 'off'}`))) setOn(on);
+  };
+  const pref = async <K extends keyof typeof prefs>(k: K, v: (typeof prefs)[K]) => {
+    const next = { ...prefs, [k]: v };
+    setPrefs(next);
+    if (k === 'tone') setTone(v as Tone);
+    if (!(await save({ [k]: v } as Partial<Settings>, 'Saved'))) setPrefs(prefs);
+  };
+  return (
+    <div className="stack-lg narrow-wide">
+      <section className="panel">
+        <div className="panel-head">
+          <strong>What you use</strong>
+          <div className="xs muted">Switch off what a business like yours doesn’t need. Nothing is deleted: switch it on again and it’s all still there.</div>
+        </div>
+        <ul className="list">
+          {FEATURE_KEYS.filter((k) => k !== 'dividends' || settings.businessType === 'company').map((k) => (
+            <li key={k} className="list-row">
+              <label className="check grow">
+                <input type="checkbox" checked={on[k]} onChange={(e) => void toggle(k, e.target.checked)} />
+                <span>
+                  {FEATURES[k].label}
+                  <div className="xs muted">{FEATURES[k].hint}</div>
+                </span>
+              </label>
+            </li>
+          ))}
+          {on.payroll && (
+            <li className="list-row">
+              <label className="check grow">
+                <input type="checkbox" checked={prefs.sdl} onChange={(e) => void pref('sdl', e.target.checked)} />
+                <span>
+                  Registered for the Skills Development Levy
+                  <div className="xs muted">When your payroll is over R500 000 a year: 1% of salaries, paid by you.</div>
+                </span>
+              </label>
+            </li>
+          )}
+        </ul>
+      </section>
+      <section className="panel panel-pad stack">
+        <h3>How Shap talks to you</h3>
+        <div className="row wrap">
+          <button type="button" className={`btn ${prefs.tone !== 'formal' ? 'primary' : ''}`} onClick={() => void pref('tone', 'casual')}>
+            Lekker and casual
+          </button>
+          <button type="button" className={`btn ${prefs.tone === 'formal' ? 'primary' : ''}`} onClick={() => void pref('tone', 'formal')}>
+            Formal
+          </button>
+        </div>
+        <p className="xs muted">Only the app’s greetings and confirmations change. Quotes and invoices always stay professional.</p>
+      </section>
+      <section className="panel panel-pad stack">
+        <h3>Your kind of business</h3>
+        <Field label="What you do">
+          {(p) => (
+            <select {...p} className="select" value={prefs.industry} onChange={(e) => void pref('industry', e.target.value)}>
+              <option value="">Not said</option>
+              {INDUSTRIES.map((i) => (
+                <option key={i.key} value={i.key}>
+                  {i.label}
+                </option>
+              ))}
+            </select>
+          )}
+        </Field>
+        <label className="check">
+          <input type="checkbox" checked={prefs.usageConsent} onChange={(e) => void pref('usageConsent', e.target.checked)} />
+          <span>
+            Let OpenWorks know, anonymously, what kind of business uses Shap
+            <div className="xs muted">Only the kind of business and which parts are switched on. Never names, clients or figures.</div>
+          </span>
+        </label>
+      </section>
     </div>
   );
 }

@@ -48,6 +48,20 @@ export const settingsInput = z.object({
   website: text(120).default(''),
   bankDetails: text(600).default(''),
   businessType: z.enum(['company', 'sole_prop']).default('company'),
+  features: z.record(z.string(), z.boolean()).default({}),
+  /** Casual ("Howzit, lekker") or formal words in the app. */
+  tone: z.enum(['casual', 'formal']).default('casual'),
+  /** What the business does (setup.ts INDUSTRIES), for the defaults and, if allowed, anonymous counts. */
+  industry: text(40).default(''),
+  /** May the app tell OpenWorks, anonymously, what kind of business uses it. */
+  usageConsent: z.boolean().default(false),
+  /** Registered for the Skills Development Levy (payroll over R500 000 a year). */
+  sdl: z.boolean().default(false),
+  /** The usual card payment link (Yoco, SnapScan…), printed on invoices. */
+  payLink: z.string().trim().max(500).refine((v) => !v || /^https:\/\//.test(v), 'A payment link starts with https://').default(''),
+  setupDone: z.boolean().optional(),
+  accent: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Use a colour like #e8731c').default('#e8731c'),
+  logoLayout: z.object({ zoom: z.number().min(0.2).max(5), x: z.number().min(-1).max(1), y: z.number().min(-1).max(1) }).partial().default({}),
   vatRegistered: z.boolean().default(false),
   vatRateBp: z.number().int().min(0).max(5000).default(1500),
   fyEndMonth: z.number().int().min(1).max(12).default(2),
@@ -211,6 +225,8 @@ export const documentInput = z.object({
   depositBp: z.number().int().min(1).max(10000).nullable().default(null),
   depositCents: z.number().int().min(1).max(1_000_000_000_00).nullable().default(null),
   depositShowBalance: z.boolean().default(true),
+  /** A card payment link for this invoice (blank: the business's usual one). */
+  payLink: z.string().trim().max(500).refine((v) => !v || /^https:\/\//.test(v), 'A payment link starts with https://').default(''),
 }).refine((d) => !(d.depositBp && d.depositCents), { message: 'Give the deposit as a percentage or an amount, not both', path: ['depositCents'] });
 
 /** Delinquent: write off what's left on an invoice (the client won't pay the rest). */
@@ -315,6 +331,7 @@ export const brandInput = z.object({
   bankDetails: text(600).default(''),
   accent: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Use a colour like #e8731c').default('#e8731c'),
   active: z.boolean().default(true),
+  logoLayout: z.object({ zoom: z.number().min(0.2).max(5), x: z.number().min(-1).max(1), y: z.number().min(-1).max(1) }).partial().default({}),
 });
 
 export const assignSourceInput = z.object({
@@ -354,4 +371,53 @@ export const taxEstimateInput = z.object({
   ageBand: z.enum(['under65', '65to74', '75plus']).default('under65'),
   otherIncomeCents: positiveCents.default(0),
   retirementCents: positiveCents.default(0),
+});
+
+// ---------------------------------------------------------------- payroll and dividends
+export const employeeInput = z.object({
+  name: text(120).min(1, 'Give the employee’s name'),
+  idNumber: text(20).default(''),
+  taxNumber: text(20).default(''),
+  isDirector: z.boolean().default(false),
+  salaryCents: positiveCents,
+  ageBand: z.enum(['under65', '65to74', '75plus']).default('under65'),
+  medicalMembers: z.number().int().min(0).max(20).default(0),
+  uif: z.boolean().default(true),
+  startDate: isoDate,
+  endDate: isoDate.nullable().default(null),
+  bankDetails: text(300).default(''),
+  active: z.boolean().default(true),
+});
+export type EmployeeInput = z.infer<typeof employeeInput>;
+
+export const payRunInput = z.object({
+  period: z.string().regex(/^\d{4}-\d{2}$/, 'Choose the month'),
+  payDate: isoDate,
+  sourceId: uuid,
+});
+
+export const payLineInput = z.object({
+  salaryCents: positiveCents,
+  extraCents: positiveCents.default(0),
+  note: text(200).default(''),
+});
+
+export const dividendInput = z.object({
+  declaredOn: isoDate,
+  paidOn: isoDate.nullable().default(null),
+  shareholder: text(120).min(1, 'Who is it paid to?'),
+  grossCents: positiveCents.refine((c) => c > 0, 'Enter the dividend'),
+  /** The shareholder is a South African company: no dividends tax. */
+  exempt: z.boolean().default(false),
+  sourceId: uuid.nullable().default(null),
+  note: text(300).default(''),
+});
+
+export const sarsPaymentInput = z.object({
+  kind: z.enum(['emp201', 'dwt']),
+  period: z.string().regex(/^\d{4}-\d{2}$/),
+  date: isoDate,
+  amountCents: positiveCents,
+  sourceId: uuid,
+  reference: text(60).default(''),
 });

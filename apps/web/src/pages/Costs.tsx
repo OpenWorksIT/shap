@@ -15,7 +15,7 @@ import type { CostRow } from '../lib/types';
 type Period = 'month' | 'last' | 'fy' | 'lastfy' | 'all';
 
 export default function CostsPage() {
-  const { ref, settings, isOwner } = useAuthed();
+  const { ref, settings, isOwner, has } = useAuthed();
   const [params, setParams] = useSearchParams();
   const period = (params.get('period') as Period) || (params.get('kind') || params.get('source') === 'none' ? 'all' : 'month');
   const category = params.get('category') ?? '';
@@ -179,9 +179,11 @@ export default function CostsPage() {
             </option>
           ))}
         </select>
-        <div className="auto-w">
-          <ProjectSelect value={project} onChange={(v) => setParam('project', v)} emptyLabel="Any job" />
-        </div>
+        {has('jobs') && (
+          <div className="auto-w">
+            <ProjectSelect value={project} onChange={(v) => setParam('project', v)} emptyLabel="Any job" />
+          </div>
+        )}
         <div className="search">
           <Icon name="search" size={18} />
           <input className="input" placeholder="Search" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search costs" />

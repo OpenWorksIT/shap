@@ -44,6 +44,7 @@ services:
       TRUST_PROXY: 'true'
       MFA_REQUIRED: ${MFA_REQUIRED:-true}
       TZ: Africa/Johannesburg
+      FEEDBACK_DIR: /data/feedback
     expose:
       - '8080'
     # Settings → System: requests for shap-ctl (updates, backups) and the backups themselves
@@ -51,6 +52,8 @@ services:
     volumes:
       - /var/lib/shap/ctl:/ctl
       - /var/backups/shap:/backups:ro
+      # Feedback and bug reports (Settings → Feedback), kept across updates.
+      - feedback:/data/feedback
     # Caddy reaches Shap by this name. Not plain "app": when Caddy also fronts other apps on a
     # shared network (edge.yml), their "app" would answer for that name too.
     networks:
@@ -79,3 +82,4 @@ services:
 volumes:
   db_data:
   caddy_data:
+  feedback:
