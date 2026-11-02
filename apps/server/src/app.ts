@@ -30,6 +30,7 @@ import { registerReportRoutes } from './modules/reports.js';
 import { registerSettingsRoutes } from './modules/settings.js';
 import { registerWorkerRoutes } from './modules/workers.js';
 import { registerYearEndRoutes } from './modules/yearend.js';
+import { registerArchiveRoutes } from './modules/archive.js';
 import { registerBankRoutes } from './modules/bank/routes.js';
 import { appVersion, registerSystemRoutes } from './modules/system.js';
 import { DEMO_COOKIE, registerDemoRoutes } from './modules/demo.js';
@@ -188,6 +189,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   registerReportRoutes(app, ctx);
   registerImportRoutes(app, ctx);
   registerYearEndRoutes(app, ctx);
+  registerArchiveRoutes(app, ctx);
   registerBankRoutes(app, ctx);
   registerSystemRoutes(app, ctx);
   registerStatementRoutes(app, ctx);
