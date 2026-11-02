@@ -26,7 +26,7 @@ type Tab = 'labour' | 'costs' | 'plan' | 'docs' | 'time';
 
 export default function ProjectPage() {
   const { id } = useParams<{ id: string }>();
-  const { isOwner, seesMoney, user, has } = useAuthed();
+  const { isOwner, seesMoney, user, has, settings } = useAuthed();
   const navigate = useNavigate();
   const toast = useToast();
   const { data, error, loading, reload } = useApi<ProjectDetail>(`/api/projects/${id}`);
@@ -212,7 +212,7 @@ export default function ProjectPage() {
         <PartsPlan projectId={p.id} items={data.planned} canEdit={isOwner} onChange={reload} onBuy={(item) => setDrawer({ kind: 'cost', planned: item })} onQuote={() => void fromPlan()} />
       )}
 
-      {tab === 'time' && <JobTime projectId={p.id} rateCents={Number(p.hourlyRateCents ?? 0)} canEdit={isOwner} />}
+      {tab === 'time' && <JobTime projectId={p.id} rateCents={Number(p.hourlyRateCents || settings.hourlyRateCents || 0)} canEdit={isOwner} />}
 
       {tab === 'docs' && data.documents && (
         <section className="panel">

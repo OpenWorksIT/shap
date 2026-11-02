@@ -36,14 +36,38 @@ export const WORKFLOWS: { key: Workflow; label: string; hint: string }[] = [
   { key: 'invoice', label: 'Just invoices', hint: 'Bill clients when the work’s done' },
 ];
 
+/** The extras asked about in setup: what would help a business like this. */
+export interface SetupExtras {
+  /** Charges for time by the hour: the time tracker. */
+  hourly: boolean;
+  /** Drives for work: SARS's travel logbook. */
+  travel: boolean;
+  /** Buys on account from suppliers: bills to pay. */
+  bills: boolean;
+  /** Clients sometimes pay before the work starts: pro-forma invoices. */
+  upfront: boolean;
+}
+
+const HOURLY: readonly string[] = ['it', 'design', 'photo', 'consulting', 'tutor', 'health', 'mechanic'];
+const TRAVEL: readonly string[] = ['builder', 'electrician', 'plumber', 'painter', 'handyman', 'garden', 'cleaning', 'it', 'photo', 'consulting', 'catering'];
+const ON_ACCOUNT: readonly string[] = ['builder', 'electrician', 'plumber', 'painter', 'mechanic', 'catering'];
+const UPFRONT: readonly string[] = ['builder', 'design', 'photo', 'catering', 'it'];
+
+/** What's usually right for a kind of business, as the starting answers (each one can be changed). */
+export function extrasFor(industry: string): SetupExtras {
+  return { hourly: HOURLY.includes(industry), travel: TRAVEL.includes(industry), bills: ON_ACCOUNT.includes(industry), upfront: UPFRONT.includes(industry) };
+}
+
 /** The switches the answers add up to. */
-export function featuresFor(a: { workflow: Workflow; employees: boolean; casual: boolean; company: boolean; dividends?: boolean }): Partial<Record<Feature, boolean>> {
+export function featuresFor(a: { workflow: Workflow; employees: boolean; casual: boolean; company: boolean; dividends?: boolean; extras?: SetupExtras; payshap?: boolean }): Partial<Record<Feature, boolean>> {
   return {
     jobs: a.workflow === 'quote_job_invoice',
     quotes: a.workflow !== 'invoice',
     payroll: a.employees,
     workers: a.casual,
     dividends: a.company && (a.dividends ?? true),
+    ...(a.extras ? { timeTracker: a.extras.hourly, logbook: a.extras.travel, bills: a.extras.bills, proformas: a.extras.upfront } : {}),
+    ...(a.payshap != null ? { payshap: a.payshap } : {}),
   };
 }
 

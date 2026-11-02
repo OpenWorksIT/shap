@@ -3,6 +3,16 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.12.1 (2 November 2026)
+
+- **Setting up asks about the new parts:** do you charge by the hour (with your usual rate),
+  drive for work (the travel logbook), get supplier bills on account, take payment up front
+  (pro-formas), or come from another package (Move in opens straight after). The answers start
+  from what's usual for your kind of business. Your PayShap ID, turnover tax and how often you
+  file VAT can be set up there too.
+- **A usual hourly rate** (Settings → Invoicing & tax): for time with no job, and jobs without
+  their own rate.
+
 ## 1.12.0 (2 November 2026)
 
 Moving in from another package.

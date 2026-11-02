@@ -28,6 +28,7 @@ export interface SettingsRow {
   payshapId: string;
   vatCategory: 'A' | 'B' | 'C';
   turnoverTax: boolean;
+  hourlyRateCents: number;
   tone: 'casual' | 'formal';
   watermark: boolean;
   industry: string;
