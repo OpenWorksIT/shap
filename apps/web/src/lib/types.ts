@@ -133,6 +133,7 @@ export interface ProjectRow {
   notes: string;
   brandId: string | null;
   estLabourCents: number;
+  hourlyRateCents?: number | null;
   estMaterialsCents: number;
   estDemoCents: number;
   quotedLabourCents: number;
@@ -233,7 +234,7 @@ export interface PlannedItem {
 
 export interface DocRow {
   id: string;
-  kind: 'quote' | 'invoice';
+  kind: 'quote' | 'invoice' | 'credit_note';
   number: string;
   status: string;
   issueDate: string;
@@ -252,6 +253,10 @@ export interface DocRow {
   brandId?: string | null;
   brandName?: string | null;
   writtenOffCents?: number;
+  proforma?: boolean;
+  remindedAt?: string | null;
+  reminders?: number;
+  creditedInvoiceId?: string | null;
 }
 
 export interface DocLine {
@@ -282,9 +287,16 @@ export interface DocDetail {
     writtenOffOn: string | null;
     writtenOffCents: number;
     writtenOffReason: string;
+    payLink: string;
+    clientPhone: string | null;
+    creditReason: string;
+    creditedInvoiceNumber: string | null;
+    creditedInvoiceDate: string | null;
+    creditedInvoiceTotalCents: number | null;
   };
   lines: DocLine[];
   receipts: { id: string; date: string; amountCents: number; sourceName: string; method: string; reference: string; note: string }[];
+  creditNotes: { id: string; number: string; status: string; issueDate: string; totalCents: number; creditReason: string }[];
 }
 
 export interface ClientRow {

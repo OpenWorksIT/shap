@@ -1,8 +1,13 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { formatDate, formatPercent, formatZar, monthLabel } from '@shap/shared';
 import { MonthChart } from '../components/MonthChart';
 import { PageHead } from '../components/Shell';
-import { DocChip, Empty, ErrorBox, Icon, Kpi, Loading, Money, ProjectChip } from '../components/ui';
+import { DocChip, Empty, ErrorBox, Icon, Kpi, Loading, Money, ProjectChip, useToast } from '../components/ui';
+import { stopClock, useMinuteTick, type Running } from '../components/TimeTracker';
+import { ApiError } from '../lib/api';
+import { sendReminder, type Remindable } from '../lib/reminders';
+import { hoursLabel, minutesSince } from '../lib/time';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
 import { greeting, say } from '../lib/words';
@@ -30,6 +35,10 @@ interface Dashboard {
   };
   sarsDue?: { kind: 'emp201' | 'dwt'; period: string; owingCents: number; dueOn: string; late: boolean }[];
   recurringMissing?: { key: string; label: string; months: string[]; usualCents: number; onStatement: boolean }[];
+  overdue?: (Remindable & { issueDate: string; remindedAt: string | null; clientPhone: string | null; projectName: string | null })[];
+  billsDue?: { id: string; supplier: string; description: string; dueDate: string | null; date: string; owingCents: number }[];
+  timer?: Running | null;
+  taxDue?: { key: string; label: string; due: string; to: string }[];
   bankCents: number;
   ownerLoanCents: number;
   projects: ProjectRow[];
@@ -46,12 +55,35 @@ export default function HomePage() {
 function OwnerHome() {
   const { settings, isOwner, has } = useAuthed();
   const { data, error, reload } = useApi<Dashboard>('/api/dashboard');
+  const toast = useToast();
+  useMinuteTick();
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   if (!data) return <Loading />;
   const ytdMargin = data.yearToDate.incomeCents ? data.yearToDate.grossProfitCents / data.yearToDate.incomeCents : null;
   const lastSaved = lastBackup();
   const backupDays = lastSaved ? Math.floor((Date.now() - lastSaved.getTime()) / 86_400_000) : null;
+  const billsLate = (data.billsDue ?? []).filter((b) => (b.dueDate ?? b.date) < data.today);
+  const billsOwing = (data.billsDue ?? []).reduce((s, b) => s + Number(b.owingCents), 0);
   const needs = [
+    data.timer && (
+      <div key="timer" className="attention">
+        <Icon name="clock" size={18} />
+        <span className="grow">
+          <strong className="timer-on">● {hoursLabel(minutesSince(data.timer.startedAt))}</strong> on{' '}
+          {data.timer.projectId ? <Link to={`/jobs/${data.timer.projectId}`}>{data.timer.projectName}</Link> : 'time with no job'}
+        </span>
+        <button
+          className="btn small"
+          onClick={() =>
+            void stopClock()
+              .then(() => (toast('Clock stopped'), reload()))
+              .catch((e: unknown) => toast(e instanceof ApiError ? e.message : 'Couldn’t stop the clock', 'error'))
+          }
+        >
+          Stop
+        </button>
+      </div>
+    ),
     (backupDays === null ? data.owing.invoices.length > 0 || data.yearToDate.incomeCents !== 0 : backupDays > 7) && (
       <Link key="backup" to="/backup" className="attention">
         <Icon name="upload" size={18} />
@@ -73,6 +105,29 @@ function OwnerHome() {
         <Icon name="chevronRight" size={16} />
       </Link>
     )),
+    ...(data.taxDue ?? []).map((t) => (
+      <Link key={t.key} to={t.to} className="attention">
+        <Icon name="calendar" size={18} />
+        <span className="grow">
+          <strong>SARS: {t.label}</strong> due by {formatDate(t.due)}
+        </span>
+        Figures
+        <Icon name="chevronRight" size={16} />
+      </Link>
+    )),
+    (data.billsDue ?? []).length > 0 && (
+      <Link key="bills" to="/bills" className="attention">
+        <Icon name="bill" size={18} />
+        <span className="grow">
+          <strong>
+            {data.billsDue!.length} supplier bill{data.billsDue!.length === 1 ? '' : 's'}
+          </strong>{' '}
+          {billsLate.length ? `to pay (${billsLate.length} overdue)` : 'due this week'}: <Money cents={billsOwing} whole />
+        </span>
+        Pay
+        <Icon name="chevronRight" size={16} />
+      </Link>
+    ),
     (data.vat?.state === 'over' || data.vat?.state === 'near') && (
       <Link key="vat" to="/settings" className="attention">
         <Icon name="alert" size={18} />
@@ -189,7 +244,7 @@ function OwnerHome() {
         <Icon name="chevronRight" size={16} />
       </Link>
     )),
-    data.owing.overdue > 0 && (
+    data.owing.overdue > 0 && !has('reminders') && (
       <Link key="over" to="/documents?kind=invoice&state=overdue" className="attention">
         <Icon name="alert" size={18} />
         <span className="grow">
@@ -234,6 +289,8 @@ function OwnerHome() {
       </div>
 
       {needs.length > 0 && <div className="stack" style={{ gap: 8 }}>{needs}</div>}
+
+      {has('reminders') && (data.overdue ?? []).length > 0 && <Reminders invoices={data.overdue!} today={data.today} onSent={reload} />}
 
       <div className="two-col">
         <section className="panel panel-pad">
@@ -343,5 +400,65 @@ export function SpendBar({ spent, budget }: { spent: number; budget: number }) {
     <div className={`spend ${tone}`} title={`${Math.round(ratio * 100)}% of the quote`}>
       <span style={{ width: `${Math.min(100, ratio * 100)}%` }} />
     </div>
+  );
+}
+
+/** Overdue invoices, each a tap away from a reminder: the PDF and a polite message to the share sheet. */
+function Reminders({ invoices, today, onSent }: { invoices: NonNullable<Dashboard['overdue']>; today: string; onSent: () => void }) {
+  const { settings, has } = useAuthed();
+  const toast = useToast();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [all, setAll] = useState(false);
+  const days = (from: string) => Math.max(0, Math.round((Date.parse(today) - Date.parse(from.slice(0, 10))) / 86_400_000));
+  const send = async (inv: (typeof invoices)[number]) => {
+    setBusy(inv.id);
+    try {
+      if (await sendReminder(inv, settings, has('payshap'))) {
+        toast(`Reminder for ${inv.number} sent`);
+        onSent();
+      }
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Couldn’t make the reminder', 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+  const shown = all ? invoices : invoices.slice(0, 4);
+  return (
+    <section className="panel">
+      <div className="panel-head spread">
+        <span>
+          <strong>Send reminders now</strong>
+          <div className="xs muted">Past due: the invoice and a friendly message, ready for WhatsApp or email.</div>
+        </span>
+        <Link to="/documents?kind=invoice&state=overdue" className="small">
+          All
+        </Link>
+      </div>
+      <ul className="list">
+        {shown.map((i) => (
+          <li key={i.id} className="list-row">
+            <Link to={`/documents/${i.id}`} className="grow" style={{ minWidth: 0 }}>
+              <strong className="ellipsis" style={{ display: 'block' }}>
+                {i.number} · {i.clientName ?? i.projectName ?? 'No name yet'}
+              </strong>
+              <span className="xs muted">
+                <Money cents={Number(i.totalCents) - Number(i.paidCents)} /> · {i.dueDate ? `${days(i.dueDate)} days late` : 'overdue'}
+                {i.remindedAt ? ` · reminded ${days(i.remindedAt) === 0 ? 'today' : `${days(i.remindedAt)} days ago`}` : ''}
+              </span>
+            </Link>
+            <button className={`btn small ${i.remindedAt && days(i.remindedAt) < 3 ? '' : 'primary'}`} disabled={busy !== null} onClick={() => void send(i)}>
+              <Icon name="share" size={14} />
+              {busy === i.id ? '…' : 'Send'}
+            </button>
+          </li>
+        ))}
+      </ul>
+      {invoices.length > shown.length && (
+        <button className="btn quiet small block" onClick={() => setAll(true)}>
+          {invoices.length - shown.length} more
+        </button>
+      )}
+    </section>
   );
 }

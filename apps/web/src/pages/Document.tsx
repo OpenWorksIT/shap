@@ -22,6 +22,8 @@ import { PageHead } from '../components/Shell';
 import { DocChip, Drawer, ErrorBox, Field, Icon, Loading, Money, MoneyInput, Segmented, useToast } from '../components/ui';
 import { api, ApiError, apiBlob } from '../lib/api';
 import { openFile, shareFile } from '../lib/native';
+import { sendReminder } from '../lib/reminders';
+import { hoursLabel } from '../lib/time';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
 import type { ClientRow, DocDetail, DocLine, ProjectRow } from '../lib/types';
@@ -42,7 +44,10 @@ interface Draft {
   depositCents: number | null;
   depositShowBalance: boolean;
   payLink: string;
+  creditReason: string;
 }
+
+type Kind = 'quote' | 'invoice' | 'credit_note';
 
 /** A line being edited: quantity as typed, and no price until one is entered (no 0 to delete first). */
 type DraftLine = Omit<DocLine, 'qty' | 'unitPriceCents'> & { key: string; qty: string; unitPriceCents: number | null };
@@ -59,17 +64,23 @@ export default function DocumentPage() {
   const kind = (params.get('kind') as 'quote' | 'invoice') || 'invoice';
   const existing = useApi<DocDetail>(isNew ? null : `/api/documents/${id}`, { fresh: true });
   if (!isNew && !existing.data) return existing.error ? <ErrorBox error={existing.error} onRetry={existing.reload} /> : <Loading />;
-  return <Editor key={id ?? 'new'} detail={existing.data} kind={existing.data?.doc.kind ?? kind} projectFromUrl={params.get('project')} reload={existing.reload} />;
+  const proforma = existing.data ? Boolean(existing.data.doc.proforma) : kind === 'quote' && params.get('proforma') === '1';
+  return <Editor key={id ?? 'new'} detail={existing.data} kind={existing.data?.doc.kind ?? kind} proforma={proforma} projectFromUrl={params.get('project')} reload={existing.reload} />;
 }
 
-function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | null; kind: 'quote' | 'invoice'; projectFromUrl: string | null; reload: () => Promise<void> }) {
+function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: DocDetail | null; kind: Kind; proforma: boolean; projectFromUrl: string | null; reload: () => Promise<void> }) {
   const { settings, isOwner, has } = useAuthed();
   const toast = useToast();
   const navigate = useNavigate();
   const clients = useApi<ClientRow[]>(isOwner ? '/api/clients' : null);
   const hasBrands = useHasBrands();
   const doc = detail?.doc;
-  const editable = isOwner && doc?.status !== 'void';
+  const credit = kind === 'credit_note';
+  // Issued credit notes are fixed (void and make a new one); everything else stays editable.
+  const editable = isOwner && doc?.status !== 'void' && !(credit && doc?.status === 'issued');
+  const billLike = kind === 'invoice' || proforma;
+  const label = kind === 'invoice' ? 'Invoice' : credit ? 'Credit note' : proforma ? 'Pro-forma' : 'Quote';
+  const listKind = credit ? 'credit_note' : kind;
   const today = todayIso();
 
   const initial = (): Draft => ({
@@ -77,17 +88,18 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
     clientId: doc?.clientId ?? null,
     brandId: doc?.brandId ?? null,
     issueDate: doc?.issueDate ?? today,
-    dueDate: doc?.dueDate ?? addDays(today, kind === 'invoice' ? settings.paymentDays : settings.quoteValidDays),
+    dueDate: doc ? doc.dueDate : credit ? null : addDays(today, billLike ? settings.paymentDays : settings.quoteValidDays),
     title: doc?.title ?? '',
     notes: doc?.notes ?? '',
-    terms: doc?.terms ?? (kind === 'invoice' ? settings.invoiceTerms : settings.quoteTerms),
+    terms: doc?.terms ?? (credit ? '' : billLike ? settings.invoiceTerms : settings.quoteTerms),
     number: doc?.number ?? '',
     lines: (detail?.lines ?? []).map(draftLine),
     depositMode: doc?.depositBp ? 'percent' : doc?.depositCents ? 'amount' : 'none',
     depositPercent: doc?.depositBp ? String(doc.depositBp / 100) : '50',
     depositCents: doc?.depositCents ?? null,
     depositShowBalance: doc?.depositShowBalance ?? true,
-    payLink: (doc as { payLink?: string } | undefined)?.payLink ?? '',
+    payLink: doc?.payLink ?? '',
+    creditReason: doc?.creditReason ?? '',
   });
   const [d, setD] = useState<Draft>(initial);
   const [dirty, setDirty] = useState(!detail);
@@ -103,7 +115,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
   }, [detail]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [drawer, setDrawer] = useState<null | 'pay' | 'charge' | 'writeoff' | 'client'>(null);
+  const [drawer, setDrawer] = useState<null | 'pay' | 'charge' | 'writeoff' | 'client' | 'time'>(null);
   const profile = useMemo(() => industryProfile(settings.industry), [settings.industry]);
   const L = (c: LineCategory) => lineLabel(settings.industry, c);
   const usual = useApi<UsualLine[]>(isOwner && editable ? '/api/documents/usual-lines' : null);
@@ -150,7 +162,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
   };
 
   const body = () => ({
-    expectUpdatedAt: seen,
+    expectUpdatedAt: seen ? new Date(seen).toISOString() : undefined,
     projectId: d.projectId,
     clientId: d.clientId,
     brandId: d.brandId,
@@ -165,6 +177,8 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
     depositCents: d.depositMode === 'amount' && d.depositCents ? d.depositCents : null,
     depositShowBalance: d.depositShowBalance,
     payLink: d.payLink,
+    proforma,
+    creditReason: d.creditReason,
   });
 
   const run = async (fn: () => Promise<void>) => {
@@ -184,7 +198,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
     return run(async () => {
       if (!doc) {
         const r = await api<{ id: string; number: string }>('/api/documents', { body: { kind, ...body() } });
-        toast(`${kind === 'invoice' ? 'Invoice' : 'Quote'} ${r.number} saved as a draft`);
+        toast(`${label} ${r.number} saved as a draft`);
         navigate(`/documents/${r.id}`, { replace: true });
       } else {
         await api(`/api/documents/${doc.id}`, { method: 'PUT', body: body() });
@@ -231,16 +245,17 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
       toast(`Job #${p.number} ${name} created${doc ? ' and linked' : ''}`);
     });
 
-  const label = kind === 'invoice' ? 'Invoice' : 'Quote';
   const from = settings.tradingName || settings.companyName;
   /** The PDF to the share sheet (WhatsApp, Gmail, Outlook…), with a short note for the message. */
   const share = () =>
     run(async () => {
       if (dirty) await save();
       const { blob, filename } = await apiBlob(`/api/documents/${doc!.id}/pdf`);
-      const what = `${kind === 'invoice' ? (settings.vatRegistered ? 'tax invoice' : 'invoice') : 'quote'} ${doc!.number}`;
-      const link = kind === 'invoice' ? d.payLink || settings.payLink : '';
-      const text = `Good day${doc!.clientName ? ` ${doc!.clientName}` : ''},\n\nPlease find ${what} attached.${link ? `\n\nPay by card: ${link}` : ''}\n\nKind regards,\n${from}`;
+      const what = `${kind === 'invoice' ? (settings.vatRegistered ? 'tax invoice' : 'invoice') : credit ? 'credit note' : proforma ? 'pro-forma invoice' : 'quote'} ${doc!.number}`;
+      const link = billLike ? d.payLink || settings.payLink : '';
+      const shap = billLike && has('payshap') && settings.payshapId ? settings.payshapId : '';
+      const extra = credit && doc!.creditedInvoiceNumber ? ` It credits invoice ${doc!.creditedInvoiceNumber}${d.creditReason ? ` (${d.creditReason})` : ''}.` : '';
+      const text = `Good day${doc!.clientName ? ` ${doc!.clientName}` : ''},\n\nPlease find ${what} attached.${extra}${shap ? `\n\nPay instantly with PayShap to ${shap} (reference ${doc!.number}).` : ''}${link ? `\n\nPay by card: ${link}` : ''}\n\nKind regards,\n${from}`;
       const how = await shareFile(blob, filename, `${label} ${doc!.number}`, text);
       if (how === 'downloaded') toast('PDF saved');
       if (how !== 'cancelled') await api(`/api/documents/${doc!.id}/shared`, { body: {} }).then(() => reload());
@@ -255,7 +270,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
   return (
     <div className="stack-lg">
       <PageHead
-        back={{ to: `/documents?kind=${kind}`, label: kind === 'invoice' ? 'Invoices' : 'Quotes' }}
+        back={{ to: `/documents?kind=${listKind}`, label: kind === 'invoice' ? 'Invoices' : credit ? 'Credit notes' : proforma && !has('quotes') ? 'Pro-formas' : 'Quotes' }}
         title={doc ? `${label} ${doc.number}` : `New ${label.toLowerCase()}`}
         sub={
           doc && (
@@ -269,6 +284,9 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
                 </Link>
               )}
               {doc.sourceQuoteNumber && <span className="muted">from quote {doc.sourceQuoteNumber}</span>}
+              {credit && doc.creditedInvoiceId && (
+                <Link to={`/documents/${doc.creditedInvoiceId}`}>For invoice {doc.creditedInvoiceNumber}</Link>
+              )}
             </span>
           )
         }
@@ -290,14 +308,25 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
 
       {doc?.status === 'void' && <div className="banner alert">Voided: {doc.voidReason}</div>}
       {doc?.kind === 'invoice' && doc.status === 'issued' && editable && (
-        <div className="banner small">Issued invoices can still be changed. The books update for the invoice date; send the client the new PDF.</div>
+        <div className="banner small">
+          Issued invoices can still be changed. The books update for the invoice date; send the client the new PDF.
+          {has('creditNotes') ? ' Once the client has it, a credit note is the tidy way to take something off.' : ''}
+        </div>
       )}
+      {credit && doc?.status === 'draft' && (
+        <div className="banner small">
+          Change the lines to what’s being taken back (a line, part of one, or a discount). When you issue it, it comes off invoice {doc.creditedInvoiceNumber}’s balance
+          {vatRate > 0 ? ' and the VAT on it comes off your next VAT return' : ''}. If the invoice was already paid, refund the client and record the refund as a cost.
+        </div>
+      )}
+      {credit && doc?.status === 'issued' && <div className="banner ok small">Issued: {formatZar(total)} taken off invoice {doc.creditedInvoiceNumber}. To change it, void it and make a new one.</div>}
+      {proforma && !doc && <div className="banner small">A pro-forma asks to be paid before the work starts. It isn’t a tax invoice and isn’t in the books: once paid, turn it into an invoice and record the payment there.</div>}
 
       <form className="doc-layout" onSubmit={save}>
         <div className="stack-lg">
           <section className="panel panel-pad stack">
             <div className="form-grid">
-              {has('jobs') && <Field label="Job">
+              {has('jobs') && !credit && <Field label="Job">
                 {(p) => (
                   <ProjectSelect
                     {...p}
@@ -316,7 +345,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
                     className="select"
                     value={d.clientId ?? ''}
                     onChange={(e) => (e.target.value === '+new' ? setDrawer('client') : set('clientId', e.target.value || null))}
-                    disabled={!editable}
+                    disabled={!editable || credit}
                   >
                     <option value="">{project.data?.project.clientName ? `From the job (${project.data.project.clientName})` : 'No name yet (add it later)'}</option>
                     {editable && <option value="+new">+ New client…</option>}
@@ -333,12 +362,34 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
               )}
             </div>
             <div className="form-grid">
-              <Field label={kind === 'invoice' ? 'Invoice date' : 'Quote date'}>{(p) => <input {...p} className="input" type="date" value={d.issueDate} onChange={(e) => set('issueDate', e.target.value)} disabled={!editable} />}</Field>
-              <Field label={kind === 'invoice' ? 'Due' : 'Valid until'}>{(p) => <input {...p} className="input" type="date" value={d.dueDate ?? ''} onChange={(e) => set('dueDate', e.target.value || null)} disabled={!editable} />}</Field>
+              <Field label={`${label} date`}>{(p) => <input {...p} className="input" type="date" value={d.issueDate} onChange={(e) => set('issueDate', e.target.value)} disabled={!editable} />}</Field>
+              {!credit && <Field label={billLike ? 'Due' : 'Valid until'}>{(p) => <input {...p} className="input" type="date" value={d.dueDate ?? ''} onChange={(e) => set('dueDate', e.target.value || null)} disabled={!editable} />}</Field>}
               <Field label="Number" hint={doc ? undefined : 'Leave blank for the next number'}>
-                {(p) => <input {...p} className="input" value={d.number} onChange={(e) => set('number', e.target.value)} placeholder={kind === 'invoice' ? `${settings.invoicePrefix}${String(settings.invoiceNext).padStart(settings.invoicePad, '0')}` : `${settings.quotePrefix}${String(settings.quoteNext).padStart(settings.quotePad, '0')}`} disabled={!editable} />}
+                {(p) => (
+                  <input
+                    {...p}
+                    className="input"
+                    value={d.number}
+                    onChange={(e) => set('number', e.target.value)}
+                    placeholder={
+                      kind === 'invoice'
+                        ? `${settings.invoicePrefix}${String(settings.invoiceNext).padStart(settings.invoicePad, '0')}`
+                        : credit
+                          ? `${settings.creditPrefix}${String(settings.creditNext).padStart(settings.creditPad, '0')}`
+                          : proforma
+                            ? `${settings.proformaPrefix}${String(settings.proformaNext).padStart(settings.quotePad, '0')}`
+                            : `${settings.quotePrefix}${String(settings.quoteNext).padStart(settings.quotePad, '0')}`
+                    }
+                    disabled={!editable}
+                  />
+                )}
               </Field>
             </div>
+            {credit && (
+              <Field label="Why" hint="Printed on the credit note">
+                {(p) => <input {...p} className="input" value={d.creditReason} onChange={(e) => set('creditReason', e.target.value)} placeholder="e.g. Returned part, discount agreed, charged twice" disabled={!editable} />}
+              </Field>
+            )}
             <Field label="Heading" hint="Shown as “For” on the PDF">
               {(p) => <input {...p} className="input" value={d.title} onChange={(e) => set('title', e.target.value)} placeholder={profile.heading} disabled={!editable} />}
             </Field>
@@ -347,11 +398,19 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
           <section className="panel">
             <div className="panel-head spread">
               <strong>Lines</strong>
-              {editable && d.projectId && (
-                <button type="button" className="btn small" onClick={() => setDrawer('charge')}>
-                  Charge job costs…
-                </button>
-              )}
+              <span className="row wrap" style={{ gap: 6 }}>
+                {editable && !credit && has('timeTracker') && (
+                  <button type="button" className="btn small" onClick={() => setDrawer('time')}>
+                    <Icon name="clock" size={14} />
+                    Add time…
+                  </button>
+                )}
+                {editable && !credit && d.projectId && (
+                  <button type="button" className="btn small" onClick={() => setDrawer('charge')}>
+                    Charge job costs…
+                  </button>
+                )}
+              </span>
             </div>
             <div className="lines">
               {d.lines.map((l, i) => (
@@ -410,7 +469,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
 
           <section className="panel panel-pad stack">
             <Field label="Notes (on the PDF)">{(p) => <textarea {...p} className="textarea" rows={2} value={d.notes} onChange={(e) => set('notes', e.target.value)} disabled={!editable} />}</Field>
-            {kind === 'invoice' && (
+            {billLike && (
               <Field label="Card payment link (optional)" hint={settings.payLink ? 'Blank uses your usual link from Settings. Make one for this amount in the Yoco app and paste it here.' : 'Paste a Yoco (or SnapScan) payment link: it’s printed on the invoice and added to your message.'}>
                 {(p) => <input {...p} className="input" type="url" inputMode="url" value={d.payLink} onChange={(e) => set('payLink', e.target.value)} placeholder={settings.payLink || 'https://pay.yoco.com/…'} disabled={!editable} />}
               </Field>
@@ -451,7 +510,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
                   <Money cents={total} />
                 </dd>
               </div>
-              {deposit > 0 && (kind === 'quote' || depositOutstanding) && (
+              {!credit && deposit > 0 && (kind === 'quote' || depositOutstanding) && (
                 <>
                   <div>
                     <dt>
@@ -475,7 +534,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
                 <>
                   {paid !== 0 && (
                     <div>
-                      <dt>Paid</dt>
+                      <dt>{(detail?.receipts ?? []).some((r) => r.method === 'credit') ? 'Paid and credited' : 'Paid'}</dt>
                       <dd>
                         <Money cents={-paid} />
                       </dd>
@@ -498,7 +557,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
                 </>
               )}
             </dl>
-            {editable && !writtenOff && (
+            {editable && !writtenOff && !credit && (
               <div className="fieldset stack" style={{ gap: 8 }}>
                 <span className="label">Deposit</span>
                 <Segmented
@@ -555,10 +614,36 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
                     Issue invoice (counts in the books)
                   </button>
                 )}
+                {credit && doc.status === 'draft' && (
+                  <button type="button" className="btn primary block" disabled={busy || total <= 0} onClick={() => void action('issue', {}, `Credit note ${doc.number} issued`)}>
+                    Issue credit note (takes it off the invoice)
+                  </button>
+                )}
                 {doc.kind === 'invoice' && doc.status === 'issued' && !doc.writtenOffOn && (
                   <button type="button" className="btn block" onClick={() => setDrawer('pay')}>
                     <Icon name="money" size={18} />
                     Record a payment
+                  </button>
+                )}
+                {doc.kind === 'invoice' && doc.status === 'issued' && !doc.writtenOffOn && has('reminders') && total - paid > 0 && (
+                  <button type="button" className="btn block" disabled={busy} onClick={() => void run(async () => {
+                    if (await sendReminder({ ...doc, totalCents: total, paidCents: paid, payLink: d.payLink }, settings, has('payshap'))) {
+                      toast('Reminder sent');
+                      await reload();
+                    }
+                  })}>
+                    <Icon name="chat" size={18} />
+                    Send a reminder
+                    {doc.reminders ? <span className="xs muted"> (last {formatDate(String(doc.remindedAt).slice(0, 10))})</span> : null}
+                  </button>
+                )}
+                {doc.kind === 'invoice' && doc.status === 'issued' && has('creditNotes') && (
+                  <button type="button" className="btn block" disabled={busy} onClick={() => void run(async () => {
+                    const r = await api<{ id: string }>(`/api/documents/${doc.id}/credit-note`, { body: {} });
+                    toast('Draft credit note made: change it to what’s being taken back');
+                    navigate(`/documents/${r.id}`);
+                  })}>
+                    Credit note…
                   </button>
                 )}
                 {doc.kind === 'quote' && (
@@ -579,20 +664,30 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
                   </>
                 )}
                 <div className="row wrap">
-                  <button type="button" className="btn quiet small" onClick={() => void run(async () => {
-                    const r = await api<{ id: string }>(`/api/documents/${doc.id}/duplicate`, { body: {} });
-                    toast('Copy made');
-                    navigate(`/documents/${r.id}`);
-                  })}>
-                    <Icon name="copy" size={16} />
-                    Duplicate
-                  </button>
+                  {!credit && (
+                    <button type="button" className="btn quiet small" onClick={() => void run(async () => {
+                      const r = await api<{ id: string }>(`/api/documents/${doc.id}/duplicate`, { body: {} });
+                      toast('Copy made');
+                      navigate(`/documents/${r.id}`);
+                    })}>
+                      <Icon name="copy" size={16} />
+                      Duplicate
+                    </button>
+                  )}
+                  {credit && doc.status === 'issued' && (
+                    <button type="button" className="btn quiet small danger" onClick={() => {
+                      const reason = prompt('Why is this credit note being voided?');
+                      if (reason) void action('void', { reason }, `Credit note ${doc.number} voided`);
+                    }}>
+                      Void
+                    </button>
+                  )}
                   {doc.kind === 'invoice' && doc.status === 'issued' && !doc.writtenOffOn && total - paid > 0 && (
                     <button type="button" className="btn quiet small" onClick={() => setDrawer('writeoff')}>
                       Mark delinquent…
                     </button>
                   )}
-                  {doc.kind === 'invoice' && doc.status === 'issued' && !paid && !doc.writtenOffOn && (
+                  {doc.kind === 'invoice' && doc.status === 'issued' && !paid && !doc.writtenOffOn && !(detail?.creditNotes ?? []).some((c) => c.status === 'issued') && (
                     <button type="button" className="btn quiet small danger" onClick={() => {
                       const reason = prompt('Why is this invoice being voided?');
                       if (reason) void action('void', { reason }, `Invoice ${doc.number} voided`);
@@ -605,7 +700,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
                       if (confirm(`Delete ${label.toLowerCase()} ${doc.number}?`)) void run(async () => {
                         await api(`/api/documents/${doc.id}`, { method: 'DELETE' });
                         toast('Deleted');
-                        navigate(`/documents?kind=${kind}`);
+                        navigate(`/documents?kind=${listKind}`);
                       });
                     }}>
                       <Icon name="trash" size={16} />
@@ -623,11 +718,11 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
                 {detail.receipts.map((r) => (
                   <li key={r.id} className="list-row">
                     <span className="grow small">
-                      {formatDate(r.date)} · {r.sourceName}
+                      {formatDate(r.date)} · {r.method === 'credit' ? 'Credit note' : r.sourceName}
                       {r.reference && <div className="xs muted">{r.reference}</div>}
                     </span>
                     <Money cents={r.amountCents} />
-                    {isOwner && (
+                    {isOwner && r.method !== 'credit' && (
                       <button type="button" className="btn quiet small" aria-label="Remove payment" onClick={() => {
                         if (confirm('Remove this payment?')) void run(async () => {
                           await api(`/api/receipts/${r.id}`, { method: 'DELETE' });
@@ -637,6 +732,23 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
                         <Icon name="trash" size={14} />
                       </button>
                     )}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+          {detail && detail.creditNotes.length > 0 && (
+            <section className="panel">
+              <div className="panel-head strong">Credit notes</div>
+              <ul className="list">
+                {detail.creditNotes.map((c) => (
+                  <li key={c.id} className="list-row">
+                    <Link to={`/documents/${c.id}`} className="grow small">
+                      {c.number} · {formatDate(c.issueDate)}
+                      {c.creditReason && <div className="xs muted">{c.creditReason}</div>}
+                    </Link>
+                    <DocChip status={c.status} />
+                    <Money cents={c.totalCents} />
                   </li>
                 ))}
               </ul>
@@ -666,6 +778,28 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
           }}
         />
       )}
+      {drawer === 'time' && (
+        <TimeDrawer
+          projectId={d.projectId}
+          onClose={() => setDrawer(null)}
+          onAdd={(ids) =>
+            void run(async () => {
+              // Time goes on as lines on the saved document: save first if needed.
+              let docId = doc?.id;
+              if (!docId) {
+                const r = await api<{ id: string }>('/api/documents', { body: { kind, ...body() } });
+                docId = r.id;
+              } else if (dirty) await api(`/api/documents/${docId}`, { method: 'PUT', body: body() });
+              await api('/api/time/bill', { body: { documentId: docId, ids } });
+              setDrawer(null);
+              setDirty(false);
+              toast('Time added');
+              if (!doc) navigate(`/documents/${docId}`, { replace: true });
+              else await reload();
+            })
+          }
+        />
+      )}
       {drawer === 'pay' && doc && <PaymentDrawer invoiceId={doc.id} balance={total - paid} onClose={() => setDrawer(null)} onSaved={() => (setDrawer(null), void reload())} />}
       {drawer === 'charge' && project.data && (
         <ChargeDrawer
@@ -679,6 +813,69 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
         />
       )}
     </div>
+  );
+}
+
+interface TimeEntry {
+  id: string;
+  projectId: string | null;
+  projectName: string | null;
+  hourlyRateCents: number | null;
+  startedAt: string;
+  minutes: number;
+  note: string;
+}
+
+/** Unbilled time (this job's first), ticked onto the invoice as one line per job at its hourly rate. */
+function TimeDrawer({ projectId, onClose, onAdd }: { projectId: string | null; onClose: () => void; onAdd: (ids: string[]) => void }) {
+  const { data, loading } = useApi<{ entries: TimeEntry[] }>('/api/time?unbilled=1');
+  const entries = useMemo(() => [...(data?.entries ?? [])].sort((a, b) => Number(b.projectId === projectId) - Number(a.projectId === projectId)), [data, projectId]);
+  const [picked, setPicked] = useState<Set<string> | null>(null);
+  const sel = picked ?? new Set(entries.filter((e) => !projectId || e.projectId === projectId).map((e) => e.id));
+  const toggle = (id: string) => {
+    const n = new Set(sel);
+    if (n.has(id)) n.delete(id);
+    else n.add(id);
+    setPicked(n);
+  };
+  const chosen = entries.filter((e) => sel.has(e.id));
+  const mins = chosen.reduce((s, e) => s + e.minutes, 0);
+  const value = chosen.reduce((s, e) => s + Math.round((e.minutes / 60) * Number(e.hourlyRateCents ?? 0)), 0);
+  const noRate = chosen.some((e) => !e.hourlyRateCents);
+  return (
+    <Drawer title="Add time" sub="Time logged and not on an invoice yet" onClose={onClose}>
+      <div className="stack">
+        {loading && !data ? (
+          <Loading />
+        ) : entries.length ? (
+          <ul className="list panel">
+            {entries.map((e) => (
+              <li key={e.id} className="list-row">
+                <label className="check grow">
+                  <input type="checkbox" checked={sel.has(e.id)} onChange={() => toggle(e.id)} />
+                  <span className="small">
+                    {e.projectName ?? 'No job'} · {formatDate(e.startedAt.slice(0, 10))}
+                    {e.note && <div className="xs muted">{e.note}</div>}
+                  </span>
+                </label>
+                <span className="small nowrap">{hoursLabel(e.minutes)}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="small muted">No unbilled time. Start the clock on a job (Jobs → the job → Time), or add time there by hand.</p>
+        )}
+        {chosen.length > 0 && (
+          <p className="small">
+            {hoursLabel(mins)} · <Money cents={value} />
+            {noRate && <span className="warn-text"> · some jobs have no hourly rate yet (set it on the job), so their time goes on at R0</span>}
+          </p>
+        )}
+        <button type="button" className="btn primary big block" disabled={!chosen.length} onClick={() => onAdd(chosen.map((e) => e.id))}>
+          Add {chosen.length ? hoursLabel(mins) : 'time'}
+        </button>
+      </div>
+    </Drawer>
   );
 }
 

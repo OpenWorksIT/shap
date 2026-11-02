@@ -145,4 +145,6 @@ export const LEDGER_SOURCE_LABELS: Record<string, string> = {
   disposal: 'Asset disposal',
   year_end: 'Year-end adjustment',
   write_off: 'Written off (bad debt)',
+  credit_note: 'Credit note',
+  bill_payment: 'Bill paid',
 };

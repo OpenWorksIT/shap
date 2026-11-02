@@ -8,7 +8,7 @@ import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
 import type { DocRow } from '../lib/types';
 
-type Kind = 'invoice' | 'quote';
+type Kind = 'invoice' | 'quote' | 'credit_note';
 
 export default function DocumentsPage() {
   const { isOwner, ref, has } = useAuthed();
@@ -17,6 +17,8 @@ export default function DocumentsPage() {
   const [params, setParams] = useSearchParams();
   const kind = (params.get('kind') as Kind) || 'invoice';
   const state = params.get('state') ?? '';
+  const onlyProforma = params.get('proforma') === '1';
+  const quoteTab = has('quotes') || has('proformas');
   const status = params.get('status') ?? '';
   const [search, setSearch] = useState('');
   const qs = new URLSearchParams({ kind });
@@ -25,13 +27,14 @@ export default function DocumentsPage() {
   const { data, error, loading, reload } = useApi<DocRow[]>(`/api/documents?${qs}`);
   const rows = useMemo(() => {
     const s = search.trim().toLowerCase();
-    return (data ?? []).filter((d) => !s || d.number.toLowerCase().includes(s) || (d.clientName ?? '').toLowerCase().includes(s) || (d.projectName ?? '').toLowerCase().includes(s) || d.title.toLowerCase().includes(s));
-  }, [data, search]);
-  const owing = rows.filter((d) => d.status === 'issued').reduce((s, d) => s + d.totalCents - d.paidCents - (d.writtenOffCents ?? 0), 0);
-  const filter = state || status || 'all';
+    return (data ?? []).filter((d) => (!onlyProforma || d.proforma) && (kind !== 'quote' || has('quotes') || d.proforma)).filter((d) => !s || d.number.toLowerCase().includes(s) || (d.clientName ?? '').toLowerCase().includes(s) || (d.projectName ?? '').toLowerCase().includes(s) || d.title.toLowerCase().includes(s));
+  }, [data, search, onlyProforma, kind, has]);
+  const owing = rows.filter((d) => d.kind === 'invoice' && d.status === 'issued').reduce((s, d) => s + d.totalCents - d.paidCents - (d.writtenOffCents ?? 0), 0);
+  const filter = onlyProforma ? 'proforma' : state || status || 'all';
   const setFilter = (v: string) => {
     const n = new URLSearchParams({ kind });
     if (['owing', 'overdue', 'paid', 'written_off'].includes(v)) n.set('state', v);
+    else if (v === 'proforma') n.set('proforma', '1');
     else if (v !== 'all') n.set('status', v);
     setParams(n, { replace: true });
   };
@@ -54,6 +57,11 @@ export default function DocumentsPage() {
                     New quote
                   </button>
                 )}
+                {has('proformas') && (
+                  <button className="btn" onClick={() => navigate('/documents/new?kind=quote&proforma=1')}>
+                    New pro-forma
+                  </button>
+                )}
                 <button className="btn primary" onClick={() => navigate('/documents/new?kind=invoice')}>
                   <Icon name="plus" size={18} />
                   New invoice
@@ -63,14 +71,17 @@ export default function DocumentsPage() {
           </>
         }
       />
-      {has('quotes') && <Tabs<Kind>
-        value={kind}
-        onChange={(k) => setParams({ kind: k }, { replace: true })}
-        tabs={[
-          { value: 'invoice', label: 'Invoices' },
-          { value: 'quote', label: 'Quotes' },
-        ]}
-      />}
+      {(quoteTab || has('creditNotes')) && (
+        <Tabs<Kind>
+          value={kind}
+          onChange={(k) => setParams({ kind: k }, { replace: true })}
+          tabs={[
+            { value: 'invoice', label: 'Invoices' },
+            ...(quoteTab ? [{ value: 'quote' as Kind, label: has('quotes') ? (has('proformas') ? 'Quotes & pro-formas' : 'Quotes') : 'Pro-formas' }] : []),
+            ...(has('creditNotes') ? [{ value: 'credit_note' as Kind, label: 'Credit notes' }] : []),
+          ]}
+        />
+      )}
       <div className="toolbar">
         {kind === 'invoice' ? (
           <Segmented
@@ -86,7 +97,7 @@ export default function DocumentsPage() {
               { value: 'draft', label: 'Drafts' },
             ]}
           />
-        ) : (
+        ) : kind === 'quote' ? (
           <Segmented
             label="Show"
             value={filter}
@@ -96,6 +107,19 @@ export default function DocumentsPage() {
               { value: 'draft', label: 'Drafts' },
               { value: 'sent', label: 'Sent' },
               { value: 'accepted', label: 'Accepted' },
+              ...(has('proformas') && has('quotes') ? [{ value: 'proforma', label: 'Pro-formas' }] : []),
+            ]}
+          />
+        ) : (
+          <Segmented
+            label="Show"
+            value={filter}
+            onChange={setFilter}
+            options={[
+              { value: 'all', label: 'All' },
+              { value: 'draft', label: 'Drafts' },
+              { value: 'issued', label: 'Issued' },
+              { value: 'void', label: 'Void' },
             ]}
           />
         )}
@@ -125,6 +149,7 @@ export default function DocumentsPage() {
                 <tr key={d.id} className="clickable" onClick={() => navigate(`/documents/${d.id}`)}>
                   <td className="strong nowrap">
                     <Link to={`/documents/${d.id}`}>{d.number}</Link>
+                    {d.proforma && <div className="xs muted">Pro-forma</div>}
                     {brands.length > 1 && d.brandId && (
                       <div className="brand-tag" style={{ '--brand-dot': brands.find((b) => b.id === d.brandId)?.accent } as CSSProperties}>
                         {d.brandName}
@@ -149,6 +174,7 @@ export default function DocumentsPage() {
                   )}
                   <td>
                     <DocChip status={d.status} paymentState={d.paymentState} />
+                    {d.paymentState === 'overdue' && (d.reminders ?? 0) > 0 && <div className="xs muted">Reminded {d.reminders}×</div>}
                   </td>
                 </tr>
               ))}
@@ -157,7 +183,9 @@ export default function DocumentsPage() {
         </div>
       ) : (
         <div className="panel">
-          <Empty title={`No ${kind === 'invoice' ? 'invoices' : 'quotes'} here`} />
+          <Empty title={`No ${kind === 'invoice' ? 'invoices' : kind === 'credit_note' ? 'credit notes' : 'quotes'} here`}>
+            {kind === 'credit_note' ? 'Open an issued invoice and choose “Credit note” to take back part or all of it.' : null}
+          </Empty>
         </div>
       )}
     </div>

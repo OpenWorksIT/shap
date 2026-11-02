@@ -22,6 +22,9 @@ const SettingsPage = lazy(() => import('./pages/Settings'));
 const BackupPage = lazy(() => import('./pages/Backup'));
 const PayrollPage = lazy(() => import('./pages/Payroll'));
 const WelcomePage = lazy(() => import('./pages/Welcome'));
+const BillsPage = lazy(() => import('./pages/Bills'));
+const LogbookPage = lazy(() => import('./pages/Logbook'));
+const GuidesPage = lazy(() => import('./pages/Guides'));
 
 export function App() {
   return (
@@ -66,6 +69,10 @@ function Books() {
           {has('workers') && <Route path="/workers/:id" element={<WorkerPage />} />}
           {pays && <Route path="/payroll" element={<PayrollPage />} />}
           <Route path="/costs" element={<CostsPage />} />
+          {has('bills') && <Route path="/bills" element={<BillsPage />} />}
+          {has('logbook') && <Route path="/logbook" element={<LogbookPage />} />}
+          {has('guides') && <Route path="/guides" element={<GuidesPage />} />}
+          {has('guides') && <Route path="/guides/:topic" element={<GuidesPage />} />}
           <Route path="/documents" element={<DocumentsPage />} />
           <Route path="/documents/new" element={<DocumentPage />} />
           <Route path="/documents/:id" element={<DocumentPage />} />

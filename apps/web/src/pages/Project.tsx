@@ -10,6 +10,7 @@ import { api, ApiError } from '../lib/api';
 import { FileButton } from '../components/Files';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
+import { JobTime } from '../components/TimeTracker';
 import type { CostRow, DocRow, LabourEntry, PlannedItem, ProjectRow } from '../lib/types';
 
 interface ProjectDetail {
@@ -22,11 +23,11 @@ interface ProjectDetail {
   workers?: { id: string; name: string; days: number; costCents: number }[];
 }
 
-type Tab = 'labour' | 'costs' | 'plan' | 'docs';
+type Tab = 'labour' | 'costs' | 'plan' | 'docs' | 'time';
 
 export default function ProjectPage() {
   const { id } = useParams<{ id: string }>();
-  const { isOwner, seesMoney, user } = useAuthed();
+  const { isOwner, seesMoney, user, has } = useAuthed();
   const navigate = useNavigate();
   const toast = useToast();
   const { data, error, loading, reload } = useApi<ProjectDetail>(`/api/projects/${id}`);
@@ -113,6 +114,7 @@ export default function ProjectPage() {
             : []),
           { value: 'plan', label: 'Parts plan', count: data.planned.length },
           ...(seesMoney ? [{ value: 'docs' as Tab, label: 'Quotes & invoices', count: data.documents?.length }] : []),
+          ...(seesMoney && has('timeTracker') ? [{ value: 'time' as Tab, label: 'Time' }] : []),
         ]}
       />
 
@@ -211,6 +213,8 @@ export default function ProjectPage() {
         <PartsPlan projectId={p.id} items={data.planned} canEdit={isOwner} onChange={reload} onBuy={(item) => setDrawer({ kind: 'cost', planned: item })} onQuote={() => void fromPlan()} />
       )}
 
+      {tab === 'time' && <JobTime projectId={p.id} rateCents={Number(p.hourlyRateCents ?? 0)} canEdit={isOwner} />}
+
       {tab === 'docs' && data.documents && (
         <section className="panel">
           {data.documents.length ? (
@@ -220,7 +224,7 @@ export default function ProjectPage() {
                   <Link to={`/documents/${d.id}`} className="list-row">
                     <span className="grow">
                       <strong>
-                        {d.kind === 'quote' ? 'Quote' : 'Invoice'} {d.number}
+                        {d.kind === 'quote' ? (d.proforma ? 'Pro-forma' : 'Quote') : d.kind === 'credit_note' ? 'Credit note' : 'Invoice'} {d.number}
                       </strong>
                       <div className="xs muted">
                         {formatDate(d.issueDate)}

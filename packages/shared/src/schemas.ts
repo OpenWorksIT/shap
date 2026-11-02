@@ -226,7 +226,8 @@ export const documentLineInput = z.object({
 
 export const documentInput = z.object({
   /** When the screen last loaded the document: a save from an out-of-date screen is refused. */
-  expectUpdatedAt: z.string().max(40).optional(),
+  // A timestamp: text over HTTP, but a Date when the phone's engine is called directly.
+  expectUpdatedAt: z.union([z.string().max(40), z.date()]).optional(),
   brandId: optionalUuid,
   projectId: optionalUuid,
   clientId: optionalUuid,

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   ACCOUNT_TYPE_LABELS,
   ACCOUNT_TYPES,
@@ -29,7 +29,8 @@ import { useAuthed } from '../lib/session';
 import type { Brand, Settings } from '../lib/types';
 import { BusinessFields, LogoField } from '../components/BusinessForm';
 import { ApiImage } from '../components/Files';
-import { FEATURES, FEATURE_KEYS, featureOn, INDUSTRIES } from '@shap/shared';
+import { FEATURES, FEATURE_GROUPS, FEATURE_KEYS, featureOn, INDUSTRIES, TURNOVER_TAX_LIMIT_CENTS } from '@shap/shared';
+import { WipeData } from '../components/WipeData';
 import { reportUsage } from '../lib/usage';
 import { setTone, type Tone } from '../lib/words';
 import { SupportShap } from '../components/Support';
@@ -60,6 +61,7 @@ export default function SettingsPage() {
         <>
           <BusinessSettings />
           {has('brands') && <TradingNames />}
+          <WipeData />
         </>
       )}
       {tab === 'invoicing' && <SettingsForm section="invoicing" />}
@@ -104,7 +106,8 @@ function BusinessSettings() {
     setBusy(true);
     setError('');
     try {
-      await saveSettings(settings, { ...f, fyEndMonth: f.businessType === 'sole_prop' ? 2 : f.fyEndMonth });
+      const { features: _f, tone: _t, industry: _i, usageConsent: _u, sdl: _s, watermark: _w, ...mine } = f;
+      await saveSettings(settings, { ...mine, fyEndMonth: f.businessType === 'sole_prop' ? 2 : f.fyEndMonth });
       await refreshReference();
       toast('Saved');
     } catch (err) {
@@ -168,30 +171,40 @@ function Sections() {
           <strong>What you use</strong>
           <div className="xs muted">Switch off what a business like yours doesn’t need. Nothing is deleted: switch it on again and it’s all still there.</div>
         </div>
-        <ul className="list">
-          {FEATURE_KEYS.filter((k) => k !== 'dividends' || settings.businessType === 'company').map((k) => (
-            <li key={k} className="list-row">
-              <label className="check grow">
-                <input type="checkbox" checked={on[k]} onChange={(e) => void toggle(k, e.target.checked)} />
-                <span>
-                  {FEATURES[k].label}
-                  <div className="xs muted">{FEATURES[k].hint}</div>
-                </span>
-              </label>
-            </li>
-          ))}
-          {on.payroll && (
-            <li className="list-row">
-              <label className="check grow">
-                <input type="checkbox" checked={prefs.sdl} onChange={(e) => void pref('sdl', e.target.checked)} />
-                <span>
-                  Registered for the Skills Development Levy
-                  <div className="xs muted">When your payroll is over R500 000 a year: 1% of salaries, paid by you.</div>
-                </span>
-              </label>
-            </li>
-          )}
-        </ul>
+        {FEATURE_GROUPS.map((g) => (
+          <div key={g.label}>
+            <div className="list-group-head xs muted">{g.label}</div>
+            <ul className="list">
+              {g.keys.filter((k) => k !== 'dividends' || settings.businessType === 'company').map((k) => (
+                <li key={k} className="list-row">
+                  <label className="check grow">
+                    <input type="checkbox" checked={on[k]} onChange={(e) => void toggle(k, e.target.checked)} />
+                    <span>
+                      {FEATURES[k].label}
+                      <div className="xs muted">{FEATURES[k].hint}</div>
+                    </span>
+                  </label>
+                </li>
+              ))}
+              {g.keys.includes('payroll') && on.payroll && (
+                <li className="list-row">
+                  <label className="check grow">
+                    <input type="checkbox" checked={prefs.sdl} onChange={(e) => void pref('sdl', e.target.checked)} />
+                    <span>
+                      Registered for the Skills Development Levy
+                      <div className="xs muted">When your payroll is over R500 000 a year: 1% of salaries, paid by you.</div>
+                    </span>
+                  </label>
+                </li>
+              )}
+            </ul>
+          </div>
+        ))}
+        {(on.payshap || on.proformas || on.creditNotes) && (
+          <p className="xs muted panel-pad" style={{ paddingTop: 0 }}>
+            Numbering for credit notes and pro-formas, and your ShapID, are under <Link to="/settings?tab=invoicing">Invoicing &amp; tax</Link>.
+          </p>
+        )}
       </section>
       <section className="panel panel-pad stack">
         <h3>How Shap talks to you</h3>
@@ -241,7 +254,7 @@ function Sections() {
 }
 
 function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
-  const { settings, ref, refreshReference } = useAuthed();
+  const { settings, ref, refreshReference, has } = useAuthed();
   const toast = useToast();
   const [f, setF] = useState<Settings>({ ...settings });
   const [error, setError] = useState('');
@@ -252,8 +265,9 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
     setBusy(true);
     setError('');
     try {
-      const { logoId: _l, ...rest } = f as Settings & { logoId: string | null };
-      await api('/api/settings', { method: 'PUT', body: rest });
+      // Only this form's fields: switches and preferences saved elsewhere since it opened stay as they are now.
+      const { logoId: _l, features: _f, tone: _t, industry: _i, usageConsent: _u, sdl: _s, watermark: _w, ...rest } = f as Settings & { logoId: string | null };
+      await saveSettings(settings, rest);
       await refreshReference();
       toast('Settings saved');
     } catch (err) {
@@ -319,9 +333,29 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
               <Field label="Next quote number">{(p) => <input {...p} className="input" type="number" min={1} value={f.quoteNext} onChange={(e) => set('quoteNext', Number(e.target.value))} />}</Field>
               <Field label="Pad to digits">{(p) => <input {...p} className="input" type="number" min={0} max={8} value={f.quotePad} onChange={(e) => set('quotePad', Number(e.target.value))} />}</Field>
             </div>
+            {(has('creditNotes') || has('proformas')) && (
+              <div className="form-grid">
+                {has('creditNotes') && text('creditPrefix', 'Credit note prefix', 'Credit notes have their own numbers')}
+                {has('creditNotes') && <Field label="Next credit note number">{(p) => <input {...p} className="input" type="number" min={1} value={f.creditNext} onChange={(e) => set('creditNext', Number(e.target.value))} />}</Field>}
+                {has('proformas') && text('proformaPrefix', 'Pro-forma prefix', 'Pro-formas aren’t tax invoices, so they’re numbered apart')}
+                {has('proformas') && <Field label="Next pro-forma number">{(p) => <input {...p} className="input" type="number" min={1} value={f.proformaNext} onChange={(e) => set('proformaNext', Number(e.target.value))} />}</Field>}
+              </div>
+            )}
             <p className="xs muted">
               Next invoice: <strong>{`${f.invoicePrefix}${String(f.invoiceNext).padStart(f.invoicePad, '0')}`}</strong> · next quote:{' '}
               <strong>{`${f.quotePrefix}${String(f.quoteNext).padStart(f.quotePad, '0')}`}</strong>
+              {has('creditNotes') && (
+                <>
+                  {' '}
+                  · next credit note: <strong>{`${f.creditPrefix}${String(f.creditNext).padStart(f.creditPad, '0')}`}</strong>
+                </>
+              )}
+              {has('proformas') && (
+                <>
+                  {' '}
+                  · next pro-forma: <strong>{`${f.proformaPrefix}${String(f.proformaNext).padStart(f.quotePad, '0')}`}</strong>
+                </>
+              )}
             </p>
           </section>
           <section className="panel panel-pad stack">
@@ -336,6 +370,11 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
             <Field label="Card payment link (optional)" hint="A Yoco (or SnapScan) payment link: printed on unpaid invoices and added to the message when you send one. Any invoice can have its own.">
               {(p) => <input {...p} className="input" type="url" inputMode="url" value={f.payLink} onChange={(e) => set('payLink', e.target.value)} placeholder="https://pay.yoco.com/…" />}
             </Field>
+            {has('payshap') && (
+              <Field label="Your ShapID (PayShap)" hint="Your cellphone number or the ShapID your bank gave you. Printed on unpaid invoices so clients pay you instantly from their banking app (up to R50 000 at most banks).">
+                {(p) => <input {...p} className="input" value={f.payshapId} onChange={(e) => set('payshapId', e.target.value)} placeholder="e.g. 082 123 4567 or yourname@yourbank" />}
+              </Field>
+            )}
             <Field label="Invoice terms">{(p) => <textarea {...p} className="textarea" rows={3} value={f.invoiceTerms} onChange={(e) => set('invoiceTerms', e.target.value)} />}</Field>
             <Field label="Quote terms">{(p) => <textarea {...p} className="textarea" rows={3} value={f.quoteTerms} onChange={(e) => set('quoteTerms', e.target.value)} />}</Field>
           </section>
@@ -365,6 +404,27 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
               </span>
             </label>
             {!f.vatRegistered && <VatThreshold />}
+            {f.vatRegistered && (
+              <Field label="How often you file VAT" hint="On your VAT registration letter (VAT103). Used for the VAT201 periods and due dates.">
+                {(p) => (
+                  <select {...p} className="select" value={f.vatCategory} onChange={(e) => set('vatCategory', e.target.value as Settings['vatCategory'])}>
+                    <option value="A">Every two months, ending in odd months (Category A: Jan, Mar, May…)</option>
+                    <option value="B">Every two months, ending in even months (Category B: Feb, Apr, Jun…)</option>
+                    <option value="C">Every month (Category C)</option>
+                  </select>
+                )}
+              </Field>
+            )}
+            <label className="check">
+              <input type="checkbox" checked={f.turnoverTax} onChange={(e) => set('turnoverTax', e.target.checked)} />
+              <span>
+                Registered for turnover tax
+                <div className="xs muted">
+                  SARS’s simpler tax for micro businesses (turnover up to {formatZar(TURNOVER_TAX_LIMIT_CENTS)} a year): a small percentage of turnover instead of income
+                  tax on profit, and no provisional tax. Only if you registered for it (form TT01). The tax estimate switches to it.
+                </div>
+              </span>
+            </label>
             <div className="form-grid">
               {f.vatRegistered && <Field label="VAT rate (%)">{(p) => <input {...p} className="input" type="number" step="0.5" value={f.vatRateBp / 100} onChange={(e) => set('vatRateBp', Math.round(Number(e.target.value) * 100))} />}</Field>}
               <Field label="Financial year ends in" hint={f.businessType === 'sole_prop' ? 'February: SARS’s tax year for individuals' : undefined}>

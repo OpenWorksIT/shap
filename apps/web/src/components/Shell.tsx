@@ -24,9 +24,12 @@ export function Shell({ children }: { children: ReactNode }) {
     { to: '/workers', label: 'Workers', icon: 'workers', show: has('workers') },
     { to: '/payroll', label: has('payroll') ? 'Payroll' : 'Dividends', icon: 'money', show: has('payroll') || (settings.businessType === 'company' && has('dividends')) },
     { to: '/costs', label: 'Costs', icon: 'costs', show: true },
+    { to: '/bills', label: 'Bills to pay', icon: 'bill', show: has('bills') },
+    { to: '/logbook', label: 'Logbook', icon: 'car', show: has('logbook') },
     { to: '/documents', label: has('quotes') ? 'Quotes & invoices' : 'Invoices', icon: 'docs', show: true },
     { to: '/clients', label: 'Clients', icon: 'clients', show: true },
     { to: '/accounts', label: 'Accounts', icon: 'accounts', show: true },
+    { to: '/guides', label: 'SARS guides', icon: 'book', show: has('guides') },
     { to: '/backup', label: 'Backup', icon: 'upload', show: true },
     { to: '/settings', label: 'Settings', icon: 'settings', show: true },
   ];

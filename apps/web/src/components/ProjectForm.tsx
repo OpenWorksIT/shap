@@ -6,12 +6,14 @@ import { useApi } from '../lib/hooks';
 import type { ClientRow, ProjectRow } from '../lib/types';
 import { BrandSelect, useHasBrands } from './Pickers';
 import { Drawer, Field, MoneyInput, useToast } from './ui';
+import { useAuthed } from '../lib/session';
 
 export function ProjectDrawer({ project, onClose, onSaved }: { project?: ProjectRow; onClose: () => void; onSaved?: () => void }) {
   const toast = useToast();
   const navigate = useNavigate();
   const clients = useApi<ClientRow[]>('/api/clients');
   const hasBrands = useHasBrands();
+  const { has } = useAuthed();
   const [f, setF] = useState({
     name: project?.name ?? '',
     clientId: project?.clientId ?? null,
@@ -23,6 +25,7 @@ export function ProjectDrawer({ project, onClose, onSaved }: { project?: Project
     estLabourCents: project?.estLabourCents ?? 0,
     estMaterialsCents: project?.estMaterialsCents ?? 0,
     estDemoCents: project?.estDemoCents ?? 0,
+    hourlyRateCents: project?.hourlyRateCents ?? 0,
     notes: project?.notes ?? '',
   });
   const [newClient, setNewClient] = useState('');
@@ -107,6 +110,11 @@ export function ProjectDrawer({ project, onClose, onSaved }: { project?: Project
             <Field label="Demo">{(p) => <MoneyInput {...p} value={f.estDemoCents} onChange={(c) => set('estDemoCents', c ?? 0)} />}</Field>
           </div>
         </fieldset>
+        {has('timeTracker') && (
+          <Field label="Hourly rate" hint="For the time tracker: time on this job goes onto invoices at this rate">
+            {(p) => <MoneyInput {...p} value={f.hourlyRateCents || null} onChange={(c) => set('hourlyRateCents', c ?? 0)} placeholder="e.g. 450" />}
+          </Field>
+        )}
         <Field label="Notes">{(p) => <textarea {...p} className="textarea" value={f.notes} onChange={(e) => set('notes', e.target.value)} rows={3} />}</Field>
         {error && <div className="banner alert small">{error}</div>}
         <button className="btn primary big block" disabled={busy}>

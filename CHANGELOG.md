@@ -2,6 +2,41 @@
 
 What changed in each version of Shap Pocket, newest first.
 
+## 0.7.0 (internal testing)
+
+More of what a small business needs, each one a switch under Settings → What you use.
+
+- **Credit notes:** take back part or all of an issued invoice (a return, a discount, a mistake),
+  with their own numbers (CN0001…). Issued, a credit note comes off the invoice's balance and its
+  VAT comes off the VAT return. Void it to undo.
+- **Pro-forma invoices:** ask to be paid before the work starts. Their own numbers, “not a tax
+  invoice” on the PDF, and turned into a real invoice once paid.
+- **PayShap:** your ShapID printed on unpaid invoices and pro-formas, and in the message when
+  you send one, so clients pay instantly from their banking app.
+- **Payment reminders:** Home lists overdue invoices (part-paid ones too) with a Send button:
+  the invoice and a friendly message to WhatsApp, email or SMS, noted on the invoice.
+- **VAT201:** the return box by box for each period (category A, B or C), with the due date;
+  Home reminds you when one is coming up.
+- **Turnover tax:** for micro businesses registered for it, the tax estimate switches to
+  turnover tax on SARS's 2026/27 table (up to R2.3 million), with the two interim payments.
+- **Supplier bills:** costs you'll pay later, what's owed and when it's due, paid off from
+  Bills to pay; Home shows bills due this week.
+- **Travel logbook:** SARS's logbook (trips, odometer at the start and end of the tax year,
+  business share), downloaded as a spreadsheet.
+- **Time tracker:** a clock per job, an hourly rate on the job, and unbilled time onto an
+  invoice in one tap.
+- **SARS filing guides:** step by step through VAT201, provisional tax, ITR12, ITR14,
+  EMP201, EMP501, turnover tax and dividends tax, with where each figure is in Shap. We're not
+  accountants: only file yourself if you're lekker with some accounting.
+- **For your accountant:** the books laid out for Sage 50 / Pastel, Xero, QuickBooks Online or
+  Sage Accounting (journal, sales, purchases, payments, debtors), with a preview and the total
+  to check after importing.
+- **Wipe all data** (Settings → Your business): back up first, type the business's name, then
+  the phone's lock.
+- Fixed: changing an invoice that was already saved could fail with “Expected string”; dates
+  from the books now reach the screens the way they do on Shap's server. Saving one Settings
+  tab no longer undoes a switch flipped a moment before on another.
+
 ## 0.6.0 (internal testing)
 
 Fitted to your trade, and quicker.

@@ -1,5 +1,5 @@
 import type { App as FastifyInstance } from '../http.js';
-import { addDays, addMonths, featureOn, financialYear, monthEnd, monthLabel, monthStart, monthsBetween } from '@shap/shared';
+import { addDays, addMonths, featureOn, financialYear, lastBusinessDay, monthEnd, monthLabel, monthStart, monthsBetween, vat201Due, vatPeriod } from '@shap/shared';
 import { requireRole, seesMoney, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { getSettings, today, freshTotals } from '../lib/books.js';
@@ -99,13 +99,14 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
       months,
       owing: {
         totalCents: owing.reduce((s, r) => s + Number(r.totalCents) - Number(r.paidCents), 0),
-        overdue: owing.filter((r) => r.paymentState === 'overdue').length,
+        overdue: owing.filter((r) => r.dueDate && String(r.dueDate) < now && Number(r.totalCents) > Number(r.paidCents)).length,
         invoices: owing.slice(-8).reverse(),
       },
       // Supplier bills due within a week (or overdue), when bills are switched on.
       billsDue: on('bills') ? (await bills(sql, 'open')).filter((b) => (b.dueDate ?? b.date) <= addDays(now, 7)) : [],
       // Overdue invoices to remind (oldest first), when payment reminders are switched on.
-      overdue: on('reminders') ? owing.filter((r) => r.paymentState === 'overdue').slice(0, 30) : [],
+      // Part-paid ones past their due date too: the rest is just as late.
+      overdue: on('reminders') ? owing.filter((r) => r.dueDate && String(r.dueDate) < now && Number(r.totalCents) > Number(r.paidCents)).slice(0, 30) : [],
       workers: workers.filter((w) => w.balanceCents !== 0),
       owedToWorkersCents: -bal('wages_payable'),
       unallocatedLabour: unallocated[0],
@@ -119,9 +120,37 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
       recurringMissing: (await findRecurring(sql))
         .filter((r) => r.status === 'missing')
         .map((r) => ({ key: r.key, label: r.label, months: r.missingMonths, usualCents: r.usualCents, onStatement: Boolean(r.onStatement) })),
+      // The time tracker's clock, if one is running.
+      timer: on('timeTracker')
+        ? ((await sql`select t.id, t.started_at, t.project_id, t.note, p.name as project_name from time_entries t left join projects p on p.id = t.project_id where t.ended_at is null`)[0] ?? null)
+        : null,
+      taxDue: taxDue(settings, now),
       bankCents: bal('bank'),
       ownerLoanCents: -bal('owner_loan'),
       projects: projects.map((p) => ({ ...p, ...totals(p as unknown as ProjectSummary) })),
     };
   });
+}
+
+/**
+ * SARS dates coming up in the next five weeks that Shap has the figures for: the VAT201 for the
+ * period just ended, and turnover tax's interim payments. (Payroll's EMP201 is in sarsDue.)
+ */
+export function taxDue(settings: { vatRegistered: boolean; vatCategory: 'A' | 'B' | 'C'; turnoverTax: boolean; fyEndMonth: number }, now: string) {
+  const soon = addDays(now, 35);
+  const out: { key: string; label: string; due: string; to: string }[] = [];
+  if (settings.vatRegistered) {
+    const current = vatPeriod(now, settings.vatCategory);
+    const last = vatPeriod(addMonths(current.start, -1), settings.vatCategory);
+    const due = vat201Due(last.end);
+    if (due >= now && due <= soon) out.push({ key: `vat201-${last.end}`, label: `VAT201 for ${last.start.slice(0, 7) === last.end.slice(0, 7) ? monthLabel(last.end.slice(0, 7)) : `${monthLabel(last.start.slice(0, 7), last.start.slice(0, 4) !== last.end.slice(0, 4))} to ${monthLabel(last.end.slice(0, 7))}`}`, due, to: '/accounts?tab=vat201' });
+  }
+  if (settings.turnoverTax) {
+    const fy = financialYear(now, settings.fyEndMonth);
+    const [y1, m1] = addMonths(fy.start, 5).split('-').map(Number) as [number, number];
+    const [y2, m2] = fy.end.split('-').map(Number) as [number, number];
+    for (const [label, due] of [['First turnover tax payment', lastBusinessDay(y1, m1)], ['Second turnover tax payment', lastBusinessDay(y2, m2)]] as const)
+      if (due >= now && due <= soon) out.push({ key: `tt-${due}`, label, due, to: '/accounts?tab=tax' });
+  }
+  return out;
 }

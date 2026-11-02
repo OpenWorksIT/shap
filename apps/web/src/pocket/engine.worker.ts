@@ -85,6 +85,22 @@ async function dropStore() {
   });
 }
 
+/**
+ * What a web server would have sent: dates as ISO text (Shap's screens expect JSON), big
+ * integers as numbers. Without this a timestamp reaches the screens as a Date object.
+ */
+function jsonReady(v: unknown): unknown {
+  if (v instanceof Date) return v.toISOString();
+  if (typeof v === 'bigint') return Number(v);
+  if (Array.isArray(v)) return v.map(jsonReady);
+  if (v && typeof v === 'object' && !(v instanceof ArrayBuffer) && !ArrayBuffer.isView(v)) {
+    const o: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(v)) o[k] = jsonReady(x);
+    return o;
+  }
+  return v;
+}
+
 self.onmessage = async (e: MessageEvent<EngineRequest>) => {
   const m = e.data;
   const reply = (r: { ok: true; result: unknown } | { ok: false; error: string }, transfer: Transferable[] = []) => (self as unknown as Worker).postMessage({ id: m.id, ...r }, transfer);
@@ -95,7 +111,7 @@ self.onmessage = async (e: MessageEvent<EngineRequest>) => {
       const r = await app!.handle(m.method, m.url, m.body);
       const bytes = r.body instanceof Uint8Array ? r.body : null;
       // Bytes go across as a copy we own, so they can be handed over rather than cloned.
-      const body = bytes ? bytes.slice().buffer : r.body;
+      const body = bytes ? bytes.slice().buffer : jsonReady(r.body);
       reply({ ok: true, result: { status: r.status, headers: r.headers, body, bytes: Boolean(bytes) } }, bytes ? [body as ArrayBuffer] : []);
     } else if (m.op === 'dump') {
       reply({ ok: true, result: await pg!.dumpDataDir('gzip') });
