@@ -39,6 +39,10 @@ More of what a small business needs, each one a switch under Settings → What y
   expenses, and the trial balance at your last year end as the opening balances, mapped to
   Shap's accounts. Each file is recognised by its columns; a preview shows what comes in before
   anything is saved, and it all goes in together or not at all.
+- **Shap Pocket on a computer:** the same app, installable from Edge or Chrome on Windows (or
+  any computer) at openworks.co.za/shap/app. It opens with no internet, keeps the books in the
+  browser's storage for the app, and backs up with a Save dialog straight into your OneDrive or
+  Google Drive folder. Backups move between the phone and the computer both ways.
 - The time tracker's clock is per person (ready for Shap's shared server).
 - Fixed: changing an invoice that was already saved could fail with “Expected string”; dates
   from the books now reach the screens the way they do on Shap's server. Saving one Settings

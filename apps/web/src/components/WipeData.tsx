@@ -6,7 +6,7 @@
 import { useState } from 'react';
 import { erase } from '../pocket/engine';
 import { backUp, scheduleBackupReminder } from '../lib/backup';
-import { isNative } from '../lib/native';
+import { device, isNative } from '../lib/native';
 import { useAuthed } from '../lib/session';
 import { phoneHasLock, unlock } from './AppLock';
 import { Drawer, Icon, useToast } from './ui';
@@ -17,7 +17,7 @@ export function WipeData() {
     <section className="panel panel-pad stack narrow-wide">
       <h3>Wipe all data</h3>
       <p className="small">
-        Deletes everything Shap Pocket keeps on this phone: invoices, quotes, clients, costs and slip photos, workers, payroll and settings. Backups you’ve saved
+        Deletes everything Shap Pocket keeps on this {device()}: invoices, quotes, clients, costs and slip photos, workers, payroll and settings. Backups you’ve saved
         elsewhere aren’t touched (delete those yourself if you want them gone too).
       </p>
       <button className="btn danger" style={{ alignSelf: 'flex-start' }} onClick={() => setOpen(true)}>

@@ -9,7 +9,7 @@ import { Logo } from '../components/Logo';
 import { Field, Icon } from '../components/ui';
 import { api, ApiError } from '../lib/api';
 import { BACKUP_PLACES, phoneBackupTip, placeSteps, restoreFrom, scheduleBackupReminder, setBackupPlace, type BackupPlace } from '../lib/backup';
-import { isNative, pickFile, platform } from '../lib/native';
+import { device, isNative, pickFile, platform } from '../lib/native';
 import { reportUsage } from '../lib/usage';
 import { useAuthed } from '../lib/session';
 import type { Settings } from '../lib/types';
@@ -219,7 +219,7 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
         )}
 
         {step === 'backup' && (
-          <Q title="Keep a copy off your phone" sub="Everything in Shap Pocket lives on this phone, not on the internet. If the phone is stolen, broken or lost, your books go with it, unless there’s a backup.">
+          <Q title={`Keep a copy off your ${device()}`} sub={`Everything in Shap Pocket lives on this ${device()}, not on the internet. If the ${device()} is stolen, broken or lost${isNative() ? '' : ', or the browser’s data is cleared'}, your books go with it, unless there’s a backup.`}>
             <p className="small">Where would you keep your backups?</p>
             <div className="choice-grid">
               {BACKUP_PLACES.filter((p) => !(p.android === false && os !== 'ios')).map((p) => (

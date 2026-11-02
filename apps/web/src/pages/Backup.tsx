@@ -5,7 +5,7 @@ import { lockEnabled, phoneHasLock, setLock } from '../components/AppLock';
 import { PageHead } from '../components/Shell';
 import { Icon, useToast } from '../components/ui';
 import { BACKUP_PLACES, backUp, backupPlace, lastBackup, placeSteps, remindOn, restoreFrom, scheduleBackupReminder, setBackupPlace, type BackupPlace } from '../lib/backup';
-import { isNative, pickFile, platform } from '../lib/native';
+import { device, isNative, pickFile, platform } from '../lib/native';
 import { useAuthed } from '../lib/session';
 
 export default function BackupPage() {
@@ -43,7 +43,7 @@ export default function BackupPage() {
   const doRestore = async () => {
     const file = await pickFile([]);
     if (!file) return;
-    if (!confirm(`Replace everything on this phone with the backup “${file.name}”? What’s here now is lost unless it’s in another backup.`)) return;
+    if (!confirm(`Replace everything on this ${device()} with the backup “${file.name}”? What’s here now is lost unless it’s in another backup.`)) return;
     setBusy('restore');
     try {
       await restoreFrom(file);
@@ -65,7 +65,7 @@ export default function BackupPage() {
 
   return (
     <div className="stack-lg narrow-wide">
-      <PageHead title="Backup" sub="Your books live only on this phone. Keep a copy somewhere else." />
+      <PageHead title="Backup" sub={`Your books live only on this ${device()}. Keep a copy somewhere else.`} />
       <section className="panel panel-pad stack">
         <h3>Back up</h3>
         <p className="small">One file with everything: invoices, costs, slips, settings.{place ? '' : ` ${where}`}</p>
@@ -97,13 +97,19 @@ export default function BackupPage() {
           </ol>
         )}
         <p className={`small ${days == null || days > 7 ? 'warn-text' : 'muted'}`}>
-          {last ? `Last backup: ${formatDate(last.toISOString().slice(0, 10))}${days ? ` (${days} day${days === 1 ? '' : 's'} ago)` : ' (today)'}.` : 'No backup yet from this phone.'}
+          {last ? `Last backup: ${formatDate(last.toISOString().slice(0, 10))}${days ? ` (${days} day${days === 1 ? '' : 's'} ago)` : ' (today)'}.` : `No backup yet from this ${device()}.`}
         </p>
         <button className="btn primary big block" onClick={() => void doBackup()} disabled={Boolean(busy)}>
           <Icon name="upload" size={18} />
           {busy === 'backup' ? 'Making the backup…' : 'Back up now'}
         </button>
-        <p className="xs muted">
+        {!isNative() && (
+          <p className="xs muted">
+            On a computer your books live in this browser’s storage for the Shap Pocket app. Clearing the browser’s data (cookies and site data) for openworks.co.za, or
+            uninstalling the browser, deletes them: the backup file is what keeps them safe. Back up at least once a week.
+          </p>
+        )}
+        {isNative() && <p className="xs muted">
           Shap also keeps a safety copy inside the app, so a phone update or low storage doesn’t lose your books.{' '}
           {platform() === 'ios'
             ? 'If your iPhone backs up to iCloud, that copy goes along with it.'
@@ -111,7 +117,7 @@ export default function BackupPage() {
               ? 'If your phone backs up to Google, that copy usually goes along with it (Google keeps up to 25 MB per app).'
               : ''}{' '}
           Still back up here at least once a week: it’s a file you control, and it moves your books to a new phone, iPhone or Android.
-        </p>
+        </p>}
         {isNative() && (
           <label className="check">
             <input
@@ -132,7 +138,7 @@ export default function BackupPage() {
 
       <section className="panel panel-pad stack">
         <h3>Restore</h3>
-        <p className="small">New phone, or need to go back? Choose a backup file (from Files, Drive, OneDrive…). It replaces everything on this phone.</p>
+        <p className="small">New phone or computer, or need to go back? Choose a backup file (from Files, Drive, OneDrive…). It replaces everything on this {device()}. A backup from the phone app opens on a computer, and the other way round.</p>
         <button className="btn block" onClick={() => void doRestore()} disabled={Boolean(busy)}>
           {busy === 'restore' ? 'Restoring…' : 'Restore a backup…'}
         </button>

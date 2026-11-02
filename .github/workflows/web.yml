@@ -1,0 +1,43 @@
+# The installable web app (Shap Pocket on Windows and other computers), published to GitHub
+# Pages and served at https://www.openworks.co.za/shap/app/ through the website's rewrite.
+# One-time setup: repository Settings → Pages → Source: GitHub Actions.
+name: Web app
+
+on:
+  push:
+    branches: [main]
+    paths: ['apps/web/**', 'packages/**', 'package-lock.json', '.github/workflows/web.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm -w @shap/web run build:web
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -12,6 +12,7 @@ import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
 import { greeting, say } from '../lib/words';
 import { lastBackup } from '../lib/backup';
+import { device } from '../lib/native';
 import type { ProjectRow } from '../lib/types';
 
 interface Dashboard {
@@ -88,7 +89,7 @@ function OwnerHome() {
       <Link key="backup" to="/backup" className="attention">
         <Icon name="upload" size={18} />
         <span className="grow">
-          <strong>{backupDays === null ? 'No backup yet.' : `Last backup ${backupDays} days ago.`}</strong> Your books are only on this phone: save a copy to your cloud drive.
+          <strong>{backupDays === null ? 'No backup yet.' : `Last backup ${backupDays} days ago.`}</strong> Your books are only on this {device()}: save a copy to your cloud drive.
         </span>
         Back up
         <Icon name="chevronRight" size={16} />

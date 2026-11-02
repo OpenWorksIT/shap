@@ -31,6 +31,7 @@ import { BusinessFields, LogoField } from '../components/BusinessForm';
 import { ApiImage } from '../components/Files';
 import { FEATURES, FEATURE_GROUPS, FEATURE_KEYS, featureOn, INDUSTRIES, TURNOVER_TAX_LIMIT_CENTS } from '@shap/shared';
 import { WipeData } from '../components/WipeData';
+import { device } from '../lib/native';
 import { reportUsage } from '../lib/usage';
 import { setTone, type Tone } from '../lib/words';
 import { SupportShap } from '../components/Support';
@@ -85,7 +86,7 @@ function About() {
     <section className="panel panel-pad stack narrow-wide">
       <h3>About Shap Pocket</h3>
       <p className="small">
-        Version {APP_VERSION}. Free and open source (AGPL-3.0 with an app store exception), by OpenWorks IT. Your books stay on this phone: there’s no Shap server.
+        Version {APP_VERSION}. Free and open source (AGPL-3.0 with an app store exception), by OpenWorks IT. Your books stay on this {device()}: there’s no Shap server.
       </p>
       <p className="small">
         Source code: <a href="https://github.com/OpenWorksIT/shap-pocket" target="_blank" rel="noreferrer">github.com/OpenWorksIT/shap-pocket</a>

@@ -5,6 +5,9 @@ import { App } from './App';
 import { AppLock } from './components/AppLock';
 import { ToastProvider } from './components/ui';
 import './styles.css';
+import { startWebApp } from './lib/pwa';
+
+startWebApp();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

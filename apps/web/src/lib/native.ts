@@ -6,6 +6,8 @@ import { Capacitor } from '@capacitor/core';
 
 export const isNative = () => Capacitor.isNativePlatform();
 export const platform = () => Capacitor.getPlatform() as 'ios' | 'android' | 'web';
+/** What the books live on, for the words on screen: the phone apps, or the installed web app on a computer. */
+export const device = () => (isNative() ? 'phone' : 'computer');
 
 async function toBase64(blob: Blob): Promise<string> {
   const buf = new Uint8Array(await blob.arrayBuffer());
