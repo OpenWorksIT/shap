@@ -1,11 +1,11 @@
 /**
- * Time tracker: a clock per job (one running at a time), an hourly rate on the job, and the
+ * Time tracker: a clock per job (one running at a time for each person), an hourly rate on the job, and the
  * unbilled time onto an invoice as a line. Time is for billing; it doesn't touch the books.
  */
 import type { App as FastifyInstance } from '../http.js';
 import { timeEntryInput } from '@shap/shared';
 import { z } from 'zod';
-import { requireRole } from '../auth.js';
+import { requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { q } from '../lib/books.js';
 import { badRequest, notFound } from '../lib/errors.js';
@@ -20,31 +20,34 @@ export function registerTimeRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   /** Time entries (a job's, or all), newest first, and the clock if one is running. */
   app.get('/api/time', owner, async (req) => {
+    const user = userOrThrow(req);
     const { project, unbilled } = q(req);
     const rows = await sql`
-      select t.*, p.name as project_name, p.number as project_number, p.hourly_rate_cents, d.number as billed_number
-      from time_entries t left join projects p on p.id = t.project_id left join documents d on d.id = t.billed_document_id
+      select t.*, p.name as project_name, p.number as project_number, p.hourly_rate_cents, d.number as billed_number, u.name as user_name
+      from time_entries t left join projects p on p.id = t.project_id left join documents d on d.id = t.billed_document_id left join users u on u.id = t.user_id
       where (${project ?? null}::uuid is null or t.project_id = ${project ?? null}::uuid)
         and (${unbilled === '1'} = false or (t.billed_document_id is null and t.ended_at is not null))
       order by t.started_at desc limit 500`;
-    const [running] = await sql`select t.*, p.name as project_name from time_entries t left join projects p on p.id = t.project_id where t.ended_at is null`;
+    const [running] = await sql`select t.*, p.name as project_name from time_entries t left join projects p on p.id = t.project_id where t.ended_at is null and t.user_id is not distinct from ${user.id}`;
     return { entries: rows, running: running ?? null };
   });
 
   /** Starts the clock for a job (stopping any other that's running). */
   app.post('/api/time/start', owner, async (req) => {
+    const user = userOrThrow(req);
     const { projectId, note } = parse(z.object({ projectId: z.string().uuid().nullable().default(null), note: z.string().max(300).default('') }), req.body);
     return sql.begin(async (tx) => {
-      await tx`update time_entries set ended_at = now(), minutes = greatest(0, round(extract(epoch from now() - started_at) / 60))::int where ended_at is null`;
-      const [row] = await tx`insert into time_entries (project_id, started_at, note) values (${projectId}, now(), ${note}) returning *`;
+      await tx`update time_entries set ended_at = now(), minutes = greatest(0, round(extract(epoch from now() - started_at) / 60))::int where ended_at is null and user_id is not distinct from ${user.id}`;
+      const [row] = await tx`insert into time_entries (project_id, started_at, note, user_id) values (${projectId}, now(), ${note}, ${user.id}) returning *`;
       return row;
     });
   });
 
-  app.post('/api/time/stop', owner, async () => {
+  app.post('/api/time/stop', owner, async (req) => {
+    const user = userOrThrow(req);
     const [row] = await sql`
       update time_entries set ended_at = now(), minutes = greatest(0, round(extract(epoch from now() - started_at) / 60))::int
-      where ended_at is null returning *`;
+      where ended_at is null and user_id is not distinct from ${user.id} returning *`;
     if (!row) throw badRequest('No clock is running');
     return row;
   });
@@ -54,7 +57,7 @@ export function registerTimeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const input = parse(timeEntryInput, req.body);
     if (!input.endedAt) throw badRequest('Give the end time');
     const minutes = minutesBetween(input.startedAt, input.endedAt);
-    const [row] = await sql`insert into time_entries (project_id, started_at, ended_at, minutes, note) values (${input.projectId ?? null}, ${input.startedAt}, ${input.endedAt}, ${minutes}, ${input.note}) returning *`;
+    const [row] = await sql`insert into time_entries (project_id, started_at, ended_at, minutes, note, user_id) values (${input.projectId ?? null}, ${input.startedAt}, ${input.endedAt}, ${minutes}, ${input.note}, ${userOrThrow(req).id}) returning *`;
     return row;
   });
   app.put('/api/time/:id', owner, async (req) => {

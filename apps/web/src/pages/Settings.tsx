@@ -61,6 +61,14 @@ export default function SettingsPage() {
         <>
           <BusinessSettings />
           {has('brands') && <TradingNames />}
+          <section className="panel panel-pad stack narrow-wide">
+            <h3>Coming from another package?</h3>
+            <p className="small">Bring your clients, invoices (with what’s been paid), quotes, items and opening balances from Sage, Xero, QuickBooks, Zoho or Invoice Ninja.</p>
+            <Link className="btn" to="/move-in" style={{ alignSelf: 'flex-start' }}>
+              <Icon name="upload" size={18} />
+              Move in
+            </Link>
+          </section>
           <WipeData />
         </>
       )}

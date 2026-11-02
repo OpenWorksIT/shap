@@ -33,9 +33,17 @@ More of what a small business needs, each one a switch under Settings → What y
   to check after importing.
 - **Wipe all data** (Settings → Your business): back up first, type the business's name, then
   the phone's lock.
+- **Move in from another package** (Settings → Your business): the CSV exports of Sage
+  Accounting, Xero, QuickBooks Online, Zoho Invoice / Books or Invoice Ninja. Clients, invoices
+  with what's been paid (or the payments export, with its dates), quotes, items, bills and
+  expenses, and the trial balance at your last year end as the opening balances, mapped to
+  Shap's accounts. Each file is recognised by its columns; a preview shows what comes in before
+  anything is saved, and it all goes in together or not at all.
+- The time tracker's clock is per person (ready for Shap's shared server).
 - Fixed: changing an invoice that was already saved could fail with “Expected string”; dates
   from the books now reach the screens the way they do on Shap's server. Saving one Settings
-  tab no longer undoes a switch flipped a moment before on another.
+  tab no longer undoes a switch flipped a moment before on another. Long lists no longer push
+  screens wider than the phone.
 
 ## 0.6.0 (internal testing)
 

@@ -122,7 +122,7 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
         .map((r) => ({ key: r.key, label: r.label, months: r.missingMonths, usualCents: r.usualCents, onStatement: Boolean(r.onStatement) })),
       // The time tracker's clock, if one is running.
       timer: on('timeTracker')
-        ? ((await sql`select t.id, t.started_at, t.project_id, t.note, p.name as project_name from time_entries t left join projects p on p.id = t.project_id where t.ended_at is null`)[0] ?? null)
+        ? ((await sql`select t.id, t.started_at, t.project_id, t.note, p.name as project_name from time_entries t left join projects p on p.id = t.project_id where t.ended_at is null and t.user_id is not distinct from ${user.id}`)[0] ?? null)
         : null,
       taxDue: taxDue(settings, now),
       bankCents: bal('bank'),

@@ -25,6 +25,7 @@ const WelcomePage = lazy(() => import('./pages/Welcome'));
 const BillsPage = lazy(() => import('./pages/Bills'));
 const LogbookPage = lazy(() => import('./pages/Logbook'));
 const GuidesPage = lazy(() => import('./pages/Guides'));
+const MoveInPage = lazy(() => import('./pages/MoveIn'));
 
 export function App() {
   return (
@@ -81,6 +82,7 @@ function Books() {
           <Route path="/accounts" element={<AccountsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/backup" element={<BackupPage />} />
+          <Route path="/move-in" element={<MoveInPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>

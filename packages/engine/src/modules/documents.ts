@@ -211,9 +211,14 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
          -- Not lines made from one job's costs ("Labour – Smith roof"): they're never usual.
          and l.description !~ '^(Labour|Materials|Demo|Demolition|Other|Work / time|Parts / materials) – '
          and d.issue_date > current_date - 540
-       order by lower(l.description), d.issue_date desc, d.created_at desc`.then((rows) =>
-      (rows as unknown as { uses: number; issueDate: string }[]).sort((a, b) => b.uses - a.uses || b.issueDate.localeCompare(a.issueDate)).slice(0, 40),
-    );
+       order by lower(l.description), d.issue_date desc, d.created_at desc`.then(async (rows) => {
+      const used = (rows as unknown as { description: string; uses: number; issueDate: string }[]).sort((a, b) => b.uses - a.uses || b.issueDate.localeCompare(a.issueDate)).slice(0, 40);
+      // Then the items list brought in from another package, for what hasn't been charged yet.
+      const seen = new Set(used.map((u) => u.description.toLowerCase()));
+      const items = await sql<{ description: string; category: string; unit: string; unitPriceCents: number }[]>`
+        select description, category, unit, unit_price_cents from items where active order by description limit 200`;
+      return [...used, ...items.filter((i) => !seen.has(i.description.toLowerCase())).map((i) => ({ ...i, uses: 0, issueDate: '' }))].slice(0, 120);
+    });
   });
 
   app.get('/api/documents', { preHandler: requireRole('owner', 'accountant') }, async (req) => {

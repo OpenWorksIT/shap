@@ -28,6 +28,7 @@ import { registerBillRoutes } from './modules/bills.js';
 import { registerLogbookRoutes } from './modules/logbook.js';
 import { registerTimeRoutes } from './modules/timetrack.js';
 import { registerAccountantExportRoutes } from './modules/accountantExport.js';
+import { registerMoveInRoutes } from './modules/movein.js';
 
 export interface BuildOptions {
   sql: Sql;
@@ -63,6 +64,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: App; ctx: Ctx
   registerLogbookRoutes(app, ctx);
   registerTimeRoutes(app, ctx);
   registerAccountantExportRoutes(app, ctx);
+  registerMoveInRoutes(app, ctx);
   registerBankRoutes(app, ctx);
   registerStatementRoutes(app, ctx);
   registerCompanyFileRoutes(app, ctx);
