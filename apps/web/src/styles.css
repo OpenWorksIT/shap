@@ -1309,7 +1309,7 @@ button.list-row {
 .line-nums {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: 76px 80px minmax(120px, 160px) 1fr auto;
+  grid-template-columns: 76px 96px minmax(120px, 160px) 1fr auto;
   gap: 8px;
   align-items: center;
 }
@@ -1721,7 +1721,7 @@ button.list-row {
     grid-template-columns: 1fr;
   }
   .line-nums {
-    grid-template-columns: 64px 64px 1fr auto;
+    grid-template-columns: 56px 92px 1fr auto;
   }
   .line-nums .line-total {
     grid-column: 1 / 4;
