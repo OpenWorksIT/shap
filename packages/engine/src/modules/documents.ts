@@ -6,7 +6,7 @@ import type { Ctx } from '../context.js';
 import { pgCode, PG, type Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
 import { assertOpen, formatNumber, getSettings, q, today } from '../lib/books.js';
-import { badRequest, conflict, notFound } from '../lib/errors.js';
+import { badRequest, conflict, notFound, HttpError } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 import { renderDocumentPdf, type BrandRow, type PdfDocument } from './pdf.js';
 
@@ -243,8 +243,12 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const input = parse(documentInput, req.body);
-    const [old] = await sql<{ kind: DocKind; status: string; issueDate: string; number: string; vatRateBp: number }[]>`select * from documents where id = ${id}`;
+    const [old] = await sql<{ kind: DocKind; status: string; issueDate: string; number: string; vatRateBp: number; updatedAt: Date | string }[]>`select * from documents where id = ${id}`;
     if (!old) throw notFound('Document');
+    // Someone else saved it after this screen opened it: don't overwrite their change.
+    if (input.expectUpdatedAt && Math.abs(new Date(old.updatedAt).getTime() - new Date(input.expectUpdatedAt).getTime()) > 1) {
+      throw new HttpError(409, 'Someone else changed this while you had it open. Reload to see their changes, then make yours again.', 'stale_record');
+    }
     if (old.status === 'void') throw badRequest('This invoice was voided. Duplicate it to make a new one.');
     if (old.kind === 'invoice' && old.status === 'issued') await assertOpen(sql, old.issueDate, input.issueDate);
     const settings = await getSettings(sql);
