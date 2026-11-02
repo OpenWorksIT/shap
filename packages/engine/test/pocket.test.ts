@@ -38,6 +38,18 @@ describe('a new phone', () => {
     expect((await me.get('/api/reference')).brands).toHaveLength(0);
   });
 
+  it('prints a card payment link on unpaid invoices', async () => {
+    const { settings } = await me.get('/api/reference');
+    const bad = await me.call({ method: 'PUT', url: '/api/settings', payload: { ...settings, payLink: 'pay.yoco.com/x' } });
+    expect(bad.statusCode).toBe(400);
+    await me.post('/api/settings', { ...settings, payLink: 'https://pay.yoco.com/sparky' }, 'PUT');
+    const inv = await me.post('/api/documents', { kind: 'invoice', issueDate: '2026-11-01', payLink: 'https://pay.yoco.com/r/abc123', lines: [{ category: 'labour', description: 'Call-out', qty: 1, unitPriceCents: 85000 }] });
+    expect((await me.get(`/api/documents/${inv.id}`)).doc.payLink).toBe('https://pay.yoco.com/r/abc123');
+    const pdf = await me.call({ method: 'GET', url: `/api/documents/${inv.id}/pdf` });
+    const text = new TextDecoder('latin1').decode(pdf.rawPayload);
+    expect(text).toContain('https://pay.yoco.com/r/abc123'); // the link annotation
+  });
+
   it('has no sign-in, users, demo, email or server routes', () => {
     const paths = env.app.list().map((r) => r.path);
     for (const gone of ['/api/auth/login', '/api/users', '/api/demo', '/api/system', '/api/documents/:id/email', '/api/monthly-invoices']) {

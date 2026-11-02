@@ -121,10 +121,10 @@ export async function createDocument(tx: Db, user: AuthUser | null, kind: DocKin
   try {
     [row] = await tx<{ id: string; number: string }[]>`
       insert into documents (kind, number, status, project_id, client_id, issue_date, due_date, title, notes, terms, vat_rate_bp, created_by, brand_id,
-                             deposit_bp, deposit_cents, deposit_show_balance)
+                             deposit_bp, deposit_cents, deposit_show_balance, pay_link)
       values (${kind}, ${number}, ${opts.status ?? 'draft'}, ${input.projectId ?? null}, ${clientId}, ${input.issueDate}, ${due},
               ${input.title}, ${input.notes}, ${input.terms || (kind === 'invoice' ? settings.invoiceTerms : settings.quoteTerms)},
-              ${vatRate}, ${user?.id ?? null}, ${brandId}, ${input.depositBp}, ${input.depositCents}, ${input.depositShowBalance})
+              ${vatRate}, ${user?.id ?? null}, ${brandId}, ${input.depositBp}, ${input.depositCents}, ${input.depositShowBalance}, ${input.payLink ?? ''})
       returning id, number`;
   } catch (err) {
     if (pgCode(err) === PG.uniqueViolation) throw conflict(`There is already ${kind === 'invoice' ? 'an invoice' : 'a quote'} numbered ${number}`);
@@ -245,7 +245,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
           update documents set number = ${number}, project_id = ${input.projectId ?? null}, client_id = ${clientId},
             issue_date = ${input.issueDate}, due_date = ${input.dueDate ?? null}, title = ${input.title}, notes = ${input.notes},
             terms = ${input.terms}, vat_rate_bp = ${vatRate}, updated_at = now(),
-            deposit_bp = ${input.depositBp}, deposit_cents = ${input.depositCents}, deposit_show_balance = ${input.depositShowBalance},
+            deposit_bp = ${input.depositBp}, deposit_cents = ${input.depositCents}, deposit_show_balance = ${input.depositShowBalance}, pay_link = ${input.payLink ?? ''},
             brand_id = ${input.brandId ?? (await defaultBrand(tx, input.projectId ?? null, clientId))}
           where id = ${id}`;
       } catch (err) {

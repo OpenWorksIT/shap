@@ -6,7 +6,9 @@
 export const FEATURES = {
   jobs: { label: 'Jobs', hint: 'Track each job’s quote, costs and profit', default: true },
   quotes: { label: 'Quotes', hint: 'Send quotes and turn them into invoices', default: true },
-  workers: { label: 'Workers and wages', hint: 'Log days worked by helpers and pay them', default: false },
+  workers: { label: 'Casual workers', hint: 'Log days worked by helpers paid by the day, and pay them', default: false },
+  payroll: { label: 'Payroll', hint: 'Employees on a salary: payslips, PAYE, UIF and SDL', default: false },
+  dividends: { label: 'Dividends', hint: 'Pay the company’s shareholders (you) dividends, with dividends tax', default: false },
   bank: { label: 'Bank statements', hint: 'Import statements and tick off what’s been captured', default: true },
   assets: { label: 'Assets', hint: 'Tools, vehicles and equipment, with wear and tear', default: true },
   brands: { label: 'More than one trading name', hint: 'Invoice under different names and logos', default: false },

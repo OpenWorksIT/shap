@@ -39,6 +39,7 @@ interface Draft {
   depositPercent: string;
   depositCents: number | null;
   depositShowBalance: boolean;
+  payLink: string;
 }
 
 /** A line being edited: quantity as typed, and no price until one is entered (no 0 to delete first). */
@@ -84,6 +85,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
     depositPercent: doc?.depositBp ? String(doc.depositBp / 100) : '50',
     depositCents: doc?.depositCents ?? null,
     depositShowBalance: doc?.depositShowBalance ?? true,
+    payLink: (doc as { payLink?: string } | undefined)?.payLink ?? '',
   });
   const [d, setD] = useState<Draft>(initial);
   const [dirty, setDirty] = useState(!detail);
@@ -139,6 +141,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
     depositBp: d.depositMode === 'percent' && toQty(d.depositPercent) > 0 ? Math.min(10000, Math.round(toQty(d.depositPercent) * 100)) : null,
     depositCents: d.depositMode === 'amount' && d.depositCents ? d.depositCents : null,
     depositShowBalance: d.depositShowBalance,
+    payLink: d.payLink,
   });
 
   const run = async (fn: () => Promise<void>) => {
@@ -213,7 +216,8 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
       if (dirty) await save();
       const { blob, filename } = await apiBlob(`/api/documents/${doc!.id}/pdf`);
       const what = `${kind === 'invoice' ? (settings.vatRegistered ? 'tax invoice' : 'invoice') : 'quote'} ${doc!.number}`;
-      const text = `Good day${doc!.clientName ? ` ${doc!.clientName}` : ''},\n\nPlease find ${what} attached.\n\nKind regards,\n${from}`;
+      const link = kind === 'invoice' ? d.payLink || settings.payLink : '';
+      const text = `Good day${doc!.clientName ? ` ${doc!.clientName}` : ''},\n\nPlease find ${what} attached.${link ? `\n\nPay by card: ${link}` : ''}\n\nKind regards,\n${from}`;
       const how = await shareFile(blob, filename, `${label} ${doc!.number}`, text);
       if (how === 'downloaded') toast('PDF saved');
       if (how !== 'cancelled') await api(`/api/documents/${doc!.id}/shared`, { body: {} }).then(() => reload());
@@ -368,6 +372,11 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
 
           <section className="panel panel-pad stack">
             <Field label="Notes (on the PDF)">{(p) => <textarea {...p} className="textarea" rows={2} value={d.notes} onChange={(e) => set('notes', e.target.value)} disabled={!editable} />}</Field>
+            {kind === 'invoice' && (
+              <Field label="Card payment link (optional)" hint={settings.payLink ? 'Blank uses your usual link from Settings. Make one for this amount in the Yoco app and paste it here.' : 'Paste a Yoco (or SnapScan) payment link: it’s printed on the invoice and added to your message.'}>
+                {(p) => <input {...p} className="input" type="url" inputMode="url" value={d.payLink} onChange={(e) => set('payLink', e.target.value)} placeholder={settings.payLink || 'https://pay.yoco.com/…'} disabled={!editable} />}
+              </Field>
+            )}
             <Field label="Terms">{(p) => <textarea {...p} className="textarea" rows={3} value={d.terms} onChange={(e) => set('terms', e.target.value)} disabled={!editable} />}</Field>
           </section>
         </div>

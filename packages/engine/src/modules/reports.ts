@@ -155,6 +155,9 @@ function sendCsv(reply: FastifyReply, filename: string, csv: string) {
   return reply.send(csv);
 }
 
+/** Journals the app posts itself; changed only where they come from. */
+const MADE_BY_APP: Record<string, string> = { payroll: 'a pay run (Payroll)', dividend: 'a dividend (Payroll → Dividends)', sars: 'a payment to SARS (Payroll → SARS)' };
+
 export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
   const readers = { preHandler: requireRole('owner', 'accountant') };
@@ -291,8 +294,9 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = parse(idParam, req.params);
     const input = parse(journalInput, req.body);
     checkJournal(input);
-    const [old] = await sql<{ date: string }[]>`select date from journals where id = ${id}`;
+    const [old] = await sql<{ date: string; kind: string }[]>`select date, kind from journals where id = ${id}`;
     if (!old) throw notFound('Journal');
+    if (MADE_BY_APP[old.kind]) throw badRequest(`This entry was made by ${MADE_BY_APP[old.kind]}: change it there.`);
     await assertOpen(sql, old.date, input.date);
     await sql.begin(async (tx) => {
       await tx`update journals set date = ${input.date}, description = ${input.description}, reference = ${input.reference} where id = ${id}`;
@@ -305,8 +309,9 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.delete('/api/journals/:id', owner, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
-    const [old] = await sql<{ date: string }[]>`select date from journals where id = ${id}`;
+    const [old] = await sql<{ date: string; kind: string }[]>`select date, kind from journals where id = ${id}`;
     if (!old) throw notFound('Journal');
+    if (MADE_BY_APP[old.kind]) throw badRequest(`This entry was made by ${MADE_BY_APP[old.kind]}: change it there.`);
     await assertOpen(sql, old.date);
     await sql.begin(async (tx) => {
       await tx`delete from journals where id = ${id}`;

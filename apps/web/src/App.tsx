@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
+import { FeedbackButton } from './components/Feedback';
 import { Shell } from './components/Shell';
 import { Loading } from './components/ui';
 import { SessionProvider, useAuthed, useSession } from './lib/session';
@@ -18,6 +19,7 @@ const ClientPage = lazy(() => import('./pages/Clients').then((m) => ({ default: 
 const AccountsPage = lazy(() => import('./pages/Accounts'));
 const SettingsPage = lazy(() => import('./pages/Settings'));
 const BackupPage = lazy(() => import('./pages/Backup'));
+const PayrollPage = lazy(() => import('./pages/Payroll'));
 const WelcomePage = lazy(() => import('./pages/Welcome'));
 
 export function App() {
@@ -46,9 +48,11 @@ function Opened() {
 
 function Books() {
   const { settings, has } = useAuthed();
+  const pays = has('payroll') || (settings.businessType === 'company' && has('dividends'));
   if (!settings.setupDone) return <WelcomePage />;
   return (
     <Shell>
+      <FeedbackButton />
       <Suspense fallback={<Loading />}>
         <Routes>
           <Route path="/" element={<HomePage />} />
@@ -57,6 +61,7 @@ function Books() {
           {has('jobs') && <Route path="/jobs/:id" element={<ProjectPage />} />}
           {has('workers') && <Route path="/workers" element={<WorkersPage />} />}
           {has('workers') && <Route path="/workers/:id" element={<WorkerPage />} />}
+          {pays && <Route path="/payroll" element={<PayrollPage />} />}
           <Route path="/costs" element={<CostsPage />} />
           <Route path="/documents" element={<DocumentsPage />} />
           <Route path="/documents/new" element={<DocumentPage />} />

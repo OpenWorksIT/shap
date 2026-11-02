@@ -5,6 +5,7 @@ import { PayForm } from '../components/PayForm';
 import { PageHead } from '../components/Shell';
 import { Tabs } from '../components/ui';
 import { useAuthed } from '../lib/session';
+import { say } from '../lib/words';
 
 type Tab = 'labour' | 'cost' | 'pay';
 
@@ -18,7 +19,7 @@ export default function LogPage() {
   const setTab = (t: Tab) => setParams({ tab: t }, { replace: true });
   return (
     <div className="narrow stack-lg">
-      <PageHead title={workers ? 'Add' : 'Add a cost'} sub="Capture it while it’s fresh: snap the slip." />
+      <PageHead title={workers ? 'Add' : 'Add a cost'} sub={say('addSub')} />
       {workers && (
         <Tabs<Tab>
           value={tab}

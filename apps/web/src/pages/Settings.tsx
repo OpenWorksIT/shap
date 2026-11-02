@@ -28,7 +28,9 @@ import { useAuthed } from '../lib/session';
 import type { Brand, Settings } from '../lib/types';
 import { BusinessFields, LogoField } from '../components/BusinessForm';
 import { ApiImage } from '../components/Files';
-import { FEATURES, FEATURE_KEYS, featureOn } from '@shap/shared';
+import { FEATURES, FEATURE_KEYS, featureOn, INDUSTRIES } from '@shap/shared';
+import { reportUsage } from '../lib/usage';
+import { setTone, type Tone } from '../lib/words';
 
 type Tab = 'business' | 'invoicing' | 'sections' | 'lists';
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -127,43 +129,103 @@ function BusinessSettings() {
   );
 }
 
-/** Switch parts of the app off that a business like yours doesn't need. */
+/** Switch parts of the app off that a business like yours doesn't need; how Shap talks; what it may share. */
 function Sections() {
   const { settings, refreshReference } = useAuthed();
   const toast = useToast();
   const [on, setOn] = useState<Record<string, boolean>>(() => Object.fromEntries(FEATURE_KEYS.map((k) => [k, featureOn(settings.features, k)])));
+  const [prefs, setPrefs] = useState({ tone: settings.tone, industry: settings.industry, usageConsent: settings.usageConsent, sdl: settings.sdl });
+  const save = async (changes: Partial<Settings>, done: string) => {
+    try {
+      await saveSettings(settings, changes);
+      await refreshReference();
+      const merged = { ...settings, ...changes };
+      if (merged.usageConsent) void reportUsage(merged);
+      toast(done);
+      return true;
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Couldn’t save', 'error');
+      return false;
+    }
+  };
   const toggle = async (k: (typeof FEATURE_KEYS)[number], value: boolean) => {
     const next = { ...on, [k]: value };
     setOn(next);
-    try {
-      await saveSettings(settings, { features: next });
-      await refreshReference();
-      toast(`${FEATURES[k].label} ${value ? 'on' : 'off'}`);
-    } catch (err) {
-      setOn(on);
-      toast(err instanceof ApiError ? err.message : 'Couldn’t save', 'error');
-    }
+    if (!(await save({ features: next }, `${FEATURES[k].label} ${value ? 'on' : 'off'}`))) setOn(on);
+  };
+  const pref = async <K extends keyof typeof prefs>(k: K, v: (typeof prefs)[K]) => {
+    const next = { ...prefs, [k]: v };
+    setPrefs(next);
+    if (k === 'tone') setTone(v as Tone);
+    if (!(await save({ [k]: v } as Partial<Settings>, 'Saved'))) setPrefs(prefs);
   };
   return (
-    <section className="panel narrow-wide">
-      <div className="panel-head">
-        <strong>What you use</strong>
-        <div className="xs muted">Switch off what a business like yours doesn’t need. Nothing is deleted: switch it on again and it’s all still there.</div>
-      </div>
-      <ul className="list">
-        {FEATURE_KEYS.map((k) => (
-          <li key={k} className="list-row">
-            <label className="check grow">
-              <input type="checkbox" checked={on[k]} onChange={(e) => void toggle(k, e.target.checked)} />
-              <span>
-                {FEATURES[k].label}
-                <div className="xs muted">{FEATURES[k].hint}</div>
-              </span>
-            </label>
-          </li>
-        ))}
-      </ul>
-    </section>
+    <div className="stack-lg narrow-wide">
+      <section className="panel">
+        <div className="panel-head">
+          <strong>What you use</strong>
+          <div className="xs muted">Switch off what a business like yours doesn’t need. Nothing is deleted: switch it on again and it’s all still there.</div>
+        </div>
+        <ul className="list">
+          {FEATURE_KEYS.filter((k) => k !== 'dividends' || settings.businessType === 'company').map((k) => (
+            <li key={k} className="list-row">
+              <label className="check grow">
+                <input type="checkbox" checked={on[k]} onChange={(e) => void toggle(k, e.target.checked)} />
+                <span>
+                  {FEATURES[k].label}
+                  <div className="xs muted">{FEATURES[k].hint}</div>
+                </span>
+              </label>
+            </li>
+          ))}
+          {on.payroll && (
+            <li className="list-row">
+              <label className="check grow">
+                <input type="checkbox" checked={prefs.sdl} onChange={(e) => void pref('sdl', e.target.checked)} />
+                <span>
+                  Registered for the Skills Development Levy
+                  <div className="xs muted">When your payroll is over R500 000 a year: 1% of salaries, paid by you.</div>
+                </span>
+              </label>
+            </li>
+          )}
+        </ul>
+      </section>
+      <section className="panel panel-pad stack">
+        <h3>How Shap talks to you</h3>
+        <div className="row wrap">
+          <button type="button" className={`btn ${prefs.tone !== 'formal' ? 'primary' : ''}`} onClick={() => void pref('tone', 'casual')}>
+            Lekker and casual
+          </button>
+          <button type="button" className={`btn ${prefs.tone === 'formal' ? 'primary' : ''}`} onClick={() => void pref('tone', 'formal')}>
+            Formal
+          </button>
+        </div>
+        <p className="xs muted">Only the app’s greetings and confirmations change. Quotes and invoices always stay professional.</p>
+      </section>
+      <section className="panel panel-pad stack">
+        <h3>Your kind of business</h3>
+        <Field label="What you do">
+          {(p) => (
+            <select {...p} className="select" value={prefs.industry} onChange={(e) => void pref('industry', e.target.value)}>
+              <option value="">Not said</option>
+              {INDUSTRIES.map((i) => (
+                <option key={i.key} value={i.key}>
+                  {i.label}
+                </option>
+              ))}
+            </select>
+          )}
+        </Field>
+        <label className="check">
+          <input type="checkbox" checked={prefs.usageConsent} onChange={(e) => void pref('usageConsent', e.target.checked)} />
+          <span>
+            Let OpenWorks know, anonymously, what kind of business uses Shap
+            <div className="xs muted">Only the kind of business and which parts are switched on. Never names, clients or figures.</div>
+          </span>
+        </label>
+      </section>
+    </div>
   );
 }
 
@@ -260,6 +322,9 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
                 {(p) => <input {...p} className="input" type="number" min={0} step={1} value={f.markupBp / 100} onChange={(e) => set('markupBp', Math.round(Number(e.target.value) * 100))} />}
               </Field>
             </div>
+            <Field label="Card payment link (optional)" hint="A Yoco (or SnapScan) payment link: printed on unpaid invoices and added to the message when you send one. Any invoice can have its own.">
+              {(p) => <input {...p} className="input" type="url" inputMode="url" value={f.payLink} onChange={(e) => set('payLink', e.target.value)} placeholder="https://pay.yoco.com/…" />}
+            </Field>
             <Field label="Invoice terms">{(p) => <textarea {...p} className="textarea" rows={3} value={f.invoiceTerms} onChange={(e) => set('invoiceTerms', e.target.value)} />}</Field>
             <Field label="Quote terms">{(p) => <textarea {...p} className="textarea" rows={3} value={f.quoteTerms} onChange={(e) => set('quoteTerms', e.target.value)} />}</Field>
           </section>

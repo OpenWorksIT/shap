@@ -20,6 +20,12 @@ export interface Settings {
   logoId: string | null;
   businessType: 'company' | 'sole_prop';
   features: Record<string, boolean>;
+  tone: 'casual' | 'formal';
+  industry: string;
+  usageConsent: boolean;
+  installId?: string;
+  sdl: boolean;
+  payLink: string;
   setupDone: boolean;
   logoLayout: { zoom?: number; x?: number; y?: number };
   accent: string;

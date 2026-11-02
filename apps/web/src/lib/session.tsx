@@ -6,6 +6,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { featureOn, type Feature } from '@shap/shared';
 import { api } from './api';
+import { setTone } from './words';
 import type { Reference, Settings, User } from './types';
 
 interface SessionValue {
@@ -25,7 +26,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   const refreshReference = useCallback(async () => {
-    setRef(await api<Reference>('/api/reference'));
+    const r = await api<Reference>('/api/reference');
+    setTone((r.settings as Settings).tone);
+    setRef(r);
   }, []);
 
   useEffect(() => {

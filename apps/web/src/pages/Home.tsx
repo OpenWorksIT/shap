@@ -5,6 +5,7 @@ import { PageHead } from '../components/Shell';
 import { DocChip, Empty, ErrorBox, Icon, Kpi, Loading, Money, ProjectChip } from '../components/ui';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
+import { greeting, say } from '../lib/words';
 import { lastBackup } from '../lib/backup';
 import type { ProjectRow } from '../lib/types';
 
@@ -27,6 +28,7 @@ interface Dashboard {
     failed: { id: string; documentId: string; title: string; clientName: string | null; error: string }[];
     waiting: { id: string; scheduleId: string; number: string; clientName: string | null; mode: string }[];
   };
+  sarsDue?: { kind: 'emp201' | 'dwt'; period: string; owingCents: number; dueOn: string; late: boolean }[];
   recurringMissing?: { key: string; label: string; months: string[]; usualCents: number; onStatement: boolean }[];
   bankCents: number;
   ownerLoanCents: number;
@@ -60,6 +62,17 @@ function OwnerHome() {
         <Icon name="chevronRight" size={16} />
       </Link>
     ),
+    ...(data.sarsDue ?? []).map((d) => (
+      <Link key={`sars-${d.kind}-${d.period}`} to="/payroll?tab=sars" className="attention">
+        <Icon name="alert" size={18} />
+        <span className="grow">
+          <strong>SARS: {d.kind === 'emp201' ? `PAYE, UIF and SDL for ${monthLabel(d.period)}` : `dividends tax for ${monthLabel(d.period)}`}</strong>, <Money cents={d.owingCents} />{' '}
+          {d.late ? `was due ${formatDate(d.dueOn)}` : `due by ${formatDate(d.dueOn)}`}
+        </span>
+        Pay
+        <Icon name="chevronRight" size={16} />
+      </Link>
+    )),
     (data.vat?.state === 'over' || data.vat?.state === 'near') && (
       <Link key="vat" to="/settings" className="attention">
         <Icon name="alert" size={18} />
@@ -191,7 +204,7 @@ function OwnerHome() {
   return (
     <div className="stack-lg">
       <PageHead
-        title="Howzit"
+        title={greeting()}
         sub={`${settings.tradingName || settings.companyName} · ${data.financialYear.label} (${formatDate(data.financialYear.start)} to ${formatDate(data.financialYear.end)})`}
         actions={
           isOwner && (
@@ -257,7 +270,7 @@ function OwnerHome() {
               ))}
             </ul>
           ) : (
-            <Empty title="All paid up" />
+            <Empty title={say('allPaid')} />
           )}
         </section>
       </div>

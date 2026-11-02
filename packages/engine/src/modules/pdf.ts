@@ -37,6 +37,7 @@ export interface PdfDocument {
     title: string;
     notes: string;
     terms: string;
+    payLink?: string;
     vatRateBp: number;
     subtotalCents: number;
     vatCents: number;
@@ -86,6 +87,13 @@ let BOLD: FontData | null = null;
 export function setPdfFonts(fonts: { regular: FontData; bold: FontData } | null) {
   REGULAR = fonts?.regular ?? null;
   BOLD = fonts?.bold ?? null;
+}
+
+/** Registers the app's typeface on a PDF; returns the font names to use. */
+export function usePdfFonts(pdf: PDFKit.PDFDocument): { regular: string; bold: string } {
+  if (REGULAR) pdf.registerFont('Body', REGULAR as never);
+  if (BOLD) pdf.registerFont('BodyBold', BOLD as never);
+  return { regular: REGULAR ? 'Body' : 'Helvetica', bold: BOLD ? 'BodyBold' : 'Helvetica-Bold' };
 }
 
 const qtyText = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0+$/, '').replace(/\.$/, ''));
@@ -297,8 +305,11 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   const bigAmount = isInvoice ? (depositDue ? deposit - doc.paidCents : Math.max(balance, 0)) : doc.totalCents;
   const totalsH = totals.length * 16 + 44;
   const bankText = isInvoice && contact.bank ? `${contact.bank}\nReference: ${doc.number}` : '';
+  // A card payment link (Yoco, SnapScan…): this invoice's, or the business's usual one, while it's unpaid.
+  const payLink = isInvoice && balance > 0 ? (doc.payLink || settings.payLink || '').trim() : '';
   pdf.font(regular).fontSize(9);
-  const bankH = bankText ? pdf.heightOfString(bankText, { width: 230, lineGap: 1.5 }) + 34 : 0;
+  const linkH = payLink ? pdf.heightOfString(payLink, { width: 230 }) + 22 : 0;
+  const bankH = bankText || payLink ? (bankText ? pdf.heightOfString(bankText, { width: 230, lineGap: 1.5 }) + 34 : 14) + linkH : 0;
   ensure(Math.max(totalsH, bankH) + 10);
   const tx = R - 230;
   let ty = y;
@@ -311,10 +322,18 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   pdf.roundedRect(tx - 10, ty, 240, 34, 5).fill(accent);
   pdf.font(bold).fontSize(9).fillColor('#ffffff').text(bigLabel.toUpperCase(), tx, ty + 12, { width: 120, characterSpacing: 0.8 });
   pdf.font(bold).fontSize(14).fillColor('#ffffff').text(formatZar(bigAmount), tx + 90, ty + 9, { width: 130, align: 'right' });
-  if (bankText) {
+  if (bankText || payLink) {
     pdf.roundedRect(L, y, 250, bankH, 5).lineWidth(1).strokeColor(tint(accent, 0.6)).stroke();
-    label('Please pay into', L + 12, y + 10);
-    pdf.font(regular).fontSize(9).fillColor(INK).text(bankText, L + 12, y + 23, { width: 230, lineGap: 1.5 });
+    let by = y + 10;
+    if (bankText) {
+      label('Please pay into', L + 12, by);
+      pdf.font(regular).fontSize(9).fillColor(INK).text(bankText, L + 12, by + 13, { width: 230, lineGap: 1.5 });
+      by = pdf.y + 10;
+    }
+    if (payLink) {
+      label('Or pay by card', L + 12, by);
+      pdf.font(bold).fontSize(9).fillColor(accent).text(payLink, L + 12, by + 13, { width: 230, link: payLink, underline: true });
+    }
   }
   y = Math.max(ty + 34, y + bankH) + 22;
 
