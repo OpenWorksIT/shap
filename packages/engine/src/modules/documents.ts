@@ -186,6 +186,19 @@ export async function markShared(db: Db, id: string): Promise<string | null> {
 export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
 
+  // The things this business usually charges for, with what it charged last time: offered when
+  // adding a line, so a regular "Cut and blow-dry" is one tap with the right price.
+  app.get('/api/documents/usual-lines', { preHandler: requireRole('owner') }, async () => {
+    return sql`
+      select distinct on (lower(l.description)) l.description, l.category, l.unit, l.unit_price_cents,
+             count(*) over (partition by lower(l.description))::int as uses, d.issue_date
+        from document_lines l join documents d on d.id = l.document_id
+       where d.status <> 'void' and length(l.description) between 2 and 80
+       order by lower(l.description), d.issue_date desc, d.created_at desc`.then((rows) =>
+      (rows as unknown as { uses: number; issueDate: string }[]).sort((a, b) => b.uses - a.uses || b.issueDate.localeCompare(a.issueDate)).slice(0, 40),
+    );
+  });
+
   app.get('/api/documents', { preHandler: requireRole('owner', 'accountant') }, async (req) => {
     const { kind, status, client, project, search, state } = q(req);
     const s = search?.trim() || null;

@@ -65,7 +65,7 @@ export async function reportUsage(s: Pick<Settings, 'businessType' | 'industry' 
 }
 
 export interface FeedbackReport {
-  kind: 'love' | 'dislike' | 'bug';
+  kind: 'love' | 'dislike' | 'bug' | 'idea';
   message: string;
   page: string;
   title: string;
@@ -80,7 +80,13 @@ export interface FeedbackReport {
 export async function sendFeedback(r: FeedbackReport): Promise<'sent' | 'queued'> {
   const body = { ...r, app: 'pocket', version: APP_VERSION, platform: platform() };
   try {
-    await post('feedback', body);
+    try {
+      await post('feedback', body);
+    } catch (err) {
+      // An older collector doesn't know ideas yet: send it as a "love" with the word Idea in front.
+      if (r.kind !== 'idea' || !/kind|invalid/i.test(String((err as Error).message))) throw err;
+      await post('feedback', { ...body, kind: 'love', message: `Idea: ${r.message}` });
+    }
     return 'sent';
   } catch (err) {
     if (navigator.onLine && !/fetch|network|load failed/i.test(String((err as Error).message))) throw err;

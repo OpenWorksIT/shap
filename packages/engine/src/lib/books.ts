@@ -18,6 +18,7 @@ export interface SettingsRow {
   businessType: 'company' | 'sole_prop';
   features: Record<string, boolean>;
   tone: 'casual' | 'formal';
+  watermark: boolean;
   industry: string;
   usageConsent: boolean;
   sdl: boolean;

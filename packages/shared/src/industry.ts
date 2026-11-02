@@ -1,0 +1,483 @@
+/**
+ * What each kind of business calls things, so a hairdresser sees "Colour, developer, foils" and
+ * a designer "Logo design" instead of a builder's cement. Used for the examples in forms, the
+ * names of the line types on quotes and invoices (and their PDFs), the usual items offered when
+ * adding a line, and the extra cost types added when the business kind is chosen.
+ */
+import type { LineCategory } from './enums.js';
+
+export interface IndustryItem {
+  /** What goes on the line. */
+  d: string;
+  cat: 'labour' | 'materials' | 'other';
+  unit?: string;
+}
+
+export interface IndustryProfile {
+  /** Names for the three line types, e.g. Services / Products / Other. */
+  lines: { labour: string; materials: string; other: string };
+  /** Common units, offered as suggestions on the line. */
+  units: string[];
+  /** The usual things this kind of business charges for. */
+  items: IndustryItem[];
+  /** Example heading for a quote or invoice. */
+  heading: string;
+  /** Example descriptions for a cost: stock bought for clients, and everything else. */
+  costStock: string;
+  costOther: string;
+  supplier: string;
+  /** Example for a part or material bought for a job. */
+  part: string;
+  /** Extra cost types this business is likely to need (added once, when the kind is chosen). */
+  categories: { name: string; kind: 'materials' | 'overhead'; account: string }[];
+  /** Builder-only cost types to hide from the pickers (still kept for old costs). */
+  hide: string[];
+}
+
+const TRADE_HIDE: string[] = [];
+const OFFICE_HIDE = ['Demo', 'PPE', 'Vehicle Transfer'];
+
+const GENERIC: IndustryProfile = {
+  lines: { labour: 'Work / time', materials: 'Parts / materials', other: 'Other' },
+  units: ['hour', 'day', 'item', 'km'],
+  items: [
+    { d: 'Labour', cat: 'labour', unit: 'hour' },
+    { d: 'Call-out fee', cat: 'other' },
+    { d: 'Materials', cat: 'materials' },
+    { d: 'Travel', cat: 'other', unit: 'km' },
+  ],
+  heading: 'e.g. Work done at 12 Main Rd',
+  costStock: 'e.g. Stock for a client',
+  costOther: 'e.g. Petrol',
+  supplier: 'e.g. Makro',
+  part: 'e.g. Stock for this job',
+  categories: [],
+  hide: [],
+};
+
+const P: Record<string, Partial<IndustryProfile>> = {
+  builder: {
+    lines: { labour: 'Labour', materials: 'Materials', other: 'Other' },
+    units: ['day', 'hour', 'm²', 'm³', 'bag', 'load', 'item'],
+    items: [
+      { d: 'Site establishment', cat: 'other' },
+      { d: 'Labour', cat: 'labour', unit: 'day' },
+      { d: 'Bricklaying', cat: 'labour', unit: 'm²' },
+      { d: 'Plastering', cat: 'labour', unit: 'm²' },
+      { d: 'Tiling', cat: 'labour', unit: 'm²' },
+      { d: 'Cement 50 kg', cat: 'materials', unit: 'bag' },
+      { d: 'Building sand', cat: 'materials', unit: 'm³' },
+      { d: 'Stock bricks', cat: 'materials', unit: 'item' },
+      { d: 'Rubble removal', cat: 'other', unit: 'load' },
+      { d: 'Scaffolding hire', cat: 'other', unit: 'day' },
+    ],
+    heading: 'e.g. Build boundary wall at 12 Main Rd',
+    costStock: 'e.g. Cement, sand',
+    costOther: 'e.g. Diesel',
+    supplier: 'e.g. Builders',
+    part: 'e.g. Corrugated roof sheets',
+    categories: [{ name: 'Equipment hire', kind: 'overhead', account: '6230' }],
+    hide: TRADE_HIDE,
+  },
+  electrician: {
+    lines: { labour: 'Labour', materials: 'Materials', other: 'Other' },
+    units: ['hour', 'point', 'm', 'item'],
+    items: [
+      { d: 'Call-out fee', cat: 'other' },
+      { d: 'Labour', cat: 'labour', unit: 'hour' },
+      { d: 'Electrical certificate of compliance (COC)', cat: 'labour' },
+      { d: 'Install plug point', cat: 'labour', unit: 'point' },
+      { d: 'Install light fitting', cat: 'labour', unit: 'point' },
+      { d: 'Replace geyser element and thermostat', cat: 'labour' },
+      { d: 'Fault finding', cat: 'labour', unit: 'hour' },
+      { d: 'Surge arrester', cat: 'materials', unit: 'item' },
+      { d: 'Circuit breaker', cat: 'materials', unit: 'item' },
+      { d: 'Cable 2.5 mm²', cat: 'materials', unit: 'm' },
+    ],
+    heading: 'e.g. Rewire kitchen and issue COC at 12 Main Rd',
+    costStock: 'e.g. Cable, breakers',
+    costOther: 'e.g. Petrol',
+    supplier: 'e.g. Electrical wholesaler',
+    part: 'e.g. 20 m surfix cable',
+    categories: [{ name: 'Test equipment & calibration', kind: 'overhead', account: '6130' }],
+    hide: TRADE_HIDE,
+  },
+  plumber: {
+    lines: { labour: 'Labour', materials: 'Materials', other: 'Other' },
+    units: ['hour', 'item', 'm'],
+    items: [
+      { d: 'Call-out fee', cat: 'other' },
+      { d: 'Labour', cat: 'labour', unit: 'hour' },
+      { d: 'Replace geyser (150 L)', cat: 'labour' },
+      { d: 'Geyser 150 L', cat: 'materials', unit: 'item' },
+      { d: 'Unblock drain', cat: 'labour' },
+      { d: 'Leak detection', cat: 'labour', unit: 'hour' },
+      { d: 'Replace tap', cat: 'labour', unit: 'item' },
+      { d: 'Plumbing certificate of compliance', cat: 'labour' },
+      { d: 'Copper pipe 15 mm', cat: 'materials', unit: 'm' },
+      { d: 'Fittings', cat: 'materials' },
+    ],
+    heading: 'e.g. Replace burst geyser at 12 Main Rd',
+    costStock: 'e.g. Pipe, fittings',
+    costOther: 'e.g. Petrol',
+    supplier: 'e.g. Plumbing supplies',
+    part: 'e.g. 150 L geyser',
+    categories: [],
+    hide: TRADE_HIDE,
+  },
+  painter: {
+    lines: { labour: 'Labour', materials: 'Paint & materials', other: 'Other' },
+    units: ['m²', 'day', 'hour', 'litre', 'item'],
+    items: [
+      { d: 'Prep: wash, scrape and fill cracks', cat: 'labour', unit: 'm²' },
+      { d: 'Paint interior walls (2 coats)', cat: 'labour', unit: 'm²' },
+      { d: 'Paint exterior walls (2 coats)', cat: 'labour', unit: 'm²' },
+      { d: 'Paint ceilings', cat: 'labour', unit: 'm²' },
+      { d: 'Roof painting', cat: 'labour', unit: 'm²' },
+      { d: 'Waterproofing', cat: 'labour', unit: 'm²' },
+      { d: 'Paint 20 L', cat: 'materials', unit: 'item' },
+      { d: 'Primer / undercoat', cat: 'materials', unit: 'litre' },
+      { d: 'Rollers, brushes and tape', cat: 'materials' },
+      { d: 'Labour', cat: 'labour', unit: 'day' },
+    ],
+    heading: 'e.g. Paint outside of house at 12 Main Rd',
+    costStock: 'e.g. Paint, rollers',
+    costOther: 'e.g. Petrol',
+    supplier: 'e.g. Paint shop',
+    part: 'e.g. 20 L exterior paint',
+    categories: [],
+    hide: TRADE_HIDE,
+  },
+  handyman: {
+    lines: { labour: 'Labour', materials: 'Materials', other: 'Other' },
+    units: ['hour', 'item', 'm'],
+    items: [
+      { d: 'Call-out fee', cat: 'other' },
+      { d: 'Labour', cat: 'labour', unit: 'hour' },
+      { d: 'Hang door', cat: 'labour', unit: 'item' },
+      { d: 'Assemble furniture', cat: 'labour', unit: 'item' },
+      { d: 'Clean gutters', cat: 'labour' },
+      { d: 'Fence repair', cat: 'labour', unit: 'm' },
+      { d: 'Replace tiles', cat: 'labour', unit: 'item' },
+      { d: 'Hang curtains or blinds', cat: 'labour', unit: 'item' },
+      { d: 'Materials', cat: 'materials' },
+    ],
+    heading: 'e.g. Odd jobs at 12 Main Rd',
+    costStock: 'e.g. Screws, silicone',
+    costOther: 'e.g. Petrol',
+    supplier: 'e.g. Hardware store',
+    part: 'e.g. Door hinges',
+    categories: [],
+    hide: TRADE_HIDE,
+  },
+  mechanic: {
+    lines: { labour: 'Labour', materials: 'Parts', other: 'Other' },
+    units: ['hour', 'item', 'litre'],
+    items: [
+      { d: 'Diagnostic scan', cat: 'labour' },
+      { d: 'Minor service', cat: 'labour' },
+      { d: 'Major service', cat: 'labour' },
+      { d: 'Labour', cat: 'labour', unit: 'hour' },
+      { d: 'Engine oil', cat: 'materials', unit: 'litre' },
+      { d: 'Oil filter', cat: 'materials', unit: 'item' },
+      { d: 'Brake pads (front)', cat: 'materials', unit: 'item' },
+      { d: 'Skim brake discs', cat: 'labour' },
+      { d: 'Replace clutch kit', cat: 'labour' },
+      { d: 'Wheel alignment', cat: 'labour' },
+      { d: 'Towing', cat: 'other', unit: 'km' },
+    ],
+    heading: 'e.g. Service and brakes, Toyota Hilux CA 123-456',
+    costStock: 'e.g. Brake pads, oil filter',
+    costOther: 'e.g. Workshop rent',
+    supplier: 'e.g. Parts shop',
+    part: 'e.g. Front brake pads',
+    categories: [
+      { name: 'Workshop rent', kind: 'overhead', account: '6200' },
+      { name: 'Diagnostic software', kind: 'overhead', account: '6180' },
+    ],
+    hide: ['Demo'],
+  },
+  garden: {
+    lines: { labour: 'Service', materials: 'Supplies', other: 'Other' },
+    units: ['month', 'visit', 'hour', 'load', 'item'],
+    items: [
+      { d: 'Monthly garden service', cat: 'labour', unit: 'month' },
+      { d: 'Lawn mowing and edging', cat: 'labour', unit: 'visit' },
+      { d: 'Hedge trimming', cat: 'labour', unit: 'hour' },
+      { d: 'Tree felling and removal', cat: 'labour' },
+      { d: 'Garden refuse removal', cat: 'other', unit: 'load' },
+      { d: 'Monthly pool service', cat: 'labour', unit: 'month' },
+      { d: 'Pool chemicals', cat: 'materials' },
+      { d: 'Pool pump repair', cat: 'labour' },
+      { d: 'Compost and fertiliser', cat: 'materials', unit: 'item' },
+      { d: 'Plants', cat: 'materials', unit: 'item' },
+    ],
+    heading: 'e.g. Garden service for March, 12 Main Rd',
+    costStock: 'e.g. Pool chlorine, compost',
+    costOther: 'e.g. Petrol for the mower',
+    supplier: 'e.g. Garden centre',
+    part: 'e.g. Pool chlorine',
+    categories: [{ name: 'Dump fees', kind: 'overhead', account: '6900' }],
+    hide: ['Demo'],
+  },
+  cleaning: {
+    lines: { labour: 'Cleaning', materials: 'Supplies', other: 'Other' },
+    units: ['hour', 'visit', 'room', 'month', 'm²'],
+    items: [
+      { d: 'Regular clean', cat: 'labour', unit: 'hour' },
+      { d: 'Deep clean', cat: 'labour' },
+      { d: 'Move-in / move-out clean', cat: 'labour' },
+      { d: 'Carpet cleaning', cat: 'labour', unit: 'room' },
+      { d: 'Upholstery cleaning', cat: 'labour', unit: 'item' },
+      { d: 'Window cleaning', cat: 'labour' },
+      { d: 'Office cleaning', cat: 'labour', unit: 'month' },
+      { d: 'After-builders clean', cat: 'labour', unit: 'm²' },
+      { d: 'Cleaning supplies', cat: 'materials' },
+    ],
+    heading: 'e.g. Move-out clean, 12 Main Rd',
+    costStock: 'e.g. Cleaning chemicals',
+    costOther: 'e.g. Taxi fare for staff',
+    supplier: 'e.g. Cleaning supplies',
+    part: 'e.g. Carpet shampoo',
+    categories: [{ name: 'Cleaning supplies', kind: 'materials', account: '5010' }],
+    hide: OFFICE_HIDE,
+  },
+  hair: {
+    lines: { labour: 'Services', materials: 'Products', other: 'Other' },
+    units: ['service', 'item'],
+    items: [
+      { d: 'Cut and blow-dry', cat: 'labour' },
+      { d: 'Gents cut', cat: 'labour' },
+      { d: 'Kids cut', cat: 'labour' },
+      { d: 'Fade and beard trim', cat: 'labour' },
+      { d: 'Root colour', cat: 'labour' },
+      { d: 'Full head colour', cat: 'labour' },
+      { d: 'Highlights (half head)', cat: 'labour' },
+      { d: 'Balayage', cat: 'labour' },
+      { d: 'Toner', cat: 'labour' },
+      { d: 'Treatment', cat: 'labour' },
+      { d: 'Braids', cat: 'labour' },
+      { d: 'Relaxer', cat: 'labour' },
+      { d: 'Keratin treatment', cat: 'labour' },
+      { d: 'Extensions', cat: 'labour' },
+      { d: 'Gel overlay', cat: 'labour' },
+      { d: 'Manicure', cat: 'labour' },
+      { d: 'Pedicure', cat: 'labour' },
+      { d: 'Brow and lash tint', cat: 'labour' },
+      { d: 'Waxing', cat: 'labour' },
+      { d: 'Shampoo and conditioner', cat: 'materials', unit: 'item' },
+    ],
+    heading: 'e.g. Colour and cut for Thandi',
+    costStock: 'e.g. Colour, developer, foils',
+    costOther: 'e.g. Chair rent',
+    supplier: 'e.g. Salon supplier',
+    part: 'e.g. Colour and developer',
+    categories: [
+      { name: 'Salon products & stock', kind: 'materials', account: '5010' },
+      { name: 'Chair or salon rent', kind: 'overhead', account: '6200' },
+      { name: 'Training & courses', kind: 'overhead', account: '6210' },
+      { name: 'Laundry & towels', kind: 'overhead', account: '6900' },
+    ],
+    hide: [...OFFICE_HIDE, 'Tool'],
+  },
+  it: {
+    lines: { labour: 'Labour', materials: 'Hardware & software', other: 'Other' },
+    units: ['hour', 'month', 'year', 'user', 'item'],
+    items: [
+      { d: 'Call-out fee', cat: 'other' },
+      { d: 'On-site support', cat: 'labour', unit: 'hour' },
+      { d: 'Remote support', cat: 'labour', unit: 'hour' },
+      { d: 'Monthly support', cat: 'labour', unit: 'month' },
+      { d: 'Laptop setup and data transfer', cat: 'labour', unit: 'item' },
+      { d: 'Network and Wi-Fi setup', cat: 'labour' },
+      { d: 'Backup setup', cat: 'labour' },
+      { d: 'Microsoft 365 licence', cat: 'materials', unit: 'user' },
+      { d: 'Domain and hosting', cat: 'materials', unit: 'year' },
+      { d: 'Hardware', cat: 'materials', unit: 'item' },
+    ],
+    heading: 'e.g. Office network upgrade for Bloom Café',
+    costStock: 'e.g. Router, cables',
+    costOther: 'e.g. Software subscription',
+    supplier: 'e.g. Computer wholesaler',
+    part: 'e.g. Wi-Fi access point',
+    categories: [{ name: 'Hardware for resale', kind: 'materials', account: '5010' }],
+    hide: OFFICE_HIDE,
+  },
+  design: {
+    lines: { labour: 'Design', materials: 'Print & production', other: 'Other' },
+    units: ['hour', 'project', 'item', 'round'],
+    items: [
+      { d: 'Logo design (3 concepts)', cat: 'labour', unit: 'project' },
+      { d: 'Brand identity pack', cat: 'labour', unit: 'project' },
+      { d: 'Design time', cat: 'labour', unit: 'hour' },
+      { d: 'Social media templates', cat: 'labour', unit: 'item' },
+      { d: 'Flyer or poster design', cat: 'labour', unit: 'item' },
+      { d: 'Business card design', cat: 'labour', unit: 'item' },
+      { d: 'Website design', cat: 'labour', unit: 'project' },
+      { d: 'Extra revision round', cat: 'labour', unit: 'round' },
+      { d: 'Usage rights', cat: 'other' },
+      { d: 'Stock images', cat: 'materials', unit: 'item' },
+      { d: 'Font licence', cat: 'materials', unit: 'item' },
+      { d: 'Printing', cat: 'materials' },
+      { d: 'Rush fee', cat: 'other' },
+    ],
+    heading: 'e.g. Logo and brand pack for Bloom Café',
+    costStock: 'e.g. Printing, stock photos',
+    costOther: 'e.g. Adobe subscription',
+    supplier: 'e.g. Print shop',
+    part: 'e.g. Business card printing',
+    categories: [
+      { name: 'Printing & production', kind: 'materials', account: '5010' },
+      { name: 'Stock images & fonts', kind: 'overhead', account: '6180' },
+      { name: 'Training & courses', kind: 'overhead', account: '6210' },
+    ],
+    hide: [...OFFICE_HIDE, 'Tool'],
+  },
+  photo: {
+    lines: { labour: 'Shoot & edit', materials: 'Prints & products', other: 'Other' },
+    units: ['hour', 'day', 'image', 'km', 'item'],
+    items: [
+      { d: 'Half-day shoot', cat: 'labour' },
+      { d: 'Full-day shoot', cat: 'labour', unit: 'day' },
+      { d: 'Wedding package', cat: 'labour' },
+      { d: 'Portrait session', cat: 'labour' },
+      { d: 'Product photos', cat: 'labour', unit: 'image' },
+      { d: 'Editing', cat: 'labour', unit: 'hour' },
+      { d: 'Video edit', cat: 'labour' },
+      { d: 'Drone footage', cat: 'labour' },
+      { d: 'Prints', cat: 'materials', unit: 'item' },
+      { d: 'Photo album', cat: 'materials', unit: 'item' },
+      { d: 'Travel', cat: 'other', unit: 'km' },
+    ],
+    heading: 'e.g. Wedding: Sipho and Lerato, 14 March',
+    costStock: 'e.g. Prints, album',
+    costOther: 'e.g. Lens hire',
+    supplier: 'e.g. Photo lab',
+    part: 'e.g. Canvas print',
+    categories: [
+      { name: 'Prints & albums', kind: 'materials', account: '5010' },
+      { name: 'Equipment hire', kind: 'overhead', account: '6230' },
+    ],
+    hide: OFFICE_HIDE,
+  },
+  consulting: {
+    lines: { labour: 'Time', materials: 'Expenses', other: 'Other' },
+    units: ['hour', 'day', 'month', 'km'],
+    items: [
+      { d: 'Consulting', cat: 'labour', unit: 'hour' },
+      { d: 'Day rate', cat: 'labour', unit: 'day' },
+      { d: 'Monthly retainer', cat: 'labour', unit: 'month' },
+      { d: 'Workshop', cat: 'labour' },
+      { d: 'Report', cat: 'labour' },
+      { d: 'Travel', cat: 'other', unit: 'km' },
+      { d: 'Accommodation', cat: 'materials' },
+    ],
+    heading: 'e.g. Strategy work for Bloom Café, March',
+    costStock: 'e.g. Flights for a client',
+    costOther: 'e.g. Co-working desk',
+    supplier: 'e.g. Airline',
+    part: 'e.g. Venue for the workshop',
+    categories: [{ name: 'Office or desk rent', kind: 'overhead', account: '6200' }],
+    hide: OFFICE_HIDE,
+  },
+  tutor: {
+    lines: { labour: 'Lessons', materials: 'Books & materials', other: 'Other' },
+    units: ['lesson', 'hour', 'month', 'item'],
+    items: [
+      { d: 'Lesson (1 hour)', cat: 'labour', unit: 'lesson' },
+      { d: 'Online lesson', cat: 'labour', unit: 'lesson' },
+      { d: 'Group lesson', cat: 'labour', unit: 'lesson' },
+      { d: 'Exam prep session', cat: 'labour', unit: 'lesson' },
+      { d: 'Monthly lessons', cat: 'labour', unit: 'month' },
+      { d: 'Registration fee', cat: 'other' },
+      { d: 'Workbook', cat: 'materials', unit: 'item' },
+    ],
+    heading: 'e.g. Maths lessons for Sipho, March',
+    costStock: 'e.g. Workbooks',
+    costOther: 'e.g. Venue rent',
+    supplier: 'e.g. Bookshop',
+    part: 'e.g. Past exam papers',
+    categories: [
+      { name: 'Books & materials', kind: 'materials', account: '5010' },
+      { name: 'Venue rent', kind: 'overhead', account: '6200' },
+    ],
+    hide: [...OFFICE_HIDE, 'Tool'],
+  },
+  catering: {
+    lines: { labour: 'Service & staff', materials: 'Food & drink', other: 'Other' },
+    units: ['person', 'platter', 'hour', 'item'],
+    items: [
+      { d: 'Catering', cat: 'materials', unit: 'person' },
+      { d: 'Platters', cat: 'materials', unit: 'platter' },
+      { d: 'Cake', cat: 'materials', unit: 'item' },
+      { d: 'Waiters', cat: 'labour', unit: 'hour' },
+      { d: 'Chef', cat: 'labour', unit: 'hour' },
+      { d: 'Equipment hire', cat: 'other' },
+      { d: 'Décor', cat: 'other' },
+      { d: 'Delivery and set-up', cat: 'other' },
+    ],
+    heading: 'e.g. 50th birthday lunch for 80 guests',
+    costStock: 'e.g. Meat, veg',
+    costOther: 'e.g. Gas refill',
+    supplier: 'e.g. Makro',
+    part: 'e.g. Meat for the braai',
+    categories: [
+      { name: 'Food & ingredients', kind: 'materials', account: '5010' },
+      { name: 'Equipment hire', kind: 'overhead', account: '6230' },
+    ],
+    hide: OFFICE_HIDE,
+  },
+  health: {
+    lines: { labour: 'Sessions', materials: 'Products', other: 'Other' },
+    units: ['session', 'item'],
+    items: [
+      { d: 'Consultation', cat: 'labour', unit: 'session' },
+      { d: 'Follow-up session', cat: 'labour', unit: 'session' },
+      { d: 'Assessment', cat: 'labour', unit: 'session' },
+      { d: 'Massage (60 min)', cat: 'labour', unit: 'session' },
+      { d: 'Treatment', cat: 'labour', unit: 'session' },
+      { d: 'Products', cat: 'materials', unit: 'item' },
+    ],
+    heading: 'e.g. Sessions for March',
+    costStock: 'e.g. Oils, consumables',
+    costOther: 'e.g. Rooms rent',
+    supplier: 'e.g. Medical supplier',
+    part: 'e.g. Massage oil',
+    categories: [
+      { name: 'Consumables', kind: 'materials', account: '5010' },
+      { name: 'Rooms rent', kind: 'overhead', account: '6200' },
+      { name: 'Training & CPD', kind: 'overhead', account: '6210' },
+    ],
+    hide: [...OFFICE_HIDE, 'Tool'],
+  },
+  transport: {
+    lines: { labour: 'Trips', materials: 'Tolls & extras', other: 'Other' },
+    units: ['trip', 'km', 'hour', 'load'],
+    items: [
+      { d: 'Local delivery', cat: 'labour', unit: 'trip' },
+      { d: 'Long distance', cat: 'labour', unit: 'km' },
+      { d: 'House move (half day)', cat: 'labour' },
+      { d: 'Helper', cat: 'labour', unit: 'hour' },
+      { d: 'Waiting time', cat: 'other', unit: 'hour' },
+      { d: 'Tolls', cat: 'materials' },
+      { d: 'Packing materials', cat: 'materials' },
+    ],
+    heading: 'e.g. Move from Walmer to Summerstrand',
+    costStock: 'e.g. Boxes, bubble wrap',
+    costOther: 'e.g. Diesel',
+    supplier: 'e.g. Fuel station',
+    part: 'e.g. Moving boxes',
+    categories: [{ name: 'Tolls', kind: 'overhead', account: '6060' }],
+    hide: ['Demo'],
+  },
+};
+
+export function industryProfile(industry: string | null | undefined): IndustryProfile {
+  return { ...GENERIC, ...(industry ? P[industry] : undefined) };
+}
+
+/** The name of a line type for this business. Demolition only ever appears on old builder lines. */
+export function lineLabel(industry: string | null | undefined, cat: LineCategory): string {
+  if (cat === 'demo') return 'Demolition';
+  return industryProfile(industry).lines[cat];
+}

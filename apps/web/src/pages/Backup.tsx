@@ -4,7 +4,7 @@ import { formatDate } from '@shap/shared';
 import { lockEnabled, phoneHasLock, setLock } from '../components/AppLock';
 import { PageHead } from '../components/Shell';
 import { Icon, useToast } from '../components/ui';
-import { backUp, lastBackup, restoreFrom } from '../lib/backup';
+import { BACKUP_PLACES, backUp, backupPlace, lastBackup, placeSteps, remindOn, restoreFrom, scheduleBackupReminder, setBackupPlace, type BackupPlace } from '../lib/backup';
 import { isNative, pickFile, platform } from '../lib/native';
 import { useAuthed } from '../lib/session';
 
@@ -15,6 +15,9 @@ export default function BackupPage() {
   const [last, setLast] = useState(lastBackup());
   const [lock, setLockState] = useState<boolean | null>(null);
   const [canLock, setCanLock] = useState(false);
+  const [place, setPlace] = useState<BackupPlace | null>(backupPlace());
+  const [remind, setRemind] = useState(remindOn());
+  const os = platform();
   const name = settings.tradingName || settings.companyName;
 
   useEffect(() => {
@@ -65,9 +68,34 @@ export default function BackupPage() {
       <PageHead title="Backup" sub="Your books live only on this phone. Keep a copy somewhere else." />
       <section className="panel panel-pad stack">
         <h3>Back up</h3>
-        <p className="small">
-          One file with everything: invoices, costs, slips, settings. {where}
-        </p>
+        <p className="small">One file with everything: invoices, costs, slips, settings.{place ? '' : ` ${where}`}</p>
+        <label className="small row wrap" style={{ gap: 8 }}>
+          <span>Where you keep them:</span>
+          <select
+            className="select"
+            style={{ maxWidth: 220 }}
+            value={place ?? ''}
+            onChange={(e) => {
+              const p = (e.target.value || null) as BackupPlace | null;
+              setPlace(p);
+              setBackupPlace(p);
+            }}
+          >
+            <option value="">Choose…</option>
+            {BACKUP_PLACES.filter((p) => !(p.android === false && os !== 'ios')).map((p) => (
+              <option key={p.key} value={p.key}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {place && (
+          <ol className="small steps-list">
+            {placeSteps(place, os).map((t) => (
+              <li key={t}>{t}</li>
+            ))}
+          </ol>
+        )}
         <p className={`small ${days == null || days > 7 ? 'warn-text' : 'muted'}`}>
           {last ? `Last backup: ${formatDate(last.toISOString().slice(0, 10))}${days ? ` (${days} day${days === 1 ? '' : 's'} ago)` : ' (today)'}.` : 'No backup yet from this phone.'}
         </p>
@@ -84,6 +112,22 @@ export default function BackupPage() {
               : ''}{' '}
           Still back up here at least once a week: it’s a file you control, and it moves your books to a new phone, iPhone or Android.
         </p>
+        {isNative() && (
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={remind}
+              onChange={(e) => {
+                setRemind(e.target.checked);
+                void scheduleBackupReminder(e.target.checked);
+              }}
+            />
+            <span>
+              Remind me a week after each backup
+              <div className="xs muted">One notification, only when a backup is due.</div>
+            </span>
+          </label>
+        )}
       </section>
 
       <section className="panel panel-pad stack">

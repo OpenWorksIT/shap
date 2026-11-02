@@ -2,6 +2,29 @@
 
 What changed in each version of Shap Pocket, newest first.
 
+## 0.6.0 (internal testing)
+
+Fitted to your trade, and quicker.
+
+- **Your kind of business runs through the app.** A designer sees “Logo design” and “Printing”,
+  a salon “Cut and blow-dry” and “Colour, developer, foils”, not a builder's cement. Line types
+  on quotes, invoices and their PDFs are named for the trade (Services / Products for a salon,
+  Design / Print & production for a designer), and the cost types a trade needs are added
+  (chair rent, salon stock, stock images, lens hire…) with the builder-only ones put away.
+- **Usual items, one tap each:** what you charged before, with last time's price, then the
+  common items for your trade.
+- **New client straight from the quote or invoice**, and invoices with no name yet (a walk-in):
+  add the name later.
+- **Backups in the first-run questions:** why they matter, where to keep them (Google Drive,
+  iCloud Drive, OneDrive, Dropbox, Proton Drive or email) with steps for your phone, and a
+  reminder a week after each backup.
+- **The Shap line** at the foot of quotes, invoices and payslips (switch it off in Settings →
+  Sections).
+- **Support Shap** in Settings: tell us what you need next (a new “Idea” kind of feedback).
+- **Quicker:** screens show what they showed last time straight away and refresh underneath;
+  the database answers before it finishes writing to storage; the safety copy waits for a quiet
+  moment instead of freezing the app; Home skips the parts you've switched off.
+
 ## 0.5.0 (internal testing)
 
 First test version: Shap's books on the phone, for one person.

@@ -4,9 +4,10 @@ import {
   addDays,
   formatDate,
   formatZar,
+  industryProfile,
   LINE_CATEGORIES,
-  LINE_CATEGORY_LABELS,
   LINE_CATEGORIES_OFFERED,
+  lineLabel,
   lineTotal,
   PAYMENT_METHOD_LABELS,
   PAYMENT_METHODS,
@@ -16,6 +17,7 @@ import {
   type PaymentMethod,
 } from '@shap/shared';
 import { BrandSelect, ProjectSelect, useHasBrands } from '../components/Pickers';
+import { ClientDrawer } from './Clients';
 import { PageHead } from '../components/Shell';
 import { DocChip, Drawer, ErrorBox, Field, Icon, Loading, Money, MoneyInput, Segmented, useToast } from '../components/ui';
 import { api, ApiError, apiBlob } from '../lib/api';
@@ -55,7 +57,7 @@ export default function DocumentPage() {
   const isNew = !id;
   const [params] = useSearchParams();
   const kind = (params.get('kind') as 'quote' | 'invoice') || 'invoice';
-  const existing = useApi<DocDetail>(isNew ? null : `/api/documents/${id}`);
+  const existing = useApi<DocDetail>(isNew ? null : `/api/documents/${id}`, { fresh: true });
   if (!isNew && !existing.data) return existing.error ? <ErrorBox error={existing.error} onRetry={existing.reload} /> : <Loading />;
   return <Editor key={id ?? 'new'} detail={existing.data} kind={existing.data?.doc.kind ?? kind} projectFromUrl={params.get('project')} reload={existing.reload} />;
 }
@@ -91,7 +93,10 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
   const [dirty, setDirty] = useState(!detail);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [drawer, setDrawer] = useState<null | 'pay' | 'charge' | 'writeoff'>(null);
+  const [drawer, setDrawer] = useState<null | 'pay' | 'charge' | 'writeoff' | 'client'>(null);
+  const profile = useMemo(() => industryProfile(settings.industry), [settings.industry]);
+  const L = (c: LineCategory) => lineLabel(settings.industry, c);
+  const usual = useApi<UsualLine[]>(isOwner && editable ? '/api/documents/usual-lines' : null);
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => (setD((x) => ({ ...x, [k]: v })), setDirty(true));
 
   // A new document for a job: take the job's client and name.
@@ -117,6 +122,13 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
 
   const addLine = (category: LineCategory) =>
     set('lines', [...d.lines, { key: key(), category, description: '', qty: '1', unit: '', unitPriceCents: null }]);
+  /** One tap: a usual item, with last time's price when there is one. */
+  const addItem = (it: { description: string; category: LineCategory; unit?: string; unitPriceCents?: number | null }) => {
+    // An empty line waiting at the end is filled rather than left behind.
+    const blank = d.lines.find((l) => !l.description.trim() && !l.unitPriceCents);
+    const line = { category: it.category, description: it.description, qty: '1', unit: it.unit ?? '', unitPriceCents: it.unitPriceCents ?? null };
+    set('lines', blank ? d.lines.map((l) => (l.key === blank.key ? { ...l, ...line } : l)) : [...d.lines, { key: key(), ...line }]);
+  };
   const updLine = (k: string, patch: Partial<DraftLine>) => set('lines', d.lines.map((l) => (l.key === k ? { ...l, ...patch } : l)));
   const moveLine = (k: string, dir: -1 | 1) => {
     const i = d.lines.findIndex((l) => l.key === k);
@@ -137,7 +149,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
     notes: d.notes,
     terms: d.terms,
     number: d.number || undefined,
-    lines: d.lines.filter((l) => l.description.trim() || l.unitPriceCents).map((l) => ({ category: l.category, description: l.description.trim() || LINE_CATEGORY_LABELS[l.category], qty: toQty(l.qty), unit: l.unit, unitPriceCents: l.unitPriceCents ?? 0 })),
+    lines: d.lines.filter((l) => l.description.trim() || l.unitPriceCents).map((l) => ({ category: l.category, description: l.description.trim() || L(l.category), qty: toQty(l.qty), unit: l.unit, unitPriceCents: l.unitPriceCents ?? 0 })),
     depositBp: d.depositMode === 'percent' && toQty(d.depositPercent) > 0 ? Math.min(10000, Math.round(toQty(d.depositPercent) * 100)) : null,
     depositCents: d.depositMode === 'amount' && d.depositCents ? d.depositCents : null,
     depositShowBalance: d.depositShowBalance,
@@ -288,8 +300,15 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
               </Field>}
               <Field label="Client">
                 {(p) => (
-                  <select {...p} className="select" value={d.clientId ?? ''} onChange={(e) => set('clientId', e.target.value || null)} disabled={!editable}>
-                    <option value="">{project.data?.project.clientName ? `From the job (${project.data.project.clientName})` : 'Choose…'}</option>
+                  <select
+                    {...p}
+                    className="select"
+                    value={d.clientId ?? ''}
+                    onChange={(e) => (e.target.value === '+new' ? setDrawer('client') : set('clientId', e.target.value || null))}
+                    disabled={!editable}
+                  >
+                    <option value="">{project.data?.project.clientName ? `From the job (${project.data.project.clientName})` : 'No name yet (add it later)'}</option>
+                    {editable && <option value="+new">+ New client…</option>}
                     {(clients.data ?? []).map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.name}
@@ -309,8 +328,8 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
                 {(p) => <input {...p} className="input" value={d.number} onChange={(e) => set('number', e.target.value)} placeholder={kind === 'invoice' ? `${settings.invoicePrefix}${String(settings.invoiceNext).padStart(settings.invoicePad, '0')}` : `${settings.quotePrefix}${String(settings.quoteNext).padStart(settings.quotePad, '0')}`} disabled={!editable} />}
               </Field>
             </div>
-            <Field label="Heading" hint="Shown as “For” on the PDF, e.g. “Replace roof sheeting at 12 Main Rd”">
-              {(p) => <input {...p} className="input" value={d.title} onChange={(e) => set('title', e.target.value)} disabled={!editable} />}
+            <Field label="Heading" hint="Shown as “For” on the PDF">
+              {(p) => <input {...p} className="input" value={d.title} onChange={(e) => set('title', e.target.value)} placeholder={profile.heading} disabled={!editable} />}
             </Field>
           </section>
 
@@ -329,14 +348,14 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
                   <select className="select line-cat" value={l.category} onChange={(e) => updLine(l.key, { category: e.target.value as LineCategory })} aria-label="Line type" disabled={!editable}>
                     {LINE_CATEGORIES.filter((c) => LINE_CATEGORIES_OFFERED.includes(c) || c === l.category).map((c) => (
                       <option key={c} value={c}>
-                        {LINE_CATEGORY_LABELS[c]}
+                        {L(c)}
                       </option>
                     ))}
                   </select>
-                  <textarea className="textarea line-desc" rows={1} value={l.description} onChange={(e) => updLine(l.key, { description: e.target.value })} placeholder="Description" aria-label="Description" disabled={!editable} />
+                  <textarea className="textarea line-desc" rows={1} value={l.description} onChange={(e) => updLine(l.key, { description: e.target.value })} placeholder={i === 0 ? `e.g. ${profile.items[0]?.d ?? 'What you did'}` : 'Description'} aria-label="Description" disabled={!editable} />
                   <div className="line-nums">
                     <input className="input line-qty" inputMode="decimal" value={l.qty} onChange={(e) => updLine(l.key, { qty: e.target.value.replace(/[^\d.,]/g, '') })} placeholder="1" aria-label="Quantity" disabled={!editable} />
-                    <input className="input line-unit" value={l.unit} onChange={(e) => updLine(l.key, { unit: e.target.value })} placeholder="unit" aria-label="Unit" disabled={!editable} />
+                    <input className="input line-unit" value={l.unit} onChange={(e) => updLine(l.key, { unit: e.target.value })} list="unit-list" placeholder="unit" aria-label="Unit" disabled={!editable} />
                     <div className="line-price">
                       <MoneyInput value={l.unitPriceCents} onChange={(c) => updLine(l.key, { unitPriceCents: c })} placeholder="Price" allowNegative aria-label="Unit price" />
                     </div>
@@ -358,14 +377,22 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
               ))}
               {!d.lines.length && <p className="small muted panel-pad">No lines yet.</p>}
             </div>
+            <datalist id="unit-list">
+              {profile.units.map((u) => (
+                <option key={u} value={u} />
+              ))}
+            </datalist>
             {editable && (
-              <div className="panel-pad row wrap">
-                {LINE_CATEGORIES_OFFERED.map((c) => (
-                  <button key={c} type="button" className="btn small" onClick={() => addLine(c)}>
-                    <Icon name="plus" size={14} />
-                    {LINE_CATEGORY_LABELS[c]}
-                  </button>
-                ))}
+              <div className="panel-pad stack">
+                <div className="row wrap">
+                  {LINE_CATEGORIES_OFFERED.map((c) => (
+                    <button key={c} type="button" className="btn small" onClick={() => addLine(c)}>
+                      <Icon name="plus" size={14} />
+                      {L(c)}
+                    </button>
+                  ))}
+                </div>
+                <QuickAdd usual={usual.data ?? []} profile={profile} onAdd={addItem} lines={d.lines} />
               </div>
             )}
           </section>
@@ -387,7 +414,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
               {byCat.length > 1 &&
                 byCat.map(([c, v]) => (
                   <div key={c} className="sub">
-                    <dt>{LINE_CATEGORY_LABELS[c]}</dt>
+                    <dt>{L(c)}</dt>
                     <dd>
                       <Money cents={v} />
                     </dd>
@@ -619,6 +646,15 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
           }}
         />
       )}
+      {drawer === 'client' && (
+        <ClientDrawer
+          onClose={() => setDrawer(null)}
+          onSaved={(c) => {
+            void clients.reload();
+            if (c) set('clientId', c.id);
+          }}
+        />
+      )}
       {drawer === 'pay' && doc && <PaymentDrawer invoiceId={doc.id} balance={total - paid} onClose={() => setDrawer(null)} onSaved={() => (setDrawer(null), void reload())} />}
       {drawer === 'charge' && project.data && (
         <ChargeDrawer
@@ -765,5 +801,54 @@ function WriteOffDrawer({ balance, paid, issueDate, onClose, onSave }: { balance
         </button>
       </div>
     </Drawer>
+  );
+}
+
+interface UsualLine {
+  description: string;
+  category: LineCategory;
+  unit: string;
+  unitPriceCents: number;
+  uses: number;
+}
+
+/**
+ * The usual items, one tap each: what this business charged before (with last time's price),
+ * then the common ones for its kind of work. Filtered as you type in the search box.
+ */
+function QuickAdd({ usual, profile, onAdd, lines }: { usual: UsualLine[]; profile: ReturnType<typeof industryProfile>; onAdd: (it: { description: string; category: LineCategory; unit?: string; unitPriceCents?: number | null }) => void; lines: { description: string }[] }) {
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState(lines.length === 0);
+  const seen = new Set(usual.map((u) => u.description.toLowerCase()));
+  const onDoc = new Set(lines.map((l) => l.description.trim().toLowerCase()));
+  const all = [
+    ...usual.map((u) => ({ description: u.description, category: u.category, unit: u.unit, unitPriceCents: u.unitPriceCents as number | null, mine: true })),
+    ...profile.items.filter((i) => !seen.has(i.d.toLowerCase())).map((i) => ({ description: i.d, category: i.cat as LineCategory, unit: i.unit ?? '', unitPriceCents: null, mine: false })),
+  ].filter((i) => !onDoc.has(i.description.toLowerCase()));
+  const term = q.trim().toLowerCase();
+  const shown = (term ? all.filter((i) => i.description.toLowerCase().includes(term)) : all).slice(0, term ? 24 : 12);
+  if (!all.length) return null;
+  if (!open)
+    return (
+      <button type="button" className="btn quiet small" onClick={() => setOpen(true)} style={{ alignSelf: 'flex-start' }}>
+        <Icon name="plus" size={14} />
+        Usual items…
+      </button>
+    );
+  return (
+    <div className="quick-add stack-sm">
+      <div className="row spread">
+        <span className="xs muted">Tap to add{usual.length ? ' (with last price)' : ''}</span>
+        {all.length > 12 && <input className="input input-sm" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find…" aria-label="Find an item" style={{ maxWidth: 160 }} />}
+      </div>
+      <div className="chips">
+        {shown.map((i) => (
+          <button key={i.description} type="button" className={`chip-btn ${i.mine ? 'mine' : ''}`} onClick={() => onAdd(i)}>
+            {i.description}
+            {i.unitPriceCents ? <span className="muted"> · {formatZar(i.unitPriceCents)}</span> : null}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }

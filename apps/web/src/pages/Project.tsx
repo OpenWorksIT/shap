@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { formatDate, formatPercent, formatZar, lineTotal } from '@shap/shared';
+import { formatDate, formatPercent, formatZar, industryProfile, lineTotal } from '@shap/shared';
 import { CostForm, costDraftFrom } from '../components/CostForm';
 import { LabourEntryForm, LabourForm } from '../components/LabourForm';
 import { ProjectDrawer } from '../components/ProjectForm';
@@ -348,6 +348,7 @@ function Breakdown({ s }: { s: ProjectRow }) {
 }
 
 function PartsPlan({ projectId, items, canEdit, onChange, onBuy, onQuote }: { projectId: string; items: PlannedItem[]; canEdit: boolean; onChange: () => void; onBuy: (i: PlannedItem) => void; onQuote: () => void }) {
+  const { settings } = useAuthed();
   const toast = useToast();
   const blank = { description: '', qty: 1, unit: '', unitCostCents: null as number | null, supplier: '', category: 'materials' as 'materials' | 'demo', note: '' };
   const [f, setF] = useState(blank);
@@ -457,7 +458,7 @@ function PartsPlan({ projectId, items, canEdit, onChange, onBuy, onQuote }: { pr
       {canEdit && (
         <form className="panel-pad plan-form" onSubmit={save}>
           <Field label={editId ? 'Change item' : 'Add an item'} className="grow">
-            {(p) => <input {...p} className="input" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} placeholder="e.g. Corrugated sheets 3.6m" required />}
+            {(p) => <input {...p} className="input" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} placeholder={industryProfile(settings.industry).part} required />}
           </Field>
           <Field label="Qty">{(p) => <input {...p} className="input" type="number" step="any" min="0" value={f.qty} onChange={(e) => setF({ ...f, qty: Number(e.target.value) })} />}</Field>
           <Field label="Unit">{(p) => <input {...p} className="input" value={f.unit} onChange={(e) => setF({ ...f, unit: e.target.value })} placeholder="each, m, bag" />}</Field>

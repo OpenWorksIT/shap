@@ -58,6 +58,7 @@ function open(): Promise<void> {
 
 export async function call(method: string, url: string, body?: unknown): Promise<EngineResponse> {
   await open();
+  lastCall = Date.now();
   const r = await rawCall(method, url, body);
   if (method !== 'GET' && r.status < 400) scheduleSafetyCopy();
   return r;
@@ -78,11 +79,38 @@ export const erase = async () => {
 // A second copy of the books in the app's private files on the phone, refreshed a little while
 // after each change. It's not a backup (it goes if the app is deleted or the phone is lost):
 // that's what Backup to iCloud / Google Drive / OneDrive / Proton Drive is for.
+//
+// Copying the books takes a few seconds on a phone and the books can't answer anything else
+// meanwhile, so it's done when the app goes to the background (the person has stopped), or
+// after two quiet minutes, never while someone is moving between screens.
 const SAFETY = 'books/safety-copy.tar.gz';
 let timer: ReturnType<typeof setTimeout> | null = null;
+let changed = false;
+let lastCall = 0;
 function scheduleSafetyCopy() {
+  changed = true;
   if (timer) clearTimeout(timer);
-  timer = setTimeout(() => void writeSafetyCopy(), 15_000);
+  timer = setTimeout(quietCopy, 120_000);
+}
+function quietCopy() {
+  // Still being used: wait for a quiet moment.
+  if (Date.now() - lastCall < 60_000) {
+    timer = setTimeout(quietCopy, 60_000);
+    return;
+  }
+  void flushSafetyCopy();
+}
+async function flushSafetyCopy() {
+  if (!changed) return;
+  changed = false;
+  if (timer) clearTimeout(timer);
+  timer = null;
+  await writeSafetyCopy();
+}
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') void flushSafetyCopy();
+  });
 }
 async function native() {
   const { Capacitor } = await import('@capacitor/core');
@@ -94,10 +122,15 @@ async function writeSafetyCopy() {
   if (!fs) return;
   try {
     const blob = await dump();
-    const buf = new Uint8Array(await blob.arrayBuffer());
-    let bin = '';
-    for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
-    await fs.Filesystem.writeFile({ path: SAFETY, data: btoa(bin), directory: fs.Directory.Library ?? fs.Directory.Data, recursive: true });
+    // The browser's own encoder: far quicker than building the text in JavaScript, and it
+    // doesn't freeze the screen on a big file.
+    const data = await new Promise<string>((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result).slice(String(r.result).indexOf(',') + 1));
+      r.onerror = () => reject(r.error);
+      r.readAsDataURL(blob);
+    });
+    await fs.Filesystem.writeFile({ path: SAFETY, data, directory: fs.Directory.Library ?? fs.Directory.Data, recursive: true });
   } catch (err) {
     console.warn('safety copy not written', err);
   }

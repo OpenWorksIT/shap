@@ -36,8 +36,22 @@ TestFlight needs an iPhone to install on; review and release don't.
 
 ## Store listing notes
 
-- **Privacy**: "Data not collected". The app has no server; nothing leaves the phone unless the
-  person shares it.
+- **Privacy policy URL**: https://www.openworks.co.za/shap/privacy/ (info page:
+  https://www.openworks.co.za/shap/).
+- **Privacy / data safety**: the books never leave the phone unless the person shares or backs
+  them up. Two things can go to OpenWorks, both by the person's choice, encrypted in transit:
+  - Feedback they send (message, the screens and taps leading up to it, device details,
+    optionally a screenshot with names and amounts hidden): Play "App activity → Other
+    user-generated content" and "App info and performance → Diagnostics"; Apple "User Content →
+    Other User Content" and "Diagnostics". Optional, not linked to identity, not for tracking.
+  - The anonymous usage note if they said yes at setup (kind of business, switched-on parts,
+    a random install number): Play "App activity → Other actions"; Apple "Usage Data → Product
+    Interaction". Optional, not linked to identity, not for tracking.
+  - No ads, no advertising ID, no account.
+- **Notifications** (Android 13+ asks): only the weekly backup reminder, scheduled on the phone.
+- **Donations**: the "Buy us a coffee" link is hidden in the store apps (Google Play allows
+  donation links only for registered non-profits; Apple wants in-app purchase for tips). The
+  apps still invite ideas through the feedback button.
 - **Source**: link the repository (the AGPL app store exception asks the listing or app to say
   where the source is). Settings → About in the app links it too.
 - **Category**: Business (Apple), Business (Google). Price: free.

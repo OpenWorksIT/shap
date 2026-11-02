@@ -256,7 +256,7 @@ function OwnerHome() {
                   <Link to={`/documents/${i.id}`} className="list-row">
                     <span className="grow" style={{ minWidth: 0 }}>
                       <strong className="ellipsis" style={{ display: 'block' }}>
-                        {i.number} · {i.clientName ?? i.projectName}
+                        {i.number} · {i.clientName ?? i.projectName ?? 'No name yet'}
                       </strong>
                       <span className="xs muted">{formatDate(i.issueDate)}</span>
                     </span>

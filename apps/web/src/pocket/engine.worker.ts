@@ -52,7 +52,10 @@ async function start(from?: Blob) {
     }
   }
   const usedTemplate = fresh;
-  pg = new PGlite(DATA_DIR, from ? { loadDataDir: from } : {});
+  // Relaxed durability: a change is written to the phone's storage just after the answer comes
+  // back, instead of the screen waiting for it. Much snappier on phones; the safety copy and
+  // backups cover the rare case of the app being killed in that instant.
+  pg = new PGlite(DATA_DIR, { relaxedDurability: true, ...(from ? { loadDataDir: from } : {}) });
   await pg.waitReady;
   const sql = createDb(pg);
   fresh = usedTemplate || (await migrate(sql, MIGRATIONS)).includes(MIGRATIONS.map((m) => m.name).sort()[0]!);

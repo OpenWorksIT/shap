@@ -169,7 +169,7 @@ export function LabourForm({ projectId: fixedProject, onSaved }: { projectId?: s
         )}
         {isOwner && <span className="hint">Wage + allowance per person. Change them here for a one-off; change the worker’s rate for good.</span>}
       </div>
-      <Field label="Note (optional)">{(p) => <input {...p} className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. waiting for the concrete truck" />}</Field>
+      <Field label="Note (optional)">{(p) => <input {...p} className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Waiting for the client" />}</Field>
       {error && <div className="banner alert small">{error}</div>}
       <button className="btn primary big block" disabled={busy}>
         {busy ? 'Saving…' : ids.length ? `Log ${ids.length} worker${ids.length === 1 ? '' : 's'}${seesMoney ? ` · ${formatZar(total, { cents: false })}` : ''}` : 'Log the day'}

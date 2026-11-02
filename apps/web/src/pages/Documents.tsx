@@ -132,7 +132,7 @@ export default function DocumentsPage() {
                     )}
                   </td>
                   <td>
-                    {d.clientName ?? '—'}
+                    {d.clientName ?? <span className="muted">No name yet</span>}
                     <div className="xs muted">
                       {d.projectName ? `#${d.projectNumber} ${d.projectName}` : d.title}
                       <span className="show-sm"> · {formatDate(d.issueDate)}</span>

@@ -1,5 +1,6 @@
-import { lazy, Suspense } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { lazy, Suspense, useEffect } from 'react';
+import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import { listenForReminder } from './lib/backup';
 import { FeedbackButton } from './components/Feedback';
 import { Shell } from './components/Shell';
 import { Loading } from './components/ui';
@@ -49,6 +50,8 @@ function Opened() {
 function Books() {
   const { settings, has } = useAuthed();
   const pays = has('payroll') || (settings.businessType === 'company' && has('dividends'));
+  const navigate = useNavigate();
+  useEffect(() => void listenForReminder(navigate), [navigate]);
   if (!settings.setupDone) return <WelcomePage />;
   return (
     <Shell>

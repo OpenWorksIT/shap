@@ -8,14 +8,14 @@ import { LogoField } from '../components/BusinessForm';
 import { Logo } from '../components/Logo';
 import { Field, Icon } from '../components/ui';
 import { api, ApiError } from '../lib/api';
-import { restoreFrom } from '../lib/backup';
-import { pickFile } from '../lib/native';
+import { BACKUP_PLACES, phoneBackupTip, placeSteps, restoreFrom, scheduleBackupReminder, setBackupPlace, type BackupPlace } from '../lib/backup';
+import { isNative, pickFile, platform } from '../lib/native';
 import { reportUsage } from '../lib/usage';
 import { useAuthed } from '../lib/session';
 import type { Settings } from '../lib/types';
 import { setTone } from '../lib/words';
 
-const STEPS = ['hello', 'structure', 'industry', 'people', 'workflow', 'logo', 'details', 'tone'] as const;
+const STEPS = ['hello', 'structure', 'industry', 'people', 'workflow', 'logo', 'details', 'backup', 'tone'] as const;
 type Step = (typeof STEPS)[number];
 
 export default function WelcomePage({ canRestore = true }: { canRestore?: boolean }) {
@@ -29,6 +29,9 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
   const [casual, setCasual] = useState<boolean | null>(null);
   const [dividends, setDividends] = useState<boolean | null>(null);
   const [workflow, setWorkflow] = useState<Workflow>('quote_job_invoice');
+  const [place, setPlace] = useState<BackupPlace | null>(null);
+  const [remind, setRemind] = useState(true);
+  const os = platform();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setF((x) => ({ ...x, [k]: v }));
@@ -46,6 +49,8 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
       const { logoId: _l, ...rest } = { ...f, features, industry, usageConsent: Boolean(consent), setupDone: true, fyEndMonth: company ? f.fyEndMonth : 2 } as Settings & { logoId: string | null };
       await api('/api/settings', { method: 'PUT', body: rest });
       setTone(f.tone);
+      setBackupPlace(place);
+      void scheduleBackupReminder(remind);
       if (consent) void reportUsage({ ...f, features, industry, usageConsent: true });
       await refreshReference();
     } catch (err) {
@@ -98,6 +103,9 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
               <Logo size={72} />
               <h1>Welcome to Shap</h1>
               <p className="muted">Quotes, invoices, costs and tax for your business. A few quick questions and Shap sets itself up to fit: no bigger than you need.</p>
+              <p className="small welcome-gift">
+                A gift from OpenWorks IT to South African business: free, open and never any ads{isNative() ? '' : ', kept going by people who chip in'}. Less admin, more building.
+              </p>
             </div>
             <button className="btn primary big block" onClick={next}>
               Let’s set up
@@ -207,6 +215,41 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
             </div>
             <Field label="Payment terms (on invoices)">{(p) => <textarea {...p} className="textarea" rows={2} value={f.invoiceTerms} onChange={(e) => set('invoiceTerms', e.target.value)} />}</Field>
             {nav()}
+          </Q>
+        )}
+
+        {step === 'backup' && (
+          <Q title="Keep a copy off your phone" sub="Everything in Shap Pocket lives on this phone, not on the internet. If the phone is stolen, broken or lost, your books go with it, unless there’s a backup.">
+            <p className="small">Where would you keep your backups?</p>
+            <div className="choice-grid">
+              {BACKUP_PLACES.filter((p) => !(p.android === false && os !== 'ios')).map((p) => (
+                <button key={p.key} type="button" className={`choice small ${place === p.key ? 'on' : ''}`} onClick={() => setPlace(p.key)}>
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            {place && (
+              <div className="panel panel-pad stack" style={{ gap: 8 }}>
+                <strong className="small">How it works</strong>
+                <ol className="small steps-list">
+                  {placeSteps(place, os).map((t) => (
+                    <li key={t}>{t}</li>
+                  ))}
+                </ol>
+                <span className="xs muted">Your first backup is worth making once you’ve added some work. Back up any time from the menu: Backup.</span>
+              </div>
+            )}
+            {isNative() && (
+              <label className="check">
+                <input type="checkbox" checked={remind} onChange={(e) => setRemind(e.target.checked)} />
+                <span>
+                  Remind me to back up every week
+                  <div className="xs muted">A notification a week after your last backup. Back up, and it moves on a week.</div>
+                </span>
+              </label>
+            )}
+            {phoneBackupTip(os) && <p className="xs muted">{phoneBackupTip(os)}</p>}
+            {nav(true, place ? 'Next' : 'Decide later')}
           </Q>
         )}
 

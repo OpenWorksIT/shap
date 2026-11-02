@@ -21,6 +21,7 @@ export interface Settings {
   businessType: 'company' | 'sole_prop';
   features: Record<string, boolean>;
   tone: 'casual' | 'formal';
+  watermark: boolean;
   industry: string;
   usageConsent: boolean;
   installId?: string;

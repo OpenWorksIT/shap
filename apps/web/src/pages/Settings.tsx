@@ -11,6 +11,7 @@ import {
   passwordProblem,
   ROLE_HINTS,
   ROLE_LABELS,
+  SHAP_LINE,
   ROLES,
   SOURCE_KIND_LABELS,
   SOURCE_KINDS,
@@ -31,6 +32,7 @@ import { ApiImage } from '../components/Files';
 import { FEATURES, FEATURE_KEYS, featureOn, INDUSTRIES } from '@shap/shared';
 import { reportUsage } from '../lib/usage';
 import { setTone, type Tone } from '../lib/words';
+import { SupportShap } from '../components/Support';
 
 type Tab = 'business' | 'invoicing' | 'sections' | 'lists';
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -134,7 +136,7 @@ function Sections() {
   const { settings, refreshReference } = useAuthed();
   const toast = useToast();
   const [on, setOn] = useState<Record<string, boolean>>(() => Object.fromEntries(FEATURE_KEYS.map((k) => [k, featureOn(settings.features, k)])));
-  const [prefs, setPrefs] = useState({ tone: settings.tone, industry: settings.industry, usageConsent: settings.usageConsent, sdl: settings.sdl });
+  const [prefs, setPrefs] = useState({ tone: settings.tone, industry: settings.industry, usageConsent: settings.usageConsent, sdl: settings.sdl, watermark: settings.watermark });
   const save = async (changes: Partial<Settings>, done: string) => {
     try {
       await saveSettings(settings, changes);
@@ -202,9 +204,17 @@ function Sections() {
           </button>
         </div>
         <p className="xs muted">Only the app’s greetings and confirmations change. Quotes and invoices always stay professional.</p>
+        <label className="check">
+          <input type="checkbox" checked={prefs.watermark} onChange={(e) => void pref('watermark', e.target.checked)} />
+          <span>
+            Sign off with the Shap line
+            <div className="xs muted">A small line at the foot of quotes, invoices and payslips: “{SHAP_LINE}” Thanks for spreading the word.</div>
+          </span>
+        </label>
       </section>
       <section className="panel panel-pad stack">
         <h3>Your kind of business</h3>
+        <p className="xs muted">The examples, the names of line types on your quotes and invoices, the usual items offered when you add a line, and the cost types follow this.</p>
         <Field label="What you do">
           {(p) => (
             <select {...p} className="select" value={prefs.industry} onChange={(e) => void pref('industry', e.target.value)}>
@@ -225,6 +235,7 @@ function Sections() {
           </span>
         </label>
       </section>
+      <SupportShap />
     </div>
   );
 }

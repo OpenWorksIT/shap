@@ -1,5 +1,5 @@
 import type { App as FastifyInstance } from '../http.js';
-import { addMonths, financialYear, monthEnd, monthLabel, monthStart, monthsBetween } from '@shap/shared';
+import { addMonths, featureOn, financialYear, monthEnd, monthLabel, monthStart, monthsBetween } from '@shap/shared';
 import { requireRole, seesMoney, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { getSettings, today } from '../lib/books.js';
@@ -27,6 +27,9 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
     const settings = await getSettings(sql);
     const fy = financialYear(now, settings.fyEndMonth);
     const firstMonth = monthStart(addMonths(now, -11));
+    // Parts of the app that are switched off aren't asked about: on a phone every question counts.
+    const on = (k: Parameters<typeof featureOn>[1]) => featureOn(settings.features, k);
+    const none = Promise.resolve([] as never[]);
 
     const [series, owing, workers, unallocated, materialsNoJob, balances, projects, uncaptured] = await Promise.all([
       // Last 12 months: invoiced, cost of sales, running costs
@@ -45,22 +48,22 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
         left join clients c on c.id = d.client_id left join projects p on p.id = d.project_id
         where d.kind = 'invoice' and d.status = 'issued' and d.written_off_on is null and d.total_cents - coalesce(r.paid, 0) <> 0
         order by d.issue_date`),
-      sql<{ id: string; name: string; balanceCents: number }[]>`
+      !on('workers') ? none : sql<{ id: string; name: string; balanceCents: number }[]>`
         select w.id, w.name,
           (coalesce((select sum(wage_cents + allowance_cents) from labour_entries where worker_id = w.id), 0)
            - coalesce((select sum(amount_cents) from wage_payments where worker_id = w.id), 0))::bigint as balance_cents
         from workers w where w.active order by w.name`,
-      sql<{ n: number; cost: number; days: number }[]>`
+      !on('workers') ? Promise.resolve([{ n: 0, cost: 0, days: 0 }]) : sql<{ n: number; cost: number; days: number }[]>`
         select count(*)::int as n, coalesce(sum(wage_cents + allowance_cents), 0)::bigint as cost, coalesce(sum(days), 0)::float as days
         from labour_entries where project_id is null and work_type_id is null`,
-      sql<{ n: number; total: number }[]>`
+      !on('jobs') ? Promise.resolve([{ n: 0, total: 0 }]) : sql<{ n: number; total: number }[]>`
         select count(*)::int as n, coalesce(sum(c.amount_cents), 0)::bigint as total from costs c join cost_categories k on k.id = c.category_id
         where k.kind = 'materials' and c.project_id is null and not c.no_job and c.date >= ${fy.start}::date`,
       sql<{ key: string; balance: number }[]>`
         select a.system_key as key, coalesce(sum(l.amount_cents), 0)::bigint as balance from accounts a
         left join ledger l on l.account_id = a.id and l.date <= ${now}::date
         where a.system_key in ('bank', 'owner_loan', 'receivables', 'wages_payable') group by a.system_key`,
-      sql.unsafe(`
+      !on('jobs') ? none : sql.unsafe(`
         select p.id, p.number, p.name, p.status, c.name as client_name, s.*
         from projects p left join clients c on c.id = p.client_id join (${projectSummarySql}) s on s.id = p.id
         where p.status in ('active', 'invoiced', 'quoted') order by p.number desc limit 12`),
@@ -101,7 +104,7 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
       unallocatedLabour: unallocated[0],
       materialsWithoutJob: materialsNoJob[0],
       uncapturedCosts: uncaptured[0],
-      statementsMissing: await missingStatements(sql),
+      statementsMissing: on('bank') ? await missingStatements(sql) : [],
       duplicateCosts: (await findDuplicates(sql)).length,
       vat: await vatStatus(sql, now),
       sarsDue: await payrollAttention(sql, now),
