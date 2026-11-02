@@ -59,11 +59,19 @@ jobs:
         if: env.HAS_SIGNING == 'true'
         working-directory: apps/web/android
         env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/upload.jks"
+          # The secret is the key file as base64 text (base64 -w0 shap-pocket-upload.jks), not the file itself.
+          if ! printf '%s' "$KEYSTORE_BASE64" | tr -d ' \r\n' | grep -Eq '^[A-Za-z0-9+/]+=*$'; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 isn't base64 text. Run: base64 -w0 shap-pocket-upload.jks > key.txt and paste what's in key.txt."
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | tr -d ' \r\n' | base64 -d > "$RUNNER_TEMP/upload.jks"
+          keytool -list -keystore "$RUNNER_TEMP/upload.jks" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" > /dev/null \
+            || { echo "::error::The keystore opened wrongly: check ANDROID_KEYSTORE_PASSWORD and ANDROID_KEY_ALIAS (upload)."; exit 1; }
           ./gradlew --no-daemon bundleRelease \
             -Pandroid.injected.signing.store.file="$RUNNER_TEMP/upload.jks" \
             -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
