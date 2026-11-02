@@ -22,8 +22,8 @@ Fitted to your trade, and quicker.
   Sections).
 - **Support Shap** in Settings: tell us what you need next (a new “Idea” kind of feedback).
 - **Quicker:** screens show what they showed last time straight away and refresh underneath;
-  the database answers before it finishes writing to storage; the safety copy waits for a quiet
-  moment instead of freezing the app; Home skips the parts you've switched off.
+  the safety copy waits for a quiet moment instead of freezing the app; Home skips the parts
+  you've switched off.
 
 ## 0.5.0 (internal testing)
 
