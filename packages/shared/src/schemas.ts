@@ -81,6 +81,8 @@ export const settingsInput = z.object({
   payshapId: text(80).default(''),
   vatCategory: z.enum(['A', 'B', 'C']).default('B'),
   turnoverTax: z.boolean().default(false),
+  /** The usual hourly rate for time not on a job (or a job without its own rate). */
+  hourlyRateCents: positiveCents.default(0),
   paymentDays: z.number().int().min(0).max(365).default(7),
   quoteValidDays: z.number().int().min(0).max(365).default(30),
   invoiceTerms: text(2000).default(''),

@@ -43,6 +43,13 @@ More of what a small business needs, each one a switch under Settings → What y
   any computer) at openworks.co.za/shap/app. It opens with no internet, keeps the books in the
   browser's storage for the app, and backs up with a Save dialog straight into your OneDrive or
   Google Drive folder. Backups move between the phone and the computer both ways.
+- **The first-run questions cover the new parts:** do you charge by the hour (with your usual
+  rate), drive for work (the travel logbook), get supplier bills on account, take payment up front
+  (pro-formas), or come from another package (Move in opens straight after setup). The answers
+  start from what's usual for your kind of business. Your PayShap ID, turnover tax and how often
+  you file VAT can be set there too.
+- **A usual hourly rate** (Settings → Invoicing & tax): for time with no job, and jobs without
+  their own rate.
 - The time tracker's clock is per person (ready for Shap's shared server).
 - Fixed: changing an invoice that was already saved could fail with “Expected string”; dates
   from the books now reach the screens the way they do on Shap's server. Saving one Settings

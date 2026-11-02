@@ -21,7 +21,7 @@ import {
   type SourceKind,
 } from '@shap/shared';
 import { PageHead } from '../components/Shell';
-import { Drawer, ErrorBox, Field, Icon, Loading, Tabs, useToast } from '../components/ui';
+import { Drawer, ErrorBox, Field, Icon, Loading, MoneyInput, Tabs, useToast } from '../components/ui';
 import { api, ApiError, APP_VERSION } from '../lib/api';
 import { fileToBase64, shrinkImage } from '../lib/files';
 import { useApi } from '../lib/hooks';
@@ -379,6 +379,11 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
             <Field label="Card payment link (optional)" hint="A Yoco (or SnapScan) payment link: printed on unpaid invoices and added to the message when you send one. Any invoice can have its own.">
               {(p) => <input {...p} className="input" type="url" inputMode="url" value={f.payLink} onChange={(e) => set('payLink', e.target.value)} placeholder="https://pay.yoco.com/…" />}
             </Field>
+            {has('timeTracker') && (
+              <Field label="Usual hourly rate" hint="For time on the clock: jobs can set their own, and time with no job uses this.">
+                {(p) => <MoneyInput {...p} value={f.hourlyRateCents || null} onChange={(c) => set('hourlyRateCents', c ?? 0)} placeholder="e.g. 450" />}
+              </Field>
+            )}
             {has('payshap') && (
               <Field label="Your ShapID (PayShap)" hint="Your cellphone number or the ShapID your bank gave you. Printed on unpaid invoices so clients pay you instantly from their banking app (up to R50 000 at most banks).">
                 {(p) => <input {...p} className="input" value={f.payshapId} onChange={(e) => set('payshapId', e.target.value)} placeholder="e.g. 082 123 4567 or yourname@yourbank" />}

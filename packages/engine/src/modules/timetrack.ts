@@ -23,7 +23,8 @@ export function registerTimeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const user = userOrThrow(req);
     const { project, unbilled } = q(req);
     const rows = await sql`
-      select t.*, p.name as project_name, p.number as project_number, p.hourly_rate_cents, d.number as billed_number, u.name as user_name
+      select t.*, p.name as project_name, p.number as project_number,
+        coalesce(nullif(p.hourly_rate_cents, 0), (select hourly_rate_cents from settings where id))::bigint as hourly_rate_cents, d.number as billed_number, u.name as user_name
       from time_entries t left join projects p on p.id = t.project_id left join documents d on d.id = t.billed_document_id left join users u on u.id = t.user_id
       where (${project ?? null}::uuid is null or t.project_id = ${project ?? null}::uuid)
         and (${unbilled === '1'} = false or (t.billed_document_id is null and t.ended_at is not null))
@@ -84,7 +85,7 @@ export function registerTimeRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!doc || doc.status === 'void' || doc.kind === 'credit_note') throw badRequest('Choose an invoice or quote that can still be changed');
     return sql.begin(async (tx) => {
       const rows = await tx<{ projectId: string | null; projectName: string | null; rate: number; minutes: number }[]>`
-        select t.project_id, p.name as project_name, coalesce(p.hourly_rate_cents, 0)::bigint as rate, sum(t.minutes)::int as minutes
+        select t.project_id, p.name as project_name, coalesce(nullif(p.hourly_rate_cents, 0), (select hourly_rate_cents from settings where id), 0)::bigint as rate, sum(t.minutes)::int as minutes
         from time_entries t left join projects p on p.id = t.project_id
         where t.id = any(${ids}::uuid[]) and t.billed_document_id is null and t.ended_at is not null
         group by t.project_id, p.name, p.hourly_rate_cents`;

@@ -82,4 +82,16 @@ describe('more of the books', () => {
     expect(d.doc.subtotalCents).toBe(112500);
     expect((await me.get(`/api/time?project=${job.id}&unbilled=1`)).entries).toHaveLength(0);
   });
+
+  it('bills time with no job (or a job without a rate) at the usual hourly rate', async () => {
+    const { settings } = await me.get('/api/reference');
+    await me.post('/api/settings', { ...settings, hourlyRateCents: 60000 }, 'PUT');
+    const t = await me.post('/api/time', { projectId: null, startedAt: '2026-10-05T08:00:00+02:00', endedAt: '2026-10-05T09:30:00+02:00', note: 'Admin for client' });
+    const { entries } = await me.get('/api/time?unbilled=1');
+    expect(entries.find((e: { id: string }) => e.id === t.id).hourlyRateCents).toBe(60000);
+    const inv = await me.post('/api/documents', { kind: 'invoice', issueDate: '2026-10-06', lines: [] });
+    await me.post('/api/time/bill', { documentId: inv.id, ids: [t.id] });
+    const d = await me.get(`/api/documents/${inv.id}`);
+    expect(d.lines[0]).toMatchObject({ qty: 1.5, unitPriceCents: 60000, lineTotalCents: 90000 });
+  });
 });

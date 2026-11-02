@@ -111,7 +111,7 @@ export function ProjectDrawer({ project, onClose, onSaved }: { project?: Project
           </div>
         </fieldset>
         {has('timeTracker') && (
-          <Field label="Hourly rate" hint="For the time tracker: time on this job goes onto invoices at this rate">
+          <Field label="Hourly rate" hint="For the time tracker: time on this job goes onto invoices at this rate. Blank uses your usual rate (Settings).">
             {(p) => <MoneyInput {...p} value={f.hourlyRateCents || null} onChange={(c) => set('hourlyRateCents', c ?? 0)} placeholder="e.g. 450" />}
           </Field>
         )}

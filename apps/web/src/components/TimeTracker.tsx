@@ -102,7 +102,7 @@ export function JobTime({ projectId, rateCents, canEdit }: { projectId: string; 
               · <Money cents={Math.round((unbilled / 60) * rateCents)} /> at <Money cents={rateCents} /> an hour
             </>
           ) : (
-            <span className="muted"> · set the job’s hourly rate (edit the job) to bill it</span>
+            <span className="muted"> · set an hourly rate on the job, or your usual rate in Settings → Invoicing &amp; tax, to bill it</span>
           )}
         </p>
         <p className="xs muted">To bill it, open an invoice for this job and tap “Add time…”.</p>

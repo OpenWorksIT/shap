@@ -3,10 +3,11 @@
  * exactly as big as the business needs. Everything can be changed later in Settings.
  */
 import { useState, type ReactNode } from 'react';
-import { featuresFor, INDUSTRIES, WORKFLOWS, type IndustryKey, type Workflow } from '@shap/shared';
+import { useNavigate } from 'react-router-dom';
+import { extrasFor, featuresFor, INDUSTRIES, TURNOVER_TAX_LIMIT_CENTS, formatZar, WORKFLOWS, type IndustryKey, type SetupExtras, type Workflow } from '@shap/shared';
 import { LogoField } from '../components/BusinessForm';
 import { Logo } from '../components/Logo';
-import { Field, Icon } from '../components/ui';
+import { Field, Icon, MoneyInput } from '../components/ui';
 import { api, ApiError } from '../lib/api';
 import { BACKUP_PLACES, phoneBackupTip, placeSteps, restoreFrom, scheduleBackupReminder, setBackupPlace, type BackupPlace } from '../lib/backup';
 import { device, isNative, pickFile, platform } from '../lib/native';
@@ -15,11 +16,12 @@ import { useAuthed } from '../lib/session';
 import type { Settings } from '../lib/types';
 import { setTone } from '../lib/words';
 
-const STEPS = ['hello', 'structure', 'industry', 'people', 'workflow', 'logo', 'details', 'backup', 'tone'] as const;
+const STEPS = ['hello', 'structure', 'industry', 'people', 'workflow', 'extras', 'logo', 'details', 'backup', 'tone'] as const;
 type Step = (typeof STEPS)[number];
 
 export default function WelcomePage({ canRestore = true }: { canRestore?: boolean }) {
   const { settings, refreshReference } = useAuthed();
+  const navigate = useNavigate();
   const [step, setStep] = useState<Step>('hello');
   const [f, setF] = useState<Settings>({ ...settings });
   const [logoId, setLogoId] = useState(settings.logoId);
@@ -29,6 +31,9 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
   const [casual, setCasual] = useState<boolean | null>(null);
   const [dividends, setDividends] = useState<boolean | null>(null);
   const [workflow, setWorkflow] = useState<Workflow>('quote_job_invoice');
+  const [extras, setExtras] = useState<SetupExtras>(() => extrasFor(settings.industry || ''));
+  const [movingIn, setMovingIn] = useState<boolean | null>(null);
+  const extra = (k: keyof SetupExtras) => (v: boolean) => setExtras((x) => ({ ...x, [k]: v }));
   const [place, setPlace] = useState<BackupPlace | null>(null);
   const [remind, setRemind] = useState(true);
   const os = platform();
@@ -44,7 +49,10 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
   const finish = async () => {
     setBusy(true);
     setError('');
-    const features = { ...f.features, ...featuresFor({ workflow, employees: Boolean(employees), casual: Boolean(casual), company, dividends: dividends ?? false }) };
+    const features = {
+      ...f.features,
+      ...featuresFor({ workflow, employees: Boolean(employees), casual: Boolean(casual), company, dividends: dividends ?? false, extras, payshap: Boolean(f.payshapId.trim()) }),
+    };
     try {
       const { logoId: _l, ...rest } = { ...f, features, industry, usageConsent: Boolean(consent), setupDone: true, fyEndMonth: company ? f.fyEndMonth : 2 } as Settings & { logoId: string | null };
       await api('/api/settings', { method: 'PUT', body: rest });
@@ -52,6 +60,8 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
       setBackupPlace(place);
       void scheduleBackupReminder(remind);
       if (consent) void reportUsage({ ...f, features, industry, usageConsent: true });
+      // Moving from another package: straight to the screen that brings the books across.
+      if (movingIn) navigate('/move-in', { replace: true });
       await refreshReference();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Couldn’t save');
@@ -133,6 +143,13 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
                 <div className="xs muted">Not yet? Shap warns you when you get near the point where you must (R2.3 million a year).</div>
               </span>
             </label>
+            <label className="check">
+              <input type="checkbox" checked={f.turnoverTax} onChange={(e) => set('turnoverTax', e.target.checked)} />
+              <span>
+                Registered for turnover tax
+                <div className="xs muted">SARS’s simpler tax for micro businesses (turnover up to {formatZar(TURNOVER_TAX_LIMIT_CENTS, { cents: false })} a year). Only if you registered for it: not sure? Leave it off.</div>
+              </span>
+            </label>
             {nav(Boolean(f.companyName.trim()))}
           </Q>
         )}
@@ -148,6 +165,7 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
                   onClick={() => {
                     setIndustry(i.key);
                     setWorkflow(i.workflow);
+                    setExtras(extrasFor(i.key));
                   }}
                 >
                   {i.label}
@@ -188,6 +206,23 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
           </Q>
         )}
 
+        {step === 'extras' && (
+          <Q title="What else would help?" sub="Shap has guessed from what you do. Change anything that doesn’t fit: it can all be switched on or off later under Settings → What you use.">
+            <YesNo q="Do you charge for your time by the hour?" hint="A clock to start and stop on each job, your hourly rate, and the hours onto the invoice in one tap." value={extras.hourly} onChange={extra('hourly')} />
+            {extras.hourly && (
+              <Field label="Your usual hourly rate" hint="Each job can have its own rate too">
+                {(p) => <MoneyInput {...p} value={f.hourlyRateCents || null} onChange={(c) => set('hourlyRateCents', c ?? 0)} placeholder="e.g. 450" />}
+              </Field>
+            )}
+            <YesNo q="Do you drive for work?" hint="SARS’s travel logbook: each business trip and the odometer at the start and end of the tax year. You need it to claim your travel." value={extras.travel} onChange={extra('travel')} />
+            <YesNo q="Do suppliers give you bills to pay later (an account)?" hint="Bills to pay: what you owe, when it’s due, and a nudge on Home before it is." value={extras.bills} onChange={extra('bills')} />
+            <YesNo q="Do clients sometimes pay before you start?" hint="Pro-forma invoices: ask for the money up front, without a tax invoice. Once paid, turn it into the invoice." value={extras.upfront} onChange={extra('upfront')} />
+            <YesNo q="Are you moving from another package?" hint="Sage, Xero, QuickBooks, Zoho or Invoice Ninja: after setup Shap opens Move in, to bring your clients, invoices and balances across." value={movingIn} onChange={setMovingIn} />
+            <p className="xs muted">Switched on for everyone: credit notes, payment reminders on Home (with a message ready for WhatsApp) and step-by-step SARS filing guides.</p>
+            {nav(movingIn !== null)}
+          </Q>
+        )}
+
         {step === 'logo' && (
           <Q title="Your logo" sub="Optional. Add it from your photos or files, then drag and size it until it sits right.">
             <LogoField logoId={logoId} layout={f.logoLayout ?? {}} accent={f.accent ?? '#e8731c'} onLogo={setLogoId} onLayout={(l) => set('logoLayout', l)} />
@@ -208,9 +243,23 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
             <Field label="Card payment link (optional)" hint="Use Yoco? Paste your payment link: clients can pay invoices by card.">
               {(p) => <input {...p} className="input" type="url" inputMode="url" value={f.payLink} onChange={(e) => set('payLink', e.target.value)} placeholder="https://pay.yoco.com/…" />}
             </Field>
+            <Field label="Your ShapID for PayShap (optional)" hint="Your cellphone number or the ShapID from your bank. Printed on invoices so clients can pay you instantly from their banking app.">
+              {(p) => <input {...p} className="input" value={f.payshapId} onChange={(e) => set('payshapId', e.target.value)} placeholder="e.g. 082 123 4567" />}
+            </Field>
             <div className="form-grid">
               <Field label="Invoices due after (days)">{(p) => <input {...p} className="input" type="number" min={0} value={f.paymentDays} onChange={(e) => set('paymentDays', Number(e.target.value))} />}</Field>
               {f.vatRegistered && <Field label="VAT number">{(p) => <input {...p} className="input" value={f.vatNumber} onChange={(e) => set('vatNumber', e.target.value)} />}</Field>}
+              {f.vatRegistered && (
+                <Field label="You file VAT" hint="On your VAT registration letter">
+                  {(p) => (
+                    <select {...p} className="select" value={f.vatCategory} onChange={(e) => set('vatCategory', e.target.value as Settings['vatCategory'])}>
+                      <option value="B">Every two months (Feb, Apr, Jun…)</option>
+                      <option value="A">Every two months (Jan, Mar, May…)</option>
+                      <option value="C">Every month</option>
+                    </select>
+                  )}
+                </Field>
+              )}
               {company && <Field label="Company registration number">{(p) => <input {...p} className="input" value={f.regNumber} onChange={(e) => set('regNumber', e.target.value)} />}</Field>}
             </div>
             <Field label="Payment terms (on invoices)">{(p) => <textarea {...p} className="textarea" rows={2} value={f.invoiceTerms} onChange={(e) => set('invoiceTerms', e.target.value)} />}</Field>
