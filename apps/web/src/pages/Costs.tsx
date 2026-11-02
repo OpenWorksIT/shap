@@ -333,7 +333,7 @@ export default function CostsPage() {
           </span>
           <select className="select auto" value={assignTo} onChange={(e) => setAssignTo(e.target.value)} aria-label="Paid from">
             <option value="">Paid from…</option>
-            {ref.sources.filter((x) => x.active).map((x) => (
+            {ref.sources.filter((x) => x.active && !x.role).map((x) => (
               <option key={x.id} value={x.id}>
                 {x.name}
               </option>

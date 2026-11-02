@@ -28,7 +28,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const refreshReference = useCallback(async () => {
     const r = await api<Reference>('/api/reference');
     setTone((r.settings as Settings).tone);
-    setRef(r);
+    // Credit notes settle invoices through a source of their own, never picked by hand; the
+    // unpaid-bills source only shows with Supplier bills switched on.
+    const bills = featureOn(r.settings.features, 'bills');
+    setRef({ ...r, sources: r.sources.filter((x) => x.role !== 'credit_notes' && (x.role !== 'bills' || bills)) });
   }, []);
 
   useEffect(() => {

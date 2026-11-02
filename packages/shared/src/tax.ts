@@ -174,3 +174,61 @@ export function estimateTax(f: TaxEstimateFigures) {
   const taxableCents = Math.max(0, before - retirementDeductionCents);
   return { taxableCents, retirementDeductionCents, taxCents: individualTax(taxableCents, f.fyEnd, f.ageBand ?? 'under65') };
 }
+
+/* ---------------------------------------------------------------- turnover tax (micro businesses) */
+
+/**
+ * Turnover tax: a simple tax on turnover for micro businesses (turnover up to R2.3 million from
+ * 1 April 2026). It replaces income tax, provisional tax, capital gains tax and dividends tax
+ * (VAT stays optional). SARS: https://www.sars.gov.za/types-of-tax/turnover-tax/
+ * Bands in rand: [from, base tax, rate above from].
+ */
+const TURNOVER_TABLES: { from: string; bands: [number, number, number][] }[] = [
+  // Years of assessment from 1 March 2026.
+  { from: '2027-02-28', bands: [[0, 0, 0], [600_000, 0, 0.01], [950_000, 3_500, 0.02], [1_400_000, 12_500, 0.03]] },
+  // Earlier years (unchanged since 2013).
+  { from: '0000-00-00', bands: [[0, 0, 0], [335_000, 0, 0.01], [500_000, 1_650, 0.02], [750_000, 6_650, 0.03]] },
+];
+export const TURNOVER_TAX_LIMIT_CENTS = 2_300_000_00;
+
+export function turnoverTaxTable(yearEnd: string) {
+  return TURNOVER_TABLES.find((t) => yearEnd >= t.from)!.bands;
+}
+
+/** Turnover tax for a year's taxable turnover, in cents. */
+export function turnoverTax(turnoverCents: number, yearEnd: string): number {
+  const r = Math.max(0, turnoverCents) / 100;
+  const bands = turnoverTaxTable(yearEnd);
+  let band = bands[0]!;
+  for (const b of bands) if (r > b[0]) band = b;
+  return Math.round((band[1] + (r - band[0]) * band[2]) * 100);
+}
+
+/* ---------------------------------------------------------------- VAT201 periods */
+
+/** The VAT period (two months for categories A and B, one for C) ending in or before `on`'s month. */
+export function vatPeriod(on: string, category: 'A' | 'B' | 'C'): { start: string; end: string } {
+  const [y, m] = on.split('-').map(Number) as [number, number];
+  let endMonth = m;
+  if (category === 'A' && m % 2 === 0) endMonth = m + 1; // A ends Jan, Mar, May…
+  if (category === 'B' && m % 2 === 1) endMonth = m + 1; // B ends Feb, Apr, Jun…
+  const end = new Date(Date.UTC(y, endMonth, 0));
+  const start = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() - (category === 'C' ? 0 : 1), 1));
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  return { start: iso(start), end: iso(end) };
+}
+
+/** VAT201 due date when filed and paid on eFiling: the last business day of the month after the period. */
+export function vat201Due(periodEnd: string): string {
+  const [y, m] = periodEnd.split('-').map(Number) as [number, number];
+  const d = new Date(Date.UTC(y, m + 1, 0));
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/** The last business day of a month (turnover tax interim payments). */
+export function lastBusinessDay(year: number, month: number): string {
+  const d = new Date(Date.UTC(year, month, 0));
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}

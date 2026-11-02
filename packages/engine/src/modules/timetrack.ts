@@ -1,0 +1,104 @@
+/**
+ * Time tracker: a clock per job (one running at a time), an hourly rate on the job, and the
+ * unbilled time onto an invoice as a line. Time is for billing; it doesn't touch the books.
+ */
+import type { App as FastifyInstance } from '../http.js';
+import { timeEntryInput } from '@shap/shared';
+import { z } from 'zod';
+import { requireRole } from '../auth.js';
+import type { Ctx } from '../context.js';
+import { q } from '../lib/books.js';
+import { badRequest, notFound } from '../lib/errors.js';
+import { parse } from '../lib/validate.js';
+
+const idParam = z.object({ id: z.string().uuid() });
+const minutesBetween = (a: string | Date, b: string | Date) => Math.max(0, Math.round((new Date(b).getTime() - new Date(a).getTime()) / 60_000));
+
+export function registerTimeRoutes(app: FastifyInstance, ctx: Ctx): void {
+  const { sql } = ctx;
+  const owner = { preHandler: requireRole('owner') };
+
+  /** Time entries (a job's, or all), newest first, and the clock if one is running. */
+  app.get('/api/time', owner, async (req) => {
+    const { project, unbilled } = q(req);
+    const rows = await sql`
+      select t.*, p.name as project_name, p.number as project_number, p.hourly_rate_cents, d.number as billed_number
+      from time_entries t left join projects p on p.id = t.project_id left join documents d on d.id = t.billed_document_id
+      where (${project ?? null}::uuid is null or t.project_id = ${project ?? null}::uuid)
+        and (${unbilled === '1'} = false or (t.billed_document_id is null and t.ended_at is not null))
+      order by t.started_at desc limit 500`;
+    const [running] = await sql`select t.*, p.name as project_name from time_entries t left join projects p on p.id = t.project_id where t.ended_at is null`;
+    return { entries: rows, running: running ?? null };
+  });
+
+  /** Starts the clock for a job (stopping any other that's running). */
+  app.post('/api/time/start', owner, async (req) => {
+    const { projectId, note } = parse(z.object({ projectId: z.string().uuid().nullable().default(null), note: z.string().max(300).default('') }), req.body);
+    return sql.begin(async (tx) => {
+      await tx`update time_entries set ended_at = now(), minutes = greatest(0, round(extract(epoch from now() - started_at) / 60))::int where ended_at is null`;
+      const [row] = await tx`insert into time_entries (project_id, started_at, note) values (${projectId}, now(), ${note}) returning *`;
+      return row;
+    });
+  });
+
+  app.post('/api/time/stop', owner, async () => {
+    const [row] = await sql`
+      update time_entries set ended_at = now(), minutes = greatest(0, round(extract(epoch from now() - started_at) / 60))::int
+      where ended_at is null returning *`;
+    if (!row) throw badRequest('No clock is running');
+    return row;
+  });
+
+  /** Time added or corrected by hand. */
+  app.post('/api/time', owner, async (req) => {
+    const input = parse(timeEntryInput, req.body);
+    if (!input.endedAt) throw badRequest('Give the end time');
+    const minutes = minutesBetween(input.startedAt, input.endedAt);
+    const [row] = await sql`insert into time_entries (project_id, started_at, ended_at, minutes, note) values (${input.projectId ?? null}, ${input.startedAt}, ${input.endedAt}, ${minutes}, ${input.note}) returning *`;
+    return row;
+  });
+  app.put('/api/time/:id', owner, async (req) => {
+    const { id } = parse(idParam, req.params);
+    const input = parse(timeEntryInput, req.body);
+    const minutes = input.endedAt ? minutesBetween(input.startedAt, input.endedAt) : null;
+    const [row] = await sql`
+      update time_entries set project_id = ${input.projectId ?? null}, started_at = ${input.startedAt}, ended_at = ${input.endedAt}, minutes = ${minutes}, note = ${input.note}
+      where id = ${id} and billed_document_id is null returning *`;
+    if (!row) throw badRequest('That time is already on an invoice');
+    return row;
+  });
+  app.delete('/api/time/:id', owner, async (req) => {
+    const { id } = parse(idParam, req.params);
+    const [row] = await sql`delete from time_entries where id = ${id} and billed_document_id is null returning id`;
+    if (!row) throw notFound('Time');
+    return { ok: true };
+  });
+
+  /** Puts unbilled time on an invoice or quote as lines (one per job at its rate); the time is marked billed. */
+  app.post('/api/time/bill', owner, async (req) => {
+    const { documentId, ids } = parse(z.object({ documentId: z.string().uuid(), ids: z.array(z.string().uuid()).min(1).max(500) }), req.body);
+    const [doc] = await sql<{ status: string; kind: string }[]>`select status, kind from documents where id = ${documentId}`;
+    if (!doc || doc.status === 'void' || doc.kind === 'credit_note') throw badRequest('Choose an invoice or quote that can still be changed');
+    return sql.begin(async (tx) => {
+      const rows = await tx<{ projectId: string | null; projectName: string | null; rate: number; minutes: number }[]>`
+        select t.project_id, p.name as project_name, coalesce(p.hourly_rate_cents, 0)::bigint as rate, sum(t.minutes)::int as minutes
+        from time_entries t left join projects p on p.id = t.project_id
+        where t.id = any(${ids}::uuid[]) and t.billed_document_id is null and t.ended_at is not null
+        group by t.project_id, p.name, p.hourly_rate_cents`;
+      if (!rows.length) throw badRequest('That time is already on an invoice');
+      const [n] = await tx<{ next: number }[]>`select coalesce(max(sort), -1) + 1 as next from document_lines where document_id = ${documentId}`;
+      let sort = n!.next;
+      for (const r of rows) {
+        const hours = Math.round((r.minutes / 60) * 100) / 100;
+        const total = Math.round(hours * Number(r.rate));
+        await tx`insert into document_lines (document_id, sort, category, description, qty, unit, unit_price_cents, line_total_cents)
+                 values (${documentId}, ${sort++}, 'labour', ${`Time${r.projectName ? `: ${r.projectName}` : ''}`}, ${hours}, 'hour', ${r.rate}, ${total})`;
+      }
+      await tx`update time_entries set billed_document_id = ${documentId} where id = any(${ids}::uuid[]) and billed_document_id is null`;
+      // Totals follow the lines (VAT at the document's rate).
+      await tx`update documents d set subtotal_cents = x.s, vat_cents = round(x.s * d.vat_rate_bp / 10000.0), total_cents = x.s + round(x.s * d.vat_rate_bp / 10000.0), updated_at = now()
+               from (select coalesce(sum(line_total_cents), 0)::bigint as s from document_lines where document_id = ${documentId}) x where d.id = ${documentId}`;
+      return { lines: rows.length };
+    });
+  });
+}

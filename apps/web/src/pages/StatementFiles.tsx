@@ -22,7 +22,7 @@ export function StatementFiles() {
   const toast = useToast();
   const [params] = useSearchParams();
   const { data, error, reload } = useApi<Files>('/api/statement-files');
-  const sources = ref.sources.filter((s) => s.active && s.kind !== 'cash');
+  const sources = ref.sources.filter((s) => s.active && s.kind !== 'cash' && !s.role);
   const [sourceId, setSourceId] = useState(params.get('source') ?? sources.find((s) => s.statementsRequired)?.id ?? sources[0]?.id ?? '');
   const [month, setMonth] = useState(params.get('month') ?? addMonths(todayIso(), -1).slice(0, 7));
   const [busy, setBusy] = useState(false);

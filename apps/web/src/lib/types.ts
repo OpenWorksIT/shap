@@ -21,6 +21,14 @@ export interface Settings {
   businessType: 'company' | 'sole_prop';
   features: Record<string, boolean>;
   tone: 'casual' | 'formal';
+  creditPrefix: string;
+  creditNext: number;
+  creditPad: number;
+  proformaPrefix: string;
+  proformaNext: number;
+  payshapId: string;
+  vatCategory: 'A' | 'B' | 'C';
+  turnoverTax: boolean;
   watermark: boolean;
   industry: string;
   usageConsent: boolean;
@@ -70,6 +78,8 @@ export interface Source {
   id: string;
   name: string;
   kind: SourceKind;
+  /** Sources Shap uses itself: credit notes (never picked) and unpaid bills (with Supplier bills on). */
+  role?: 'credit_notes' | 'bills' | null;
   accountId: string;
   accountCode: string;
   accountName: string;

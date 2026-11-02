@@ -18,6 +18,14 @@ export interface SettingsRow {
   businessType: 'company' | 'sole_prop';
   features: Record<string, boolean>;
   tone: 'casual' | 'formal';
+  creditPrefix: string;
+  creditNext: number;
+  creditPad: number;
+  proformaPrefix: string;
+  proformaNext: number;
+  payshapId: string;
+  vatCategory: 'A' | 'B' | 'C';
+  turnoverTax: boolean;
   watermark: boolean;
   industry: string;
   usageConsent: boolean;

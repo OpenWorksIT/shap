@@ -34,7 +34,7 @@ export const LINE_CATEGORY_LABELS: Record<LineCategory, string> = {
   other: 'Other',
 };
 
-export const DOC_KINDS = ['quote', 'invoice'] as const;
+export const DOC_KINDS = ['quote', 'invoice', 'credit_note'] as const;
 export type DocKind = (typeof DOC_KINDS)[number];
 
 export const QUOTE_STATUSES = ['draft', 'sent', 'accepted', 'declined'] as const;

@@ -60,7 +60,7 @@ export function BankRecon() {
   const { ref, isOwner } = useAuthed();
   const toast = useToast();
   const [params, setParams] = useSearchParams();
-  const sources = ref.sources.filter((s) => s.active && s.kind !== 'cash');
+  const sources = ref.sources.filter((s) => s.active && s.kind !== 'cash' && !s.role);
   const sourceId = params.get('source') ?? sources.find((s) => s.kind === 'bank')?.id ?? sources[0]?.id ?? '';
   const [view, setView] = useState<View>('todo');
   const { data, error, loading, reload } = useApi<Recon>(sourceId ? `/api/bank/recon?sourceId=${sourceId}` : null);
@@ -690,7 +690,7 @@ function MatchDrawer({ line, onClose, onDone }: { line: Line; onClose: () => voi
 function TransferDrawer({ sourceId, line, onClose, onDone }: { sourceId: string; line: Line; onClose: () => void; onDone: () => void }) {
   const { ref } = useAuthed();
   const toast = useToast();
-  const others = ref.sources.filter((s) => s.active && s.id !== sourceId);
+  const others = ref.sources.filter((s) => s.active && !s.role && s.id !== sourceId);
   const [other, setOther] = useState(others[0]?.id ?? '');
   const [description, setDescription] = useState('');
   const out = line.amountCents < 0;

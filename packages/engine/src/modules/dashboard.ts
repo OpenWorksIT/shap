@@ -1,5 +1,5 @@
 import type { App as FastifyInstance } from '../http.js';
-import { addMonths, featureOn, financialYear, monthEnd, monthLabel, monthStart, monthsBetween } from '@shap/shared';
+import { addDays, addMonths, featureOn, financialYear, monthEnd, monthLabel, monthStart, monthsBetween } from '@shap/shared';
 import { requireRole, seesMoney, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { getSettings, today, freshTotals } from '../lib/books.js';
@@ -9,6 +9,7 @@ import { findDuplicates } from './duplicates.js';
 import { findRecurring } from './recurring.js';
 import { vatStatus } from './vat.js';
 import { payrollAttention } from './payroll.js';
+import { bills } from './bills.js';
 import { projectSummarySql, totals, type ProjectSummary } from './projects.js';
 
 export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -44,7 +45,8 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
         group by 1 order by 1`,
       sql.unsafe(`
         select d.id, d.number, d.issue_date, d.due_date, d.total_cents, coalesce(r.paid, 0)::bigint as paid_cents,
-          c.name as client_name, p.name as project_name, ${paymentStateSql} as payment_state
+          c.name as client_name, c.phone as client_phone, c.email as client_email, d.reminded_at, d.reminders, d.pay_link,
+          p.name as project_name, ${paymentStateSql} as payment_state
         from documents d left join lateral (select sum(amount_cents) as paid from receipts where invoice_id = d.id) r on true
         left join clients c on c.id = d.client_id left join projects p on p.id = d.project_id
         where d.kind = 'invoice' and d.status = 'issued' and d.written_off_on is null and d.total_cents - coalesce(r.paid, 0) <> 0
@@ -100,6 +102,10 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
         overdue: owing.filter((r) => r.paymentState === 'overdue').length,
         invoices: owing.slice(-8).reverse(),
       },
+      // Supplier bills due within a week (or overdue), when bills are switched on.
+      billsDue: on('bills') ? (await bills(sql, 'open')).filter((b) => (b.dueDate ?? b.date) <= addDays(now, 7)) : [],
+      // Overdue invoices to remind (oldest first), when payment reminders are switched on.
+      overdue: on('reminders') ? owing.filter((r) => r.paymentState === 'overdue').slice(0, 30) : [],
       workers: workers.filter((w) => w.balanceCents !== 0),
       owedToWorkersCents: -bal('wages_payable'),
       unallocatedLabour: unallocated[0],

@@ -72,6 +72,15 @@ export const settingsInput = z.object({
   quotePrefix: text(12).default('Q'),
   quoteNext: z.number().int().min(1).max(10_000_000),
   quotePad: z.number().int().min(0).max(8).default(4),
+  creditPrefix: text(10).default('CN'),
+  creditNext: z.number().int().min(1).max(10_000_000).default(1),
+  creditPad: z.number().int().min(0).max(8).default(4),
+  proformaPrefix: text(10).default('PF'),
+  proformaNext: z.number().int().min(1).max(10_000_000).default(1),
+  /** PayShap: the ShapID or cellphone number clients pay to. */
+  payshapId: text(80).default(''),
+  vatCategory: z.enum(['A', 'B', 'C']).default('B'),
+  turnoverTax: z.boolean().default(false),
   paymentDays: z.number().int().min(0).max(365).default(7),
   quoteValidDays: z.number().int().min(0).max(365).default(30),
   invoiceTerms: text(2000).default(''),
@@ -110,6 +119,7 @@ export const projectInput = z.object({
   estDemoCents: positiveCents.default(0),
   notes: text(4000).default(''),
   brandId: optionalUuid,
+  hourlyRateCents: positiveCents.default(0),
 });
 
 export const workerInput = z.object({
@@ -185,6 +195,9 @@ export const costInput = z.object({
   note: text(1000).default(''),
   receiptId: optionalUuid,
   plannedItemId: optionalUuid,
+  /** A supplier's bill to pay later: its number and when it's due. */
+  billNumber: text(60).default(''),
+  dueDate: isoDate.nullable().default(null),
 });
 
 export const attachmentInput = z.object({
@@ -230,6 +243,11 @@ export const documentInput = z.object({
   depositShowBalance: z.boolean().default(true),
   /** A card payment link for this invoice (blank: the business's usual one). */
   payLink: z.string().trim().max(500).refine((v) => !v || /^https:\/\//.test(v), 'A payment link starts with https://').default(''),
+  /** A quote that asks to be paid up front: titled "Pro-forma invoice". */
+  proforma: z.boolean().default(false),
+  /** For a credit note: the invoice it reduces, and why. */
+  creditedInvoiceId: optionalUuid,
+  creditReason: text(300).default(''),
 }).refine((d) => !(d.depositBp && d.depositCents), { message: 'Give the deposit as a percentage or an amount, not both', path: ['depositCents'] });
 
 /** Delinquent: write off what's left on an invoice (the client won't pay the rest). */
@@ -423,4 +441,35 @@ export const sarsPaymentInput = z.object({
   amountCents: positiveCents,
   sourceId: uuid,
   reference: text(60).default(''),
+});
+
+export const billPaymentInput = z.object({
+  date: isoDate,
+  amountCents: cents.refine((v) => v > 0, 'Enter the amount'),
+  sourceId: uuid,
+  note: text(300).default(''),
+});
+
+export const tripInput = z.object({
+  date: isoDate,
+  fromPlace: text(200).default(''),
+  toPlace: text(200).default(''),
+  reason: text(300).default(''),
+  km: z.number().min(0).max(5000),
+  business: z.boolean().default(true),
+  projectId: optionalUuid,
+  clientId: optionalUuid,
+});
+
+export const logbookYearInput = z.object({
+  vehicle: text(120).default(''),
+  odometerStart: z.number().min(0).max(5_000_000).nullable().default(null),
+  odometerEnd: z.number().min(0).max(5_000_000).nullable().default(null),
+});
+
+export const timeEntryInput = z.object({
+  projectId: optionalUuid,
+  startedAt: z.string().datetime({ offset: true }),
+  endedAt: z.string().datetime({ offset: true }).nullable().default(null),
+  note: text(300).default(''),
 });

@@ -764,7 +764,7 @@ function PaymentDrawer({ invoiceId, balance, onClose, onSaved }: { invoiceId: st
           <Field label="Received into">
             {(p) => (
               <select {...p} className="select" value={sourceId} onChange={(e) => setSourceId(e.target.value)}>
-                {ref.sources.filter((s) => s.active).map((s) => (
+                {ref.sources.filter((s) => s.active && !s.role).map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
                   </option>
