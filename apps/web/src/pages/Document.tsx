@@ -91,6 +91,16 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
   });
   const [d, setD] = useState<Draft>(initial);
   const [dirty, setDirty] = useState(!detail);
+  // When this screen last loaded the document. A save is refused if someone else changed it since.
+  const [seen, setSeen] = useState(doc?.updatedAt);
+  // Fresh from the server (after a save, or someone else's change): show it, unless there are
+  // unsaved edits here, which are kept (the save then explains what happened).
+  useEffect(() => {
+    if (!detail || dirty) return;
+    setD(initial());
+    setSeen(detail.doc.updatedAt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [drawer, setDrawer] = useState<null | 'pay' | 'email' | 'charge' | 'writeoff' | 'monthly' | 'client'>(null);
@@ -143,6 +153,7 @@ function Editor({ detail, kind, projectFromUrl, reload }: { detail: DocDetail | 
   };
 
   const body = () => ({
+    expectUpdatedAt: seen,
     projectId: d.projectId,
     clientId: d.clientId,
     brandId: d.brandId,

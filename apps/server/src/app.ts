@@ -31,6 +31,8 @@ import { registerSettingsRoutes } from './modules/settings.js';
 import { registerWorkerRoutes } from './modules/workers.js';
 import { registerYearEndRoutes } from './modules/yearend.js';
 import { registerArchiveRoutes } from './modules/archive.js';
+import { registerLiveRoutes } from './modules/live.js';
+import { LiveBus } from './lib/live.js';
 import { registerBankRoutes } from './modules/bank/routes.js';
 import { appVersion, registerSystemRoutes } from './modules/system.js';
 import { DEMO_COOKIE, registerDemoRoutes } from './modules/demo.js';
@@ -94,6 +96,14 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
     },
     secrets: new Secrets(config.secretsKey),
   };
+
+  // Tells other open screens that something changed, after every successful save.
+  const bus = new LiveBus();
+  app.addHook('onResponse', async (req, reply) => {
+    if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS' || reply.statusCode >= 400) return;
+    if (!req.url.startsWith('/api/') || req.url.startsWith('/api/auth') || req.url.startsWith('/api/feedback') || req.url.startsWith('/api/demo')) return;
+    bus.publish({ type: 'changed', by: req.user?.id ?? null, demo: req.cookies?.shap_demo === '1', at: Date.now() });
+  });
 
   await app.register(cookie);
   await app.register(rateLimit, { global: false });
@@ -190,6 +200,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   registerImportRoutes(app, ctx);
   registerYearEndRoutes(app, ctx);
   registerArchiveRoutes(app, ctx);
+  registerLiveRoutes(app, ctx, bus);
   registerBankRoutes(app, ctx);
   registerSystemRoutes(app, ctx);
   registerStatementRoutes(app, ctx);

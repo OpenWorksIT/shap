@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from './api';
+import { onLive } from './live';
 
 /**
  * What each screen showed last time. Coming back to a screen shows that straight away and
@@ -41,6 +42,20 @@ export function useApi<T>(path: string | null, opts: { fresh?: boolean } = {}) {
       if (mine === seq.current) setLoading(false);
     }
   }, [path]);
+
+  // Someone else saved something: refetch quietly (a short pause gathers a burst of saves).
+  useEffect(() => {
+    if (!path) return;
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const off = onLive(() => {
+      if (t) clearTimeout(t);
+      t = setTimeout(() => void load(), 600);
+    });
+    return () => {
+      off();
+      if (t) clearTimeout(t);
+    };
+  }, [load, path]);
 
   useEffect(() => {
     // A new path (another client, another filter) starts from what that one showed last.

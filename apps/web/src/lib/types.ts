@@ -256,6 +256,7 @@ export interface DocLine {
 
 export interface DocDetail {
   doc: DocRow & {
+    updatedAt: string;
     notes: string;
     terms: string;
     vatRateBp: number;

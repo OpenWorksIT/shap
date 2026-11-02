@@ -3,6 +3,7 @@ import { featureOn, type Feature } from '@shap/shared';
 import { api, setNativeToken, setUnauthorizedHandler } from './api';
 import { setTone } from './words';
 import type { Reference, Settings, User } from './types';
+import { startLive, stopLive } from './live';
 
 /** What the password step asks for next. */
 export type LoginStep =
@@ -46,6 +47,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     },
     [refreshReference],
   );
+
+  // Hear about other people's saves while signed in.
+  useEffect(() => {
+    if (user) startLive();
+    else stopLive();
+  }, [user]);
 
   useEffect(() => {
     setUnauthorizedHandler(() => setUser(null));

@@ -212,6 +212,8 @@ export const documentLineInput = z.object({
 });
 
 export const documentInput = z.object({
+  /** When the screen last loaded the document: a save from an out-of-date screen is refused. */
+  expectUpdatedAt: z.string().max(40).optional(),
   brandId: optionalUuid,
   projectId: optionalUuid,
   clientId: optionalUuid,

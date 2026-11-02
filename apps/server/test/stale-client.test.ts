@@ -32,4 +32,16 @@ describe('a page opened before an update', () => {
     const native = await owner.call({ method: 'POST', url: '/api/clients', payload: { name: 'Phone Co' }, headers: { 'x-shap-version': '0.0.1', 'x-shap-client': 'native' } });
     expect(native.statusCode).toBe(200);
   });
+
+  it('won’t let an out-of-date screen overwrite someone else’s change to an invoice', async () => {
+    const doc = await owner.post('/api/documents', { kind: 'invoice', issueDate: '2026-11-02', lines: [{ category: 'labour', description: 'Labour', qty: 1, unitPriceCents: 10000 }] });
+    const first = (await owner.get(`/api/documents/${doc.id}`)).doc;
+    // Someone else saves it.
+    await owner.post(`/api/documents/${doc.id}`, { issueDate: '2026-11-02', title: 'Changed elsewhere', lines: [{ category: 'labour', description: 'Labour', qty: 2, unitPriceCents: 10000 }], expectUpdatedAt: first.updatedAt }, 'PUT');
+    // This screen still has the first version.
+    const r = await owner.call({ method: 'PUT', url: `/api/documents/${doc.id}`, payload: { issueDate: '2026-11-02', title: 'Mine', lines: [], expectUpdatedAt: first.updatedAt } });
+    expect(r.statusCode).toBe(409);
+    expect(r.json()).toMatchObject({ code: 'stale_record' });
+    expect((await owner.get(`/api/documents/${doc.id}`)).doc.title).toBe('Changed elsewhere');
+  });
 });
