@@ -194,6 +194,9 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
              count(*) over (partition by lower(l.description))::int as uses, d.issue_date
         from document_lines l join documents d on d.id = l.document_id
        where d.status <> 'void' and length(l.description) between 2 and 80
+         -- Not lines made from one job's costs ("Labour – Smith roof"): they're never usual.
+         and l.description !~ '^(Labour|Materials|Demo|Demolition|Other|Work / time|Parts / materials) – '
+         and d.issue_date > current_date - 540
        order by lower(l.description), d.issue_date desc, d.created_at desc`.then((rows) =>
       (rows as unknown as { uses: number; issueDate: string }[]).sort((a, b) => b.uses - a.uses || b.issueDate.localeCompare(a.issueDate)).slice(0, 40),
     );

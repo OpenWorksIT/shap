@@ -4,7 +4,7 @@
  * names of the line types on quotes and invoices (and their PDFs), the usual items offered when
  * adding a line, and the extra cost types added when the business kind is chosen.
  */
-import type { LineCategory } from './enums.js';
+import { LINE_CATEGORY_LABELS, type LineCategory } from './enums.js';
 
 export interface IndustryItem {
   /** What goes on the line. */
@@ -38,7 +38,7 @@ const TRADE_HIDE: string[] = [];
 const OFFICE_HIDE = ['Demo', 'PPE', 'Vehicle Transfer'];
 
 const GENERIC: IndustryProfile = {
-  lines: { labour: 'Work / time', materials: 'Parts / materials', other: 'Other' },
+  lines: { labour: LINE_CATEGORY_LABELS.labour, materials: LINE_CATEGORY_LABELS.materials, other: LINE_CATEGORY_LABELS.other },
   units: ['hour', 'day', 'item', 'km'],
   items: [
     { d: 'Labour', cat: 'labour', unit: 'hour' },
@@ -478,6 +478,6 @@ export function industryProfile(industry: string | null | undefined): IndustryPr
 
 /** The name of a line type for this business. Demolition only ever appears on old builder lines. */
 export function lineLabel(industry: string | null | undefined, cat: LineCategory): string {
-  if (cat === 'demo') return 'Demolition';
+  if (cat === 'demo') return LINE_CATEGORY_LABELS.demo;
   return industryProfile(industry).lines[cat];
 }
