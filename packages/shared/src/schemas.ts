@@ -51,6 +51,7 @@ export const settingsInput = z.object({
   features: z.record(z.string(), z.boolean()).default({}),
   /** Casual ("Howzit, lekker") or formal words in the app. */
   tone: z.enum(['casual', 'formal']).default('casual'),
+  watermark: z.boolean().default(true),
   /** What the business does (setup.ts INDUSTRIES), for the defaults and, if allowed, anonymous counts. */
   industry: text(40).default(''),
   /** May the app tell OpenWorks, anonymously, what kind of business uses it. */

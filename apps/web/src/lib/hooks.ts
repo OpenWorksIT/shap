@@ -1,11 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from './api';
 
+/**
+ * What each screen showed last time. Coming back to a screen shows that straight away and
+ * refreshes it underneath, instead of a spinner while the books are asked again.
+ */
+const lastSeen = new Map<string, unknown>();
+
 /** Fetch JSON for a path; `reload()` refetches without blanking the screen. */
-export function useApi<T>(path: string | null) {
-  const [data, setData] = useState<T | null>(null);
+export function useApi<T>(path: string | null, opts: { fresh?: boolean } = {}) {
+  const cached = () => (path && !opts.fresh ? ((lastSeen.get(path) as T | undefined) ?? null) : null);
+  const [data, setDataState] = useState<T | null>(cached);
   const [error, setError] = useState<ApiError | null>(null);
   const [loading, setLoading] = useState(Boolean(path));
+  const setData = useCallback(
+    (v: T | null | ((x: T | null) => T | null)) =>
+      setDataState((x) => {
+        const next = typeof v === 'function' ? (v as (x: T | null) => T | null)(x) : v;
+        if (path) lastSeen.set(path, next);
+        return next;
+      }),
+    [path],
+  );
   const seq = useRef(0);
 
   const load = useCallback(async () => {
@@ -14,6 +30,7 @@ export function useApi<T>(path: string | null) {
     setLoading(true);
     try {
       const d = await api<T>(path);
+      if (path) lastSeen.set(path, d);
       if (mine === seq.current) {
         setData(d);
         setError(null);
@@ -26,6 +43,8 @@ export function useApi<T>(path: string | null) {
   }, [path]);
 
   useEffect(() => {
+    // A new path (another client, another filter) starts from what that one showed last.
+    setDataState(cached());
     void load();
   }, [load]);
 

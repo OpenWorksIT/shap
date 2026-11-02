@@ -24,6 +24,7 @@ export interface Settings {
   logoLayout: { zoom?: number; x?: number; y?: number };
   accent: string;
   tone: 'casual' | 'formal';
+  watermark: boolean;
   industry: string;
   usageConsent: boolean;
   installId?: string;

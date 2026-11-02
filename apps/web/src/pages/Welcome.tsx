@@ -83,6 +83,9 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
               <Logo size={72} />
               <h1>Welcome to Shap</h1>
               <p className="muted">Quotes, invoices, costs and tax for your business. A few quick questions and Shap sets itself up to fit: no bigger than you need.</p>
+              <p className="small welcome-gift">
+                A gift from OpenWorks IT to South African business: free, open and never any ads, kept going by people who chip in. Less admin, more building.
+              </p>
             </div>
             <button className="btn primary big block" onClick={next}>
               Let’s set up

@@ -7,3 +7,4 @@ export * from './passwords.js';
 export * from './features.js';
 export * from './payroll.js';
 export * from './setup.js';
+export * from './industry.js';

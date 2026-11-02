@@ -424,7 +424,7 @@ function SettleAdvance({ workerId, name, advanceCents, onClose, onDone }: { work
             {(p) => <input {...p} className="input" inputMode="decimal" value={days} onChange={(e) => setDays(e.target.value.replace(/[^\d.,]/g, ''))} style={{ maxWidth: 100 }} />}
           </Field>
         )}
-        <Field label="Note">{(p) => <input {...p} className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder={what === 'bonus' ? 'e.g. Christmas bonus' : 'e.g. Weekend on the Smith roof'} />}</Field>
+        <Field label="Note">{(p) => <input {...p} className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder={what === 'bonus' ? 'e.g. Christmas bonus' : 'e.g. Weekend work for the Smiths'} />}</Field>
         {error && <div className="banner alert small">{error}</div>}
         <button className="btn primary big block">Book it</button>
       </form>

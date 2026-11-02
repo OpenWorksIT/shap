@@ -1,5 +1,5 @@
 import PDFDocument from 'pdfkit';
-import { formatDate, formatZar, LINE_CATEGORY_LABELS, type LineCategory } from '@shap/shared';
+import { formatDate, formatZar, lineLabel, SHAP_LINE, SHAP_URL, type LineCategory } from '@shap/shared';
 import type { SettingsRow } from '../lib/books.js';
 
 export interface BrandRow {
@@ -97,6 +97,31 @@ export function usePdfFonts(pdf: PDFKit.PDFDocument): { regular: string; bold: s
 }
 
 const qtyText = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0+$/, '').replace(/\.$/, ''));
+
+
+/** The Shap hand (the app icon's mark) in orange, `size` points square, top-left at x, y. */
+export function drawShapMark(pdf: PDFKit.PDFDocument, x: number, y: number, size: number) {
+  const o = '#E8731C';
+  pdf.save();
+  pdf.translate(x, y).scale(size / 100);
+  pdf.translate(50, 51).scale(0.74).rotate(-20).translate(-50, -56);
+  pdf.lineCap('round');
+  pdf.moveTo(41, 76).lineTo(41.5, 91).lineWidth(21).strokeColor(o).stroke();
+  pdf.moveTo(37, 44).lineTo(23, 19).lineWidth(16).strokeColor(o).stroke();
+  pdf.moveTo(60, 69).lineTo(86, 69).lineWidth(13).strokeColor(o).stroke();
+  pdf.path('M29 47 C29 37 34 33 43 33 L59 33 C66 33 68 37 67 41 C72 42 73 46 72.5 49 C72 52 70 54 67 54.5 C71 55.5 72.5 58 72 61 C71.5 64 69 66 66 66 L66 69 C66 76 61 80 53 80 L41 80 C33 80 29 75 29 67 Z').fill(o);
+  pdf.restore();
+}
+
+/** One quiet line at the foot of a page: the mark, the tagline and a link to Shap. */
+export function shapFooter(pdf: PDFKit.PDFDocument, x: number, y: number, width: number, font: string) {
+  drawShapMark(pdf, x, y - 1.5, 9);
+  pdf.font(font).fontSize(6.5).fillColor('#8a959c');
+  const link = 'openworks.co.za/shap';
+  const lw = pdf.widthOfString(link);
+  pdf.text(SHAP_LINE, x + 12, y, { width: width - lw - 20, lineBreak: false, ellipsis: true });
+  pdf.fillColor('#c2611a').text(link, x + width - lw, y, { width: lw + 2, lineBreak: false, link: SHAP_URL });
+}
 
 /** A pale tint of the brand colour for bands and boxes. */
 function tint(hex: string, amount: number): string {
@@ -199,7 +224,9 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   pdf.rect(L, bandTop, contentW, 2).fill(accent);
   y = bandTop + 14;
   label('From', L, y);
-  label(isInvoice ? 'Bill to' : 'Prepared for', L + colW + 30, y);
+  // No client yet (a walk-in, or the name comes later): leave the "Bill to" side empty.
+  const hasClient = Boolean(doc.clientName);
+  if (hasClient) label(isInvoice ? 'Bill to' : 'Prepared for', L + colW + 30, y);
   y += 12;
   pdf.font(bold).fontSize(10.5).fillColor(INK).text(tradingName, L, y, { width: colW });
   const fromLines = [
@@ -212,7 +239,8 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   ].filter(Boolean);
   pdf.font(regular).fontSize(8.5).fillColor(MUTED).text(fromLines.join('\n'), L, pdf.y + 2, { width: colW, lineGap: 1.2 });
   const fromBottom = pdf.y;
-  pdf.font(bold).fontSize(10.5).fillColor(INK).text(doc.clientName || '—', L + colW + 30, y, { width: colW });
+  if (hasClient) pdf.font(bold).fontSize(10.5).fillColor(INK).text(doc.clientName!, L + colW + 30, y, { width: colW });
+  else pdf.y = y;
   const toLines = [doc.clientContact && doc.clientContact !== doc.clientName ? doc.clientContact : '', doc.clientAddress, [doc.clientPhone, doc.clientEmail].filter(Boolean).join('  ·  '), doc.clientVatNumber ? `VAT no. ${doc.clientVatNumber}` : ''].filter(Boolean) as string[];
   pdf.font(regular).fontSize(8.5).fillColor(MUTED).text(toLines.join('\n'), L + colW + 30, pdf.y + 2, { width: colW, lineGap: 1.2 });
   y = Math.max(fromBottom, pdf.y) + 16;
@@ -258,7 +286,7 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
     const group = lines.filter((l) => l.category === cat);
     if (grouped) {
       ensure(24);
-      pdf.font(bold).fontSize(8).fillColor(accent).text(LINE_CATEGORY_LABELS[cat].toUpperCase(), cols.desc, y + 4, { characterSpacing: 0.8 });
+      pdf.font(bold).fontSize(8).fillColor(accent).text(lineLabel(settings.industry, cat).toUpperCase(), cols.desc, y + 4, { characterSpacing: 0.8 });
       y = pdf.y + 5;
     }
     for (const l of group) {
@@ -279,7 +307,7 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
 
   // ---- totals (right) and payment details (left), side by side
   const totals: [string, number][] = [];
-  if (grouped) for (const cat of categories) totals.push([LINE_CATEGORY_LABELS[cat], lines.filter((l) => l.category === cat).reduce((s, l) => s + l.lineTotalCents, 0)]);
+  if (grouped) for (const cat of categories) totals.push([lineLabel(settings.industry, cat), lines.filter((l) => l.category === cat).reduce((s, l) => s + l.lineTotalCents, 0)]);
   totals.push(['Subtotal', doc.subtotalCents]);
   if (doc.vatRateBp > 0) totals.push([`VAT ${(doc.vatRateBp / 100).toFixed(doc.vatRateBp % 100 ? 1 : 0)}%`, doc.vatCents]);
   // A deposit is a request for part of the total up front. On an invoice it's what's due until it's in.
@@ -359,11 +387,12 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
     pdf.switchToPage(i);
     // Writing inside the bottom margin would otherwise start a new page.
     pdf.page.margins.bottom = 0;
-    const fy = pdf.page.height - 40;
+    const fy = pdf.page.height - (settings.watermark ? 46 : 40);
     pdf.rect(0, pdf.page.height - 6, W, 6).fill(accent);
     const foot = [legal, settings.regNumber ? `Reg. ${settings.regNumber}` : '', settings.vatRegistered && settings.vatNumber ? `VAT ${settings.vatNumber}` : ''].filter(Boolean).join('  ·  ');
     pdf.font(regular).fontSize(7.5).fillColor(MUTED).text(foot, L, fy, { width: contentW - 80, lineBreak: false });
     pdf.text(`Page ${i - range.start + 1} of ${range.count}`, R - 80, fy, { width: 80, align: 'right', lineBreak: false });
+    if (settings.watermark) shapFooter(pdf, L, fy + 14, contentW, regular);
   }
   pdf.end();
   return done;

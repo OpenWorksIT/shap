@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import {
   accountInput,
+  industryProfile,
   attachmentInput,
   brandInput,
   categoryInput,
@@ -21,6 +22,23 @@ import { badRequest, conflict, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 
 const idParam = z.object({ id: z.string().uuid() });
+
+/**
+ * The cost types a kind of business needs (a salon's products and chair rent), added once and
+ * listed first; a builder's demolition and PPE are hidden from the pickers for a designer. Hidden
+ * ones stay on old costs and can be switched back on in Settings.
+ */
+export async function applyIndustry(db: Db, industry: string) {
+  const p = industryProfile(industry);
+  for (const [i, c] of p.categories.entries()) {
+    await db`insert into cost_categories (name, kind, account_id, sort)
+             select ${c.name}, ${c.kind}, a.id, ${i - 20} from accounts a where a.code = ${c.account}
+             and not exists (select 1 from cost_categories x where lower(x.name) = lower(${c.name}))`;
+  }
+  const back = ['Demo', 'PPE', 'Vehicle Transfer', 'Tool'].filter((n) => !p.hide.includes(n));
+  if (back.length) await db`update cost_categories set active = true where name in ${db(back)}`;
+  if (p.hide.length) await db`update cost_categories set active = false where name in ${db(p.hide)} and not exists (select 1 from costs where category_id = cost_categories.id)`;
+}
 
 
 export async function referenceData(db: Db, money: boolean) {
@@ -76,11 +94,13 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     const input = parse(settingsInput, req.body);
     // A sole proprietor's tax year is SARS's year for individuals: it ends in February.
     if (input.businessType === 'sole_prop') input.fyEndMonth = 2;
+    const before = await getSettings(sql);
     await sql.begin(async (tx) => {
       const row: Record<string, unknown> = { ...input, features: tx.json(input.features as never), logoLayout: tx.json(input.logoLayout as never), lockDate: input.lockDate ?? null, updatedAt: new Date() };
       for (const k of Object.keys(row)) if (row[k] === undefined) delete row[k];
       await tx`update settings set ${tx(row as never)} where id`;
       await applyBusinessType(tx, input.businessType);
+      if (input.industry && input.industry !== before.industry) await applyIndustry(tx, input.industry);
     });
     await audit(sql, { userId: user.id, action: 'update', entity: 'settings', ip: req.ip });
     const saved = await getSettings(sql);

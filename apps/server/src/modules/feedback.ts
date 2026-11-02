@@ -19,7 +19,7 @@
  * address and per day.
  */
 import { randomBytes } from 'node:crypto';
-import { appendFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
@@ -33,11 +33,13 @@ const MAX_SHOT_BYTES = 4 * 1024 * 1024;
 /** Reports from outside (Pocket, other Shaps) per day, so the folder can't be used to fill the disk. */
 const OUTSIDE_PER_DAY = 500;
 const outside = { day: '', count: 0 };
-const ID_RE = /^FB-\d{8}-\d{6}-[0-9a-f]{4}-(love|dislike|bug)$/;
+const ID_RE = /^FB-\d{8}-\d{6}-[0-9a-f]{4}-(love|dislike|bug|idea)$/;
+/** Reports and usage notes are kept for a year (as the privacy policy says), then deleted. */
+const KEEP_DAYS = 365;
 const INSTALL_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 const feedbackInput = z.object({
-  kind: z.enum(['love', 'dislike', 'bug']),
+  kind: z.enum(['love', 'dislike', 'bug', 'idea']),
   message: z.string().trim().max(2000).default(''),
   page: z.string().max(500),
   title: z.string().max(200).default(''),
@@ -82,7 +84,7 @@ export type UsageNote = z.infer<typeof usageInput>;
 
 export interface FeedbackSummary {
   id: string;
-  kind: 'love' | 'dislike' | 'bug';
+  kind: 'love' | 'dislike' | 'bug' | 'idea';
   at: string;
   receivedAt: string;
   page: string;
@@ -237,6 +239,39 @@ export function registerFeedbackRoutes(app: FastifyInstance, ctx: Ctx): void {
     }
   };
   const idParam = z.object({ id: z.string().regex(ID_RE) });
+
+  /** Deletes reports older than a year, and usage notes not updated for a year. */
+  const prune = async (now = Date.now()) => {
+    const cutoff = now - KEEP_DAYS * 86_400_000;
+    const items = await readIndex();
+    const old = items.filter((x) => Date.parse(x.receivedAt) < cutoff);
+    if (old.length) {
+      for (const x of old) await rm(folderOf(x.id), { recursive: true, force: true });
+      const keep = items.filter((x) => !old.includes(x));
+      await writeFile(`${indexFile}.tmp`, keep.map((x) => `${JSON.stringify(x)}\n`).join(''), { mode: 0o640 });
+      await rename(`${indexFile}.tmp`, indexFile);
+    }
+    let notes: string[] = [];
+    try {
+      notes = (await readdir(usageDir)).filter((f) => f.endsWith('.json'));
+    } catch {
+      /* none yet */
+    }
+    for (const f of notes) {
+      try {
+        const n = JSON.parse(await readFile(join(usageDir, f), 'utf8')) as { at?: string };
+        if (!n.at || Date.parse(n.at) < cutoff) await rm(join(usageDir, f), { force: true });
+      } catch {
+        await rm(join(usageDir, f), { force: true });
+      }
+    }
+    return old.length;
+  };
+  const tidy = () => void prune().catch((err: Error) => app.log.warn({ err: err.message }, 'feedback tidy-up failed'));
+  setTimeout(tidy, 60_000).unref();
+  setInterval(tidy, 86_400_000).unref();
+  // Tests reach the tidy-up through the app.
+  app.decorate('pruneFeedback', prune);
 
   app.get('/api/feedback', { preHandler: owner }, async (req) => {
     const { status } = parse(z.object({ status: z.enum(['open', 'done', 'all']).default('open') }), req.query);

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { formatDate, formatZar, todayIso, vatIncluded } from '@shap/shared';
+import { formatDate, formatZar, industryProfile, todayIso, vatIncluded } from '@shap/shared';
 import { api, ApiError, apiUrl } from '../lib/api';
 import { shrinkImage } from '../lib/files';
 import { useApi } from '../lib/hooks';
@@ -43,6 +43,7 @@ export function costDraftFrom(c: CostRow): CostDraft {
 /** Add or change a cost. On a phone: amount first, a photo of the slip, then the details. */
 export function CostForm({ initial, projectId, plannedItem, onSaved, onDeleted }: { initial?: CostDraft; projectId?: string; plannedItem?: PlannedItem; onSaved?: () => void; onDeleted?: () => void }) {
   const { ref, settings, isOwner, has } = useAuthed();
+  const profile = industryProfile(settings.industry);
   const toast = useToast();
   const suppliers = useApi<string[]>('/api/costs/suppliers');
   const cats = ref.categories.filter((c) => c.active || c.id === initial?.categoryId);
@@ -174,11 +175,11 @@ export function CostForm({ initial, projectId, plannedItem, onSaved, onDeleted }
         </Field>
       )}
       <div className="form-grid">
-        <Field label="Description">{(p) => <input {...p} className="input" value={f.description} onChange={(e) => set('description', e.target.value)} placeholder={category?.kind === 'materials' ? 'e.g. Cement, sand' : 'e.g. Diesel'} />}</Field>
+        <Field label="Description">{(p) => <input {...p} className="input" value={f.description} onChange={(e) => set('description', e.target.value)} placeholder={category?.kind === 'materials' ? profile.costStock : profile.costOther} />}</Field>
         <Field label="Supplier">
           {(p) => (
             <>
-              <input {...p} className="input" list="supplier-list" value={f.supplier} onChange={(e) => set('supplier', e.target.value)} placeholder="e.g. Builders" />
+              <input {...p} className="input" list="supplier-list" value={f.supplier} onChange={(e) => set('supplier', e.target.value)} placeholder={profile.supplier} />
               <datalist id="supplier-list">
                 {(suppliers.data ?? []).map((s) => (
                   <option key={s} value={s} />

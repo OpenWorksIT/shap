@@ -4,11 +4,12 @@ import { api, ApiError, APP_VERSION } from '../lib/api';
 import { getTrail, record, scrubPath, startTrail } from '../lib/trail';
 import { Icon } from './ui';
 
-type Kind = 'love' | 'dislike' | 'bug';
+type Kind = 'love' | 'dislike' | 'bug' | 'idea';
 const KINDS: { kind: Kind; label: string; emoji: string; prompt: string }[] = [
   { kind: 'love', label: 'Love this', emoji: '💚', prompt: 'What do you like about it?' },
   { kind: 'dislike', label: 'Don’t like this', emoji: '👎', prompt: 'What would make it better?' },
   { kind: 'bug', label: 'Bug found', emoji: '🐞', prompt: 'What went wrong? What did you expect to happen?' },
+  { kind: 'idea', label: 'Idea', emoji: '💡', prompt: 'What should Shap do next? Is your kind of business not covered? Tell us what you need.' },
 ];
 
 /**
@@ -101,17 +102,25 @@ export function FeedbackButton() {
     setShot(url ? { url, masked } : null);
   };
 
-  const start = async () => {
+  // Settings' "Tell us what you need" opens the widget straight on an idea.
+  useEffect(() => {
+    const onAsk = (e: Event) => void start((e as CustomEvent<Kind>).detail);
+    window.addEventListener('shap:feedback', onAsk);
+    return () => window.removeEventListener('shap:feedback', onAsk);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
+
+  const start = async (preset: Kind | null = null) => {
     // Remember the moment the button was pressed: that's the page the report is about.
     openedAt.current = { at: new Date().toISOString(), path: location.pathname + location.search, title: document.title, scrollY: Math.round(window.scrollY) };
-    setKind(null);
+    setKind(preset);
     setMessage('');
     setShot(null);
     setIncludeShot(true);
     setMask(true);
     setState('idle');
     setError('');
-    await takeShot(true);
+    if (preset !== 'idea') await takeShot(true);
     setOpen(true);
   };
   const close = () => {
@@ -240,4 +249,9 @@ export function FeedbackButton() {
       )}
     </div>
   );
+}
+
+/** Opens the feedback widget from elsewhere, e.g. on an idea. */
+export function askFeedback(kind: Kind = 'idea') {
+  window.dispatchEvent(new CustomEvent('shap:feedback', { detail: kind }));
 }

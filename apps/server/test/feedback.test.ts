@@ -57,4 +57,18 @@ describe('feedback and the collector', () => {
     // The phone's second note replaced its first: only this Shap still counts quotes.
     expect(u.byFeature.find((x: { name: string }) => x.name === 'quotes').n).toBe(1);
   });
+
+  it('takes ideas, and forgets reports and usage notes after a year', async () => {
+    const r = await env.app.inject({ method: 'POST', url: '/collect/feedback', payload: { ...report({ kind: 'idea', message: 'Please add tattoo artists' }), app: 'pocket', version: '0.6.0', platform: 'android' } });
+    expect(r.statusCode).toBe(201);
+    const owner = await login(env.app, 'owner@example.co.za');
+    expect((await owner.get('/api/feedback'))[0]).toMatchObject({ kind: 'idea' });
+    const prune = (env.app as unknown as { pruneFeedback: (now?: number) => Promise<number> }).pruneFeedback;
+    expect(await prune()).toBe(0);
+    const before = (await owner.get('/api/feedback')).length;
+    expect(before).toBeGreaterThan(0);
+    expect(await prune(Date.now() + 366 * 86_400_000)).toBe(before);
+    expect(await owner.get('/api/feedback')).toHaveLength(0);
+    expect((await owner.get('/api/feedback/usage')).total).toBe(0);
+  });
 });

@@ -3,6 +3,30 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.10.0 (2 November 2026)
+
+- **Fitted to your kind of business.** Settings → What you use → *Your kind of business* now
+  runs through the app: the examples in forms (a designer no longer sees cement), the names of
+  line types on quotes, invoices and their PDFs (Services / Products for a salon, Design / Print
+  & production for a designer; builders and books that haven't said keep Labour / Materials /
+  Demo), units, and the cost types a trade needs (chair rent, salon stock, stock images, lens
+  hire…), added once, with builder-only ones put away. New expense accounts: Rent, Training &
+  courses, Printing & stationery, Equipment hire.
+- **Usual items** under a quote's or invoice's lines: what you've charged before with last
+  time's price, then the common items for your trade. One tap adds the line.
+- **New client from the quote or invoice** ("+ New client…" in the Client box), and invoices
+  with no client yet ("No name yet"): add the name later.
+- **The Shap line**: a small line at the foot of quotes, invoices and payslips ("Made with Shap:
+  keeps the books lekker so South Africa can get to work…"). On by default; switch it off in
+  Settings → What you use → How Shap talks to you.
+- **Support Shap** in Settings: *Tell us what you need* opens feedback on a new 💡 Idea kind,
+  and *Buy us a coffee* goes to openworks.co.za/shap (set `VITE_SUPPORT_URL` at build time to
+  change it). The first-run questions mention that Shap is free, open and never has ads.
+- **Feedback is kept for a year.** Reports and anonymous usage notes older than 12 months are
+  deleted once a day (as the privacy policy at openworks.co.za/shap/privacy says).
+- **Quicker screens**: coming back to a screen shows what it showed last time straight away and
+  refreshes underneath; Home skips the parts you've switched off.
+
 ## 1.9.0 (2 November 2026)
 
 - **Payroll.** Settings → What you use → *Payroll*. Employees on a monthly salary; each month's

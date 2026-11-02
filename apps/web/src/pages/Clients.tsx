@@ -186,7 +186,7 @@ export function ClientPage() {
   );
 }
 
-function ClientDrawer({ client, onClose, onSaved }: { client?: ClientRow; onClose: () => void; onSaved: () => void }) {
+export function ClientDrawer({ client, onClose, onSaved }: { client?: ClientRow; onClose: () => void; onSaved: (saved?: ClientRow) => void }) {
   const toast = useToast();
   const [f, setF] = useState({
     code: client?.code ?? '',
@@ -206,10 +206,9 @@ function ClientDrawer({ client, onClose, onSaved }: { client?: ClientRow; onClos
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     try {
-      if (client) await api(`/api/clients/${client.id}`, { method: 'PUT', body: f });
-      else await api('/api/clients', { body: f });
+      const saved = client ? await api<ClientRow>(`/api/clients/${client.id}`, { method: 'PUT', body: f }) : await api<ClientRow>('/api/clients', { body: f });
       toast('Client saved');
-      onSaved();
+      onSaved(saved);
       onClose();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Couldn’t save');

@@ -36,7 +36,7 @@ import { audit } from '../lib/audit.js';
 import { assertOpen, centsToCsv, getSettings, q, today, toCsv } from '../lib/books.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
-import { usePdfFonts } from './pdf.js';
+import { shapFooter, usePdfFonts } from './pdf.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 
@@ -547,7 +547,9 @@ function renderPayslip(d: {
   top = table('Paid by the employer (not deducted)', [['UIF (employer, 1%)', line.uifEmployerCents], ...(line.sdlCents ? ([['Skills Development Levy (1%)', line.sdlCents]] as [string, number][]) : [])], top);
   table('This tax year so far', [['Gross pay', ytd.gross], ['PAYE', ytd.paye], ['UIF', ytd.uif]], top);
 
-  pdf.font(f.regular).fontSize(8).fillColor('#66737b').text(`Made with Shap. PAYE on SARS’s tables for the year ending ${taxYearEnd(run.payDate)}.`, L, pdf.page.height - 70, { width: W, align: 'center' });
+  pdf.page.margins.bottom = 0;
+  pdf.font(f.regular).fontSize(8).fillColor('#66737b').text(`PAYE on SARS’s tables for the year ending ${taxYearEnd(run.payDate)}.`, L, pdf.page.height - 70, { width: W, align: 'center' });
+  if (settings.watermark) shapFooter(pdf, L, pdf.page.height - 40, W, f.regular);
   pdf.end();
   return done;
 }

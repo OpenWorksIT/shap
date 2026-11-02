@@ -4,7 +4,7 @@ import { api, apiUrl } from '../lib/api';
 import { useApi } from '../lib/hooks';
 
 
-type Kind = 'love' | 'dislike' | 'bug';
+type Kind = 'love' | 'dislike' | 'bug' | 'idea';
 interface Item {
   id: string;
   kind: Kind;
@@ -33,7 +33,7 @@ interface Report {
   note: string;
 }
 
-const KIND = { love: { label: 'Love this', emoji: '💚', chip: 'p-active' }, dislike: { label: 'Don’t like', emoji: '👎', chip: 'warn' }, bug: { label: 'Bug', emoji: '🐞', chip: 'd-overdue' } } as const;
+const KIND = { love: { label: 'Love this', emoji: '💚', chip: 'p-active' }, dislike: { label: 'Don’t like', emoji: '👎', chip: 'warn' }, bug: { label: 'Bug', emoji: '🐞', chip: 'd-overdue' }, idea: { label: 'Idea', emoji: '💡', chip: 'p-quoted' } } as const;
 const dateTime = (iso: string) => new Date(iso).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
 /** Settings → Feedback: everything sent with the feedback button, newest first. */

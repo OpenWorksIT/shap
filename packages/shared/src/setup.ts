@@ -46,3 +46,7 @@ export function featuresFor(a: { workflow: Workflow; employees: boolean; casual:
     dividends: a.company && (a.dividends ?? true),
   };
 }
+
+/** The line Shap signs off quotes, invoices and payslips with, unless switched off in Settings. */
+export const SHAP_LINE = 'Made with Shap: keeps the books lekker so South Africa can get to work. Always free, always open, never ads.';
+export const SHAP_URL = 'https://www.openworks.co.za/shap/';

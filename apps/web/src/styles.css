@@ -1914,7 +1914,7 @@ button.list-row {
 }
 .feedback-kinds {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 8px;
 }
 .feedback-kind {
@@ -2070,4 +2070,49 @@ button.list-row {
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+/* The usual items under the lines: one tap adds one. */
+.quick-add .chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip-btn {
+  border: 1px solid var(--rule);
+  background: transparent;
+  color: inherit;
+  border-radius: 99px;
+  padding: 5px 11px;
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  text-align: left;
+}
+.chip-btn:hover,
+.chip-btn:focus-visible {
+  border-color: var(--action);
+}
+.chip-btn.mine {
+  background: var(--action-soft);
+  border-color: transparent;
+}
+.stack-sm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.input-sm {
+  padding: 4px 8px;
+  min-height: 32px;
+}
+.steps-list {
+  margin: 0;
+  padding-left: 1.2em;
+  display: grid;
+  gap: 4px;
+}
+.welcome-gift {
+  color: var(--action);
+  font-weight: 700;
 }
