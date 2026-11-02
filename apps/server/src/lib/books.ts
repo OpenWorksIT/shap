@@ -20,6 +20,14 @@ export interface SettingsRow {
   setupDone: boolean;
   logoLayout: { zoom?: number; x?: number; y?: number };
   accent: string;
+  creditPrefix: string;
+  creditNext: number;
+  creditPad: number;
+  proformaPrefix: string;
+  proformaNext: number;
+  payshapId: string;
+  vatCategory: 'A' | 'B' | 'C';
+  turnoverTax: boolean;
   tone: 'casual' | 'formal';
   watermark: boolean;
   industry: string;

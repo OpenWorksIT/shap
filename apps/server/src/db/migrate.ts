@@ -12,6 +12,13 @@ function migrationsDir(): string {
   return candidates.find((d) => existsSync(join(d, '001_init.sql'))) ?? candidates[0]!;
 }
 
+/** Every migration, in order, with its SQL (for rebuilding the books in one transaction). */
+export async function migrationFiles(): Promise<{ name: string; body: string }[]> {
+  const dir = migrationsDir();
+  const files = (await readdir(dir)).filter((f) => f.endsWith('.sql')).sort();
+  return Promise.all(files.map(async (name) => ({ name, body: await readFile(join(dir, name), 'utf8') })));
+}
+
 /** Applies any *.sql files in migrations/ that have not run yet, each in its own transaction. */
 export async function migrate(sql: Sql, log: (msg: string) => void = () => {}): Promise<string[]> {
   await sql`create table if not exists schema_migrations (name text primary key, applied_at timestamptz not null default now())`;

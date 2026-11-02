@@ -32,7 +32,7 @@ export const LINE_CATEGORY_LABELS: Record<LineCategory, string> = {
   other: 'Other',
 };
 
-export const DOC_KINDS = ['quote', 'invoice'] as const;
+export const DOC_KINDS = ['quote', 'invoice', 'credit_note'] as const;
 export type DocKind = (typeof DOC_KINDS)[number];
 
 export const QUOTE_STATUSES = ['draft', 'sent', 'accepted', 'declined'] as const;
@@ -143,4 +143,6 @@ export const LEDGER_SOURCE_LABELS: Record<string, string> = {
   disposal: 'Asset disposal',
   year_end: 'Year-end adjustment',
   write_off: 'Written off (bad debt)',
+  credit_note: 'Credit note',
+  bill_payment: 'Bill paid',
 };

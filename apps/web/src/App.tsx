@@ -23,6 +23,9 @@ const AccountsPage = lazy(() => import('./pages/Accounts'));
 const SettingsPage = lazy(() => import('./pages/Settings'));
 const PayrollPage = lazy(() => import('./pages/Payroll'));
 const WelcomePage = lazy(() => import('./pages/Welcome'));
+const BillsPage = lazy(() => import('./pages/Bills'));
+const LogbookPage = lazy(() => import('./pages/Logbook'));
+const GuidesPage = lazy(() => import('./pages/Guides'));
 
 export function App() {
   return (
@@ -73,6 +76,10 @@ function Authed() {
               <Route path="/clients" element={<ClientsPage />} />
               <Route path="/clients/:id" element={<ClientPage />} />
               <Route path="/accounts" element={<AccountsPage />} />
+              {has('bills') && <Route path="/bills" element={<BillsPage />} />}
+              {has('logbook') && <Route path="/logbook" element={<LogbookPage />} />}
+              {has('guides') && <Route path="/guides" element={<GuidesPage />} />}
+              {has('guides') && <Route path="/guides/:topic" element={<GuidesPage />} />}
             </>
           )}
           {user.role === 'owner' && <Route path="/settings" element={<SettingsPage />} />}

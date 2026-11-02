@@ -8,3 +8,4 @@ export * from './features.js';
 export * from './payroll.js';
 export * from './setup.js';
 export * from './industry.js';
+export * from './exports.js';

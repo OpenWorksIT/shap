@@ -3,6 +3,49 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.11.0 (2 November 2026)
+
+More of what a small business needs, each one a switch under Settings → What you use (now
+grouped: Work, Invoicing, Money and tax).
+
+- **Credit notes:** take back part or all of an issued invoice (a return, a discount, a
+  mistake), with their own numbers (CN0001…). Issued, a credit note comes off the invoice's
+  balance and its VAT off the VAT return. Void it to undo; an invoice with credit notes can't be
+  voided.
+- **Pro-forma invoices:** ask to be paid before the work starts. Their own numbers, "not a tax
+  invoice" on the PDF, and turned into a real invoice once paid.
+- **PayShap:** your ShapID printed on unpaid invoices and pro-formas, and in the email, so
+  clients pay instantly from their banking app.
+- **Payment reminders:** Home lists overdue invoices (part-paid ones too). With email set up and
+  a client email address, one tap emails the reminder with the invoice attached; otherwise the
+  PDF downloads (or opens the share sheet on a phone) with a friendly message copied to paste
+  into WhatsApp. Each reminder is noted on the invoice.
+- **VAT201:** the return box by box for each period (category A, B or C), with the due date;
+  Home reminds you when one is coming up.
+- **Turnover tax:** for micro businesses registered for it, the tax tab switches to turnover tax
+  on SARS's 2026/27 table (up to R2.3 million), with the two interim payments.
+- **Supplier bills:** costs you'll pay later, what's owed and when it's due, paid off from
+  Bills to pay; Home shows bills due this week.
+- **Travel logbook:** SARS's logbook (trips, odometer at the start and end of the tax year,
+  business share), downloaded as a spreadsheet.
+- **Time tracker:** a clock per job and per person (each owner runs their own), an hourly rate
+  on the job, and unbilled time onto an invoice in one tap ("Add time…").
+- **SARS filing guides:** step by step through VAT201, provisional tax, ITR12, ITR14, EMP201,
+  EMP501, turnover tax and dividends tax, with where each figure is in Shap. We're not
+  accountants: only file yourself if you're lekker with some accounting.
+- **For your accountant** (Accounts → Export): the books laid out for Sage 50 / Pastel, Xero,
+  QuickBooks Online or Sage Accounting (journal, sales, purchases, payments, debtors age
+  analysis), with a preview and the total to check after importing.
+- **Wipe all data** (Settings → Updates & backups): back up first, then type the business's
+  name and your password. The books start over from the first-run questions; the people who sign
+  in and the audit log stay.
+- **Several people at once:** open screens refresh when someone else saves, and an
+  out-of-date invoice screen can't overwrite a newer save.
+- **Slips kept grey and small** (about a fifth of the size), and closed years can be archived to
+  squeeze their slips again (Accounts → Year end).
+- **Reports fast on big books:** per-account totals are cached; tested on ten busy years.
+- Fixed: saving one Settings tab no longer undoes a switch flipped a moment before on another.
+
 ## 1.10.0 (2 November 2026)
 
 - **Fitted to your kind of business.** Settings → What you use → *Your kind of business* now

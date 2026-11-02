@@ -37,7 +37,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const refreshReference = useCallback(async () => {
     const r = await api<Reference>('/api/reference');
     setTone((r.settings as Settings).tone);
-    setRef(r);
+    // Sources Shap posts to itself: credit notes are never picked; unpaid bills only with Supplier bills on.
+    const bills = featureOn((r.settings as Settings).features, 'bills');
+    setRef({ ...r, sources: r.sources.filter((x) => x.role !== 'credit_notes' && (x.role !== 'bills' || bills)) });
   }, []);
 
   const enter = useCallback(

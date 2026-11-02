@@ -24,14 +24,16 @@ import type { Account, StatementLine, Totals } from '../lib/types';
 import { BankRecon } from './Bank';
 import { StatementFiles } from './StatementFiles';
 import { ProvisionalTax, YearEnd } from './YearEnd';
+import { ExportStudio } from '../components/ExportStudio';
+import { TurnoverTax, Vat201 } from '../components/TaxForms';
 
-type Tab = 'income' | 'balance' | 'trial' | 'ledger' | 'journals' | 'assets' | 'bank' | 'files' | 'checks' | 'yearend' | 'tax' | 'export';
+type Tab = 'income' | 'balance' | 'trial' | 'ledger' | 'journals' | 'assets' | 'bank' | 'files' | 'checks' | 'yearend' | 'tax' | 'vat201' | 'export';
 
 export default function AccountsPage() {
   const [params, setParams] = useSearchParams();
   const tab = (params.get('tab') as Tab) || 'income';
   const go = (t: Tab, extra: Record<string, string> = {}) => setParams({ tab: t, ...extra }, { replace: false });
-  const { has } = useAuthed();
+  const { has, settings } = useAuthed();
   return (
     <div className="stack-lg">
       <PageHead title="Accounts" sub="Built live from your invoices, costs, labour and payments." />
@@ -49,7 +51,8 @@ export default function AccountsPage() {
             ...(has('bank') ? [{ value: 'bank' as Tab, label: 'Bank statements' }, { value: 'files' as Tab, label: 'Statement PDFs' }] : []),
             { value: 'checks', label: 'Balance checks' },
             { value: 'yearend', label: 'Year end' },
-            { value: 'tax', label: 'Provisional tax' },
+            { value: 'tax', label: settings.turnoverTax ? 'Turnover tax' : 'Provisional tax' },
+            ...(settings.vatRegistered ? [{ value: 'vat201' as Tab, label: 'VAT201' }] : []),
             { value: 'export', label: 'Export' },
           ]}
         />
@@ -64,7 +67,8 @@ export default function AccountsPage() {
       {tab === 'files' && <StatementFiles />}
       {tab === 'checks' && <BalanceChecks />}
       {tab === 'yearend' && <YearEnd />}
-      {tab === 'tax' && <ProvisionalTax />}
+      {tab === 'tax' && (settings.turnoverTax ? <TurnoverTax /> : <ProvisionalTax />)}
+      {tab === 'vat201' && <Vat201 />}
       {tab === 'export' && <Exports />}
     </div>
   );
@@ -1105,7 +1109,11 @@ function Exports() {
   return (
     <div className="stack">
       <PeriodPicker from={range.from} to={range.to} onChange={(from, to) => setRange({ from, to })} />
+      <ExportStudio from={range.from} to={range.to} />
       <section className="panel">
+        <div className="panel-head">
+          <strong>Quick downloads</strong>
+        </div>
         <ul className="list">
           {items.map(([label, href, sub]) => (
             <li key={label}>

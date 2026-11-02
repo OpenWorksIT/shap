@@ -191,7 +191,7 @@ function RunDrawer({ id, onClose }: { id: string; onClose: () => void }) {
             <Field label="Paid from">
               {(p) => (
                 <select {...p} className="select" value={run.sourceId} onChange={(e) => void act(() => api(`/api/pay-runs/${id}`, { method: 'PUT', body: { payDate: run.payDate, sourceId: e.target.value } }))}>
-                  {ref.sources.filter((s) => s.active).map((s) => (
+                  {ref.sources.filter((s) => s.active && !s.role).map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name}
                     </option>
@@ -488,7 +488,7 @@ function Sars() {
       {pay && (
         <SarsPayDrawer
           pay={pay}
-          sources={ref.sources.filter((s) => s.active)}
+          sources={ref.sources.filter((s) => s.active && !s.role)}
           onClose={() => setPay(null)}
           onSaved={() => (setPay(null), void reload(), toast('Recorded'))}
         />
@@ -606,7 +606,7 @@ function Dividends() {
       {paying && (
         <PayDividendDrawer
           d={paying}
-          sources={ref.sources.filter((s) => s.active)}
+          sources={ref.sources.filter((s) => s.active && !s.role)}
           onClose={() => setPaying(null)}
           onSaved={() => (setPaying(null), void reload())}
         />
@@ -617,7 +617,7 @@ function Dividends() {
 
 function DividendDrawer({ available, defaultName, onClose, onSaved }: { available: number; defaultName: string; onClose: () => void; onSaved: () => void }) {
   const { ref } = useAuthed();
-  const sources = ref.sources.filter((s) => s.active);
+  const sources = ref.sources.filter((s) => s.active && !s.role);
   const [f, setF] = useState({ declaredOn: todayIso(), paidNow: true, shareholder: defaultName, grossCents: null as number | null, exempt: false, sourceId: sources.find((s) => s.kind === 'bank')?.id ?? sources[0]?.id ?? '', note: '' });
   const [error, setError] = useState('');
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((x) => ({ ...x, [k]: v }));

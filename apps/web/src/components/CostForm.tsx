@@ -21,6 +21,8 @@ export interface CostDraft {
   plannedItemId: string | null;
   receiptId: string | null;
   note: string;
+  billNumber?: string;
+  dueDate?: string | null;
 }
 
 export function costDraftFrom(c: CostRow): CostDraft {
@@ -37,6 +39,8 @@ export function costDraftFrom(c: CostRow): CostDraft {
     plannedItemId: c.plannedItemId,
     receiptId: c.receiptId,
     note: c.note,
+    billNumber: (c as { billNumber?: string }).billNumber ?? '',
+    dueDate: (c as { dueDate?: string | null }).dueDate ?? null,
   };
 }
 
@@ -60,6 +64,8 @@ export function CostForm({ initial, projectId, plannedItem, onSaved, onDeleted }
     plannedItemId: plannedItem?.id ?? null,
     receiptId: null,
     note: '',
+    billNumber: '',
+    dueDate: null,
   });
   const [f, setF] = useState<CostDraft>(initial ?? fresh());
   const [vatAuto, setVatAuto] = useState(!initial);
@@ -157,6 +163,14 @@ export function CostForm({ initial, projectId, plannedItem, onSaved, onDeleted }
           )}
         </Field>
       </div>
+      {sources.find((s) => s.id === f.sourceId)?.role === 'bills' && (
+        <div className="form-grid">
+          <Field label="Bill number (optional)">{(p) => <input {...p} className="input" value={f.billNumber ?? ''} onChange={(e) => set('billNumber', e.target.value)} />}</Field>
+          <Field label="Due" hint="Shows on Home a week before">
+            {(p) => <input {...p} className="input" type="date" value={f.dueDate ?? ''} onChange={(e) => set('dueDate', e.target.value || null)} />}
+          </Field>
+        </div>
+      )}
       {has('jobs') && <Field label={isJobCost ? 'Job' : 'Job (optional)'} hint={isJobCost && !f.projectId ? 'Parts without a job can’t be charged on. Pick the job if you know it.' : undefined}>
         {(p) => <ProjectSelect {...p} value={f.projectId} onChange={(v) => setF((x) => ({ ...x, projectId: v, plannedItemId: null }))} emptyLabel={isJobCost ? 'Choose the job…' : 'Not for a job'} />}
       </Field>}

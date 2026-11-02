@@ -27,9 +27,12 @@ export function Shell({ children }: { children: ReactNode }) {
     { to: '/workers', label: 'Workers', icon: 'workers', show: seesMoney && has('workers') },
     { to: '/payroll', label: has('payroll') ? 'Payroll' : 'Dividends', icon: 'money', show: seesMoney && (has('payroll') || (settings.businessType === 'company' && has('dividends'))) },
     { to: '/costs', label: 'Costs', icon: 'costs', show: seesMoney },
+    { to: '/bills', label: 'Bills to pay', icon: 'bill', show: seesMoney && has('bills') },
+    { to: '/logbook', label: 'Logbook', icon: 'car', show: seesMoney && has('logbook') },
     { to: '/documents', label: 'Quotes & invoices', icon: 'docs', show: seesMoney },
     { to: '/clients', label: 'Clients', icon: 'clients', show: seesMoney },
     { to: '/accounts', label: 'Accounts', icon: 'accounts', show: seesMoney },
+    { to: '/guides', label: 'SARS guides', icon: 'book', show: seesMoney && has('guides') },
     { to: '/settings', label: 'Settings', icon: 'settings', show: isOwner },
   ];
   const items = all.filter((i) => i.show);

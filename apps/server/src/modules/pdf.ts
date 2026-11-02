@@ -1,5 +1,5 @@
 import PDFDocument from 'pdfkit';
-import { formatDate, formatZar, lineLabel, SHAP_LINE, SHAP_URL, type LineCategory } from '@shap/shared';
+import { featureOn, formatDate, formatZar, lineLabel, SHAP_LINE, SHAP_URL, type LineCategory } from '@shap/shared';
 import type { SettingsRow } from '../lib/books.js';
 
 export interface BrandRow {
@@ -29,7 +29,11 @@ export const LOGO_BOX = { w: 210, h: 78 } as const;
 export interface PdfDocument {
   doc: {
     id: string;
-    kind: 'quote' | 'invoice';
+    kind: 'quote' | 'invoice' | 'credit_note';
+    proforma?: boolean;
+    creditedInvoiceNumber?: string | null;
+    creditedInvoiceDate?: string | null;
+    creditReason?: string;
     number: string;
     status: string;
     issueDate: string;
@@ -153,7 +157,7 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
     bank: brand?.bankDetails || settings.bankDetails,
   };
 
-  const pdf = new PDFDocument({ size: 'A4', margins: { top: 40, bottom: 60, left: 44, right: 44 }, bufferPages: true, info: { Title: `${doc.kind === 'invoice' ? 'Invoice' : 'Quote'} ${doc.number}`, Author: tradingName } });
+  const pdf = new PDFDocument({ size: 'A4', margins: { top: 40, bottom: 60, left: 44, right: 44 }, bufferPages: true, info: { Title: `${doc.kind === 'invoice' ? 'Invoice' : doc.kind === 'credit_note' ? 'Credit note' : doc.proforma ? 'Pro-forma invoice' : 'Quote'} ${doc.number}`, Author: tradingName } });
   const chunks: Buffer[] = [];
   pdf.on('data', (c: Buffer) => chunks.push(c));
   const done = new Promise<Buffer>((resolve) => pdf.on('end', () => resolve(Buffer.concat(chunks))));
@@ -168,8 +172,12 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   const R = W - 44;
   const contentW = R - L;
   const bottom = () => pdf.page.height - 74;
+  const isCredit = doc.kind === 'credit_note';
+  const isProforma = doc.kind === 'quote' && Boolean(doc.proforma);
+  // A pro-forma asks to be paid like an invoice, but it isn't one (no tax invoice until the work's invoiced).
   const isInvoice = doc.kind === 'invoice';
-  const heading = isInvoice ? (settings.vatRegistered && doc.vatRateBp > 0 ? 'Tax invoice' : 'Invoice') : 'Quotation';
+  const asksPayment = isInvoice || isProforma;
+  const heading = isCredit ? 'Credit note' : isInvoice ? (settings.vatRegistered && doc.vatRateBp > 0 ? 'Tax invoice' : 'Invoice') : isProforma ? 'Pro-forma invoice' : 'Quotation';
   const balance = doc.totalCents - (isInvoice ? doc.paidCents : 0);
   const label = (text: string, x: number, at: number, opts: PDFKit.Mixins.TextOptions = {}) =>
     pdf.font(bold).fontSize(7.5).fillColor(MUTED).text(text.toUpperCase(), x, at, { characterSpacing: 0.9, ...opts });
@@ -197,10 +205,12 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   }
   pdf.font(bold).fontSize(26).fillColor(accent).text(heading, L, y, { width: contentW, align: 'right' });
   const meta: [string, string][] = [
-    [isInvoice ? 'Invoice no.' : 'Quote no.', doc.number],
+    [isCredit ? 'Credit note no.' : isInvoice ? 'Invoice no.' : isProforma ? 'Pro-forma no.' : 'Quote no.', doc.number],
     ['Date', formatDate(doc.issueDate)],
   ];
-  if (doc.dueDate) meta.push([isInvoice ? 'Due' : 'Valid until', formatDate(doc.dueDate)]);
+  if (isCredit && doc.creditedInvoiceNumber) meta.push(['For invoice', doc.creditedInvoiceNumber]);
+  if (isCredit && doc.creditedInvoiceDate) meta.push(['Invoice date', formatDate(doc.creditedInvoiceDate)]);
+  if (doc.dueDate && !isCredit) meta.push([isInvoice || isProforma ? 'Due' : 'Valid until', formatDate(doc.dueDate)]);
   if (doc.clientCode) meta.push(['Account', doc.clientCode]);
   if (doc.sourceQuoteNumber) meta.push(['Our quote', doc.sourceQuoteNumber]);
   let my = y + 36;
@@ -226,7 +236,7 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   label('From', L, y);
   // No client yet (a walk-in, or the name comes later): leave the "Bill to" side empty.
   const hasClient = Boolean(doc.clientName);
-  if (hasClient) label(isInvoice ? 'Bill to' : 'Prepared for', L + colW + 30, y);
+  if (hasClient) label(isInvoice || isProforma ? 'Bill to' : isCredit ? 'Credited to' : 'Prepared for', L + colW + 30, y);
   y += 12;
   pdf.font(bold).fontSize(10.5).fillColor(INK).text(tradingName, L, y, { width: colW });
   const fromLines = [
@@ -246,7 +256,7 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   y = Math.max(fromBottom, pdf.y) + 16;
 
   // ---- what it's for
-  const forText = doc.title || doc.projectName || '';
+  const forText = isCredit ? [doc.creditReason ? `Reason: ${doc.creditReason}` : '', doc.title || doc.projectName || ''].filter(Boolean).join('  ·  ') : doc.title || doc.projectName || '';
   if (forText) {
     pdf.font(regular).fontSize(9);
     const site = doc.siteAddress ? `  ·  ${doc.siteAddress}` : '';
@@ -323,21 +333,30 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
     totals.push(['Total', doc.totalCents]);
     totals.push([deposit > 0 ? 'Paid (incl. deposit)' : 'Paid', -doc.paidCents]);
   }
-  const bigLabel = isInvoice
-    ? depositDue
-      ? 'Deposit due'
-      : doc.paidCents >= doc.totalCents && doc.totalCents > 0
-        ? 'Paid in full'
-        : 'Amount due'
-    : 'Quote total';
-  const bigAmount = isInvoice ? (depositDue ? deposit - doc.paidCents : Math.max(balance, 0)) : doc.totalCents;
+  const bigLabel = isCredit
+    ? 'Credited'
+    : isInvoice
+      ? depositDue
+        ? 'Deposit due'
+        : doc.paidCents >= doc.totalCents && doc.totalCents > 0
+          ? 'Paid in full'
+          : 'Amount due'
+      : isProforma
+        ? deposit > 0
+          ? 'Deposit due'
+          : 'Amount due'
+        : 'Quote total';
+  const bigAmount = isInvoice ? (depositDue ? deposit - doc.paidCents : Math.max(balance, 0)) : isProforma && deposit > 0 ? deposit : doc.totalCents;
   const totalsH = totals.length * 16 + 44;
-  const bankText = isInvoice && contact.bank ? `${contact.bank}\nReference: ${doc.number}` : '';
+  const bankText = asksPayment && contact.bank ? `${contact.bank}\nReference: ${doc.number}` : '';
   // A card payment link (Yoco, SnapScan…): this invoice's, or the business's usual one, while it's unpaid.
-  const payLink = isInvoice && balance > 0 ? (doc.payLink || settings.payLink || '').trim() : '';
+  const payLink = asksPayment && balance > 0 ? (doc.payLink || settings.payLink || '').trim() : '';
+  // PayShap: an instant payment from the client's banking app to the business's ShapID.
+  const payshap = asksPayment && balance > 0 && featureOn(settings.features, 'payshap') && settings.payshapId ? `${settings.payshapId}\nReference: ${doc.number}` : '';
   pdf.font(regular).fontSize(9);
   const linkH = payLink ? pdf.heightOfString(payLink, { width: 230 }) + 22 : 0;
-  const bankH = bankText || payLink ? (bankText ? pdf.heightOfString(bankText, { width: 230, lineGap: 1.5 }) + 34 : 14) + linkH : 0;
+  const shapH = payshap ? pdf.heightOfString(payshap, { width: 230, lineGap: 1.5 }) + 22 : 0;
+  const bankH = bankText || payLink || payshap ? (bankText ? pdf.heightOfString(bankText, { width: 230, lineGap: 1.5 }) + 34 : 14) + linkH + shapH : 0;
   ensure(Math.max(totalsH, bankH) + 10);
   const tx = R - 230;
   let ty = y;
@@ -350,12 +369,17 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   pdf.roundedRect(tx - 10, ty, 240, 34, 5).fill(accent);
   pdf.font(bold).fontSize(9).fillColor('#ffffff').text(bigLabel.toUpperCase(), tx, ty + 12, { width: 120, characterSpacing: 0.8 });
   pdf.font(bold).fontSize(14).fillColor('#ffffff').text(formatZar(bigAmount), tx + 90, ty + 9, { width: 130, align: 'right' });
-  if (bankText || payLink) {
+  if (bankText || payLink || payshap) {
     pdf.roundedRect(L, y, 250, bankH, 5).lineWidth(1).strokeColor(tint(accent, 0.6)).stroke();
     let by = y + 10;
     if (bankText) {
       label('Please pay into', L + 12, by);
       pdf.font(regular).fontSize(9).fillColor(INK).text(bankText, L + 12, by + 13, { width: 230, lineGap: 1.5 });
+      by = pdf.y + 10;
+    }
+    if (payshap) {
+      label(bankText ? 'Or pay instantly with PayShap' : 'Pay instantly with PayShap', L + 12, by);
+      pdf.font(bold).fontSize(9).fillColor(INK).text(payshap, L + 12, by + 13, { width: 230, lineGap: 1.5 });
       by = pdf.y + 10;
     }
     if (payLink) {
@@ -379,7 +403,8 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
     y = pdf.y + 14;
   };
   block('Notes', doc.notes);
-  block(isInvoice ? 'Terms' : 'Terms and conditions', doc.terms);
+  if (isProforma) block('Please note', 'This is a pro-forma invoice, not a tax invoice. A tax invoice follows once the work is invoiced.');
+  block(isInvoice || isProforma ? 'Terms' : isCredit ? 'Notes' : 'Terms and conditions', doc.terms);
 
   // ---- footer on every page
   const range = pdf.bufferedPageRange();

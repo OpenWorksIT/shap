@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
+import type { Mailer } from '../lib/mailer.js';
 import { addDays, documentInput, featureOn, lineTotal, quoteStatusInput, receiptInput, writeOffInput, type DocKind } from '@shap/shared';
 import { z } from 'zod';
 import { requireRole, userOrThrow, type AuthUser } from '../auth.js';
 import type { Ctx } from '../context.js';
-import type { Mailer } from '../lib/mailer.js';
 import { pgCode, PG, type Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
 import { assertOpen, formatNumber, getSettings, q, today } from '../lib/books.js';
@@ -58,12 +58,12 @@ export async function syncProjectOfDocument(db: Db, documentId: string): Promise
   await syncProjectStatus(db, d?.projectId);
 }
 
-async function nextNumber(db: Db, kind: DocKind): Promise<string> {
+async function nextNumber(db: Db, kind: DocKind, proforma = false): Promise<string> {
   // Lock the settings row so two people can't take the same number.
+  const series = kind === 'invoice' ? 'invoice' : kind === 'credit_note' ? 'credit' : proforma ? 'proforma' : 'quote';
   const [s] = await db<{ prefix: string; next: number; pad: number }[]>`
-    select ${kind === 'invoice' ? db`invoice_prefix` : db`quote_prefix`} as prefix,
-           ${kind === 'invoice' ? db`invoice_next` : db`quote_next`} as next,
-           ${kind === 'invoice' ? db`invoice_pad` : db`quote_pad`} as pad
+    select ${db.unsafe(`${series}_prefix`)} as prefix, ${db.unsafe(`${series}_next`)} as next,
+           ${db.unsafe(series === 'proforma' ? 'quote_pad' : `${series}_pad`)} as pad
     from settings where id for update`;
   let n = s!.next;
   let number = formatNumber(s!.prefix, n, s!.pad);
@@ -74,8 +74,7 @@ async function nextNumber(db: Db, kind: DocKind): Promise<string> {
     n++;
     number = formatNumber(s!.prefix, n, s!.pad);
   }
-  if (kind === 'invoice') await db`update settings set invoice_next = ${n + 1} where id`;
-  else await db`update settings set quote_next = ${n + 1} where id`;
+  await db`update settings set ${db.unsafe(`${series}_next`)} = ${n + 1} where id`;
   return number;
 }
 
@@ -115,20 +114,31 @@ export async function createDocument(tx: Db, user: AuthUser | null, kind: DocKin
     clientId = p?.clientId ?? null;
   }
   const brandId = input.brandId ?? (await defaultBrand(tx, input.projectId ?? null, clientId));
-  const number = input.number?.trim() || (await nextNumber(tx, kind));
-  const due = input.dueDate ?? (kind === 'invoice' ? addDays(input.issueDate, settings.paymentDays) : addDays(input.issueDate, settings.quoteValidDays));
-  const vatRate = settings.vatRegistered ? settings.vatRateBp : 0;
+  const proforma = kind === 'quote' && input.proforma;
+  const number = input.number?.trim() || (await nextNumber(tx, kind, proforma));
+  const due =
+    kind === 'credit_note' ? null : (input.dueDate ?? (kind === 'invoice' || proforma ? addDays(input.issueDate, settings.paymentDays) : addDays(input.issueDate, settings.quoteValidDays)));
+  let vatRate = settings.vatRegistered ? settings.vatRateBp : 0;
+  if (kind === 'credit_note') {
+    const [inv] = await tx<{ kind: string; status: string; clientId: string | null; vatRateBp: number }[]>`
+      select kind, status, client_id, vat_rate_bp from documents where id = ${input.creditedInvoiceId ?? null}`;
+    if (!inv || inv.kind !== 'invoice' || inv.status !== 'issued') throw badRequest('A credit note is made from an issued invoice');
+    clientId = inv.clientId;
+    // The VAT goes back at the rate the invoice charged.
+    vatRate = inv.vatRateBp;
+  }
   let row: { id: string; number: string } | undefined;
   try {
     [row] = await tx<{ id: string; number: string }[]>`
       insert into documents (kind, number, status, project_id, client_id, issue_date, due_date, title, notes, terms, vat_rate_bp, created_by, brand_id,
-                             deposit_bp, deposit_cents, deposit_show_balance, pay_link)
+                             deposit_bp, deposit_cents, deposit_show_balance, pay_link, proforma, credited_invoice_id, credit_reason)
       values (${kind}, ${number}, ${opts.status ?? 'draft'}, ${input.projectId ?? null}, ${clientId}, ${input.issueDate}, ${due},
-              ${input.title}, ${input.notes}, ${input.terms || (kind === 'invoice' ? settings.invoiceTerms : settings.quoteTerms)},
-              ${vatRate}, ${user?.id ?? null}, ${brandId}, ${input.depositBp}, ${input.depositCents}, ${input.depositShowBalance}, ${input.payLink ?? ''})
+              ${input.title}, ${input.notes}, ${kind === 'credit_note' ? input.terms : input.terms || (kind === 'invoice' || proforma ? settings.invoiceTerms : settings.quoteTerms)},
+              ${vatRate}, ${user?.id ?? null}, ${brandId}, ${input.depositBp}, ${input.depositCents}, ${input.depositShowBalance}, ${input.payLink ?? ''},
+              ${proforma}, ${kind === 'credit_note' ? (input.creditedInvoiceId ?? null) : null}, ${input.creditReason})
       returning id, number`;
   } catch (err) {
-    if (pgCode(err) === PG.uniqueViolation) throw conflict(`There is already ${kind === 'invoice' ? 'an invoice' : 'a quote'} numbered ${number}`);
+    if (pgCode(err) === PG.uniqueViolation) throw conflict(`There is already ${kind === 'invoice' ? 'an invoice' : kind === 'credit_note' ? 'a credit note' : 'a quote'} numbered ${number}`);
     throw err;
   }
   await writeLines(tx, row!.id, input.lines ?? [], vatRate);
@@ -142,19 +152,23 @@ export async function loadDocument(db: Db, id: string) {
       p.name as project_name, p.number as project_number, p.site_address,
       c.name as client_name, c.contact_person as client_contact, c.address as client_address, c.email as client_email,
       c.phone as client_phone, c.vat_number as client_vat_number, c.code as client_code,
-      sq.number as source_quote_number, b.name as brand_name
+      sq.number as source_quote_number, b.name as brand_name,
+      ci.number as credited_invoice_number, ci.issue_date as credited_invoice_date, ci.total_cents as credited_invoice_total_cents
     from documents d
     left join brands b on b.id = d.brand_id
     left join lateral (select sum(amount_cents) as paid from receipts where invoice_id = d.id) r on true
     left join projects p on p.id = d.project_id left join clients c on c.id = d.client_id
     left join documents sq on sq.id = d.source_quote_id
+    left join documents ci on ci.id = d.credited_invoice_id
     where d.id = ${id}`;
   if (!doc) throw notFound('Document');
   const lines = await db<PdfDocument['lines']>`select * from document_lines where document_id = ${id} order by sort`;
   const receipts = await db`
     select r.*, s.name as source_name from receipts r join payment_sources s on s.id = r.source_id
     where r.invoice_id = ${id} order by r.date, r.created_at`;
-  return { doc, lines, receipts };
+  const creditNotes = await db`
+    select id, number, status, issue_date, total_cents, credit_reason from documents where credited_invoice_id = ${id} order by issue_date, created_at`;
+  return { doc, lines, receipts, creditNotes };
 }
 
 /** A quote or invoice as its PDF, under its trading name, with the file name clients see. */
@@ -170,7 +184,7 @@ export async function documentPdf(db: Db, id: string) {
     logo = a?.bytes ?? null;
   }
   const pdf = await renderDocumentPdf({ ...data, settings, brand, logo });
-  const label = data.doc.kind === 'invoice' ? (settings.vatRegistered ? 'Tax invoice' : 'Invoice') : 'Quote';
+  const label = data.doc.kind === 'invoice' ? (settings.vatRegistered ? 'Tax invoice' : 'Invoice') : data.doc.kind === 'credit_note' ? 'Credit note' : data.doc.proforma ? 'Pro-forma invoice' : 'Quote';
   const filename = `${brand ? `${brand.name} ` : ''}${label} ${data.doc.number}${data.doc.clientName ? ` - ${data.doc.clientName}` : ''}.pdf`.replace(/[^\w.\- ]/g, '');
   return { pdf, filename, data, settings, brand };
 }
@@ -181,7 +195,7 @@ export async function documentPdf(db: Db, id: string) {
  */
 export async function emailDocument(db: Db, mailer: Mailer, id: string, to: string, message: string): Promise<string> {
   const { pdf, filename, data, settings, brand } = await documentPdf(db, id);
-  const what = data.doc.kind === 'invoice' ? 'Invoice' : 'Quote';
+  const what = data.doc.kind === 'invoice' ? 'Invoice' : data.doc.kind === 'credit_note' ? 'Credit note' : data.doc.proforma ? 'Pro-forma invoice' : 'Quote';
   const from = brand?.name || settings.tradingName || settings.companyName;
   await mailer.send({
     to,
@@ -190,12 +204,22 @@ export async function emailDocument(db: Db, mailer: Mailer, id: string, to: stri
     subject: `${what} ${data.doc.number} from ${from}`,
     text:
       (message || `Good day,\n\nPlease find ${what.toLowerCase()} ${data.doc.number} attached.\n\nKind regards,\n${from}`) +
-      (data.doc.kind === 'invoice' && (data.doc.payLink || settings.payLink) ? `\n\nPay by card: ${data.doc.payLink || settings.payLink}` : ''),
+      ((data.doc.kind === 'invoice' || data.doc.proforma) && featureOn(settings.features, 'payshap') && settings.payshapId ? `\n\nPay instantly with PayShap to ${settings.payshapId} (reference ${data.doc.number}).` : '') +
+      ((data.doc.kind === 'invoice' || data.doc.proforma) && (data.doc.payLink || settings.payLink) ? `\n\nPay by card: ${data.doc.payLink || settings.payLink}` : ''),
     attachments: [{ filename, content: pdf, contentType: 'application/pdf' }],
   });
   if (data.doc.kind === 'quote' && data.doc.status === 'draft') await db`update documents set status = 'sent', sent_at = now() where id = ${id}`;
   else await db`update documents set sent_at = coalesce(sent_at, now()) where id = ${id}`;
   return data.doc.kind;
+}
+
+/** Shared from the phone (WhatsApp, email…): a draft quote counts as sent; either way, when. */
+export async function markShared(db: Db, id: string): Promise<string | null> {
+  const [d] = await db<{ kind: string; status: string }[]>`select kind, status from documents where id = ${id}`;
+  if (!d) return null;
+  if (d.kind === 'quote' && d.status === 'draft') await db`update documents set status = 'sent', sent_at = now() where id = ${id}`;
+  else await db`update documents set sent_at = coalesce(sent_at, now()) where id = ${id}`;
+  return d.kind;
 }
 
 export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -223,7 +247,8 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const rows = await sql.unsafe(
       `select d.id, d.kind, d.number, d.status, d.issue_date, d.due_date, d.title, d.subtotal_cents, d.vat_cents, d.total_cents, d.written_off_cents,
          d.project_id, d.client_id, d.brand_id, b.name as brand_name, p.name as project_name, p.number as project_number, c.name as client_name,
-         coalesce(r.paid, 0)::bigint as paid_cents, ${paymentStateSql} as payment_state
+         coalesce(r.paid, 0)::bigint as paid_cents, ${paymentStateSql} as payment_state, d.proforma, d.reminded_at, d.reminders,
+         d.credited_invoice_id
        from documents d
        left join lateral (select sum(amount_cents) as paid from receipts where invoice_id = d.id) r on true
        left join projects p on p.id = d.project_id left join clients c on c.id = d.client_id
@@ -245,9 +270,9 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.post('/api/documents', { preHandler: requireRole('owner') }, async (req) => {
     const user = userOrThrow(req);
-    const { kind, ...rest } = parse(z.object({ kind: z.enum(['quote', 'invoice']) }).passthrough(), req.body);
+    const { kind, ...rest } = parse(z.object({ kind: z.enum(['quote', 'invoice', 'credit_note']) }).passthrough(), req.body);
     const input = parse(documentInput, rest);
-    if (kind === 'invoice') await assertOpen(sql, input.issueDate);
+    if (kind !== 'quote') await assertOpen(sql, input.issueDate);
     const doc = await sql.begin((tx) => createDocument(tx, user, kind, input));
     await audit(sql, { userId: user.id, action: 'create', entity: kind, entityId: doc.id, ip: req.ip, details: { number: doc.number } });
     return doc;
@@ -265,9 +290,10 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
       throw new HttpError(409, 'Someone else changed this while you had it open. Reload to see their changes, then make yours again.', 'stale_record');
     }
     if (old.status === 'void') throw badRequest('This invoice was voided. Duplicate it to make a new one.');
+    if (old.kind === 'credit_note' && old.status !== 'draft') throw badRequest('An issued credit note can’t be changed. Void it and make a new one.');
     if (old.kind === 'invoice' && old.status === 'issued') await assertOpen(sql, old.issueDate, input.issueDate);
     const settings = await getSettings(sql);
-    const vatRate = old.status === 'draft' ? (settings.vatRegistered ? settings.vatRateBp : 0) : old.vatRateBp;
+    const vatRate = old.status === 'draft' && old.kind !== 'credit_note' ? (settings.vatRegistered ? settings.vatRateBp : 0) : old.vatRateBp;
     const number = input.number?.trim() || old.number;
     await sql.begin(async (tx) => {
       let clientId = input.clientId ?? null;
@@ -301,12 +327,34 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/documents/:id/issue', { preHandler: requireRole('owner') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
-    const [doc] = await sql<{ kind: string; status: string; issueDate: string; totalCents: number }[]>`select * from documents where id = ${id}`;
-    if (!doc || doc.kind !== 'invoice') throw notFound('Invoice');
-    if (doc.status !== 'draft') throw badRequest('This invoice has already been issued');
+    const [doc] = await sql<{ kind: string; status: string; issueDate: string; totalCents: number; number: string; creditedInvoiceId: string | null }[]>`select * from documents where id = ${id}`;
+    if (!doc || (doc.kind !== 'invoice' && doc.kind !== 'credit_note')) throw notFound('Invoice');
+    const what = doc.kind === 'credit_note' ? 'credit note' : 'invoice';
+    if (doc.status !== 'draft') throw badRequest(`This ${what} has already been issued`);
     await assertOpen(sql, doc.issueDate);
     const [lines] = await sql<{ n: number }[]>`select count(*) as n from document_lines where document_id = ${id}`;
     if (!lines!.n) throw badRequest('Add at least one line first');
+    if (doc.kind === 'credit_note') {
+      // It settles that much of the invoice: never more than what's still owed on it.
+      const [inv] = await sql<{ status: string; totalCents: number; paid: number; writtenOffCents: number }[]>`
+        select d.status, d.total_cents, d.written_off_cents, coalesce((select sum(amount_cents) from receipts where invoice_id = d.id), 0)::bigint as paid
+        from documents d where d.id = ${doc.creditedInvoiceId}`;
+      if (!inv || inv.status !== 'issued') throw badRequest('The invoice this credits isn’t issued');
+      const owing = Number(inv.totalCents) - Number(inv.paid) - Number(inv.writtenOffCents);
+      if (Number(doc.totalCents) <= 0) throw badRequest('A credit note needs an amount');
+      if (Number(doc.totalCents) > owing)
+        throw badRequest(`That's more than is still owed on the invoice (${(owing / 100).toFixed(2)}). If the client already paid, refund them and record it as a cost or journal.`);
+      const [src] = await sql<{ id: string }[]>`select id from payment_sources where role = 'credit_notes'`;
+      await sql.begin(async (tx) => {
+        const [r] = await tx<{ id: string }[]>`
+          insert into receipts (invoice_id, date, amount_cents, source_id, method, reference, note, created_by)
+          values (${doc.creditedInvoiceId}, ${doc.issueDate}, ${doc.totalCents}, ${src!.id}, 'credit', ${doc.number}, 'Credit note', ${user.id}) returning id`;
+        await tx`update documents set status = 'issued', credit_receipt_id = ${r!.id}, updated_at = now() where id = ${id}`;
+      });
+      await syncProjectOfDocument(sql, doc.creditedInvoiceId!);
+      await audit(sql, { userId: user.id, action: 'issue', entity: 'credit_note', entityId: id, ip: req.ip });
+      return loadDocument(sql, id);
+    }
     await sql`update documents set status = 'issued', updated_at = now() where id = ${id}`;
     await syncProjectStatus(sql, (doc as { projectId?: string | null }).projectId);
     await audit(sql, { userId: user.id, action: 'issue', entity: 'invoice', entityId: id, ip: req.ip });
@@ -335,10 +383,22 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const { reason } = parse(z.object({ reason: z.string().trim().min(2, 'Give a reason').max(300) }), req.body);
-    const [doc] = await sql<{ kind: string; status: string; issueDate: string; writtenOffOn: string | null }[]>`select * from documents where id = ${id}`;
-    if (!doc || doc.kind !== 'invoice') throw notFound('Invoice');
+    const [doc] = await sql<{ kind: string; status: string; issueDate: string; writtenOffOn: string | null; creditReceiptId: string | null; creditedInvoiceId: string | null }[]>`select * from documents where id = ${id}`;
+    if (!doc || (doc.kind !== 'invoice' && doc.kind !== 'credit_note')) throw notFound('Invoice');
     await assertOpen(sql, doc.issueDate);
-    const [paid] = await sql`select 1 from receipts where invoice_id = ${id} limit 1`;
+    if (doc.kind === 'credit_note') {
+      await sql.begin(async (tx) => {
+        await tx`update documents set status = 'void', void_reason = ${reason}, credit_receipt_id = null, updated_at = now() where id = ${id}`;
+        if (doc.creditReceiptId) await tx`delete from receipts where id = ${doc.creditReceiptId}`;
+      });
+      if (doc.creditedInvoiceId) await syncProjectOfDocument(sql, doc.creditedInvoiceId);
+      await audit(sql, { userId: user.id, action: 'void', entity: 'credit_note', entityId: id, ip: req.ip, details: { reason } });
+      return loadDocument(sql, id);
+    }
+    // Credit notes on it are part of what was settled: void those first.
+    const [credited] = await sql`select 1 from documents where credited_invoice_id = ${id} and status = 'issued' limit 1`;
+    if (credited) throw badRequest('Void the credit notes on this invoice first');
+    const [paid] = await sql`select 1 from receipts where invoice_id = ${id} and method <> 'credit' limit 1`;
     if (paid) throw badRequest('Remove the payments on this invoice before voiding it');
     if (doc.writtenOffOn) throw badRequest('Undo the write-off before voiding this invoice');
     await sql`update documents set status = 'void', void_reason = ${reason}, updated_at = now() where id = ${id}`;
@@ -352,7 +412,8 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = parse(idParam, req.params);
     const [doc] = await sql<{ kind: string; status: string }[]>`select kind, status from documents where id = ${id}`;
     if (!doc) throw notFound('Document');
-    if (doc.kind === 'invoice' && doc.status !== 'draft') throw badRequest('Issued invoices can’t be deleted. Void it instead, so the number stays accounted for.');
+    if ((doc.kind === 'invoice' || doc.kind === 'credit_note') && doc.status !== 'draft')
+      throw badRequest(`Issued ${doc.kind === 'invoice' ? 'invoices' : 'credit notes'} can’t be deleted. Void it instead, so the number stays accounted for.`);
     await sql.begin(async (tx) => {
       await tx`update documents set source_quote_id = null where source_quote_id = ${id}`;
       await tx`delete from documents where id = ${id}`;
@@ -388,6 +449,35 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
       return inv;
     });
     return created;
+  });
+
+  /** A draft credit note for an invoice: all of what's still owed, line by line (change it before issuing). */
+  app.post('/api/documents/:id/credit-note', { preHandler: requireRole('owner') }, async (req) => {
+    const user = userOrThrow(req);
+    const { id } = parse(idParam, req.params);
+    const { doc, lines } = await loadDocument(sql, id);
+    if (doc.kind !== 'invoice' || doc.status !== 'issued') throw badRequest('Credit notes are made from issued invoices');
+    const created = await sql.begin((tx) =>
+      createDocument(tx, user, 'credit_note', {
+        brandId: doc.brandId,
+        projectId: doc.projectId,
+        clientId: doc.clientId,
+        issueDate: today(),
+        title: doc.title,
+        creditedInvoiceId: id,
+        creditReason: '',
+        lines: lines.map((l) => ({ category: l.category, description: l.description, qty: l.qty, unit: l.unit, unitPriceCents: l.unitPriceCents })),
+      }),
+    );
+    await audit(sql, { userId: user.id, action: 'create', entity: 'credit_note', entityId: created.id, ip: req.ip, details: { invoiceId: id } });
+    return created;
+  });
+
+  /** A payment reminder was sent (from the phone's share sheet, or emailed). */
+  app.post('/api/documents/:id/reminded', { preHandler: requireRole('owner') }, async (req) => {
+    const { id } = parse(idParam, req.params);
+    await sql`update documents set reminded_at = now(), reminders = reminders + 1 where id = ${id} and kind = 'invoice'`;
+    return { ok: true };
   });
 
   app.post('/api/documents/:id/duplicate', { preHandler: requireRole('owner') }, async (req) => {
@@ -460,6 +550,11 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   app.delete('/api/receipts/:id', { preHandler: requireRole('owner') }, async (req) => {
+    {
+      const { id: rid } = parse(idParam, req.params);
+      const [cr] = await sql`select 1 from receipts where id = ${rid} and method = 'credit'`;
+      if (cr) throw badRequest('That was settled by a credit note: void the credit note instead.');
+    }
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const [r] = await sql<{ date: string; invoiceId: string; writtenOffOn: string | null }[]>`
@@ -482,6 +577,15 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     reply.header('content-type', 'application/pdf');
     reply.header('content-disposition', `${q(req).download ? 'attachment' : 'inline'}; filename="${filename}"`);
     return reply.send(pdf);
+  });
+
+  app.post('/api/documents/:id/shared', { preHandler: requireRole('owner') }, async (req) => {
+    const user = userOrThrow(req);
+    const { id } = parse(idParam, req.params);
+    const kind = await markShared(sql, id);
+    if (!kind) throw notFound('Document');
+    await audit(sql, { userId: user.id, action: 'share', entity: kind, entityId: id, ip: req.ip });
+    return { ok: true };
   });
 
   app.post('/api/documents/:id/email', { preHandler: requireRole('owner') }, async (req) => {
