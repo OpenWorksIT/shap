@@ -83,6 +83,14 @@ export default function SettingsPage() {
       )}
       {tab === 'import' && (
         <>
+          <section className="panel panel-pad stack narrow-wide">
+            <h3>Coming from another package?</h3>
+            <p className="small">Bring your clients, invoices (with what’s been paid), quotes, items, bills and opening balances from Sage, Xero, QuickBooks, Zoho or Invoice Ninja.</p>
+            <Link className="btn primary" to="/move-in" style={{ alignSelf: 'flex-start' }}>
+              <Icon name="upload" size={18} />
+              Move in
+            </Link>
+          </section>
           <ImportTracker />
           <CompanyFile />
         </>

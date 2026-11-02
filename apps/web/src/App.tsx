@@ -26,6 +26,7 @@ const WelcomePage = lazy(() => import('./pages/Welcome'));
 const BillsPage = lazy(() => import('./pages/Bills'));
 const LogbookPage = lazy(() => import('./pages/Logbook'));
 const GuidesPage = lazy(() => import('./pages/Guides'));
+const MoveInPage = lazy(() => import('./pages/MoveIn'));
 
 export function App() {
   return (
@@ -83,6 +84,7 @@ function Authed() {
             </>
           )}
           {user.role === 'owner' && <Route path="/settings" element={<SettingsPage />} />}
+          {user.role === 'owner' && <Route path="/move-in" element={<MoveInPage />} />}
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -3,6 +3,19 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.12.0 (2 November 2026)
+
+Moving in from another package.
+
+- **Move in** (Settings → Import & company file): the CSV exports of Sage Accounting, Xero,
+  QuickBooks Online, Zoho Invoice / Books or Invoice Ninja. Clients, invoices with what's been
+  paid (or the payments export, with its dates), quotes, items, bills and expenses, and the trial
+  balance at your last year end as the opening balances, mapped to Shap's accounts. Each file is
+  recognised by its columns; a preview shows what comes in before anything is saved, and it all
+  goes in together or not at all. The numbering carries on from the old package's.
+- Imported items join the usual items offered when you add a line.
+- Long lists no longer push screens wider than a phone.
+
 ## 1.11.0 (2 November 2026)
 
 More of what a small business needs, each one a switch under Settings → What you use (now
