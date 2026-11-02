@@ -4,7 +4,7 @@ import { requireRole, userOrThrow } from '../../auth.js';
 import type { Ctx } from '../../context.js';
 import type { Db } from '../../db/index.js';
 import { audit } from '../../lib/audit.js';
-import { assertOpen, q } from '../../lib/books.js';
+import { assertOpen, q, freshTotals } from '../../lib/books.js';
 import { badRequest, notFound } from '../../lib/errors.js';
 import { parse } from '../../lib/validate.js';
 import { depositDueSql, syncProjectOfDocument } from '../documents.js';
@@ -535,7 +535,8 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
     const lastBal = [...lines].reverse().find((l) => l.balanceCents != null);
     let booksCents: number | null = null;
     if (lastBal && src) {
-      const [b] = await sql<{ t: number }[]>`select coalesce(sum(amount_cents), 0)::bigint as t from ledger where account_id = ${src.accountId} and date <= ${lastBal.date}::date`;
+      await freshTotals(sql);
+      const [b] = await sql<{ t: number }[]>`select coalesce(sum(amount_cents), 0)::bigint as t from ledger_totals where account_id = ${src.accountId} and date <= ${lastBal.date}::date`;
       booksCents = b!.t;
     }
     return {

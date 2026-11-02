@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { audit } from '../lib/audit.js';
-import { getSettings, isIsoDate, q, today } from '../lib/books.js';
+import { getSettings, isIsoDate, q, today, freshTotals } from '../lib/books.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 
@@ -19,9 +19,10 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   // ---------------------------------------------------------------- agreed year ends
   app.get('/api/year-ends', readers, async () => {
+    await freshTotals(sql);
     return sql`
       select y.fy_end, y.note, y.created_at, count(f.account_id)::int as figures,
-        coalesce((select sum(l.amount_cents) from ledger l where l.source = 'year_end' and l.date = y.fy_end and l.account_id = sys_account('suspense')), 0)::bigint as suspense_cents
+        coalesce((select sum(l.amount_cents) from ledger_totals l where l.source = 'year_end' and l.date = y.fy_end and l.account_id = sys_account('suspense')), 0)::bigint as suspense_cents
       from year_ends y left join year_end_figures f on f.fy_end = y.fy_end group by y.fy_end order by y.fy_end desc`;
   });
 
@@ -35,9 +36,10 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
     const settings = await getSettings(sql);
     const fy = financialYear(fyEnd, settings.fyEndMonth);
     if (fy.end !== fyEnd) throw badRequest(`Your financial year ends in month ${settings.fyEndMonth}; ${fyEnd} isn’t a year end`);
+    await freshTotals(sql);
     const rows = await sql<{ id: string; code: string; name: string; type: AccountType; systemKey: string | null; shapCents: number; targetCents: number | null }[]>`
       select a.id, a.code, a.name, a.type, a.system_key,
-        coalesce((select sum(l.amount_cents) from ledger l
+        coalesce((select sum(l.amount_cents) from ledger_totals l
           where l.account_id = a.id and not (l.source = 'year_end' and l.date = ${fyEnd}::date)
             and l.date <= ${fyEnd}::date
             and (a.type not in ('income', 'cost_of_sales', 'expense') or l.date >= ${fy.start}::date)), 0)::bigint as shap_cents,
@@ -48,7 +50,7 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [ye] = await sql`select * from year_ends where fy_end = ${fyEnd}`;
     // Retained earnings at the start of the year (earlier years' profit, adjustments included).
     const [re] = await sql<{ t: number }[]>`
-      select coalesce(sum(l.amount_cents), 0)::bigint as t from ledger l join accounts a on a.id = l.account_id
+      select coalesce(sum(l.amount_cents), 0)::bigint as t from ledger_totals l join accounts a on a.id = l.account_id
       where a.type in ('income', 'cost_of_sales', 'expense') and l.date < ${fy.start}::date`;
     return {
       fyEnd,
@@ -111,10 +113,11 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (asAt < fy.start) throw badRequest('That date is before the financial year starts');
     const months = monthsBetween(fy.start, asAt).filter((m) => monthEnd(`${m}-01`) <= asAt).length || 1;
     const prev = financialYear(addMonths(fy.start, -1), settings.fyEndMonth);
+    await freshTotals(sql);
     const rows = await sql<{ id: string; code: string; name: string; type: AccountType; systemKey: string | null; actual: number; prior: number }[]>`
       select a.id, a.code, a.name, a.type, a.system_key,
-        coalesce((select sum(l.amount_cents) from ledger l where l.account_id = a.id and l.date between ${fy.start}::date and ${asAt}::date), 0)::bigint as actual,
-        coalesce((select sum(l.amount_cents) from ledger l where l.account_id = a.id and l.date between ${prev.start}::date and ${prev.end}::date), 0)::bigint as prior
+        coalesce((select sum(l.amount_cents) from ledger_totals l where l.account_id = a.id and l.date between ${fy.start}::date and ${asAt}::date), 0)::bigint as actual,
+        coalesce((select sum(l.amount_cents) from ledger_totals l where l.account_id = a.id and l.date between ${prev.start}::date and ${prev.end}::date), 0)::bigint as prior
       from accounts a where a.type in ('income', 'cost_of_sales', 'expense') and coalesce(a.system_key, '') <> 'income_tax'
       order by a.code`;
     // A sole proprietor doesn't pay themselves a salary: what they take out is drawings, not a cost.
@@ -136,7 +139,7 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
       });
     // Assessed loss brought forward: earlier years' losses not yet used up by profits (from the books).
     const [prior] = await sql<{ t: number }[]>`
-      select coalesce(sum(l.amount_cents), 0)::bigint as t from ledger l join accounts a on a.id = l.account_id
+      select coalesce(sum(l.amount_cents), 0)::bigint as t from ledger_totals l join accounts a on a.id = l.account_id
       where a.type in ('income', 'cost_of_sales', 'expense') and coalesce(a.system_key, '') <> 'income_tax' and l.date < ${fy.start}::date`;
     const assessedLoss = Math.max(0, prior!.t); // debit-positive: a net loss is positive
     const saved = await sql`select id, period, as_at, taxable_income_cents, tax_cents, payable_cents, note, created_at from tax_estimates where fy_end = ${fy.end} order by created_at desc`;

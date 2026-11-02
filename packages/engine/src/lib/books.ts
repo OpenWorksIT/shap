@@ -47,6 +47,14 @@ export interface SettingsRow {
   timezone: string;
 }
 
+/**
+ * Brings the per-account, per-day totals (ledger_totals) up to date. Cheap when nothing changed;
+ * after a change it works the ledger out once. Call before a query that reads ledger_totals.
+ */
+export async function freshTotals(db: Db): Promise<void> {
+  await db`select fresh_ledger_totals()`;
+}
+
 export async function getSettings(db: Db): Promise<SettingsRow> {
   const [s] = await db<SettingsRow[]>`select * from settings where id`;
   return s!;
