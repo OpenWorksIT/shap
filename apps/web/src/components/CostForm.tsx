@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { formatDate, formatZar, industryProfile, todayIso, vatIncluded } from '@shap/shared';
 import { api, ApiError } from '../lib/api';
 import { FileButton } from './Files';
-import { shrinkImage } from '../lib/files';
+import { compressSlip } from '../lib/files';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
 import type { CostRow, PlannedItem } from '../lib/types';
@@ -82,7 +82,7 @@ export function CostForm({ initial, projectId, plannedItem, onSaved, onDeleted }
     if (!file) return;
     setUploading(true);
     try {
-      const shrunk = await shrinkImage(file);
+      const shrunk = await compressSlip(file);
       const r = await api<{ id: string }>('/api/attachments', { body: shrunk });
       set('receiptId', r.id);
     } catch (err) {

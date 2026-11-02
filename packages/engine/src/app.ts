@@ -22,6 +22,7 @@ import { registerStatementRoutes } from './modules/statements.js';
 import { registerVatRoutes } from './modules/vat.js';
 import { registerWorkerRoutes } from './modules/workers.js';
 import { registerYearEndRoutes } from './modules/yearend.js';
+import { registerArchiveRoutes } from './modules/archive.js';
 
 export interface BuildOptions {
   sql: Sql;
@@ -51,6 +52,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: App; ctx: Ctx
   registerVatRoutes(app, ctx);
   registerReportRoutes(app, ctx);
   registerYearEndRoutes(app, ctx);
+  registerArchiveRoutes(app, ctx);
   registerBankRoutes(app, ctx);
   registerStatementRoutes(app, ctx);
   registerCompanyFileRoutes(app, ctx);

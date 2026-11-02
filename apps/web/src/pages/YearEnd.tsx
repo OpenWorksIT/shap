@@ -16,7 +16,8 @@ import {
   type AgeBand,
 } from '@shap/shared';
 import { ErrorBox, Icon, Loading, MoneyInput, useToast } from '../components/ui';
-import { api, ApiError } from '../lib/api';
+import { api, ApiError, apiBlob } from '../lib/api';
+import { ARCHIVED_SLIP, fileToBase64, squeezePhoto } from '../lib/files';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
 
@@ -239,7 +240,89 @@ export function YearEnd() {
           )}
         </>
       )}
+      {isOwner && <ArchiveYears />}
     </div>
+  );
+}
+
+interface ArchiveInfo {
+  lockDate: string | null;
+  totalBytes: number;
+  years: { fyEnd: string; label: string; slips: number; bytes: number; locked: boolean; archived: { archivedAt: string; photos: number; bytesBefore: number; bytesAfter: number } | null }[];
+}
+const mb = (b: number) => (b >= 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
+
+/**
+ * A closed year (books locked, tax paid) can be archived: its slip photos are squeezed smaller
+ * to save space. Every slip stays readable on screen; the figures don't change.
+ */
+function ArchiveYears() {
+  const toast = useToast();
+  const info = useApi<ArchiveInfo>('/api/archive');
+  const [busy, setBusy] = useState<{ fyEnd: string; done: number; of: number } | null>(null);
+  if (!info.data || !info.data.years.length) return null;
+
+  const archive = async (fyEnd: string, label: string) => {
+    if (!confirm(`Archive ${label}? Its slip photos are made smaller (still readable on screen) to save space. The books themselves don't change.`)) return;
+    try {
+      const photos = await api<{ id: string; size: number }[]>(`/api/archive/${fyEnd}/photos`);
+      let before = 0;
+      let after = 0;
+      setBusy({ fyEnd, done: 0, of: photos.length });
+      for (const [i, ph] of photos.entries()) {
+        before += Number(ph.size);
+        try {
+          const { blob } = await apiBlob(`/api/attachments/${ph.id}`);
+          const small = await squeezePhoto(blob, ARCHIVED_SLIP);
+          const r = await api<{ kept: boolean; size: number }>(`/api/attachments/${ph.id}`, { method: 'PUT', body: { mime: 'image/jpeg', dataBase64: await fileToBase64(small) } });
+          after += r.size;
+        } catch {
+          after += Number(ph.size); // left as it was
+        }
+        setBusy({ fyEnd, done: i + 1, of: photos.length });
+      }
+      await api(`/api/archive/${fyEnd}`, { body: { photos: photos.length, bytesBefore: before, bytesAfter: after } });
+      toast(`${label} archived: ${mb(before)} of photos now ${mb(after)}`);
+      await info.reload();
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Couldn’t archive that year', 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <strong>Archive closed years</strong>
+        <div className="xs muted">
+          Year done, tax paid, books clean? Archive it: its slip photos are squeezed smaller to save space (still readable on screen). Lock the year first
+          above. Slips and statements take {mb(info.data.totalBytes)} altogether.
+        </div>
+      </div>
+      <ul className="list">
+        {info.data.years.map((y) => (
+          <li key={y.fyEnd} className="list-row">
+            <div className="grow">
+              <strong>{y.label}</strong>
+              <div className="xs muted">
+                {y.slips} slip{y.slips === 1 ? '' : 's'} · {mb(y.bytes)}
+                {y.archived ? ` · archived ${formatDate(y.archived.archivedAt.slice(0, 10))} (was ${mb(y.archived.bytesBefore)})` : y.locked ? ' · locked' : ' · not locked yet'}
+              </div>
+            </div>
+            {busy?.fyEnd === y.fyEnd ? (
+              <span className="small muted">
+                {busy.done} / {busy.of}…
+              </span>
+            ) : (
+              <button type="button" className="btn small" disabled={!y.locked || Boolean(busy)} onClick={() => void archive(y.fyEnd, y.label)}>
+                {y.archived ? 'Squeeze again' : 'Archive'}
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
