@@ -29,7 +29,9 @@ Store builds run too once these repository secrets are set
 2. Users and Access → Integrations → App Store Connect API: make a team key with the *Admin*
    role (signing in the cloud makes the distribution certificate, which App Manager keys can't).
    Download the `.p8` (once only).
-3. Secrets: `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8` (the file's contents), `APPLE_TEAM_ID`.
+3. Secrets: `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8` (the file's contents), `APPLE_TEAM_ID`, and
+   `IOS_CERT_KEY`: the RSA key of the App Store distribution certificate, the same one LineGuard and
+   Steady use (signing as they do, with Codemagic's CLI tools: no registered iPhone, no cloud signing).
 4. The workflow then archives, signs (automatic signing through the API key) and uploads each
    build to App Store Connect, where it appears under TestFlight. Submit it for review from there.
 
