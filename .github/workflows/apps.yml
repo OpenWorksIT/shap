@@ -111,6 +111,32 @@ jobs:
         with:
           name: shap-pocket-ios-simulator
           path: ShapPocket-simulator.zip
+      - name: Check the App Store Connect key
+        if: env.HAS_SIGNING == 'true'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        # Signs a short token with the key and asks Apple for the app list, so a wrong ID or key
+        # fails here with Apple's own reason (never printing the secrets).
+        run: |
+          node --input-type=module -e '
+            import { createSign, createPrivateKey } from "node:crypto";
+            const { ASC_KEY_ID: kid, ASC_ISSUER_ID: iss, ASC_KEY_P8: p8 } = process.env;
+            console.log("Key ID: " + kid.length + " characters; issuer ID: " + iss.length + " characters (a UUID is 36)");
+            let key;
+            try { key = createPrivateKey(p8.trim()); } catch (e) { console.log("::error::The .p8 key could not be read: paste the whole file, BEGIN and END lines included"); process.exit(1); }
+            const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
+            const now = Math.floor(Date.now() / 1000);
+            const head = b64({ alg: "ES256", kid: kid.trim(), typ: "JWT" });
+            const body = b64({ iss: iss.trim(), iat: now, exp: now + 600, aud: "appstoreconnect-v1" });
+            const sig = createSign("SHA256").update(head + "." + body).sign({ key, dsaEncoding: "ieee-p1363" }).toString("base64url");
+            const r = await fetch("https://api.appstoreconnect.apple.com/v1/apps?limit=5", { headers: { authorization: "Bearer " + head + "." + body + "." + sig } });
+            const j = await r.json().catch(() => ({}));
+            if (r.ok) { console.log("Key works. Apps: " + (j.data ?? []).map((a) => a.attributes.bundleId).join(", ")); process.exit(0); }
+            console.log("::error::Apple said " + r.status + ": " + (j.errors ?? []).map((e) => e.code + " - " + e.title + ": " + e.detail).join(" | "));
+            process.exit(1);
+          '
       - name: Store build, uploaded to App Store Connect
         if: env.HAS_SIGNING == 'true'
         working-directory: apps/web/ios/App
