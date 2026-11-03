@@ -149,10 +149,13 @@ jobs:
           echo "${{ secrets.ASC_KEY_P8 }}" > ~/.appstoreconnect/private_keys/AuthKey_$ASC_KEY_ID.p8
           KEY=~/.appstoreconnect/private_keys/AuthKey_$ASC_KEY_ID.p8
           BUILD=$(( GITHUB_RUN_NUMBER + 100 ))
+          # Archived unsigned, then signed for the App Store on export (Apple's cloud signing with
+          # the API key). Signing at archive time would want a development profile, and those
+          # need a registered iPhone: the team has none and doesn't need one.
           xcodebuild -project App.xcodeproj -scheme App -configuration Release \
             -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/App.xcarchive" \
-            DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGN_STYLE=Automatic CURRENT_PROJECT_VERSION=$BUILD \
-            -allowProvisioningUpdates -authenticationKeyPath "$KEY" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$TEAM_ID" CURRENT_PROJECT_VERSION=$BUILD \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             archive
           cat > "$RUNNER_TEMP/export.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
