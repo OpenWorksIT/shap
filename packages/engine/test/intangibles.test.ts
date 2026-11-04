@@ -48,4 +48,17 @@ describe('intangible assets and IT costs', () => {
     expect(await balance(env.sql, 'software', '2026-04-30')).toBe(40000);
     expect(await balance(env.sql, 'hosting', '2026-04-30')).toBe(25000);
   });
+
+  it('refuses editing an asset whose purchase sits in a closed year', async () => {
+    const admin = await ref(env.sql).then((r) => r.cat('Accounting & admin').catch(() => r.cat('Sundry')));
+    const fee = await owner.post('/api/costs', { date: '2026-09-01', description: 'Tool', amountCents: 300000, supplier: 'X', categoryId: admin, sourceId: bank });
+    const asset = await owner.post('/api/assets', { name: 'Locked tool', category: 'tools', purchaseDate: '2026-09-01', costCents: 300000, costId: fee.id, lifeMonths: 36 });
+    await env.sql`update settings set lock_date = '2026-09-30'`;
+    // Its purchase is now in a closed year: editing its cost must be refused (it feeds a signed-off
+    // balance sheet), the same way a back-dated cost already is.
+    const r = await owner.call({ method: 'PUT', url: `/api/assets/${asset.id}`, payload: { name: 'Locked tool', category: 'tools', purchaseDate: '2026-09-01', costCents: 900000, costId: fee.id, lifeMonths: 36 } });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error).toMatch(/closed/i);
+    await env.sql`update settings set lock_date = null`;
+  });
 });

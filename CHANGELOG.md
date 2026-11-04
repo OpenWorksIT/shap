@@ -2,6 +2,13 @@
 
 What changed in each version of Shap Pocket, newest first.
 
+## 0.7.1 (internal testing)
+
+From the security review shared with Shap:
+
+- **Closed years are better protected:** once a year is locked, an asset's cost can no longer be
+  changed (the same rule costs already follow), so a signed-off balance sheet can't shift.
+
 ## 0.7.0 (internal testing)
 
 More of what a small business needs, each one a switch under Settings → What you use.

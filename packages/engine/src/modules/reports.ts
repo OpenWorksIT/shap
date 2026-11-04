@@ -412,7 +412,9 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
     const input = parse(assetInput, req.body);
     const [old] = await sql<{ costId: string | null; purchaseDate: string }[]>`select cost_id, purchase_date from assets where id = ${id}`;
     if (!old) throw notFound('Asset');
-    await assertOpen(sql, input.disposedOn);
+    // Refuse editing an asset whose purchase sits in a closed year, or moving one into/within it:
+    // its cost and depreciation feed a signed-off balance sheet. (POST and DELETE already do this.)
+    await assertOpen(sql, old.purchaseDate, input.purchaseDate, input.disposedOn);
     const costId = input.costId ?? old.costId;
     if (costId) {
       const [c] = await sql<{ amountCents: number; vatCents: number }[]>`select amount_cents, vat_cents from costs where id = ${costId}`;
