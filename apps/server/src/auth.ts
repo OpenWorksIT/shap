@@ -4,7 +4,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { loginInput, passwordProblem, type Role } from '@shap/shared';
 import { z } from 'zod';
 import type { Ctx } from './context.js';
-import type { Db } from './db/index.js';
+import type { Db, Sql } from './db/index.js';
 import { audit } from './lib/audit.js';
 import { badRequest, forbidden, HttpError, unauthorized } from './lib/errors.js';
 import { newToken, sha256 } from './lib/tokens.js';
@@ -46,17 +46,36 @@ async function failures(db: Db, action: string, where: { email?: string; userId?
 }
 
 /**
+ * A short tag of the current password hash, embedded in the signed MFA challenges. Changing the
+ * password changes the hash, so any challenge issued earlier (enrol secret or sign-in step 2) can
+ * no longer be redeemed — it can't outrun a password change within its lifetime.
+ */
+const pwTag = (passwordHash: string): string => sha256(passwordHash).slice(0, 32);
+
+/**
  * Re-checks the signed-in person's password before something that would let a stolen session
  * take over (changing your own email or password, a full backup, replacing everything). Wrong
  * tries are counted like sign-in failures.
  */
-export async function confirmPassword(db: Db, userId: string, password: string | undefined, ip: string): Promise<void> {
-  if ((await failures(db, 'password_failed', { userId }, LIMITS.password.minutes)) >= LIMITS.password.tries) throw tooMany(LIMITS.password.minutes);
-  const [row] = await db<{ passwordHash: string }[]>`select password_hash from users where id = ${userId} and active`;
-  if (!row || !password || !(await verify(row.passwordHash, password).catch(() => false))) {
-    await audit(db, { userId, action: 'password_failed', entity: 'user', entityId: userId, ip });
-    throw badRequest(password ? 'Your password is incorrect' : 'Enter your password to confirm');
-  }
+export async function confirmPassword(db: Sql, userId: string, password: string | undefined, ip: string): Promise<void> {
+  // Count the recent failures, verify, and record a new failure all while holding a per-account
+  // lock, so a burst of concurrent tries can't all read "under the limit" before any of their
+  // failures is written (which would defeat the per-account limit). The failure is recorded inside
+  // the transaction and committed; the rejection is thrown afterwards so it isn't rolled back.
+  const outcome = await db.begin(async (tx) => {
+    await tx`select pg_advisory_xact_lock(hashtext(${`pw:${userId}`}))`;
+    if ((await failures(tx, 'password_failed', { userId }, LIMITS.password.minutes)) >= LIMITS.password.tries) return 'too_many' as const;
+    const [row] = await tx<{ passwordHash: string }[]>`select password_hash from users where id = ${userId} and active`;
+    const ok = !!row && !!password && (await verify(row.passwordHash, password).catch(() => false));
+    if (!ok) {
+      await audit(tx, { userId, action: 'password_failed', entity: 'user', entityId: userId, ip });
+      return password ? ('wrong' as const) : ('empty' as const);
+    }
+    return 'ok' as const;
+  });
+  if (outcome === 'too_many') throw tooMany(LIMITS.password.minutes);
+  if (outcome === 'wrong') throw badRequest('Your password is incorrect');
+  if (outcome === 'empty') throw badRequest('Enter your password to confirm');
 }
 
 /** The new password, if it's acceptable. */
@@ -127,10 +146,10 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
     return { user, token };
   };
 
-  const enrolChallenge = (user: AuthUser) => {
+  const enrolChallenge = (user: AuthUser, passwordHash: string) => {
     const secret = newTotpSecret();
     return {
-      challenge: secrets.signToken('mfa-enrol', { uid: user.id, s: secrets.seal(secret) }, 15 * 60),
+      challenge: secrets.signToken('mfa-enrol', { uid: user.id, s: secrets.seal(secret), pw: pwTag(passwordHash) }, 15 * 60),
       secret,
       otpauthUrl: otpauthUrl(secret, user.email),
     };
@@ -139,28 +158,37 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
   // ---- Step 1: password ------------------------------------------------------
   app.post('/api/auth/login', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
     const input = parse(loginInput, req.body);
-    // Same answer whether or not the email exists, so this doesn't reveal who has an account.
-    if ((await failures(sql, 'login_failed', { email: input.email }, LIMITS.login.minutes)) >= LIMITS.login.tries) {
-      await verify(await getDummyHash(), input.password).catch(() => false);
-      throw tooMany(LIMITS.login.minutes);
-    }
-    const rows = await sql<(AuthUser & { passwordHash: string; active: boolean; totpEnabledAt: Date | null })[]>`
-      select id, name, email, role, password_hash, active, totp_enabled_at from users where email = ${input.email}
-    `;
-    const row = rows[0];
-    // Always run a verify so response time does not reveal whether the email exists.
-    const ok = await verify(row?.passwordHash ?? (await getDummyHash()), input.password).catch(() => false);
-    if (!row || !ok || !row.active) {
-      await audit(sql, { action: 'login_failed', entity: 'user', entityId: row?.id ?? null, actor: 'user', ip: req.ip, details: { email: input.email } });
-      throw unauthorized('Email or password is incorrect');
-    }
-    const { passwordHash: _ph, active: _a, totpEnabledAt, ...user } = row;
+    // Count recent failures, verify, and record a new failure while holding a per-account lock, so
+    // a burst of concurrent guesses can't all pass the window check before any failure lands (which
+    // would make the per-account limit — the defence against a distributed/botnet attack on one
+    // account — useless). The failure is committed inside the transaction; the result is acted on
+    // after it commits. Same answer whether or not the email exists, so this reveals no accounts.
+    const outcome = await sql.begin(async (tx) => {
+      await tx`select pg_advisory_xact_lock(hashtext(${`login:${input.email}`}))`;
+      if ((await failures(tx, 'login_failed', { email: input.email }, LIMITS.login.minutes)) >= LIMITS.login.tries) {
+        await verify(await getDummyHash(), input.password).catch(() => false);
+        return { kind: 'too_many' as const };
+      }
+      const [row] = await tx<(AuthUser & { passwordHash: string; active: boolean; totpEnabledAt: Date | null })[]>`
+        select id, name, email, role, password_hash, active, totp_enabled_at from users where email = ${input.email}
+      `;
+      // Always run a verify so response time does not reveal whether the email exists.
+      const ok = await verify(row?.passwordHash ?? (await getDummyHash()), input.password).catch(() => false);
+      if (!row || !ok || !row.active) {
+        await audit(tx, { action: 'login_failed', entity: 'user', entityId: row?.id ?? null, actor: 'user', ip: req.ip, details: { email: input.email } });
+        return { kind: 'fail' as const };
+      }
+      return { kind: 'ok' as const, row };
+    });
+    if (outcome.kind === 'too_many') throw tooMany(LIMITS.login.minutes);
+    if (outcome.kind === 'fail') throw unauthorized('Email or password is incorrect');
+    const { passwordHash, active: _a, totpEnabledAt, ...user } = outcome.row;
 
     if (totpEnabledAt) {
-      return { mfa: 'verify', challenge: secrets.signToken('mfa-verify', { uid: user.id }, 5 * 60) };
+      return { mfa: 'verify', challenge: secrets.signToken('mfa-verify', { uid: user.id, pw: pwTag(passwordHash) }, 5 * 60) };
     }
     if (config.mfaRequired) {
-      return { mfa: 'enrol', ...enrolChallenge(user) };
+      return { mfa: 'enrol', ...enrolChallenge(user, passwordHash) };
     }
     return startSession(req, reply, user, 'password');
   });
@@ -168,55 +196,82 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
   // ---- Step 2: authenticator code (or a recovery code) ------------------------
   app.post('/api/auth/mfa/verify', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
     const { challenge, code } = parse(z.object({ challenge: z.string().min(10).max(2000), code: z.string().trim().min(6).max(20) }), req.body);
-    const p = secrets.verifyToken<{ uid: string }>('mfa-verify', challenge);
+    const p = secrets.verifyToken<{ uid: string; pw?: string }>('mfa-verify', challenge);
     if (!p) throw unauthorized('That sign-in took too long. Please start again.');
-    const [row] = await sql<(AuthUser & { totpSecretEnc: string | null; totpLastStep: string | null })[]>`
-      select id, name, email, role, totp_secret_enc, totp_last_step from users where id = ${p.uid} and active
-    `;
-    if (!row?.totpSecretEnc) throw unauthorized('Please sign in again.');
-    const { totpSecretEnc, totpLastStep, ...user } = row;
-    // Six-digit codes can't be guessed in a handful of tries; they can in a million.
-    if ((await failures(sql, 'mfa_failed', { userId: user.id }, LIMITS.mfa.minutes)) >= LIMITS.mfa.tries) throw tooMany(LIMITS.mfa.minutes);
-
-    const isRecovery = /[a-z]/i.test(code);
-    if (isRecovery) {
-      const [used] = await sql<{ id: string }[]>`
-        update recovery_codes set used_at = now()
-        where id = (select id from recovery_codes where user_id = ${user.id} and used_at is null
-                    and code_hash = ${secrets.hash(normaliseRecoveryCode(code))} limit 1)
-        returning id
+    // The count, the code check, the single-use claim and the failure record all happen under a
+    // per-account lock, so concurrent tries can't slip past the count and a code (TOTP or recovery)
+    // can't be redeemed more than once by racing requests.
+    const outcome = await sql.begin(async (tx) => {
+      await tx`select pg_advisory_xact_lock(hashtext(${`mfa:${p.uid}`}))`;
+      const [row] = await tx<(AuthUser & { passwordHash: string; totpSecretEnc: string | null; totpLastStep: string | null })[]>`
+        select id, name, email, role, password_hash, totp_secret_enc, totp_last_step from users where id = ${p.uid} and active
       `;
-      if (!used) {
-        await audit(sql, { userId: user.id, action: 'mfa_failed', entity: 'user', entityId: user.id, ip: req.ip, details: { kind: 'recovery' } });
-        throw unauthorized('That recovery code isn’t valid or has been used.');
-      }
-      return startSession(req, reply, user, 'recovery_code');
-    }
+      if (!row?.totpSecretEnc) return { kind: 'resignin' as const };
+      const { passwordHash, totpSecretEnc, totpLastStep, ...user } = row;
+      // A password change since the challenge was issued makes it stale.
+      if (p.pw && p.pw !== pwTag(passwordHash)) return { kind: 'resignin' as const };
+      // Six-digit codes can't be guessed in a handful of tries; they can in a million.
+      if ((await failures(tx, 'mfa_failed', { userId: user.id }, LIMITS.mfa.minutes)) >= LIMITS.mfa.tries) return { kind: 'too_many' as const };
 
-    const step = verifyTotp(secrets.open(totpSecretEnc), code, { afterStep: totpLastStep == null ? null : Number(totpLastStep) });
-    if (step == null) {
-      await audit(sql, { userId: user.id, action: 'mfa_failed', entity: 'user', entityId: user.id, ip: req.ip, details: { kind: 'totp' } });
-      throw unauthorized('That code isn’t right. Check the time on your phone and try the newest code.');
-    }
-    await sql`update users set totp_last_step = ${step} where id = ${user.id}`;
-    return startSession(req, reply, user, 'totp');
+      if (/[a-z]/i.test(code)) {
+        // Claim the code atomically: `used_at is null` is in the WHERE, so a second racing request
+        // finds no row to update and is rejected.
+        const [used] = await tx<{ id: string }[]>`
+          update recovery_codes set used_at = now()
+          where user_id = ${user.id} and code_hash = ${secrets.hash(normaliseRecoveryCode(code))} and used_at is null
+          returning id
+        `;
+        if (!used) {
+          await audit(tx, { userId: user.id, action: 'mfa_failed', entity: 'user', entityId: user.id, ip: req.ip, details: { kind: 'recovery' } });
+          return { kind: 'bad_recovery' as const };
+        }
+        return { kind: 'ok' as const, user, method: 'recovery_code' as const };
+      }
+
+      const step = verifyTotp(secrets.open(totpSecretEnc), code, { afterStep: totpLastStep == null ? null : Number(totpLastStep) });
+      if (step == null) {
+        await audit(tx, { userId: user.id, action: 'mfa_failed', entity: 'user', entityId: user.id, ip: req.ip, details: { kind: 'totp' } });
+        return { kind: 'bad_totp' as const };
+      }
+      // Advance the last-used step atomically: a replay of the same (or an older) code can't move
+      // it forward, so the conditional update matches no row and the code is rejected.
+      const [claimed] = await tx<{ id: string }[]>`
+        update users set totp_last_step = ${step} where id = ${user.id} and (totp_last_step is null or totp_last_step < ${step}) returning id
+      `;
+      if (!claimed) {
+        await audit(tx, { userId: user.id, action: 'mfa_failed', entity: 'user', entityId: user.id, ip: req.ip, details: { kind: 'totp' } });
+        return { kind: 'bad_totp' as const };
+      }
+      return { kind: 'ok' as const, user, method: 'totp' as const };
+    });
+    if (outcome.kind === 'resignin') throw unauthorized('Please sign in again.');
+    if (outcome.kind === 'too_many') throw tooMany(LIMITS.mfa.minutes);
+    if (outcome.kind === 'bad_recovery') throw unauthorized('That recovery code isn’t valid or has been used.');
+    if (outcome.kind === 'bad_totp') throw unauthorized('That code isn’t right. Check the time on your phone and try the newest code.');
+    return startSession(req, reply, outcome.user, outcome.method);
   });
 
   // ---- Setting up an authenticator (at sign-in when required, or later from the account screen) ----
   app.post('/api/auth/mfa/setup', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req) => {
     if (!req.user) throw unauthorized();
-    // Replacing an authenticator you already have takes your password: otherwise someone with
-    // your open session could move your two-factor to their own phone.
-    const [cur] = await sql<{ on: boolean }[]>`select totp_enabled_at is not null as on from users where id = ${req.user.id}`;
-    if (cur?.on) await confirmPassword(sql, req.user.id, parse(z.object({ password: z.string().max(200).optional() }), req.body ?? {}).password, req.ip);
-    return enrolChallenge(req.user);
+    // Setting up or replacing an authenticator always takes your password — so an open session
+    // left on a phone can't move your two-factor to someone else's device, including right after
+    // an owner resets it (when two-factor is briefly off, the old gate asked for nothing).
+    await confirmPassword(sql, req.user.id, parse(z.object({ password: z.string().max(200).optional() }), req.body ?? {}).password, req.ip);
+    const [row] = await sql<{ passwordHash: string }[]>`select password_hash from users where id = ${req.user.id} and active`;
+    if (!row) throw unauthorized();
+    return enrolChallenge(req.user, row.passwordHash);
   });
 
   app.post('/api/auth/mfa/enrol', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
     const { challenge, code } = parse(z.object({ challenge: z.string().min(10).max(4000), code: z.string().trim().min(6).max(10) }), req.body);
-    const p = secrets.verifyToken<{ uid: string; s: string }>('mfa-enrol', challenge);
+    const p = secrets.verifyToken<{ uid: string; s: string; pw: string }>('mfa-enrol', challenge);
     if (!p) throw unauthorized('Setup took too long. Please start again.');
     if (req.user && req.user.id !== p.uid) throw forbidden();
+    // Stale if the password changed after the challenge was issued, so a captured challenge can't
+    // be redeemed later to seize 2FA and mint a session that outlives a password reset.
+    const [pwRow] = await sql<{ passwordHash: string }[]>`select password_hash from users where id = ${p.uid} and active`;
+    if (!pwRow || p.pw !== pwTag(pwRow.passwordHash)) throw unauthorized('Setup took too long. Please start again.');
     const secret = secrets.open(p.s);
     const step = verifyTotp(secret, code);
     if (step == null) throw badRequest('That code isn’t right. Make sure you scanned the code just shown, then try the newest code.');

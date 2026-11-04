@@ -31,9 +31,24 @@ export function appVersion(): string {
 const BACKUP_NAME = /^[a-z0-9_]+-(daily|manual|pre-update)-\d{4}-\d{2}-\d{2}_\d{4}\.dump$/;
 
 export function registerSystemRoutes(app: FastifyInstance, ctx: Ctx): void {
-  const { CTL_DIR, BACKUP_DIR, GIT_SHA } = ctx.config;
+  const { CTL_DIR, REQUEST_DIR, BACKUP_DIR, GIT_SHA } = ctx.config;
   const owner = { preHandler: requireRole('owner') };
   const version = appVersion();
+
+  // Only this company's own backups are visible and downloadable here. shap-ctl writes every
+  // database on the box into one shared dir (shap-*, and shap_<tenant>-* for each extra company);
+  // without this scope the main company's owner could list and download other tenants' full
+  // database dumps. Database names are [a-z0-9_] only (no "-"), so the "<db>-" prefix can't match
+  // another company (e.g. "shap-" never matches "shap_friend-…").
+  let ownDb: string | null = null;
+  const ownDbName = async (): Promise<string> => {
+    if (ownDb === null) {
+      const [row] = await ctx.dbs.real<{ db: string }[]>`select current_database() as db`;
+      ownDb = row!.db;
+    }
+    return ownDb;
+  };
+  const ownsBackup = (name: string, db: string): boolean => name.startsWith(`${db}-`);
 
   const readStatus = () => {
     try {
@@ -44,7 +59,7 @@ export function registerSystemRoutes(app: FastifyInstance, ctx: Ctx): void {
   };
   const pending = () => {
     try {
-      return readFileSync(join(CTL_DIR, 'request'), 'utf8').trim() || null;
+      return readFileSync(join(REQUEST_DIR, 'request'), 'utf8').trim() || null;
     } catch {
       return null;
     }
@@ -56,7 +71,8 @@ export function registerSystemRoutes(app: FastifyInstance, ctx: Ctx): void {
     let pulledByPc: string | null = null;
     if (existsSync(BACKUP_DIR)) {
       try {
-        const names = (await readdir(BACKUP_DIR)).filter((n) => BACKUP_NAME.test(n));
+        const db = await ownDbName();
+        const names = (await readdir(BACKUP_DIR)).filter((n) => BACKUP_NAME.test(n) && ownsBackup(n, db));
         backups = (await Promise.all(names.map(async (name) => ({ name, s: await stat(join(BACKUP_DIR, name)) }))))
           .map(({ name, s }) => ({ name, sizeBytes: s.size, at: s.mtime.toISOString() }))
           .sort((a, b) => b.at.localeCompare(a.at));
@@ -83,7 +99,7 @@ export function registerSystemRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { action } = parse(z.object({ action: z.enum(['check', 'update', 'backup']) }), req.body);
     if (!readStatus()) throw badRequest('Updates and backups from here aren’t set up on this server yet (deploy/vps/ctl/install.sh).');
     try {
-      await writeFile(join(CTL_DIR, 'request'), `${action}\n`, { mode: 0o660 });
+      await writeFile(join(REQUEST_DIR, 'request'), `${action}\n`, { mode: 0o660 });
     } catch {
       throw badRequest('Shap can’t leave the request for the server. Run deploy/vps/ctl/install.sh again.');
     }
@@ -98,7 +114,7 @@ export function registerSystemRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/system/backups/:name/link', { ...owner, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req) => {
     const user = userOrThrow(req);
     const { name } = parse(z.object({ name: z.string() }), req.params);
-    if (!BACKUP_NAME.test(name)) throw notFound('Backup');
+    if (!BACKUP_NAME.test(name) || !ownsBackup(name, await ownDbName())) throw notFound('Backup');
     await confirmPassword(ctx.dbs.real, user.id, parse(z.object({ password: z.string().max(200).optional() }), req.body ?? {}).password, req.ip);
     const t = ctx.secrets.signToken('backup-download', { name, uid: user.id }, 120);
     return { url: `/api/system/backups/${encodeURIComponent(name)}?t=${encodeURIComponent(t)}` };
@@ -106,7 +122,7 @@ export function registerSystemRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.get('/api/system/backups/:name', owner, async (req, reply) => {
     const { name } = parse(z.object({ name: z.string() }), req.params);
-    if (!BACKUP_NAME.test(name)) throw notFound('Backup');
+    if (!BACKUP_NAME.test(name) || !ownsBackup(name, await ownDbName())) throw notFound('Backup');
     const { t } = parse(z.object({ t: z.string().max(2000).default('') }), req.query);
     const link = ctx.secrets.verifyToken<{ name: string; uid: string }>('backup-download', t);
     if (!link || link.name !== name || link.uid !== req.user?.id) throw badRequest('That download link has expired. Choose the backup again.');

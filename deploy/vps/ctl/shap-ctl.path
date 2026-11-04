@@ -3,7 +3,7 @@
 Description=Shap: watch for requests from the app
 
 [Path]
-PathExists=/var/lib/shap/ctl/request
+PathExists=/var/lib/shap/ctl-in/request
 Unit=shap-ctl.service
 
 [Install]

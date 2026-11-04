@@ -38,7 +38,26 @@ export function createMailer(smtpUrl: string, from: string, log: FastifyBaseLogg
       },
     };
   }
-  const transport = nodemailer.createTransport(smtpUrl);
+  // Plain smtp:// to a remote host only upgrades to TLS opportunistically, which a network
+  // attacker can strip to capture the login. Force STARTTLS there. smtps:// (implicit TLS) and a
+  // local relay are left exactly as configured.
+  let transport;
+  try {
+    const u = new URL(smtpUrl);
+    const remote = !['localhost', '127.0.0.1', '[::1]', '::1'].includes(u.hostname);
+    transport =
+      u.protocol === 'smtp:' && remote
+        ? nodemailer.createTransport({
+            host: u.hostname,
+            port: u.port ? Number(u.port) : 587,
+            secure: false,
+            requireTLS: true,
+            auth: u.username ? { user: decodeURIComponent(u.username), pass: decodeURIComponent(u.password) } : undefined,
+          })
+        : nodemailer.createTransport(smtpUrl);
+  } catch {
+    transport = nodemailer.createTransport(smtpUrl);
+  }
   // "Company <accounts@x.co.za>" or just the address.
   const address = /<([^>]+)>/.exec(from)?.[1] ?? from.trim();
   return {

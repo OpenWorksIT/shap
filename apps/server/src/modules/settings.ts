@@ -64,13 +64,13 @@ const SIGNATURES: Record<string, (b: Buffer) => boolean> = {
   'application/pdf': (b) => b.subarray(0, 5).toString('latin1') === '%PDF-',
 };
 
-export async function saveAttachment(db: Db, input: z.infer<typeof attachmentInput>): Promise<string> {
+export async function saveAttachment(db: Db, input: z.infer<typeof attachmentInput>, createdBy: string): Promise<string> {
   const bytes = Buffer.from(input.dataBase64, 'base64');
   if (bytes.length === 0) throw badRequest('That file is empty');
   if (!SIGNATURES[input.mime]?.(bytes)) throw badRequest('That file isn’t a photo (JPEG, PNG, WebP) or a PDF');
   if (bytes.length > 6 * 1024 * 1024) throw badRequest('That file is too big (6 MB at most). Photos are shrunk on the phone before upload.');
   const [row] = await db<{ id: string }[]>`
-    insert into attachments (filename, mime, size, bytes) values (${input.filename}, ${input.mime}, ${bytes.length}, ${bytes}) returning id
+    insert into attachments (filename, mime, size, bytes, created_by) values (${input.filename}, ${input.mime}, ${bytes.length}, ${bytes}, ${createdBy}) returning id
   `;
   return row!.id;
 }
@@ -112,7 +112,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/settings/logo', { preHandler: requireRole('owner') }, async (req) => {
     const input = parse(attachmentInput, req.body);
     if (!input.mime.startsWith('image/png') && !input.mime.startsWith('image/jpeg')) throw badRequest('Use a PNG or JPEG logo');
-    const id = await saveAttachment(sql, input);
+    const id = await saveAttachment(sql, input, userOrThrow(req).id);
     await sql`update settings set logo_id = ${id} where id`;
     return { logoId: id };
   });
@@ -153,7 +153,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = parse(idParam, req.params);
     const input = parse(attachmentInput, req.body);
     if (input.mime !== 'image/png' && input.mime !== 'image/jpeg') throw badRequest('Use a PNG or JPEG logo');
-    const logoId = await saveAttachment(sql, input);
+    const logoId = await saveAttachment(sql, input, userOrThrow(req).id);
     await sql`update brands set logo_id = ${logoId} where id = ${id}`;
     return { logoId };
   });
@@ -165,21 +165,27 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   // ---- files
   app.post('/api/attachments', { preHandler: requireRole('owner', 'capture') }, async (req) => {
-    const id = await saveAttachment(sql, parse(attachmentInput, req.body));
+    const id = await saveAttachment(sql, parse(attachmentInput, req.body), userOrThrow(req).id);
     return { id };
   });
   app.get('/api/attachments/:id', { preHandler: requireRole() }, async (req, reply) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
-    // Site capture opens the slips on costs they captured; statements and the rest are for the owner and accountant.
+    // Site capture opens only the files it uploaded itself (its own slips); statements, logos and
+    // everyone else's slips are for the owner and accountant. Authorising by the uploader — not by
+    // "a cost points at this attachment" — stops capture granting itself access by pointing one of
+    // its own costs at someone else's attachment id.
     const [row] = seesMoney(user)
       ? await sql<{ filename: string; mime: string; bytes: Buffer }[]>`select filename, mime, bytes from attachments where id = ${id}`
-      : await sql<{ filename: string; mime: string; bytes: Buffer }[]>`select a.filename, a.mime, a.bytes from attachments a
-          where a.id = ${id} and exists (select 1 from costs c where c.receipt_id = a.id and c.created_by = ${user.id})`;
+      : await sql<{ filename: string; mime: string; bytes: Buffer }[]>`select filename, mime, bytes from attachments where id = ${id} and created_by = ${user.id}`;
     if (!row) throw notFound('File');
     reply.header('content-type', row.mime);
     reply.header('content-disposition', `inline; filename="${row.filename.replace(/[^\w.\- ]/g, '_')}"`);
     reply.header('cache-control', 'private, max-age=86400');
+    // Belt-and-braces for a user-supplied file served inline: no scripts or plugins run even if a
+    // client were ever to treat the bytes as a document (nosniff already forces the stored type).
+    // Kept narrow (not default-src 'none') so the browser's inline image/PDF viewing still works.
+    reply.header('content-security-policy', "script-src 'none'; object-src 'none'; frame-ancestors 'none'");
     return reply.send(row.bytes);
   });
 
@@ -247,6 +253,9 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     const input = parse(userInput, req.body);
     if (!input.password) throw badRequest('Set a starting password (at least 10 characters)');
     checkNewPassword(input.password, input);
+    // Creating another owner is a takeover-grade action, so it takes the acting owner's password:
+    // a session left open on a phone can't be used to mint a rival owner without it.
+    if (input.role === 'owner') await confirmPassword(sql, me.id, input.currentPassword, req.ip);
     try {
       const u = await createUser(sql, { name: input.name, email: input.email, password: input.password, role: input.role });
       await audit(sql, { userId: me.id, action: 'create', entity: 'user', entityId: u.id, ip: req.ip, details: { role: input.role } });
@@ -261,12 +270,20 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = parse(idParam, req.params);
     const input = parse(userInput, req.body);
     if (id === me.id && (input.role !== 'owner' || input.active === false)) throw badRequest('You can’t remove your own owner access');
-    // Your own email or password: your current password too, so an open session left on a
-    // phone can't be used to lock you out of your own books.
-    if (id === me.id && (input.password || input.email !== me.email)) await confirmPassword(sql, me.id, input.currentPassword, req.ip);
+    const [target] = await sql<{ role: string }[]>`select role from users where id = ${id}`;
+    if (!target) throw notFound('Someone');
+    // Step-up re-authentication for the moves a stolen owner session could use to take over or
+    // lock someone out: changing your own email/password (as before), resetting someone else's
+    // password, making someone an owner, or editing an existing owner. Not just your own record.
+    const stepUp =
+      (id === me.id && (Boolean(input.password) || input.email !== me.email)) ||
+      (id !== me.id && (Boolean(input.password) || input.role === 'owner' || target.role === 'owner'));
+    if (stepUp) await confirmPassword(sql, me.id, input.currentPassword, req.ip);
     if (input.password) checkNewPassword(input.password, input);
     await sql.begin(async (tx) => {
-      await tx`update users set name = ${input.name}, email = ${input.email}, role = ${input.role}, active = ${input.active ?? true} where id = ${id}`;
+      // An omitted `active` leaves it unchanged (so a PUT that doesn't resend active:false can't
+      // silently re-enable a disabled sign-in).
+      await tx`update users set name = ${input.name}, email = ${input.email}, role = ${input.role}, active = coalesce(${input.active ?? null}, active) where id = ${id}`;
       if (input.password) {
         await tx`update users set password_hash = ${await hashPassword(input.password)} where id = ${id}`;
         // Everyone signed in as them is signed out (you stay signed in, if it's yours).
@@ -280,10 +297,17 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/users/:id/reset-mfa', { preHandler: requireRole('owner') }, async (req) => {
     const me = userOrThrow(req);
     const { id } = parse(idParam, req.params);
-    if (id === me.id) await confirmPassword(sql, me.id, parse(z.object({ password: z.string().max(200).optional() }), req.body ?? {}).password, req.ip);
-    await sql`update users set totp_secret_enc = null, totp_enabled_at = null, totp_last_step = null where id = ${id}`;
-    await sql`delete from recovery_codes where user_id = ${id}`;
-    await audit(sql, { userId: me.id, action: 'mfa_reset', entity: 'user', entityId: id, ip: req.ip });
+    // Always takes the acting owner's password (a lost or borrowed phone shouldn't let anyone
+    // reset someone's two-factor), and ends the target's sessions so a device that still holds one
+    // can't keep access past the reset.
+    await confirmPassword(sql, me.id, parse(z.object({ password: z.string().max(200).optional() }), req.body ?? {}).password, req.ip);
+    await sql.begin(async (tx) => {
+      await tx`update users set totp_secret_enc = null, totp_enabled_at = null, totp_last_step = null where id = ${id}`;
+      await tx`delete from recovery_codes where user_id = ${id}`;
+      if (id === me.id) await endOtherSessions(tx, id, sessionToken(req));
+      else await tx`delete from sessions where user_id = ${id}`;
+      await audit(tx, { userId: me.id, action: 'mfa_reset', entity: 'user', entityId: id, ip: req.ip });
+    });
     return { ok: true };
   });
 

@@ -13,8 +13,11 @@ cd "$(dirname "$0")"
 
 SLUG="${1:-}"
 DOMAIN="${2:-}"
-if ! [[ "$SLUG" =~ ^[a-z][a-z0-9]{1,19}$ ]] || [ -z "$DOMAIN" ]; then
-  echo "Usage: ./add-company.sh <short-name> <domain>   (short name: lowercase letters and digits, e.g. friend)" >&2
+if ! [[ "$SLUG" =~ ^[a-z][a-z0-9]{1,19}$ ]] || ! [[ "$DOMAIN" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$ ]]; then
+  # The domain is validated (not just non-empty) because it's written into an env file and the
+  # Caddy config: a newline or stray character could inject a second DATABASE_URL or a Caddy
+  # directive, or break the shared Caddyfile for every site.
+  echo "Usage: ./add-company.sh <short-name> <domain>   (short name: lowercase letters and digits; domain like shap.friend.co.za)" >&2
   exit 1
 fi
 [ "$SLUG" = shap ] && { echo "Choose another short name." >&2; exit 1; }

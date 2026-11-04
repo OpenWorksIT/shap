@@ -77,8 +77,18 @@ describe('the demo company', () => {
     expect((await demoSql`select 1 from clients where name = 'Visitor Test Co'`).length).toBe(1);
   });
 
-  it('keeps the server’s updates and backups out of reach', async () => {
+  it('keeps the server, the feedback inbox and the wipe screen out of reach (incl. percent-encoded paths)', async () => {
     expect((await demo('GET', '/api/system')).statusCode).toBe(403);
+    // Percent-encoding must not slip past the guard: /api/%73ystem routes to the real /api/system
+    // handler, so a raw req.url string check would miss it.
+    expect((await demo('GET', '/api/%73ystem')).statusCode).toBe(403);
+    expect((await demo('POST', '/api/%73ystem/request', { action: 'update' })).statusCode).toBe(403);
+    // The feedback inbox is filesystem-backed and company-wide (not routed to the demo db), so it
+    // must be unreachable while showing the demo.
+    expect((await demo('GET', '/api/feedback')).statusCode).toBe(403);
+    expect((await demo('GET', '/api/feedback/usage')).statusCode).toBe(403);
+    // Wipe reads the real company's names via dbs.real.
+    expect((await demo('GET', '/api/wipe')).statusCode).toBe(403);
   });
 
   it('needs the owner’s password to get back to the real books', async () => {

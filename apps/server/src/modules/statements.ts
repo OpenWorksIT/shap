@@ -56,7 +56,7 @@ export function registerStatementRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [src] = await sql`select 1 from payment_sources where id = ${input.sourceId}`;
     if (!src) throw badRequest('Choose the account');
     const row = await sql.begin(async (tx) => {
-      const attachmentId = await saveAttachment(tx, { filename: input.filename, mime: 'application/pdf', dataBase64: input.dataBase64 });
+      const attachmentId = await saveAttachment(tx, { filename: input.filename, mime: 'application/pdf', dataBase64: input.dataBase64 }, user.id);
       const [r] = await tx<{ id: string }[]>`
         insert into statement_files (source_id, month, attachment_id, filename, uploaded_by)
         values (${input.sourceId}, ${`${input.month}-01`}, ${attachmentId}, ${input.filename}, ${user.id}) returning id`;

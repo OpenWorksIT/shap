@@ -9,6 +9,7 @@ import { confirmPassword, DEMO_SESSION_COOKIE, requireRole, SESSION_COOKIE, user
 import type { Ctx } from '../context.js';
 import type { Sql } from '../db/index.js';
 import { inDemo } from '../db/routing.js';
+import { routePath } from '../lib/http.js';
 import { seed } from '../db/seed.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, forbidden } from '../lib/errors.js';
@@ -23,9 +24,15 @@ export function registerDemoRoutes(app: FastifyInstance, ctx: Ctx): void {
   const available = () => config.DEMO_ENABLED && dbs.demo != null;
   const cookie = { httpOnly: true, sameSite: 'lax' as const, secure: config.COOKIE_SECURE, path: '/', maxAge: config.SESSION_TTL_HOURS * 3600 };
 
-  // The server's own updates and backups (your real data) are never reachable from the demo.
+  // The server's own updates and backups, the (filesystem-backed, company-wide) feedback inbox,
+  // and the wipe screen all read the REAL company/server regardless of the routed sql, so they
+  // must never run while showing the demo. Match on the resolved route, not req.url: the latter
+  // keeps percent-encoding, so `/api/%73ystem` would slip past a raw `startsWith('/api/system')`.
+  const REAL_ONLY = ['/api/system', '/api/feedback', '/api/wipe'];
   app.addHook('onRequest', async (req) => {
-    if (inDemo() && req.url.startsWith('/api/system')) throw forbidden('Not available in the demo company');
+    if (!inDemo()) return;
+    const p = routePath(req);
+    if (REAL_ONLY.some((base) => p === base || p.startsWith(`${base}/`))) throw forbidden('Not available in the demo company');
   });
 
   // Fill the demo company the first time it's shown (a few seconds), one at a time.

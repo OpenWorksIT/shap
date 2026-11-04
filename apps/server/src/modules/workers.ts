@@ -136,6 +136,21 @@ export function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx): void {
     const input = parse(labourBatchInput, req.body);
     checkTarget(input.projectId, input.workTypeId);
     await assertOpen(sql, input.date);
+    if (user.role === 'capture') {
+      // A worker is about one day per calendar day. Allow a split across jobs or a correction, but
+      // not days piling up (repeating this call would otherwise run the wages-payable liability up
+      // without limit). The owner, who is trusted, can still batch many days in one go.
+      const CAP = 2;
+      const adding = new Map<string, number>();
+      for (const e of input.entries) adding.set(e.workerId, (adding.get(e.workerId) ?? 0) + e.days);
+      const existing = await sql<{ workerId: string; days: number }[]>`
+        select worker_id, coalesce(sum(days), 0)::float8 as days from labour_entries
+        where date = ${input.date} and worker_id = any(${[...adding.keys()]}::uuid[]) group by worker_id`;
+      const have = new Map(existing.map((r) => [r.workerId, Number(r.days)]));
+      for (const [wid, d] of adding) {
+        if ((have.get(wid) ?? 0) + d > CAP) throw badRequest('That’s more days than a worker can be logged for on that date. Ask the owner.');
+      }
+    }
     const rates = user.role === 'capture' ? await ratesFor(sql, input.entries.map((e) => e.workerId)) : null;
     const ids = await sql.begin(async (tx) => {
       const out: string[] = [];

@@ -3,6 +3,36 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.13.0 (4 November 2026)
+
+A security review and penetration test, with the findings fixed. Most of this is behind the
+scenes; a few things you'll notice:
+
+- **The demo company is sealed off from your real books.** While you're showing the demo, it can
+  no longer reach your real feedback, the server (updates & backups) screen, or your business's
+  real name — not even through an oddly-typed web address.
+- **Setting up or replacing two-factor sign-in now asks for your password** (every time, including
+  the first), so a phone left unlocked can't move your two-factor to someone else's device.
+- **Resetting someone's two-factor now signs them out everywhere**, and asks for your password —
+  so a lost phone loses its access straight away.
+- **Making someone an owner, or resetting another person's password or two-factor, asks for your
+  password first.** A session left open can no longer be used to quietly take over.
+- **Sign-in, two-factor and password limits now hold under a flood of simultaneous attempts**, not
+  only one-at-a-time; a code or recovery code can be used once, even against a burst of tries.
+- **Site staff stay on-site:** they can't set VAT, raise supplier bills, enter negative costs, pay
+  from an internal account, or pile up a worker's days; and they no longer see a job's billing
+  rate, part prices, or the full supplier list (only their own).
+- **The System screen shows only this company's own backups.**
+- **Closed years are better protected:** an asset's cost can no longer be changed once its year is
+  locked.
+- Uploaded receipts and statements are served more defensively, and dependencies were updated.
+
+**For self-hosters:** the app now runs with fewer privileges and reads the server's status from a
+read-only folder, with a separate drop-box for its requests. Re-run
+`deploy/vps/ctl/install.sh` once after updating so the folders are set up (the app keeps working
+either way; this just restores the updates & backups screen). See the hardening notes in
+`docs/deployment.md` for the optional least-privilege database login and signed-release updates.
+
 ## 1.12.1 (2 November 2026)
 
 - **Setting up asks about the new parts:** do you charge by the hour (with your usual rate),

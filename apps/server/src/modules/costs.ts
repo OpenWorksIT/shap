@@ -13,6 +13,18 @@ const idParam = z.object({ id: z.string().uuid() });
 export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
 
+  // Site capture logs a slip's basics; it must not reach into the money machinery. It can't claim
+  // input VAT, post a negative (credit-note) amount, raise a supplier bill to pay later, or pay
+  // from an internal (role) account — those stay owner-only, so the parsed cost is pinned here.
+  const limitCaptureCost = async (input: z.infer<typeof costInput>): Promise<z.infer<typeof costInput>> => {
+    if (input.amountCents < 0) throw badRequest('A cost can’t be a negative amount');
+    if (input.sourceId) {
+      const [src] = await sql<{ role: string | null }[]>`select role from payment_sources where id = ${input.sourceId}`;
+      if (!src || src.role) throw badRequest('Choose a normal account it was paid from, or leave it for the owner to set');
+    }
+    return { ...input, vatCents: 0, billNumber: '', dueDate: null };
+  };
+
   app.get('/api/costs', { preHandler: requireRole('owner', 'accountant') }, async (req) => {
     const { from, to, category, project, source, search, kind } = q(req);
     const f = isIsoDate(from) ? from : null;
@@ -64,10 +76,13 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { updated: res.count };
   });
 
-  /** Suppliers you've used, most used first, for the picker on the phone. */
-  app.get('/api/costs/suppliers', { preHandler: requireRole() }, async () => {
-    const rows = await sql<{ supplier: string }[]>`
-      select supplier from costs where supplier <> '' group by supplier order by count(*) desc, supplier limit 200`;
+  /** Suppliers you've used, most used first, for the picker on the phone. Site capture sees only
+   *  the suppliers on its own entries, not the owner's full (sometimes sensitive) supplier list. */
+  app.get('/api/costs/suppliers', { preHandler: requireRole() }, async (req) => {
+    const user = userOrThrow(req);
+    const rows = seesMoney(user)
+      ? await sql<{ supplier: string }[]>`select supplier from costs where supplier <> '' group by supplier order by count(*) desc, supplier limit 200`
+      : await sql<{ supplier: string }[]>`select supplier from costs where supplier <> '' and created_by = ${user.id} group by supplier order by count(*) desc, supplier limit 200`;
     return rows.map((r) => r.supplier);
   });
 
@@ -82,7 +97,7 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.post('/api/costs', { preHandler: requireRole('owner', 'capture') }, async (req) => {
     const user = userOrThrow(req);
-    const input = parse(costInput, req.body);
+    const input = user.role === 'owner' ? parse(costInput, req.body) : await limitCaptureCost(parse(costInput, req.body));
     await assertOpen(sql, input.date);
     const settings = await getSettings(sql);
     // Not a VAT vendor: no input VAT to claim, whatever the slip says.
@@ -97,7 +112,7 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.put('/api/costs/:id', { preHandler: requireRole('owner', 'capture') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
-    const input = parse(costInput, req.body);
+    const input = user.role === 'owner' ? parse(costInput, req.body) : await limitCaptureCost(parse(costInput, req.body));
     const [old] = await sql<{ date: string; createdBy: string | null; createdAt: Date }[]>`select date, created_by, created_at from costs where id = ${id}`;
     if (!old) throw notFound('Cost');
     if (user.role !== 'owner' && (old.createdBy !== user.id || Date.now() - old.createdAt.getTime() > 24 * 3600_000)) throw forbidden('Ask the owner to change this cost');

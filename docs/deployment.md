@@ -187,3 +187,33 @@ Allow 80 and 443 (Caddy), and SSH from your own addresses only. Postgres is neve
 - Every change (costs, labour, invoices, journals, settings, users) is written to an
   append-only audit log, which the database won't let anyone edit or delete.
 - A lock date stops anything in a closed financial year from being changed.
+- The app can read shap-ctl's status and the backups, but writes only its single request file (a
+  read-only mount and a separate drop-box), and runs with `no-new-privileges` and all Linux
+  capabilities dropped, so a compromise of the app can't reach root on the host.
+
+### Hardening you may want to add
+
+These aren't set up automatically; they suit a server hosting several companies or a higher-risk
+setup.
+
+- **Give the app a least-privilege database login.** The default compose connects the main app as
+  the `shap` Postgres superuser (the official image makes `POSTGRES_USER` a superuser). A SQL-level
+  flaw in the app would then have superuser reach over every company's database. To reduce the
+  blast radius, create a non-superuser role that owns only the `shap` database and point
+  `DATABASE_URL` at it, keeping `shap` for admin scripts only:
+
+  ```sql
+  create role shap_app login password '…';
+  alter database shap owner to shap_app;
+  revoke all on database shap from public;
+  grant connect on database shap to shap_app;
+  ```
+
+  Pre-create the demo database (`createdb -O shap_app shap_demo`) so the app never needs
+  `CREATEDB`. (Tenant companies added with `add-company.sh` already use their own non-superuser
+  roles.)
+- **Update from signed releases, not branch tips.** "Update" pulls `main` from GitHub and rebuilds
+  on the server, so whoever controls that branch or the GitHub account controls the server. For a
+  stricter chain, track signed, annotated release tags and verify them (`git verify-tag`) before
+  building, and pin the base images (`node`, `postgres`, `caddy`) by `@sha256:` digest rather than
+  the floating `:16`/`:2` tags.

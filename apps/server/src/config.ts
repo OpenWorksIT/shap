@@ -23,9 +23,13 @@ const envSchema = z.object({
   /** Sliding session length. A month by default, so a phone on the home screen stays signed in. */
   SESSION_TTL_HOURS: z.coerce.number().int().min(1).default(24 * 30),
   WEB_DIST: z.string().default(''),
-  /** Settings → System: where shap-ctl reads requests and writes its status, and where backups land. */
+  /** Settings → System: where the app READS shap-ctl's status (root writes it; mounted read-only
+   *  so a compromised app can't plant symlinks for root to follow), and where backups land. */
   CTL_DIR: z.string().default('/ctl'),
   BACKUP_DIR: z.string().default('/backups'),
+  /** Where the app WRITES its one request file for shap-ctl (a small, app-writable drop-box, kept
+   *  separate from the root-written state dir above). */
+  REQUEST_DIR: z.string().default('/ctl-in'),
   GIT_SHA: z.string().default(''),
   TRUST_PROXY: z
     .enum(['true', 'false'])

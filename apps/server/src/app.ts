@@ -10,6 +10,7 @@ import type { Ctx } from './context.js';
 import type { Sql } from './db/index.js';
 import { Secrets } from './lib/crypto.js';
 import { HttpError } from './lib/errors.js';
+import { routePath } from './lib/http.js';
 import { createMailer, type Mailer } from './lib/mailer.js';
 import { registerClientRoutes } from './modules/clients.js';
 import { registerCostRoutes } from './modules/costs.js';
@@ -108,7 +109,8 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   const bus = new LiveBus();
   app.addHook('onResponse', async (req, reply) => {
     if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS' || reply.statusCode >= 400) return;
-    if (!req.url.startsWith('/api/') || req.url.startsWith('/api/auth') || req.url.startsWith('/api/feedback') || req.url.startsWith('/api/demo')) return;
+    const p = routePath(req);
+    if (!p.startsWith('/api/') || p.startsWith('/api/auth') || p.startsWith('/api/feedback') || p.startsWith('/api/demo')) return;
     bus.publish({ type: 'changed', by: req.user?.id ?? null, demo: req.cookies?.shap_demo === '1', at: Date.now() });
   });
 
@@ -143,7 +145,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   // anything: its screens may send what the new server reads differently. It's asked to reload.
   const version = appVersion();
   app.addHook('onRequest', async (req, reply) => {
-    if (!req.url.startsWith('/api/') || req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return;
+    if (!routePath(req).startsWith('/api/') || req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return;
     const theirs = req.headers['x-shap-version'];
     // Shap's own pages always send their version; a form or script on another site can't add that
     // header (browsers only allow it from Shap's own address), so a change without it is refused.
@@ -155,13 +157,14 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   });
 
   app.addHook('onSend', async (req, reply, payload) => {
-    if (req.url.startsWith('/api/')) reply.header('x-shap-version', version);
+    const isApi = routePath(req).startsWith('/api/');
+    if (isApi) reply.header('x-shap-version', version);
     // The app's pages: only Shap's own scripts, styles and images; never inside another site's frame.
     else if (!reply.getHeader('content-security-policy')) reply.header('content-security-policy', CSP);
     reply.header('x-content-type-options', 'nosniff');
     reply.header('referrer-policy', 'strict-origin-when-cross-origin');
     reply.header('x-frame-options', 'SAMEORIGIN');
-    if (req.url.startsWith('/api/') && !reply.getHeader('cache-control')) reply.header('cache-control', 'no-store');
+    if (isApi && !reply.getHeader('cache-control')) reply.header('cache-control', 'no-store');
     return payload;
   });
 

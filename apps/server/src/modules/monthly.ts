@@ -75,7 +75,8 @@ async function makeInvoice(db: Sql, s: Schedule, month: string): Promise<string 
   return db.begin(async (tx) => {
     const [done] = await tx`select 1 from documents where monthly_id = ${s.id} and monthly_period = ${month}`;
     if (done) return null;
-    if (s.mode === 'send') await assertOpen(tx, issueDate);
+    // Honour the lock for drafts too, not only send-mode: nothing in a closed period, even a draft.
+    await assertOpen(tx, issueDate);
     // The latest one in the series: what was sent last carries on (a new price, say).
     const [latest] = await tx<{ id: string }[]>`
       select id from documents where (monthly_id = ${s.id} or id = ${s.sourceId}) and kind = 'invoice' and status <> 'void'

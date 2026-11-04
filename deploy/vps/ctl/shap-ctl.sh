@@ -11,11 +11,18 @@ main() {
   set -uo pipefail
   REPO="${SHAP_REPO:-/opt/shap}"
   VPS="$REPO/deploy/vps"
+  # CTL holds root-written state the app only READS (status.json, scratch). The app's container
+  # mounts it read-only, so it can't plant symlinks here for root's writes below to follow.
   CTL="${SHAP_CTL_DIR:-/var/lib/shap/ctl}"
+  # CTL_IN is the app's drop-box: the only place the app writes (its one `request` file).
+  CTL_IN="${SHAP_CTL_IN_DIR:-/var/lib/shap/ctl-in}"
   BACKUPS="${SHAP_BACKUP_DIR:-/var/backups/shap}"
   KEEP_DAILY="${SHAP_KEEP_DAILY:-14}"
   APP_GID="${SHAP_APP_GID:-1000}"
-  mkdir -p "$CTL" "$BACKUPS"
+  # Keep the split even if install.sh wasn't re-run: CTL root-only, CTL_IN app-writable + sticky.
+  install -d -m 0755 -o root -g root "$CTL"
+  install -d -m 1730 -o root -g "$APP_GID" "$CTL_IN"
+  mkdir -p "$BACKUPS"
 
   # One at a time. A request left waiting is picked up when the running job ends.
   exec 9>/run/shap-ctl.lock
@@ -23,8 +30,10 @@ main() {
 
   local action="${1:-}"
   if [ -z "$action" ]; then
-    action="$(tr -dc 'a-z-' < "$CTL/request" 2>/dev/null || true)"
-    rm -f "$CTL/request"
+    # The app's request comes from the drop-box. Only a-z and - survive, then it must match a
+    # fixed action below, so even a symlinked/odd request file can at most pick a known action.
+    action="$(tr -dc 'a-z-' < "$CTL_IN/request" 2>/dev/null || true)"
+    rm -f "$CTL_IN/request"
     [ -n "$action" ] || action=check
   fi
 

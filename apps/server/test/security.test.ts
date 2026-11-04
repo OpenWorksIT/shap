@@ -29,8 +29,8 @@ describe('breaking in', () => {
     ({ app } = await buildApp({ config: loadConfig({ ...process.env, TRUST_PROXY: 'true' }), sql: env.sql, mailer: { send: async () => {} } }));
     await app.ready();
     owner = await login(env.app, 'owner@example.co.za');
-    await owner.post('/api/users', { name: 'Thandi Mokoena', email: 'thandi@example.co.za', role: 'owner', password: 'river-canvas-lamp-9' });
-    await owner.post('/api/users', { name: 'Pieter Botha', email: 'pieter@example.co.za', role: 'owner', password: 'stone-orchid-kettle-4' });
+    await owner.post('/api/users', { name: 'Thandi Mokoena', email: 'thandi@example.co.za', role: 'owner', password: 'river-canvas-lamp-9', currentPassword: 'test-password-1' });
+    await owner.post('/api/users', { name: 'Pieter Botha', email: 'pieter@example.co.za', role: 'owner', password: 'stone-orchid-kettle-4', currentPassword: 'test-password-1' });
   });
   afterAll(async () => {
     await app.close();
@@ -56,10 +56,13 @@ describe('breaking in', () => {
     const r = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: 'pieter@example.co.za', password: 'stone-orchid-kettle-4' }, headers: { ...V, 'x-forwarded-for': '203.0.113.79' } });
     const cookie = r.cookies.find((c) => c.name === 'shap_session')!.value;
     const as = (url: string, payload: unknown = {}) => app.inject({ method: 'POST', url, payload: payload as never, headers: V, cookies: { shap_session: cookie } });
-    const setupRes = (await as('/api/auth/mfa/setup')).json();
+    // Setting up two-factor takes your password too — even the first time, and even right after an
+    // owner reset (when it's briefly off) — so a stolen session alone can't add or move it.
+    expect((await as('/api/auth/mfa/setup')).statusCode).toBe(400);
+    const setupRes = (await as('/api/auth/mfa/setup', { password: 'stone-orchid-kettle-4' })).json();
     const code = (now = Date.now()) => hotp(base32Decode(setupRes.secret), timeStep(now));
     expect((await as('/api/auth/mfa/enrol', { challenge: setupRes.challenge, code: code() })).statusCode).toBe(200);
-    // Moving two-factor to a new phone needs the password: a stolen session alone can't.
+    // Replacing it later needs the password again.
     expect((await as('/api/auth/mfa/setup')).statusCode).toBe(400);
     expect((await as('/api/auth/mfa/setup', { password: 'stone-orchid-kettle-4' })).statusCode).toBe(200);
     // Signing in again: six wrong codes, then even the right one is refused for a while.
@@ -145,6 +148,43 @@ describe('breaking in', () => {
     const mine = await site.post('/api/costs', { date: '2026-10-02', description: 'Site slip', amountCents: 1000, supplier: 'X', categoryId: parts, sourceId: null, receiptId: mySlip.id });
     expect((await site.call({ method: 'GET', url: `/api/costs/${mine.id}` })).statusCode).toBe(200);
     expect((await site.call({ method: 'GET', url: `/api/attachments/${mySlip.id}` })).statusCode).toBe(200);
+    // Capture can't read a slip it didn't upload, even by pointing one of its own costs at it.
+    const ownerSlip2 = await owner.post('/api/attachments', { filename: 'o.png', mime: 'image/png', dataBase64: PNG });
+    await site.post('/api/costs', { date: '2026-10-02', description: 'Forge', amountCents: 100, supplier: 'X', categoryId: parts, sourceId: null, receiptId: ownerSlip2.id });
+    expect((await site.call({ method: 'GET', url: `/api/attachments/${ownerSlip2.id}` })).statusCode).toBe(404);
+  });
+
+  it('site staff can’t poison the books: no input VAT, negatives, bills, or piled-up wage days', async () => {
+    const site = await login(env.app, 'site@example.co.za');
+    const parts = await ref(env.sql).then((r) => r.cat('Parts'));
+    // Input VAT, a supplier bill, and a due date are all ignored/blocked for capture.
+    const c = await site.post('/api/costs', { date: '2026-10-05', description: 'Slip', amountCents: 1150, vatCents: 150, supplier: 'Hardware', categoryId: parts, sourceId: null, billNumber: 'INV-9', dueDate: '2026-12-01' });
+    const saved = await site.get(`/api/costs/${c.id}`);
+    expect(saved.vatCents).toBe(0);
+    expect(saved.billNumber).toBe('');
+    expect(saved.dueDate).toBeNull();
+    // A negative (credit-note) amount is refused.
+    expect((await site.call({ method: 'POST', url: '/api/costs', payload: { date: '2026-10-05', description: 'Credit', amountCents: -500, supplier: 'X', categoryId: parts, sourceId: null } })).statusCode).toBe(400);
+    // Paying from an internal (role) account is refused.
+    const [roleSrc] = await env.sql<{ id: string }[]>`select id from payment_sources where role is not null limit 1`;
+    if (roleSrc) expect((await site.call({ method: 'POST', url: '/api/costs', payload: { date: '2026-10-05', description: 'Role', amountCents: 100, supplier: 'X', categoryId: parts, sourceId: roleSrc.id } })).statusCode).toBe(400);
+    // Wage days can't pile up for one worker on one date (CAP is 2).
+    const worker = await owner.post('/api/workers', { name: 'Sipho Dube', kind: 'casual', dayRateCents: 50000 });
+    expect((await site.call({ method: 'POST', url: '/api/labour', payload: { date: '2026-10-05', entries: [{ workerId: worker.id, days: 3, wageCents: 0 }] } })).statusCode).toBe(400);
+    expect((await site.call({ method: 'POST', url: '/api/labour', payload: { date: '2026-10-05', entries: [{ workerId: worker.id, days: 1, wageCents: 0 }] } })).statusCode).toBe(200);
+    expect((await site.call({ method: 'POST', url: '/api/labour', payload: { date: '2026-10-05', entries: [{ workerId: worker.id, days: 1.5, wageCents: 0 }] } })).statusCode).toBe(400);
+  });
+
+  it('a closed year can’t be rewritten through an asset edit', async () => {
+    const [src] = await env.sql<{ id: string }[]>`select id from payment_sources limit 1`;
+    const asset = await owner.post('/api/assets', { name: 'Drill', category: 'tools', purchaseDate: '2026-01-15', costCents: 120000, sourceId: src!.id });
+    await env.sql`update settings set lock_date = '2026-02-28'`;
+    // The asset's purchase now sits in a closed year: editing its cost must be refused (it feeds a
+    // signed-off balance sheet), the same way a back-dated cost already is.
+    const r = await owner.call({ method: 'PUT', url: `/api/assets/${asset.id}`, payload: { name: 'Drill', category: 'tools', purchaseDate: '2026-01-15', costCents: 950000, sourceId: src!.id } });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error).toMatch(/closed/i);
+    await env.sql`update settings set lock_date = null`;
   });
 
   it('every route: signed out gets nowhere; the accountant changes nothing; site staff only log', async () => {

@@ -603,8 +603,14 @@ function UserDrawer({ user, onClose, onSaved }: { user: UserRow | null; onClose:
   const [error, setError] = useState('');
   const [passwordPrompt, askPassword] = usePasswordPrompt();
   const isMe = user?.id === me.id;
-  // Changing your own email or password takes your current one (in case someone else has your phone).
-  const needsCurrent = isMe && (Boolean(f.password) || f.email.trim().toLowerCase() !== user?.email);
+  // The acting owner re-enters their password for the high-impact moves (matching the server): your
+  // own email/password, resetting someone else's password, making someone an owner, or editing an
+  // existing owner — so a session left open on a phone can't take over or lock someone out.
+  const resettingOther = Boolean(user) && !isMe && Boolean(f.password);
+  const makingOwner = f.role === 'owner' && (!user || user.role !== 'owner');
+  const editingOwner = Boolean(user) && !isMe && user?.role === 'owner';
+  const needsCurrent =
+    (isMe && (Boolean(f.password) || f.email.trim().toLowerCase() !== user?.email)) || resettingOther || makingOwner || editingOwner;
   const problem = f.password ? passwordProblem(f.password, f) : null;
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -640,7 +646,7 @@ function UserDrawer({ user, onClose, onSaved }: { user: UserRow | null; onClose:
           {(p) => <input {...p} className="input" type="text" autoComplete="new-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} required={!user} minLength={user ? undefined : 10} />}
         </Field>
         {needsCurrent && (
-          <Field label="Your current password" hint="To change your own email or password.">
+          <Field label="Your current password" hint="Enter your password to confirm this change.">
             {(p) => <input {...p} className="input" type="password" autoComplete="current-password" value={f.currentPassword} onChange={(e) => setF({ ...f, currentPassword: e.target.value })} required />}
           </Field>
         )}
@@ -658,8 +664,8 @@ function UserDrawer({ user, onClose, onSaved }: { user: UserRow | null; onClose:
               type="button"
               className="btn"
               onClick={async () => {
-                const password = isMe ? await askPassword('Reset your two-factor', 'Enter your password to reset your own two-factor sign-in.') : undefined;
-                if (isMe && !password) return;
+                const password = await askPassword('Reset two-factor', isMe ? 'Enter your password to reset your own two-factor sign-in.' : 'Enter your password to reset this person’s two-factor sign-in.');
+                if (!password) return;
                 try {
                   await api(`/api/users/${user.id}/reset-mfa`, { body: { password } });
                   toast('Two-factor reset; they set it up again at next sign-in');

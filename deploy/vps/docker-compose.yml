@@ -47,10 +47,18 @@ services:
       FEEDBACK_DIR: /data/feedback
     expose:
       - '8080'
-    # Settings → System: requests for shap-ctl (updates, backups) and the backups themselves
-    # (read only). Set up by ctl/install.sh; without it the app just says so.
+    # Don't let a compromised app gain more than it started with.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Settings → System: shap-ctl's status (read-only — root writes it; a read-only mount stops the
+    # app planting symlinks for root to follow), the app's request drop-box (read-write, its only
+    # writable spot), and the backups (read only). Set up by ctl/install.sh; without it the app
+    # just says so.
     volumes:
-      - /var/lib/shap/ctl:/ctl
+      - /var/lib/shap/ctl:/ctl:ro
+      - /var/lib/shap/ctl-in:/ctl-in
       - /var/backups/shap:/backups:ro
       # Feedback and bug reports (Settings → Feedback), kept across updates.
       - feedback:/data/feedback

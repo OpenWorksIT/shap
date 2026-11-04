@@ -153,9 +153,11 @@ export function registerProjectRoutes(app: FastifyInstance, ctx: Ctx): void {
       from planned_items i where i.project_id = ${id} order by i.sort, i.created_at
     `;
     if (!seesMoney(user)) {
-      // Site capture sees the job and its parts list, not what it was quoted for.
-      const { estLabourCents: _l, estMaterialsCents: _m, estDemoCents: _d, ...site } = project as Record<string, unknown>;
-      return { project: site, planned };
+      // Site capture sees the job and its parts list — not what it was quoted for, its billing
+      // rate, or what the parts were priced/bought at.
+      const { estLabourCents: _l, estMaterialsCents: _m, estDemoCents: _d, hourlyRateCents: _h, ...site } = project as Record<string, unknown>;
+      const parts = (planned as Record<string, unknown>[]).map(({ unitCostCents: _u, totalCents: _t, boughtCents: _b, ...rest }) => rest);
+      return { project: site, planned: parts };
     }
 
     const [summary] = await sql.unsafe(`select * from (${projectSummarySql}) s where s.id = $1`, [id]);
