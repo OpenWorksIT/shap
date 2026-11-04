@@ -96,3 +96,55 @@ export function monthRange(month: string): { from: string; to: string } {
 export const MARKET_BAND = 1.05;
 export const marketBand = (cents: number) => Math.round(Math.log(cents) / Math.log(MARKET_BAND));
 export const bandCents = (band: number) => Math.round(MARKET_BAND ** band);
+
+// ---------------------------------------------------------------- ranges (market-rates branch)
+
+/** A range is only ever shown where at least this many different businesses have shared. */
+export const MARKET_MIN_BUSINESSES = 5;
+
+export interface MarketRange {
+  item: string;
+  unit: string;
+  /** The middle half of what businesses charged (quarter to three-quarters), and the middle. */
+  lowCents: number;
+  midCents: number;
+  highCents: number;
+  /** How many different businesses it's from. */
+  businesses: number;
+}
+
+/** The quarter, middle and three-quarter prices from banded counts. */
+export function rangeFromBands(bands: Record<string, number>): { low: number; mid: number; high: number } | null {
+  const sorted = Object.entries(bands)
+    .map(([b, n]) => [Number(b), n] as const)
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => a[0] - b[0]);
+  const total = sorted.reduce((s, [, n]) => s + n, 0);
+  if (!total) return null;
+  const at = (q: number) => {
+    let seen = 0;
+    for (const [b, n] of sorted) {
+      seen += n;
+      if (seen >= q * total) return bandCents(b);
+    }
+    return bandCents(sorted[sorted.length - 1]![0]);
+  };
+  return { low: at(0.25), mid: at(0.5), high: at(0.75) };
+}
+
+/** The range for a quote or invoice line, if it's a standard item with one. */
+export function rangeForLine(ranges: MarketRange[], description: string, unit: string): MarketRange | undefined {
+  const key = `${norm(description)}|${norm(unit)}`;
+  return ranges.find((r) => `${norm(r.item)}|${norm(r.unit)}` === key);
+}
+
+/** The 12 whole months before `today`, newest first. */
+export function lastMonths(today: string, count = 12): string[] {
+  const out: string[] = [];
+  let m = lastWholeMonth(today);
+  for (let i = 0; i < count; i++) {
+    out.push(m);
+    m = lastWholeMonth(`${m}-15`);
+  }
+  return out;
+}

@@ -1325,6 +1325,9 @@ button.list-row {
 .line-tools {
   display: flex;
 }
+.line-hint {
+  grid-column: 1 / -1;
+}
 .totals {
   margin: 0;
   display: grid;

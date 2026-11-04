@@ -9,6 +9,8 @@ import {
   lineLabel,
   lineTotal,
   PAYMENT_METHOD_LABELS,
+  rangeForLine,
+  type MarketRange,
   PAYMENT_METHODS,
   todayIso,
   vatOn,
@@ -73,6 +75,8 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
   const toast = useToast();
   const navigate = useNavigate();
   const clients = useApi<ClientRow[]>(isOwner ? '/api/clients' : null);
+  // What the trade's standard items typically cost (anonymous market rates), shown under a line.
+  const market = useApi<{ items: MarketRange[] }>(isOwner && settings.industry ? '/api/market/rates' : null);
   const hasBrands = useHasBrands();
   const doc = detail?.doc;
   const credit = kind === 'credit_note';
@@ -430,6 +434,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                       </span>
                     )}
                   </div>
+                  <MarketHint ranges={market.data?.items} description={l.description} unit={l.unit} />
                 </div>
               ))}
               {!d.lines.length && <p className="small muted panel-pad">No lines yet.</p>}
@@ -1093,6 +1098,21 @@ function QuickAdd({ usual, profile, onAdd, lines }: { usual: UsualLine[]; profil
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+/**
+ * What businesses in the trade charged for a standard item over the last 12 months (the middle
+ * half of their prices), where enough different businesses have shared. It describes the market:
+ * what you charge is up to you.
+ */
+function MarketHint({ ranges, description, unit }: { ranges?: MarketRange[]; description: string; unit: string }) {
+  const r = ranges && rangeForLine(ranges, description, unit);
+  if (!r) return null;
+  return (
+    <div className="xs muted line-hint">
+      Usually {formatZar(r.lowCents)} to {formatZar(r.highCents)} per {r.unit} · from {r.businesses} businesses over the last 12 months (anonymous)
     </div>
   );
 }

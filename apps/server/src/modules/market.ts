@@ -17,7 +17,8 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { isMarketItem, lastWholeMonth, marketBand, marketItems, marketRates, monthRange, type MarketContribution } from '@shap/shared';
+import { isMarketItem, lastMonths, lastWholeMonth, MARKET_INDUSTRIES, MARKET_MIN_BUSINESSES, marketBand, marketItems, marketRates, monthRange, rangeFromBands, type MarketContribution, type MarketRange } from '@shap/shared';
+import { requireRole } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db } from '../db/index.js';
 import { getSettings, today } from '../lib/books.js';
@@ -144,12 +145,64 @@ export function collectMarket(ctx: Ctx, c: MarketContribution): Promise<number> 
   return run;
 }
 
+/**
+ * The ranges for a trade, from the last 12 months' tallies: only items at least
+ * MARKET_MIN_BUSINESSES different businesses have shared, as the middle half of what they charged.
+ */
+export async function marketRanges(ctx: Ctx, industry: string): Promise<MarketRange[]> {
+  if (!MARKET_INDUSTRIES.includes(industry)) return [];
+  const dir = marketDir(ctx);
+  const people = await readJson<Contributors>(join(dir, 'contributors.json'), {});
+  const merged = new Map<string, Record<string, number>>();
+  for (const month of lastMonths(today())) {
+    const tally = await readJson<MonthTally>(join(dir, `${month}.json`), { cells: {}, seen: {} });
+    for (const [cell, bands] of Object.entries(tally.cells)) {
+      if (!cell.startsWith(`${industry}|`)) continue;
+      const into = merged.get(cell) ?? {};
+      for (const [b, n] of Object.entries(bands)) into[b] = (into[b] ?? 0) + n;
+      merged.set(cell, into);
+    }
+  }
+  const out: MarketRange[] = [];
+  for (const [cell, bands] of merged) {
+    const businesses = Object.keys(people[cell] ?? {}).length;
+    if (businesses < MARKET_MIN_BUSINESSES) continue;
+    const r = rangeFromBands(bands);
+    const [, item, unit] = cell.split('|') as [string, string, string];
+    if (r) out.push({ item, unit, lowCents: r.low, midCents: r.mid, highCents: r.high, businesses });
+  }
+  return out.sort((a, b) => a.item.localeCompare(b.item));
+}
+
+// A server that isn't the collector asks it, at most twice a day per trade.
+const fetched = new Map<string, { at: number; ranges: MarketRange[] }>();
+async function rangesFromCollector(ctx: Ctx, industry: string): Promise<MarketRange[]> {
+  const url = ctx.config.COLLECTOR_URL;
+  if (!url || url === 'off' || !MARKET_INDUSTRIES.includes(industry)) return [];
+  const hit = fetched.get(industry);
+  if (hit && Date.now() - hit.at < 12 * 3600_000) return hit.ranges;
+  try {
+    const r = await fetch(`${url.replace(/\/$/, '')}/market/rates?industry=${encodeURIComponent(industry)}`, { signal: AbortSignal.timeout(8000) });
+    const ranges = r.ok ? ((await r.json()) as { items: MarketRange[] }).items : (hit?.ranges ?? []);
+    fetched.set(industry, { at: Date.now(), ranges });
+    return ranges;
+  } catch {
+    return hit?.ranges ?? [];
+  }
+}
+
 /** From outside: Shap Pocket on phones, and other Shap servers. */
 const PER_DAY = 5000;
 const PER_ADDRESS = 30;
 const today_ = { day: '', count: 0, byAddress: new Map<string, number>() };
 
 export function registerMarketRoutes(app: FastifyInstance, ctx: Ctx): void {
+  // What the trade's standard items typically cost, for the quote and invoice screens.
+  app.get('/api/market/rates', { preHandler: requireRole('owner', 'accountant') }, async () => {
+    const { industry } = await getSettings(ctx.sql);
+    return { industry, items: ctx.config.COLLECT ? await marketRanges(ctx, industry) : await rangesFromCollector(ctx, industry) };
+  });
+
   if (!ctx.config.COLLECT) return;
   const open = (reply: FastifyReply) => {
     // Pocket has no account: anyone may send, and no cookies are read or set here.
@@ -158,6 +211,12 @@ export function registerMarketRoutes(app: FastifyInstance, ctx: Ctx): void {
     reply.header('access-control-allow-headers', 'content-type');
     reply.header('access-control-max-age', '86400');
   };
+  app.get('/collect/market/rates', { config: { rateLimit: { max: 60, timeWindow: '10 minutes' } } }, async (req, reply) => {
+    reply.header('access-control-allow-origin', '*');
+    reply.header('cache-control', 'public, max-age=3600');
+    const { industry } = parse(z.object({ industry: z.string().max(40) }), req.query);
+    return { industry, months: 12, minimumBusinesses: MARKET_MIN_BUSINESSES, items: await marketRanges(ctx, industry) };
+  });
   app.post('/collect/market', { bodyLimit: 32 * 1024, config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } }, async (req, reply) => {
     open(reply);
     const day = new Date().toISOString().slice(0, 10);
