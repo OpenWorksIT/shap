@@ -18,6 +18,7 @@ import { registerProjectRoutes } from './modules/projects.js';
 import { registerRecurringRoutes } from './modules/recurring.js';
 import { registerReportRoutes } from './modules/reports.js';
 import { registerSettingsRoutes } from './modules/settings.js';
+import { registerMarketRoutes } from './modules/market.js';
 import { registerStatementRoutes } from './modules/statements.js';
 import { registerVatRoutes } from './modules/vat.js';
 import { registerWorkerRoutes } from './modules/workers.js';
@@ -47,6 +48,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: App; ctx: Ctx
     return { ok: true, time: new Date().toISOString() };
   });
   registerSettingsRoutes(app, ctx);
+  registerMarketRoutes(app, ctx);
   registerDashboardRoutes(app, ctx);
   registerClientRoutes(app, ctx);
   registerProjectRoutes(app, ctx);

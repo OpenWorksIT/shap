@@ -14,6 +14,7 @@ import { device, isNative, pickFile, platform } from '../lib/native';
 import { reportUsage } from '../lib/usage';
 import { useAuthed } from '../lib/session';
 import type { Settings } from '../lib/types';
+import { MarketWhat } from '../components/MarketShare';
 import { setTone } from '../lib/words';
 
 const STEPS = ['hello', 'structure', 'industry', 'people', 'workflow', 'extras', 'logo', 'details', 'backup', 'tone'] as const;
@@ -27,6 +28,8 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
   const [logoId, setLogoId] = useState(settings.logoId);
   const [industry, setIndustry] = useState<IndustryKey | ''>((settings.industry as IndustryKey) || '');
   const [consent, setConsent] = useState<boolean | null>(null);
+  // On unless switched off; shown here, so the owner has been told (engine modules/market.ts).
+  const [market, setMarket] = useState(true);
   const [employees, setEmployees] = useState<boolean | null>(null);
   const [casual, setCasual] = useState<boolean | null>(null);
   const [dividends, setDividends] = useState<boolean | null>(null);
@@ -54,7 +57,7 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
       ...featuresFor({ workflow, employees: Boolean(employees), casual: Boolean(casual), company, dividends: dividends ?? false, extras, payshap: Boolean(f.payshapId.trim()) }),
     };
     try {
-      const { logoId: _l, ...rest } = { ...f, features, industry, usageConsent: Boolean(consent), setupDone: true, fyEndMonth: company ? f.fyEndMonth : 2 } as Settings & { logoId: string | null };
+      const { logoId: _l, ...rest } = { ...f, features, industry, usageConsent: Boolean(consent), marketConsent: market, marketNoticeSeen: true, setupDone: true, fyEndMonth: company ? f.fyEndMonth : 2 } as Settings & { logoId: string | null };
       await api('/api/settings', { method: 'PUT', body: rest });
       setTone(f.tone);
       setBackupPlace(place);
@@ -184,6 +187,15 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
                 </button>
               </div>
             </div>
+            <label className="check panel panel-pad">
+              <input type="checkbox" checked={market} onChange={(e) => setMarket(e.target.checked)} />
+              <span>
+                <strong className="small">Share anonymous prices, to help show what work typically costs</strong>
+                <div>
+                  <MarketWhat />
+                </div>
+              </span>
+            </label>
             {nav(Boolean(industry) && consent !== null)}
           </Q>
         )}

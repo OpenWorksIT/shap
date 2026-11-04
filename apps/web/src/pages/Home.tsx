@@ -9,6 +9,7 @@ import { ApiError } from '../lib/api';
 import { sendReminder, type Remindable } from '../lib/reminders';
 import { hoursLabel, minutesSince } from '../lib/time';
 import { useApi } from '../lib/hooks';
+import { MarketNote } from '../components/MarketShare';
 import { useAuthed } from '../lib/session';
 import { greeting, say } from '../lib/words';
 import { lastBackup } from '../lib/backup';
@@ -289,6 +290,7 @@ function OwnerHome() {
         />}
       </div>
 
+      <MarketNote />
       {needs.length > 0 && <div className="stack" style={{ gap: 8 }}>{needs}</div>}
 
       {has('reminders') && (data.overdue ?? []).length > 0 && <Reminders invoices={data.overdue!} today={data.today} onSent={reload} />}

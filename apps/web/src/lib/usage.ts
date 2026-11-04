@@ -6,7 +6,7 @@
  * Both go to the collector on OpenWorks' Shap server. Offline? Feedback waits and goes later.
  */
 import { FEATURE_KEYS, featureOn } from '@shap/shared';
-import { APP_VERSION } from './api';
+import { api, APP_VERSION } from './api';
 import { platform } from './native';
 import type { Settings } from './types';
 
@@ -61,6 +61,27 @@ export async function reportUsage(s: Pick<Settings, 'businessType' | 'industry' 
     store.set(SENT, key);
   } catch {
     /* next time */
+  }
+}
+
+/**
+ * Anonymous market rates (@shap/shared market.ts): last month's share, once, when the phone is
+ * online. The books decide whether there's anything to send (switched off, not told yet, or
+ * already sent: nothing); a month with none of the standard items is just marked done.
+ */
+let sharing = false;
+export async function shareMarket() {
+  if (sharing) return;
+  sharing = true;
+  try {
+    const { share } = await api<{ share: null | { month: string; installId: string; industry: string; rates: unknown[] } }>('/api/market/share');
+    if (!share) return;
+    if (share.rates.length) await post('market', { app: 'pocket', version: APP_VERSION, ...share });
+    await api('/api/market/sent', { body: { month: share.month } });
+  } catch {
+    /* offline, or the collector is busy: next time the app opens */
+  } finally {
+    sharing = false;
   }
 }
 

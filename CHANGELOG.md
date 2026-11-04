@@ -2,6 +2,15 @@
 
 What changed in each version of Shap Pocket, newest first.
 
+## 0.8.0 (internal testing)
+
+- **Anonymous prices, to help show what work typically costs.** Once a month, when the phone is
+  online, Shap Pocket shares the middle price you charged last month for each of your trade's
+  standard items (like "Install plug point"), from issued invoices: never your name, clients, the
+  invoices, anything you typed or totals. OpenWorks' server keeps only national totals. Never for
+  advertising or marketing. It's on unless you switch it off in Settings, and nothing is shared
+  until you've been told: a note on Home, or during setup.
+
 ## 0.7.3 (internal testing)
 
 - **Opens about seven times quicker.** Home appears straight away with what it showed last time

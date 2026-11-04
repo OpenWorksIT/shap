@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect } from 'react';
+import { shareMarket } from './lib/usage';
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { listenForReminder } from './lib/backup';
 import { FeedbackButton } from './components/Feedback';
@@ -56,6 +57,12 @@ function Books() {
   const pays = has('payroll') || (settings.businessType === 'company' && has('dividends'));
   const navigate = useNavigate();
   useEffect(() => void listenForReminder(navigate), [navigate]);
+  // Last month's anonymous prices, once, a little after opening (never in the way of the first screens).
+  useEffect(() => {
+    if (!settings.setupDone || !settings.marketConsent || !settings.marketNoticeSeen) return;
+    const t = setTimeout(() => void shareMarket(), 15_000);
+    return () => clearTimeout(t);
+  }, [settings.setupDone, settings.marketConsent, settings.marketNoticeSeen]);
   if (!settings.setupDone) return <WelcomePage />;
   return (
     <Shell>

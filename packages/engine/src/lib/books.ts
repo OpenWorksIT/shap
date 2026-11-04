@@ -30,6 +30,12 @@ export interface SettingsRow {
   watermark: boolean;
   industry: string;
   usageConsent: boolean;
+  /** Share anonymous market rates (modules/market.ts), and the last month shared. */
+  marketConsent: boolean;
+  /** Has the owner been told about it (setup, or the note on Home)? Nothing goes before. */
+  marketNoticeSeen: boolean;
+  marketSentMonth: string;
+  installId: string;
   sdl: boolean;
   payLink: string;
   setupDone: boolean;

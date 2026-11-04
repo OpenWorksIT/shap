@@ -35,6 +35,7 @@ import { device } from '../lib/native';
 import { reportUsage } from '../lib/usage';
 import { setTone, type Tone } from '../lib/words';
 import { SupportShap } from '../components/Support';
+import { MarketWhat } from '../components/MarketShare';
 
 type Tab = 'business' | 'invoicing' | 'sections' | 'lists';
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -148,7 +149,7 @@ function Sections() {
   const { settings, refreshReference } = useAuthed();
   const toast = useToast();
   const [on, setOn] = useState<Record<string, boolean>>(() => Object.fromEntries(FEATURE_KEYS.map((k) => [k, featureOn(settings.features, k)])));
-  const [prefs, setPrefs] = useState({ tone: settings.tone, industry: settings.industry, usageConsent: settings.usageConsent, sdl: settings.sdl, watermark: settings.watermark });
+  const [prefs, setPrefs] = useState({ tone: settings.tone, industry: settings.industry, usageConsent: settings.usageConsent, marketConsent: settings.marketConsent, sdl: settings.sdl, watermark: settings.watermark });
   const save = async (changes: Partial<Settings>, done: string) => {
     try {
       await saveSettings(settings, changes);
@@ -166,6 +167,11 @@ function Sections() {
     const next = { ...on, [k]: value };
     setOn(next);
     if (!(await save({ features: next }, `${FEATURES[k].label} ${value ? 'on' : 'off'}`))) setOn(on);
+  };
+  // Choosing here also counts as having been told about it (so no note on Home).
+  const marketPref = async (v: boolean) => {
+    setPrefs({ ...prefs, marketConsent: v });
+    if (!(await save({ marketConsent: v, marketNoticeSeen: true }, v ? 'Prices are shared anonymously' : 'Prices aren’t shared'))) setPrefs(prefs);
   };
   const pref = async <K extends keyof typeof prefs>(k: K, v: (typeof prefs)[K]) => {
     const next = { ...prefs, [k]: v };
@@ -254,6 +260,15 @@ function Sections() {
           <span>
             Let OpenWorks know, anonymously, what kind of business uses Shap
             <div className="xs muted">Only the kind of business and which parts are switched on. Never names, clients or figures.</div>
+          </span>
+        </label>
+        <label className="check">
+          <input type="checkbox" checked={prefs.marketConsent} onChange={(e) => void marketPref(e.target.checked)} />
+          <span>
+            Share anonymous prices, to help show what work typically costs
+            <div>
+              <MarketWhat />
+            </div>
           </span>
         </label>
       </section>
