@@ -23,7 +23,7 @@ import {
 import { PageHead } from '../components/Shell';
 import { Drawer, ErrorBox, Field, Icon, Loading, MoneyInput, Tabs, useToast } from '../components/ui';
 import { api, ApiError, APP_VERSION } from '../lib/api';
-import { fileToBase64, shrinkImage } from '../lib/files';
+import { cleanPngLogo, shrinkImage } from '../lib/files';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
 import type { Brand, Settings } from '../lib/types';
@@ -771,7 +771,7 @@ function BrandDrawer({ brand, onClose }: { brand: Brand | null; onClose: () => v
   const uploadLogo = async (file: File | undefined) => {
     if (!file || !brand) return;
     try {
-      const img = file.type === 'image/png' ? { dataBase64: await fileToBase64(file), mime: 'image/png' as const, filename: file.name } : await shrinkImage(file, 1200, 0.9);
+      const img = file.type === 'image/png' ? await cleanPngLogo(file) : await shrinkImage(file, 1200, 0.9);
       const r = await api<{ logoId: string }>(`/api/brands/${brand.id}/logo`, { body: img });
       setLogoId(r.logoId);
       await refreshReference();

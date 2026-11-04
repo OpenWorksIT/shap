@@ -1,5 +1,5 @@
 import type { Req as FastifyRequest } from '../http.js';
-import { financialYear, todayIso } from '@shap/shared';
+import { financialYear, safeText, todayIso } from '@shap/shared';
 import type { Db } from '../db/index.js';
 import { badRequest } from './errors.js';
 
@@ -101,11 +101,11 @@ export const isIsoDate = (s: string | undefined): s is string => !!s && /^\d{4}-
 export function toCsv(header: string[], rows: (string | number | null | undefined)[][]): string {
   const cell = (v: string | number | null | undefined) => {
     if (v == null) return '';
-    let s = String(v);
-    // A cell starting with = + - @ is a formula to Excel and LibreOffice: a description typed as
-    // "=HYPERLINK(...)" could run when the accountant opens the export. Numbers stay numbers.
-    if (/^[=+\-@\t\r]/.test(s) && !/^-?\d+(\.\d+)?$/.test(s)) s = `'${s}`;
-    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    // Text that a spreadsheet would run as a formula (= + - @ at the start, or straight after a
+    // separator a differently set-up Excel would split on) is neutralised: a description typed as
+    // "=HYPERLINK(...)" can't run when the accountant opens the export. Numbers stay numbers.
+    const s = typeof v === 'number' ? String(v) : safeText(String(v));
+    return /[",;\t\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   return '\uFEFF' + [header, ...rows].map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n';
 }

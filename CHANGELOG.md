@@ -2,6 +2,18 @@
 
 What changed in each version of Shap Pocket, newest first.
 
+## 0.7.2 (internal testing)
+
+More from the security review shared with Shap:
+
+- **A PNG logo is redrawn on the phone when you add it**, so a damaged one is refused straight
+  away instead of leaving a quote or invoice that never finishes.
+- **Imports have sensible limits** (cells, rows, clients in one file), so a crafted bank statement,
+  client CSV or move-in file can't freeze the app.
+- **Exports are safer to open in Excel:** text a spreadsheet could run as a formula is neutralised
+  wherever Excel might start a new cell, with a comma or a semicolon as its separator.
+- **A company file is checked as if typed into Settings.**
+
 ## 0.7.1 (internal testing)
 
 From the security review shared with Shap:

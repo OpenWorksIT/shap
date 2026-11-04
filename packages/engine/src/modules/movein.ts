@@ -650,7 +650,8 @@ const CATEGORY_HINTS: [RegExp, string][] = [
 export function suggestAccount(line: InTbLine, accounts: { id: string; code: string; name: string; type: AccountType; systemKey: string | null }[]): string | null {
   const byKey = (k: string) => accounts.find((a) => a.systemKey === k)?.id ?? null;
   const byCode = (c: string) => accounts.find((a) => a.code === c)?.id ?? null;
-  const n = line.name.toLowerCase();
+  // An account name is short; matching only its start keeps the patterns cheap on a crafted file.
+  const n = line.name.toLowerCase().slice(0, 200);
   const exact = accounts.find((a) => a.name.toLowerCase() === n || (line.code && a.code === line.code && a.name.toLowerCase().includes(n.split(/\s+/)[0] ?? '')));
   if (exact) return exact.id;
   const rules: [RegExp, () => string | null][] = [
@@ -841,7 +842,7 @@ export async function applyPlan(tx: Db, plan: Plan, o: ApplyOptions, userId: str
         note(`A cost on ${formatDate(c.date)} is in a closed period`);
         continue;
       }
-      const hint = CATEGORY_HINTS.find(([re]) => re.test(c.category) || re.test(c.description))?.[1];
+      const hint = CATEGORY_HINTS.find(([re]) => re.test(c.category.slice(0, 200)) || re.test(c.description.slice(0, 200)))?.[1];
       const cat = (hint && cats.find((x) => x.name.toLowerCase() === hint.toLowerCase())) || cats.find((x) => x.name.toLowerCase() === c.category.toLowerCase()) || sundry;
       const unpaid = c.unpaidCents > 0 && billSrc;
       const [row] = await tx<{ id: string }[]>`

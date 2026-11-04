@@ -90,6 +90,24 @@ export async function shrinkImage(file: File, max = 1600, quality = 0.8): Promis
   }
 }
 
+/**
+ * A PNG logo redrawn by the phone's own image decoder into a clean PNG (transparency kept, longest
+ * side `max` px). The PDF library decodes PNGs itself, and a damaged one makes it stop without
+ * finishing, so a quote or invoice would never be ready to share; a file the phone can't read is
+ * refused here instead.
+ */
+export async function cleanPngLogo(file: File, max = 1600): Promise<{ dataBase64: string; mime: 'image/png'; filename: string }> {
+  const img = await loadImage(file);
+  if (!img.naturalWidth || !img.naturalHeight) throw new Error('That image couldn’t be read');
+  const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+  canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('That image couldn’t be read'))), 'image/png'));
+  return { dataBase64: await fileToBase64(blob), mime: 'image/png', filename: file.name };
+}
+
 /** Downloads (or on phones, shares) a file fetched from the API. */
 export async function shareOrDownload(url: string, filename: string, title: string): Promise<'shared' | 'downloaded'> {
   const res = await fetch(url, { credentials: 'same-origin' });

@@ -398,8 +398,14 @@ export function formatExportRows(dataset: ExportDataset, rows: ExportRow[], o: E
  * (CSV injection). Plain numbers like -12.50 are left alone.
  */
 export function safeText(s: string): string {
-  if (/^[=+@\t\r]/.test(s) || (/^-/.test(s) && !/^-\d+([.,]\d+)?$/.test(s))) return `'${s}`;
-  return s;
+  // Plain numbers stay numbers.
+  if (/^-?\d+([.,]\d+)?$/.test(s)) return s;
+  // A spreadsheet set to a different list separator (";" where the file uses ",", or the other
+  // way round) splits the cell there, so a trigger straight after a , ; or tab would start a
+  // formula in the new cell. A space in between is safe (it makes the cell text).
+  let out = s.replace(/([,;\t])(?=[=+\-@])/g, "$1'");
+  if (/^[=+\-@\t\r]/.test(out)) out = `'${out}`;
+  return out;
 }
 
 /** RFC 4180 CSV (with the chosen separator), with a byte-order mark so Excel opens it as UTF-8. */

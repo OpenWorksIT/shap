@@ -183,6 +183,8 @@ export interface ClientCsvRow {
 export function readClientCsv(csv: string): ClientCsvRow[] {
   const rows = parseCsv(csv);
   if (rows.length < 2) throw badRequest('That file has no rows');
+  // Each row is compared with every client: keep that bounded.
+  if (rows.length > 5001) throw badRequest('That file has too many clients (5 000 at most). Split it and import each part.');
   const header = rows[0]!.map((h) => h.trim().toLowerCase());
   // First heading in the list that exists wins (so "Contact Phone" beats an empty "Client Phone").
   const col = (...names: string[]) => names.map((n) => header.indexOf(n)).find((i) => i >= 0) ?? -1;
@@ -238,7 +240,9 @@ const words = (s: string) => s.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w
  * the person's name or street address in the client's job names ("Naidoo patio", "12 Oak Street eaves").
  */
 export function suggestMatches(rows: ClientCsvRow[], clients: MatchClient[]) {
-  const scored = rows.map((r) => {
+  const scored = rows.map((full) => {
+    // Matching only needs the start of each field (and long ones would make it slow).
+    const r = { ...full, name: full.name.slice(0, 200), contact: full.contact.slice(0, 200), address: full.address.slice(0, 200) };
     // The client's own name counts for more than the contact person's (a company's contact may be someone you know from other jobs).
     const nameWords = words(r.name);
     const contactWords = words(r.contact).filter((w) => !nameWords.includes(w));
@@ -290,6 +294,14 @@ export function suggestMatches(rows: ClientCsvRow[], clients: MatchClient[]) {
   return scored;
 }
 
+/**
+ * Limits for an imported CSV. No real cell (a name, an address, a statement line) is longer than
+ * a few thousand characters; capping them keeps every pattern matched against a cell cheap, so a
+ * crafted file can't freeze the app.
+ */
+export const MAX_CSV_CELL = 4000;
+export const MAX_CSV_ROWS = 100_000;
+
 /** Minimal RFC 4180 CSV reader (quoted fields, embedded commas and newlines). */
 export function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
@@ -309,18 +321,19 @@ export function parseCsv(text: string): string[][] {
       else field += ch;
     } else if (ch === '"') quoted = true;
     else if (ch === delim) {
-      row.push(field);
+      row.push(field.length > MAX_CSV_CELL ? field.slice(0, MAX_CSV_CELL) : field);
       field = '';
     } else if (ch === '\n' || ch === '\r') {
       if (ch === '\r' && src[i + 1] === '\n') i++;
-      row.push(field);
+      row.push(field.length > MAX_CSV_CELL ? field.slice(0, MAX_CSV_CELL) : field);
       rows.push(row);
+      if (rows.length > MAX_CSV_ROWS) throw badRequest(`That file has too many rows (${MAX_CSV_ROWS.toLocaleString('en-ZA')} at most)`);
       row = [];
       field = '';
     } else field += ch;
   }
   if (field || row.length) {
-    row.push(field);
+    row.push(field.length > MAX_CSV_CELL ? field.slice(0, MAX_CSV_CELL) : field);
     rows.push(row);
   }
   return rows.filter((r) => r.some((c) => c.trim()));

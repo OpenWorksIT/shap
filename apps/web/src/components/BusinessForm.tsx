@@ -4,7 +4,7 @@
  */
 import { useState } from 'react';
 import { api, ApiError } from '../lib/api';
-import { fileToBase64, shrinkImage } from '../lib/files';
+import { cleanPngLogo, shrinkImage } from '../lib/files';
 import { pickFile } from '../lib/native';
 import type { Settings } from '../lib/types';
 import { LogoPlacer } from './LogoPlacer';
@@ -77,7 +77,7 @@ export function LogoField({ logoId, layout, accent, onLogo, onLayout }: { logoId
     if (!file) return;
     setBusy(true);
     try {
-      const img = file.type === 'image/png' ? { dataBase64: await fileToBase64(file), mime: 'image/png' as const, filename: file.name } : await shrinkImage(file, 1200, 0.9);
+      const img = file.type === 'image/png' ? await cleanPngLogo(file) : await shrinkImage(file, 1200, 0.9);
       const r = await api<{ logoId: string }>('/api/settings/logo', { body: img });
       onLogo(r.logoId);
       onLayout({ zoom: 1, x: 0, y: 0 });
