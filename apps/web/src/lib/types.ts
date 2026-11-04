@@ -33,6 +33,8 @@ export interface Settings {
   watermark: boolean;
   industry: string;
   usageConsent: boolean;
+  marketConsent: boolean;
+  marketNoticeSeen: boolean;
   installId?: string;
   sdl: boolean;
   payLink: string;

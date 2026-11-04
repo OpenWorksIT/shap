@@ -8,6 +8,7 @@ import { stopClock, useMinuteTick, type Running } from '../components/TimeTracke
 import { ApiError } from '../lib/api';
 import { reminderToast, sendReminder, type Remindable } from '../lib/reminders';
 import { hoursLabel, minutesSince } from '../lib/time';
+import { MarketNote } from '../components/MarketShare';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
 import { greeting, say } from '../lib/words';
@@ -313,6 +314,7 @@ function OwnerHome() {
         />}
       </div>
 
+      <MarketNote />
       {needs.length > 0 && <div className="stack" style={{ gap: 8 }}>{needs}</div>}
 
       {isOwner && has('reminders') && (data.overdue ?? []).length > 0 && <Reminders invoices={data.overdue!} today={data.today} onSent={reload} />}

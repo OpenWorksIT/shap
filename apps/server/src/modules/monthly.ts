@@ -12,6 +12,7 @@ import type { FastifyInstance } from 'fastify';
 import { addMonths, monthEnd } from '@shap/shared';
 import { z } from 'zod';
 import { requireRole, userOrThrow } from '../auth.js';
+import { shareMarketRates } from './market.js';
 import type { Ctx } from '../context.js';
 import type { Db, Sql } from '../db/index.js';
 import { audit } from '../lib/audit.js';
@@ -294,10 +295,13 @@ export function registerMonthlyRoutes(app: FastifyInstance, ctx: Ctx): void {
 
 /** Checks for monthly invoices due every half hour (the real company only, never the demo). */
 export function startMonthlyTimer(ctx: Ctx, log: { info: (o: object, m: string) => void; error: (o: object, m: string) => void }) {
-  const tick = () =>
-    runMonthly(ctx.dbs.real, ctx.mailer, { emailOn: Boolean(ctx.config.SMTP_URL) })
+  const tick = () => {
+    void runMonthly(ctx.dbs.real, ctx.mailer, { emailOn: Boolean(ctx.config.SMTP_URL) })
       .then((r) => r.created + r.failed > 0 && log.info(r, 'monthly invoices'))
       .catch((err) => log.error({ err }, 'monthly invoices failed'));
+    // The real books only (never the demo company's).
+    void shareMarketRates(ctx, ctx.dbs.real, { warn: (o, m) => log.info(o, m) }).catch((err) => log.error({ err }, 'market rates failed'));
+  };
   const first = setTimeout(tick, 60_000);
   const every = setInterval(tick, 30 * 60_000);
   first.unref();

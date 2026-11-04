@@ -3,6 +3,17 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.14.0 (5 November 2026)
+
+- **Anonymous prices, to help show what work typically costs.** Once a month, Shap shares the
+  middle price you charged last month for each of your trade's standard items (like "Tiling",
+  per m²), from issued invoices: never your name, clients, the invoices, anything you typed or
+  totals. OpenWorks' server adds them into national totals as they arrive and keeps only the
+  totals, so that one day South Africa's trades and their clients can see what a fair price
+  looks like. Never for advertising or marketing. It's on unless you switch it off (Settings →
+  What you use), and nothing is shared until you've been told: a note on Home says what's shared,
+  with a button to switch it off. New businesses see it during setup.
+
 ## 1.13.1 (4 November 2026)
 
 The rest of the security review: the files and text that come into Shap from outside.

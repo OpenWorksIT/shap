@@ -7,9 +7,12 @@ import { createDb, type Sql } from '../src/db/index.js';
 import { migrate } from '../src/db/migrate.js';
 import { seed } from '../src/db/seed.js';
 import type { Mail } from '../src/lib/mailer.js';
+import type { Ctx } from '../src/context.js';
 
 export interface TestEnv {
   app: FastifyInstance;
+  /** The app's context (for code that runs outside a request, like the timers). */
+  ctx: Ctx;
   sql: Sql;
   mails: Mail[];
   close: () => Promise<void>;
@@ -33,10 +36,11 @@ export async function setup(opts: { demo?: boolean; env?: Record<string, string>
     await sql`update settings set default_brand_id = (select id from brands limit 1)`;
   }
   const mails: Mail[] = [];
-  const { app } = await buildApp({ config, sql, mailer: { send: async (m) => void mails.push(m) } });
+  const { app, ctx } = await buildApp({ config, sql, mailer: { send: async (m) => void mails.push(m) } });
   await app.ready();
   return {
     app,
+    ctx,
     sql,
     mails,
     close: async () => {

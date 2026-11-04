@@ -56,6 +56,10 @@ export const settingsInput = z.object({
   industry: text(40).default(''),
   /** May the app tell OpenWorks, anonymously, what kind of business uses it. */
   usageConsent: z.boolean().default(false),
+  /** May the app share, anonymously, what the trade's standard items cost (market.ts). On unless switched off. */
+  marketConsent: z.boolean().default(true),
+  /** The owner has been told about sharing market rates (left unchanged when not sent). */
+  marketNoticeSeen: z.boolean().optional(),
   /** Registered for the Skills Development Levy (payroll over R500 000 a year). */
   sdl: z.boolean().default(false),
   /** The usual card payment link (Yoco, SnapScan…), printed on invoices. */
