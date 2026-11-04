@@ -6,6 +6,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { featureOn, type Feature } from '@shap/shared';
 import { api } from './api';
+import { remember, remembered } from './snapshot';
 import { setTone } from './words';
 import type { Reference, Settings, User } from './types';
 
@@ -21,17 +22,27 @@ interface SessionValue {
 const SessionContext = createContext<SessionValue | null>(null);
 const OWNER: User = { id: 'owner', name: 'You', email: '', role: 'owner' };
 
+/** The reference data as the screens use it, and the app's way of speaking set to match. */
+function prepared(r: Reference): Reference {
+  setTone((r.settings as Settings).tone);
+  // Credit notes settle invoices through a source of their own, never picked by hand; the
+  // unpaid-bills source only shows with Supplier bills switched on.
+  const bills = featureOn(r.settings.features, 'bills');
+  return { ...r, sources: r.sources.filter((x) => x.role !== 'credit_notes' && (x.role !== 'bills' || bills)) };
+}
+
 export function SessionProvider({ children }: { children: ReactNode }) {
-  const [ref, setRef] = useState<Reference | null>(null);
+  // Last time's, while the books open (lib/snapshot.ts): Home appears straight away.
+  const [ref, setRef] = useState<Reference | null>(() => {
+    const last = remembered<Reference>('/api/reference');
+    return last ? prepared(last) : null;
+  });
   const [error, setError] = useState<string | null>(null);
 
   const refreshReference = useCallback(async () => {
     const r = await api<Reference>('/api/reference');
-    setTone((r.settings as Settings).tone);
-    // Credit notes settle invoices through a source of their own, never picked by hand; the
-    // unpaid-bills source only shows with Supplier bills switched on.
-    const bills = featureOn(r.settings.features, 'bills');
-    setRef({ ...r, sources: r.sources.filter((x) => x.role !== 'credit_notes' && (x.role !== 'bills' || bills)) });
+    remember('/api/reference', r);
+    setRef(prepared(r));
   }, []);
 
   useEffect(() => {

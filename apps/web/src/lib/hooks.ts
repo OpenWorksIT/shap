@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from './api';
+import { remember, remembered } from './snapshot';
 
 /**
  * What each screen showed last time. Coming back to a screen shows that straight away and
@@ -9,7 +10,8 @@ const lastSeen = new Map<string, unknown>();
 
 /** Fetch JSON for a path; `reload()` refetches without blanking the screen. */
 export function useApi<T>(path: string | null, opts: { fresh?: boolean } = {}) {
-  const cached = () => (path && !opts.fresh ? ((lastSeen.get(path) as T | undefined) ?? null) : null);
+  // Home's figures also come back from the last time the app was open (lib/snapshot.ts).
+  const cached = () => (path && !opts.fresh ? ((lastSeen.get(path) as T | undefined) ?? remembered<T>(path) ?? null) : null);
   const [data, setDataState] = useState<T | null>(cached);
   const [error, setError] = useState<ApiError | null>(null);
   const [loading, setLoading] = useState(Boolean(path));
@@ -30,7 +32,10 @@ export function useApi<T>(path: string | null, opts: { fresh?: boolean } = {}) {
     setLoading(true);
     try {
       const d = await api<T>(path);
-      if (path) lastSeen.set(path, d);
+      if (path) {
+        lastSeen.set(path, d);
+        remember(path, d);
+      }
       if (mine === seq.current) {
         setData(d);
         setError(null);

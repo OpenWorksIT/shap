@@ -3,6 +3,7 @@
  * for a web server; in Pocket the "server" is a worker on the phone.
  */
 import type { EngineReply, EngineRequest } from './engine.worker';
+import { forgetSnapshots } from '../lib/snapshot';
 
 export interface EngineResponse {
   status: number;
@@ -50,10 +51,19 @@ function open(): Promise<void> {
   return (opened ??= (async () => {
     const { fresh } = await send<{ fresh: boolean }>({ op: 'status', template: new URL('fresh-books.tar.gz', document.baseURI).href });
     if (fresh) {
+      // New, empty books: what Home showed last time no longer applies.
+      forgetSnapshots();
       const copy = await readSafetyCopy();
       if (copy) await send<null>({ op: 'restore', data: copy });
     }
   })());
+}
+
+/** Starts opening the books now, before any screen asks (it takes a few seconds on a phone). */
+export function openEarly() {
+  open().catch(() => {
+    /* the first screen to ask shows the error */
+  });
 }
 
 export async function call(method: string, url: string, body?: unknown): Promise<EngineResponse> {
@@ -68,10 +78,12 @@ export const dump = () => send<Blob>({ op: 'dump' });
 /** Replaces the books with a backup (checked first; nothing changes if it won't open). */
 export const restore = async (data: Blob) => {
   await send<null>({ op: 'restore', data });
+  forgetSnapshots();
   await writeSafetyCopy();
 };
 export const erase = async () => {
   await send<null>({ op: 'erase' });
+  forgetSnapshots();
   await writeSafetyCopy();
 };
 

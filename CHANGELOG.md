@@ -2,6 +2,13 @@
 
 What changed in each version of Shap Pocket, newest first.
 
+## 0.7.3 (internal testing)
+
+- **Opens about seven times quicker.** Home appears straight away with what it showed last time
+  (in our tests 0.4 seconds instead of about 3), while your books open underneath; the fresh
+  figures replace it a moment later. The books also start opening before the first screen is
+  drawn, instead of after.
+
 ## 0.7.2 (internal testing)
 
 More from the security review shared with Shap:
