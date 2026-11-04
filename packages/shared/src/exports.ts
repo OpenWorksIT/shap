@@ -398,13 +398,21 @@ export function formatExportRows(dataset: ExportDataset, rows: ExportRow[], o: E
  * (CSV injection). Plain numbers like -12.50 are left alone.
  */
 export function safeText(s: string): string {
-  if (/^[=+@\t\r]/.test(s) || (/^-/.test(s) && !/^-\d+([.,]\d+)?$/.test(s))) return `'${s}`;
-  return s;
+  // Plain numbers stay numbers.
+  if (/^-?\d+([.,]\d+)?$/.test(s)) return s;
+  // A spreadsheet set to a different list separator (";" where the file uses ",", or the other
+  // way round) splits the cell there, so a trigger straight after a , ; or tab would start a
+  // formula in the new cell. A space in between is safe (it makes the cell text).
+  let out = s.replace(/([,;\t])(?=[=+\-@])/g, "$1'");
+  if (/^[=+\-@\t\r]/.test(out)) out = `'${out}`;
+  return out;
 }
 
 /** RFC 4180 CSV (with the chosen separator), with a byte-order mark so Excel opens it as UTF-8. */
 export function toDelimited(headers: string[], cells: string[][], o: Pick<ExportOptions, 'delimiter' | 'header'>): string {
   const d = o.delimiter;
+  // Only this file's own separator is quoted: the packages that import these expect exactly that
+  // (safeText already neutralises a formula after any separator another spreadsheet might use).
   const cell = (s: string) => (s.includes(d) || /["\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
   const lines = [...(o.header ? [headers] : []), ...cells].map((r) => r.map(cell).join(d));
   return `﻿${lines.join('\r\n')}\r\n`;

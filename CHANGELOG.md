@@ -3,6 +3,29 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.13.1 (4 November 2026)
+
+The rest of the security review: the files and text that come into Shap from outside.
+
+- **A damaged logo can no longer stop Shap.** A logo is now checked when you upload it (one that
+  can't be read is refused, with a message), and again before it goes on a quote or invoice. Before,
+  a damaged PNG logo could stop the whole server on the next PDF, the monthly invoices included.
+  Logos already saved are checked too: one that can't be read is left off the PDF.
+- **Imports can't hold Shap up for everyone.** Bank statements, the tracker workbook, moving in
+  and client CSVs have sensible limits (no cell longer than 4 000 characters, 100 000 rows, 5 000
+  clients in one client file, a workbook of 64 MB unpacked), so a crafted file can't freeze the
+  server or use up its memory. Real files are well inside them.
+- **Exports are safer to open in Excel.** Text that a spreadsheet could run as a formula is
+  neutralised wherever Excel might start a new cell, not just at the start, whichever list
+  separator (comma or semicolon) your Excel uses.
+- **A company file is checked as if typed into Settings:** a value that isn't valid (a colour
+  that isn't a colour, text that's far too long) is refused, and a logo in it that can't be read
+  is left out.
+- For OpenWorks' feedback collector: no single address can use up a day's room, and a day's
+  screenshots have a ceiling.
+- If Shap ever stops on an unexpected error, the log now says what it was before the container
+  restarts it.
+
 ## 1.13.0 (4 November 2026)
 
 A security review and penetration test, with the findings fixed. Most of this is behind the

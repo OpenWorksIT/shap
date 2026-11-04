@@ -34,6 +34,8 @@ const valid = (y: number, m: number, d: number) => {
 
 /** Dates as banks write them. Numeric day/month order follows `order` (day first unless told). */
 export function parseStatementDate(raw: string, order: DateOrder = 'dmy'): string | null {
+  // No date is this long; checking first keeps the patterns below cheap on a crafted cell.
+  if (raw.length > 64) return null;
   const s = raw.trim().replace(/^'+|'+$/g, '');
   let m = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:[ T].*)?$/.exec(s);
   if (m) return valid(+m[1]!, +m[2]!, +m[3]!);
@@ -59,6 +61,7 @@ export function parseStatementDate(raw: string, order: DateOrder = 'dmy'): strin
 
 /** "R 1 234.56", "-1,234.56", "1234,56", "(120.00)", "120.00 Dr" → cents. */
 export function parseStatementAmount(raw: string): number | null {
+  if (raw.length > 64) return null;
   let s = raw.trim().replace(/^'+|'+$/g, '');
   if (!s) return null;
   let sign = 1;

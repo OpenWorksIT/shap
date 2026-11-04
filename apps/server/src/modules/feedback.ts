@@ -32,7 +32,13 @@ import { appVersion } from './system.js';
 const MAX_SHOT_BYTES = 4 * 1024 * 1024;
 /** Reports from outside (Pocket, other Shaps) per day, so the folder can't be used to fill the disk. */
 const OUTSIDE_PER_DAY = 500;
-const outside = { day: '', count: 0 };
+/** From one address a day: enough for anyone, and no single sender can use up the day's room. */
+const OUTSIDE_PER_ADDRESS = 20;
+/** Screenshots from outside a day, in all: past this, reports are kept without their picture. */
+const OUTSIDE_SHOT_BYTES_PER_DAY = 200 * 1024 * 1024;
+/** Usage notes a day, in all (each install's is one small file it overwrites). */
+const USAGE_PER_DAY = 5000;
+const outside = { day: '', count: 0, usage: 0, shotBytes: 0, byAddress: new Map<string, number>() };
 const ID_RE = /^FB-\d{8}-\d{6}-[0-9a-f]{4}-(love|dislike|bug|idea)$/;
 /** Reports and usage notes are kept for a year (as the privacy policy says), then deleted. */
 const KEEP_DAYS = 365;
@@ -181,20 +187,35 @@ export function registerFeedbackRoutes(app: FastifyInstance, ctx: Ctx): void {
       reply.header('access-control-allow-headers', 'content-type');
       reply.header('access-control-max-age', '86400');
     };
-    const daily = () => {
+    const tooMany = () => new HttpError(429, 'Thanks: we’ve had a lot of feedback today. Please try again tomorrow.', 'rate_limited');
+    const today = () => {
       const day = new Date().toISOString().slice(0, 10);
-      if (outside.day !== day) Object.assign(outside, { day, count: 0 });
-      if (++outside.count > OUTSIDE_PER_DAY) throw new HttpError(429, 'Thanks: we’ve had a lot of feedback today. Please try again tomorrow.', 'rate_limited');
+      if (outside.day !== day) Object.assign(outside, { day, count: 0, usage: 0, shotBytes: 0, byAddress: new Map() });
+    };
+    // Checked before a report is read, counted only once it's kept: requests that fail validation
+    // don't use up the day's room, and one address can't take all of it.
+    const roomFor = (ip: string) => {
+      today();
+      if (outside.count >= OUTSIDE_PER_DAY || (outside.byAddress.get(ip) ?? 0) >= OUTSIDE_PER_ADDRESS) throw tooMany();
+    };
+    const counted = (ip: string) => {
+      outside.count++;
+      outside.byAddress.set(ip, (outside.byAddress.get(ip) ?? 0) + 1);
     };
     app.options('/collect/*', async (_req, reply) => (open(reply), reply.code(204).send()));
 
     app.post('/collect/feedback', { bodyLimit: 6 * 1024 * 1024, config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } }, async (req, reply) => {
       open(reply);
-      daily();
+      roomFor(req.ip);
       const input = parse(collectedInput, req.body);
       if (input.kind !== 'love' && !input.message) throw badRequest('Please say a few words about it');
+      // A day's screenshots have a ceiling in all, so the folder can't be used to fill the disk.
+      const shotBytes = input.kind === 'bug' && input.screenshot ? Math.floor((input.screenshot.length * 3) / 4) : 0;
+      if (shotBytes && outside.shotBytes + shotBytes > OUTSIDE_SHOT_BYTES_PER_DAY) input.screenshot = null;
+      else outside.shotBytes += shotBytes;
       const label = input.app === 'pocket' ? `Shap Pocket ${input.version} (${input.platform || 'phone'})` : `another Shap ${input.version}${input.role ? `, ${input.role}` : ''}`;
       const id = await store(input, { anonymous: true, app: input.app, version: input.version, platform: input.platform, role: input.role }, label, input.app, req.ip);
+      counted(req.ip);
       req.log.info({ feedback: id, from: input.app }, 'feedback collected');
       reply.code(201);
       return { id };
@@ -202,8 +223,11 @@ export function registerFeedbackRoutes(app: FastifyInstance, ctx: Ctx): void {
 
     app.post('/collect/usage', { bodyLimit: 16 * 1024, config: { rateLimit: { max: 20, timeWindow: '10 minutes' } } }, async (req, reply) => {
       open(reply);
-      daily();
+      // Usage notes have their own room for the day, so they don't use up the room for feedback.
+      today();
+      if (outside.usage >= USAGE_PER_DAY) throw tooMany();
       const input = parse(usageInput, req.body);
+      outside.usage++;
       await mkdir(usageDir, { recursive: true, mode: 0o750 });
       await writeFile(join(usageDir, `${input.installId}.json`), JSON.stringify({ ...input, at: new Date().toISOString() }), { mode: 0o640 });
       reply.code(201);

@@ -1,6 +1,7 @@
 import PDFDocument from 'pdfkit';
 import { featureOn, formatDate, formatZar, lineLabel, SHAP_LINE, SHAP_URL, type LineCategory } from '@shap/shared';
 import type { SettingsRow } from '../lib/books.js';
+import { cleanImageCached } from '../lib/images.js';
 
 export interface BrandRow {
   id: string;
@@ -143,7 +144,9 @@ function tint(hex: string, amount: number): string {
  * at the bottom so paying is easy.
  */
 export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
-  const { doc, lines, settings, brand, logo } = data;
+  const { doc, lines, settings, brand } = data;
+  // Only a logo known to decode reaches pdfkit (a damaged PNG would otherwise crash the server).
+  const logo = data.logo ? cleanImageCached(data.logo) : null;
   const chosen = brand?.accent || settings.accent;
   const accent = chosen && /^#[0-9a-f]{6}$/i.test(chosen) ? chosen : '#e8731c';
   const soft = tint(accent, 0.9);

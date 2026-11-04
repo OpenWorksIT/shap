@@ -8,6 +8,7 @@
  * and updated; nothing is deleted.
  */
 import type { FastifyInstance } from 'fastify';
+import { brandInput, clientInput, settingsInput } from '@shap/shared';
 import { z } from 'zod';
 import { confirmPassword, requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -16,6 +17,7 @@ import { audit } from '../lib/audit.js';
 import { applyBusinessType, getSettings } from '../lib/books.js';
 import { badRequest } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
+import { cleanImage } from '../lib/images.js';
 
 const FORMAT = 'shap-company/1';
 
@@ -26,14 +28,15 @@ const fileSchema = z.object({
   settings: z.record(z.string(), z.unknown()).default({}),
   defaultBrand: z.string().nullable().default(null),
   brands: z
-    .array(z.object({ name: z.string().min(1), legalLine: str, email: str, phone: str, website: str, address: str, bankDetails: str, accent: z.string().default('#e8731c'), active: z.boolean().default(true), logo }))
+    // The same limits as typing them into Settings (lengths, an accent that's a colour).
+    .array(brandInput.omit({ logoLayout: true }).extend({ logo }))
     .default([]),
   accounts: z.array(z.object({ code: z.string().min(1), name: z.string().min(1), type: z.enum(['asset', 'liability', 'equity', 'income', 'cost_of_sales', 'expense']), active: z.boolean().default(true) })).default([]),
   sources: z.array(z.object({ name: z.string().min(1), kind: z.enum(['bank', 'card', 'cash', 'owner', 'other']), account: z.string(), active: z.boolean().default(true) })).default([]),
   categories: z.array(z.object({ name: z.string().min(1), kind: z.enum(['materials', 'demo', 'overhead', 'asset', 'personal']), account: z.string(), active: z.boolean().default(true) })).default([]),
   workTypes: z.array(z.object({ name: z.string().min(1), active: z.boolean().default(true) })).default([]),
   clients: z
-    .array(z.object({ code: z.string().nullable().default(null), name: z.string().min(1), contactPerson: str, email: str, phone: str, address: str, vatNumber: str, notes: str, brand: z.string().nullable().default(null), active: z.boolean().default(true) }))
+    .array(clientInput.omit({ brandId: true, code: true }).extend({ code: z.string().trim().max(30).nullable().default(null), brand: z.string().max(80).nullable().default(null) }))
     .default([]),
   /** Jobs to link to a client or trading name, by job name (applied when the jobs exist). */
   jobs: z.array(z.object({ name: z.string(), client: z.string().nullable().default(null), brand: z.string().nullable().default(null) })).default([]),
@@ -107,8 +110,10 @@ export async function restoreCompanyFile(tx: Tx, raw: unknown) {
       if (typeof v === 'string' && v) await tx`update settings set lock_date = greatest(coalesce(lock_date, ${v}::date), ${v}::date) where id`;
       continue;
     }
-    if (k === 'businessType' && v !== 'company' && v !== 'sole_prop') continue;
-    await tx`update settings set ${tx(SETTINGS_COLUMNS[k])} = ${v as never} where id`;
+    // Each value is checked as if it were typed into Settings, not written to the column as it comes.
+    const checked = settingsInput.shape[k].safeParse(v);
+    if (!checked.success) throw badRequest(`The company file's ${k} isn't valid: ${checked.error.issues[0]?.message ?? 'check it'}`);
+    await tx`update settings set ${tx(SETTINGS_COLUMNS[k])} = ${checked.data as never} where id`;
   }
   await applyBusinessType(tx, (await getSettings(tx)).businessType);
 
@@ -121,9 +126,13 @@ export async function restoreCompanyFile(tx: Tx, raw: unknown) {
         address = excluded.address, bank_details = excluded.bank_details, accent = excluded.accent, active = excluded.active
       returning id`;
     if (b.logo) {
-      const bytes = Buffer.from(b.logo.dataBase64, 'base64');
-      const [a] = await tx<{ id: string }[]>`insert into attachments (filename, mime, size, bytes) values (${`${b.name} logo`}, ${b.logo.mime}, ${bytes.length}, ${bytes}) returning id`;
-      await tx`update brands set logo_id = ${a!.id} where id = ${row!.id}`;
+      // Decoded and stored as a clean copy, like an uploaded logo; one that can't be read is left out.
+      const bytes = cleanImage(Buffer.from(b.logo.dataBase64, 'base64'));
+      if (bytes) {
+        const mime = bytes[0] === 0xff ? 'image/jpeg' : 'image/png';
+        const [a] = await tx<{ id: string }[]>`insert into attachments (filename, mime, size, bytes) values (${`${b.name} logo`}, ${mime}, ${bytes.length}, ${bytes}) returning id`;
+        await tx`update brands set logo_id = ${a!.id} where id = ${row!.id}`;
+      } else count('logosSkipped');
     }
     count('brands');
   }

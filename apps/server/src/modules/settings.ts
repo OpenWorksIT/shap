@@ -20,6 +20,7 @@ import { FEATURE_KEYS, featureOn } from '@shap/shared';
 import { reportUsage } from './feedback.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
+import { cleanImage } from '../lib/images.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 
@@ -63,6 +64,16 @@ const SIGNATURES: Record<string, (b: Buffer) => boolean> = {
   'image/webp': (b) => b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP',
   'application/pdf': (b) => b.subarray(0, 5).toString('latin1') === '%PDF-',
 };
+
+/**
+ * A logo goes on every quote and invoice PDF, so it's decoded here and stored as a clean copy:
+ * a damaged or crafted PNG is refused now, not found later by the PDF library.
+ */
+export function cleanLogo(input: z.infer<typeof attachmentInput>): z.infer<typeof attachmentInput> {
+  const clean = cleanImage(Buffer.from(input.dataBase64, 'base64'));
+  if (!clean) throw badRequest('That logo can’t be read. Save it again as a PNG or JPEG (up to 4096 pixels a side) and try again.');
+  return { ...input, mime: clean[0] === 0xff ? 'image/jpeg' : 'image/png', dataBase64: clean.toString('base64') };
+}
 
 export async function saveAttachment(db: Db, input: z.infer<typeof attachmentInput>, createdBy: string): Promise<string> {
   const bytes = Buffer.from(input.dataBase64, 'base64');
@@ -112,7 +123,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/settings/logo', { preHandler: requireRole('owner') }, async (req) => {
     const input = parse(attachmentInput, req.body);
     if (!input.mime.startsWith('image/png') && !input.mime.startsWith('image/jpeg')) throw badRequest('Use a PNG or JPEG logo');
-    const id = await saveAttachment(sql, input, userOrThrow(req).id);
+    const id = await saveAttachment(sql, cleanLogo(input), userOrThrow(req).id);
     await sql`update settings set logo_id = ${id} where id`;
     return { logoId: id };
   });
@@ -153,7 +164,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = parse(idParam, req.params);
     const input = parse(attachmentInput, req.body);
     if (input.mime !== 'image/png' && input.mime !== 'image/jpeg') throw badRequest('Use a PNG or JPEG logo');
-    const logoId = await saveAttachment(sql, input, userOrThrow(req).id);
+    const logoId = await saveAttachment(sql, cleanLogo(input), userOrThrow(req).id);
     await sql`update brands set logo_id = ${logoId} where id = ${id}`;
     return { logoId };
   });

@@ -10,6 +10,8 @@
  * Columns are found by their headings, so moved or extra columns don't matter.
  */
 import ExcelJS from 'exceljs';
+import { badRequest } from '../../lib/errors.js';
+import { zipTooBig } from '../../lib/zip.js';
 
 export interface TrackerPlan {
   clients: { code: string }[];
@@ -121,9 +123,22 @@ function sheet(wb: ExcelJS.Workbook, ...names: string[]): ExcelJS.Worksheet | un
   return wb.worksheets.find((w) => want.includes(w.name.trim().toLowerCase()));
 }
 
+/** A tracker workbook is a few MB unpacked; these keep a crafted one from exhausting memory. */
+const MAX_UNPACKED = 64 * 1024 * 1024;
+const MAX_ROWS = 50_000;
+const MAX_COLUMNS = 500;
+
 export async function readTracker(buffer: Buffer | ArrayBuffer): Promise<TrackerPlan> {
+  const bytes = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+  const tooBig = zipTooBig(bytes, MAX_UNPACKED);
+  if (tooBig) throw badRequest(tooBig);
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(buffer as ArrayBuffer);
+  await wb.xlsx.load(bytes as unknown as ArrayBuffer);
+  // Every loop below walks a sheet row by row: one cell typed far down a sheet would otherwise
+  // make it visit (and create) millions of empty rows.
+  for (const ws of wb.worksheets) {
+    if (ws.rowCount > MAX_ROWS || ws.columnCount > MAX_COLUMNS) throw badRequest(`The sheet “${ws.name}” is too big to read (${MAX_ROWS.toLocaleString('en-ZA')} rows and ${MAX_COLUMNS} columns at most)`);
+  }
   const warnings: string[] = [];
   const plan: TrackerPlan = {
     clients: [],
@@ -309,7 +324,7 @@ export async function readTracker(buffer: Buffer | ArrayBuffer): Promise<Tracker
           let amt = num(casualValue);
           let note = project;
           if (amt == null) {
-            const text = str(casualValue);
+            const text = str(casualValue).slice(0, 200);
             const m = text.match(/-?\s*R?\s*(\d+(?:[.,]\d{1,2})?)/i);
             if (m) {
               amt = Number(m[1]!.replace(',', '.')) * (/from savings/i.test(project) ? -1 : 1);

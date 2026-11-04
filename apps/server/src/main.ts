@@ -45,6 +45,13 @@ const shutdown = async () => {
 };
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
+// Something thrown where no request can catch it (a library's own callback): say what it was in
+// the log before stopping, so it can be found; the container's restart policy brings Shap back.
+process.on('uncaughtException', (err) => {
+  app.log.fatal({ err }, 'Shap stopped on an unexpected error');
+  process.exit(1);
+});
+process.on('unhandledRejection', (err) => app.log.error({ err }, 'A background task failed'));
 
 await app.listen({ host: config.HOST, port: config.PORT });
 // Monthly invoices go out on their day without anyone opening Shap.
