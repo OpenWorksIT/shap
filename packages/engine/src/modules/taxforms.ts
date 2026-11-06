@@ -4,7 +4,7 @@
  * checks them and files on eFiling. Shap doesn't file, and isn't a tax practitioner.
  */
 import type { App as FastifyInstance } from '../http.js';
-import { addMonths, financialYear, lastBusinessDay, monthEnd, monthsBetween, turnoverTax, turnoverTaxTable, TURNOVER_TAX_LIMIT_CENTS, vat201Due, vatPeriod } from '@shap/shared';
+import { addMonths, entity, financialYear, lastBusinessDay, monthEnd, monthsBetween, splitByShares, turnoverTax, turnoverTaxTable, TURNOVER_TAX_LIMIT_CENTS, vat201Due, vatPeriod } from '@shap/shared';
 import { z } from 'zod';
 import { requireRole } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -88,7 +88,10 @@ export function registerTaxFormRoutes(app: FastifyInstance, ctx: Ctx): void {
       where a.type = 'income' and coalesce(a.system_key, '') <> 'disposal_gain_loss' and l.date between ${fy.start}::date and ${asAt}::date`;
     const actual = Number(r!.income);
     const projected = Math.round((actual / months) * 12);
-    const tax = turnoverTax(projected, fy.end);
+    // A partnership's partners each pay turnover tax on their own share of the turnover.
+    const partners = entity(settings.businessType).taxedAs === 'partners' ? await sql<{ id: string; name: string; shareBp: number }[]>`select id, name, share_bp from partners where active order by created_at` : [];
+    const perPartner = splitByShares(projected, partners).map((p) => ({ name: p.partner.name, shareBp: p.partner.shareBp, turnoverCents: p.cents, taxCents: turnoverTax(p.cents, fy.end) }));
+    const tax = partners.length ? perPartner.reduce((t, p) => t + p.taxCents, 0) : turnoverTax(projected, fy.end);
     const [y1, m1] = addMonths(fy.start, 5).split('-').map(Number) as [number, number];
     const [y2, m2] = fy.end.split('-').map(Number) as [number, number];
     return {
@@ -100,6 +103,7 @@ export function registerTaxFormRoutes(app: FastifyInstance, ctx: Ctx): void {
       projectedCents: projected,
       taxCents: tax,
       overLimit: projected > TURNOVER_TAX_LIMIT_CENTS,
+      partners: perPartner,
       limitCents: TURNOVER_TAX_LIMIT_CENTS,
       bands: turnoverTaxTable(fy.end),
       // Two interim payments (TT02): half by the end of the sixth month, the rest by year end.

@@ -14,6 +14,7 @@ import { registerDashboardRoutes } from './modules/dashboard.js';
 import { registerDocumentRoutes } from './modules/documents.js';
 import { registerDuplicateRoutes } from './modules/duplicates.js';
 import { registerPayrollRoutes } from './modules/payroll.js';
+import { registerPartnerRoutes } from './modules/partners.js';
 import { registerProjectRoutes } from './modules/projects.js';
 import { registerRecurringRoutes } from './modules/recurring.js';
 import { registerReportRoutes } from './modules/reports.js';
@@ -71,5 +72,6 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: App; ctx: Ctx
   registerStatementRoutes(app, ctx);
   registerCompanyFileRoutes(app, ctx);
   registerPayrollRoutes(app, ctx);
+  registerPartnerRoutes(app, ctx);
   return { app, ctx };
 }

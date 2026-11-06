@@ -4,7 +4,7 @@
  */
 import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { extrasFor, featuresFor, INDUSTRIES, TURNOVER_TAX_LIMIT_CENTS, formatZar, WORKFLOWS, type IndustryKey, type SetupExtras, type Workflow } from '@shap/shared';
+import { BUSINESS_TYPES, ENTITIES, entity, extrasFor, featuresFor, INDUSTRIES, paysOutProfit, payoutWord, TURNOVER_TAX_LIMIT_CENTS, formatZar, WORKFLOWS, type IndustryKey, type SetupExtras, type Workflow } from '@shap/shared';
 import { LogoField } from '../components/BusinessForm';
 import { Logo } from '../components/Logo';
 import { Field, Icon, MoneyInput } from '../components/ui';
@@ -43,7 +43,10 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setF((x) => ({ ...x, [k]: v }));
-  const company = f.businessType === 'company';
+  const kind = entity(f.businessType);
+  // Pays its owners out of profit (dividends, or a CC's or trust's distributions).
+  const paysOut = paysOutProfit(f.businessType);
+  const common = f.businessType === 'sole_prop' || f.businessType === 'company';
   const go = (s: Step) => (setError(''), setStep(s), window.scrollTo(0, 0));
   const next = () => go(STEPS[STEPS.indexOf(step) + 1]!);
   const back = () => go(STEPS[STEPS.indexOf(step) - 1]!);
@@ -54,10 +57,10 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
     setError('');
     const features = {
       ...f.features,
-      ...featuresFor({ workflow, employees: Boolean(employees), casual: Boolean(casual), company, dividends: dividends ?? false, extras, payshap: Boolean(f.payshapId.trim()) }),
+      ...featuresFor({ workflow, employees: Boolean(employees), casual: Boolean(casual), company: paysOut, dividends: dividends ?? false, extras, payshap: Boolean(f.payshapId.trim()) }),
     };
     try {
-      const { logoId: _l, ...rest } = { ...f, features, industry, usageConsent: Boolean(consent), marketConsent: market, marketNoticeSeen: true, setupDone: true, fyEndMonth: company ? f.fyEndMonth : 2 } as Settings & { logoId: string | null };
+      const { logoId: _l, ...rest } = { ...f, features, industry, usageConsent: Boolean(consent), marketConsent: market, marketNoticeSeen: true, setupDone: true, fyEndMonth: kind.febYearEnd ? 2 : f.fyEndMonth, turnoverTax: kind.turnoverTax && f.turnoverTax } as Settings & { logoId: string | null };
       await api('/api/settings', { method: 'PUT', body: rest });
       setTone(f.tone);
       setBackupPlace(place);
@@ -134,9 +137,24 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
 
         {step === 'structure' && (
           <Q title="How is your business set up?" sub="This decides how your tax is worked out.">
-            <Choice on={!company} onClick={() => set('businessType', 'sole_prop')} title="Just me, in my own name" hint="A sole proprietor: the profit is taxed as your own income, on SARS’s tables for individuals. Year ends in February." />
-            <Choice on={company} onClick={() => set('businessType', 'company')} title="A company (Pty) Ltd" hint="The company pays company tax (small business rates if it qualifies) and can pay you a salary and dividends." />
-            <Field label={company ? 'Company name' : 'Business name'} hint={company ? 'e.g. Sparky Electrical (Pty) Ltd' : 'As clients know you, or your own name'}>
+            <Choice on={f.businessType === 'sole_prop'} onClick={() => set('businessType', 'sole_prop')} title="Just me, in my own name" hint="A sole proprietor: the profit is taxed as your own income, on SARS’s tables for individuals. Year ends in February." />
+            <Choice on={f.businessType === 'company'} onClick={() => set('businessType', 'company')} title="A company (Pty) Ltd" hint="The company pays company tax (small business rates if it qualifies) and can pay you a salary and dividends." />
+            <Choice on={!common} onClick={() => common && set('businessType', 'partnership')} title="A partnership, CC, trust or something else" hint="Partnerships, close corporations, trading trusts, Inc. companies, non-profit companies and co-operatives." />
+            {!common && (
+              <Field label="Which kind?" hint={`${kind.description} ${kind.ownerMoney}`}>
+                {(p) => (
+                  <select {...p} className="select" value={f.businessType} onChange={(e) => set('businessType', e.target.value as Settings['businessType'])}>
+                    {BUSINESS_TYPES.filter((t) => t !== 'sole_prop' && t !== 'company').map((t) => (
+                      <option key={t} value={t}>
+                        {ENTITIES[t].label}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </Field>
+            )}
+            {f.businessType === 'partnership' && <p className="xs muted">You’ll add the partners and their shares of the profit in Settings, after these questions.</p>}
+            <Field label={f.businessType === 'sole_prop' || f.businessType === 'partnership' ? 'Business name' : 'Registered name'} hint={kind.example}>
               {(p) => <input {...p} className="input" value={f.companyName} onChange={(e) => set('companyName', e.target.value)} />}
             </Field>
             <label className="check">
@@ -146,13 +164,13 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
                 <div className="xs muted">Not yet? Shap warns you when you get near the point where you must (R2.3 million a year).</div>
               </span>
             </label>
-            <label className="check">
+            {kind.turnoverTax && <label className="check">
               <input type="checkbox" checked={f.turnoverTax} onChange={(e) => set('turnoverTax', e.target.checked)} />
               <span>
                 Registered for turnover tax
                 <div className="xs muted">SARS’s simpler tax for micro businesses (turnover up to {formatZar(TURNOVER_TAX_LIMIT_CENTS, { cents: false })} a year). Only if you registered for it: not sure? Leave it off.</div>
               </span>
-            </label>
+            </label>}
             {nav(Boolean(f.companyName.trim()))}
           </Q>
         )}
@@ -204,8 +222,15 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
           <Q title="Who works with you?" sub="Switch on only what you need.">
             <YesNo q="Do you have employees on a monthly salary?" hint="Payroll: payslips, PAYE, UIF and SDL worked out for you." value={employees} onChange={setEmployees} />
             <YesNo q="Do you use casual labour, paid by the day?" hint="Log the days they work on each job and what you’ve paid them." value={casual} onChange={setCasual} />
-            {company && <YesNo q="Will the company pay you dividends?" hint="Declare dividends with the 20% dividends tax handled." value={dividends} onChange={setDividends} />}
-            {nav(employees !== null && casual !== null && (!company || dividends !== null))}
+            {paysOut && (
+              <YesNo
+                q={`Will ${kind.the} pay ${kind.owner.many} ${payoutWord(f.businessType)}s?`}
+                hint={kind.dividendsTax ? 'Record them with the 20% dividends tax handled.' : 'Record them: the tax estimate takes this year’s income given to South African beneficiaries off the trust’s taxable income.'}
+                value={dividends}
+                onChange={setDividends}
+              />
+            )}
+            {nav(employees !== null && casual !== null && (!paysOut || dividends !== null))}
           </Q>
         )}
 
@@ -272,7 +297,7 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
                   )}
                 </Field>
               )}
-              {company && <Field label="Company registration number">{(p) => <input {...p} className="input" value={f.regNumber} onChange={(e) => set('regNumber', e.target.value)} />}</Field>}
+              {kind.regLabel && <Field label={kind.regLabel}>{(p) => <input {...p} className="input" value={f.regNumber} onChange={(e) => set('regNumber', e.target.value)} />}</Field>}
             </div>
             <Field label="Payment terms (on invoices)">{(p) => <textarea {...p} className="textarea" rows={2} value={f.invoiceTerms} onChange={(e) => set('invoiceTerms', e.target.value)} />}</Field>
             {nav()}

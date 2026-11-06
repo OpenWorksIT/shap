@@ -3,6 +3,7 @@
  * and logo. Used by the first-run questions and by Settings.
  */
 import { useState } from 'react';
+import { BUSINESS_TYPES, ENTITIES, entity } from '@shap/shared';
 import { api, ApiError } from '../lib/api';
 import { cleanPngLogo, shrinkImage } from '../lib/files';
 import { pickFile } from '../lib/native';
@@ -21,21 +22,25 @@ export function BusinessFields({ f, set, compact = false }: { f: BusinessFields;
       {(p) => <input {...p} className="input" type={type} value={f[k]} onChange={(e) => set(k, e.target.value)} required={required} />}
     </Field>
   );
-  const company = f.businessType === 'company';
+  const kind = entity(f.businessType);
+  const registered = kind.key !== 'sole_prop' && kind.key !== 'partnership';
   return (
     <div className="stack">
-      <Field label="Your business is">
+      <Field label="Your business is" hint={compact ? undefined : `${kind.description} ${kind.ownerMoney}`}>
         {(p) => (
           <select {...p} className="select" value={f.businessType} onChange={(e) => set('businessType', e.target.value as BusinessFields['businessType'])}>
-            <option value="sole_prop">Just me, in my own name (sole proprietor)</option>
-            <option value="company">A company (Pty Ltd)</option>
+            {BUSINESS_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {ENTITIES[t].label}
+              </option>
+            ))}
           </select>
         )}
       </Field>
       <div className="form-grid">
-        {text('companyName', company ? 'Registered company name' : 'Business name', company ? 'e.g. Sparky Electrical (Pty) Ltd' : 'As clients know you, e.g. Sparky Electrical, or your own name', 'text', true)}
+        {text('companyName', registered ? 'Registered name' : 'Business name', kind.example, 'text', true)}
         {text('tradingName', 'Trading as (optional)', 'Only if quotes should show a different name')}
-        {company && text('regNumber', 'Company registration number')}
+        {kind.regLabel && text('regNumber', kind.regLabel)}
       </div>
       <label className="check">
         <input type="checkbox" checked={f.vatRegistered} onChange={(e) => set('vatRegistered', e.target.checked)} />

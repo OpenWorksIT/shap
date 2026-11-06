@@ -1,3 +1,4 @@
+import { paysOutProfit } from '@shap/shared';
 import { lazy, Suspense, useEffect } from 'react';
 import { shareMarket } from './lib/usage';
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
@@ -54,7 +55,7 @@ function Opened() {
 
 function Books() {
   const { settings, has } = useAuthed();
-  const pays = has('payroll') || (settings.businessType === 'company' && has('dividends'));
+  const pays = has('payroll') || (paysOutProfit(settings.businessType) && has('dividends'));
   const navigate = useNavigate();
   useEffect(() => void listenForReminder(navigate), [navigate]);
   // Last month's anonymous prices, once, a little after opening (never in the way of the first screens).

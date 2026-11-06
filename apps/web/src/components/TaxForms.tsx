@@ -100,6 +100,8 @@ interface TurnoverData {
   taxCents: number;
   overLimit: boolean;
   limitCents: number;
+  /** A partnership: each partner pays on their own share of the turnover. */
+  partners?: { name: string; shareBp: number; turnoverCents: number; taxCents: number }[];
   bands: [number, number, number][];
   interim: { label: string; due: string; cents: number }[];
 }
@@ -140,6 +142,19 @@ export function TurnoverTax() {
             </strong>
           </div>
         </div>
+        {data.partners && data.partners.length > 0 && (
+          <ul className="list">
+            {data.partners.map((p) => (
+              <li key={p.name} className="list-row">
+                <span className="grow small">
+                  {p.name} ({(p.shareBp / 100).toLocaleString('en-ZA')}%)
+                  <div className="xs muted">Turnover share <Money cents={p.turnoverCents} whole />: each partner registers and pays on their own share</div>
+                </span>
+                <Money cents={p.taxCents} whole />
+              </li>
+            ))}
+          </ul>
+        )}
         <ul className="list">
           {data.interim.map((i) => (
             <li key={i.label} className="list-row">

@@ -13,19 +13,7 @@
  *     SDL owed                             Cr SDL
  *     the bank (or wherever it's paid from) Cr net pay
  */
-import {
-  dividendInput,
-  dividendTax,
-  dwtDue,
-  emp201Due,
-  employeeInput,
-  payLine,
-  payLineInput,
-  payRunInput,
-  sarsPaymentInput,
-  taxYearEnd,
-  type AgeBand,
-} from '@shap/shared';
+import { dividendInput, dividendTax, dwtDue, emp201Due, employeeInput, payLine, payLineInput, payRunInput, sarsPaymentInput, taxYearEnd, type AgeBand, entity, paysOutProfit, payoutWord } from '@shap/shared';
 import PDFDocument from 'pdfkit';
 import { z } from 'zod';
 import { requireRole, userOrThrow } from '../auth.js';
@@ -415,16 +403,23 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
     availableCents: await distributable(sql),
   }));
 
+  // What the books call a payout and the person it goes to: a dividend to a shareholder, a
+  // distribution to a CC's member or a trust's beneficiary (entities.ts).
+  const words = (type: string) => {
+    const word = payoutWord(type);
+    return { Word: word[0]!.toUpperCase() + word.slice(1), to: entity(type).owner.one };
+  };
   const payDividend = async (tx: Tx, d: { id: string; grossCents: number; dwtCents: number; netCents: number; shareholder: string }, paidOn: string, sourceId: string, userId: string) => {
     const src = await sourceAccount(tx, sourceId);
+    const w = words((await getSettings(tx)).businessType);
     return postJournal(tx, {
       date: paidOn,
-      description: `Dividend paid to ${d.shareholder}`,
+      description: `${w.Word} paid to ${d.shareholder}`,
       kind: 'dividend',
       sourceId: d.id,
       userId,
       lines: [
-        { key: 'dividends_payable', debit: d.grossCents, memo: 'Dividend' },
+        { key: 'dividends_payable', debit: d.grossCents, memo: w.Word },
         { key: 'dwt_payable', credit: d.dwtCents, memo: 'Dividends tax withheld (20%)' },
         { key: src.accountId, credit: d.netCents, memo: `Paid from ${src.name}` },
       ],
@@ -435,24 +430,28 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
     const user = userOrThrow(req);
     const input = parse(dividendInput, req.body);
     const settings = await getSettings(sql);
-    if (settings.businessType !== 'company') throw badRequest('Only a company pays dividends. As a sole proprietor, money you take out is drawings.');
+    const kind = entity(settings.businessType);
+    if (kind.payout === 'none') throw badRequest('A non-profit company can’t pay out its profits to anyone.');
+    if (!paysOutProfit(settings.businessType)) throw badRequest(`A ${kind.label.toLowerCase()} doesn’t pay dividends: money the ${kind.owner.many} take out is drawings, recorded against their accounts.`);
     if (input.paidOn && !input.sourceId) throw badRequest('Choose where it’s paid from');
     if (input.paidOn && input.paidOn < input.declaredOn) throw badRequest('It can’t be paid before it’s declared');
     await assertOpen(sql, input.declaredOn, input.paidOn);
-    const dwt = dividendTax(input.grossCents, input.exempt);
+    // A trust's distributions carry no dividends tax (the beneficiary is taxed on the income).
+    const dwt = kind.dividendsTax ? dividendTax(input.grossCents, input.exempt) : 0;
+    const w = words(settings.businessType);
     const id = await sql.begin(async (tx) => {
       const [d] = await tx<{ id: string }[]>`
-        insert into dividends (declared_on, paid_on, shareholder, gross_cents, exempt, dwt_cents, net_cents, source_id, note, created_by)
-        values (${input.declaredOn}, ${input.paidOn}, ${input.shareholder}, ${input.grossCents}, ${input.exempt}, ${dwt}, ${input.grossCents - dwt}, ${input.sourceId}, ${input.note}, ${user.id}) returning id`;
+        insert into dividends (declared_on, paid_on, shareholder, gross_cents, exempt, conduit, dwt_cents, net_cents, source_id, note, created_by)
+        values (${input.declaredOn}, ${input.paidOn}, ${input.shareholder}, ${input.grossCents}, ${input.exempt || !kind.dividendsTax}, ${kind.key === 'trust' ? input.conduit : true}, ${dwt}, ${input.grossCents - dwt}, ${input.sourceId}, ${input.note}, ${user.id}) returning id`;
       const declared = await postJournal(tx, {
         date: input.declaredOn,
-        description: `Dividend declared to ${input.shareholder}`,
+        description: `${w.Word} declared to ${input.shareholder}`,
         kind: 'dividend',
         sourceId: d!.id,
         userId: user.id,
         lines: [
-          { key: 'dividends', debit: input.grossCents, memo: 'Dividend declared' },
-          { key: 'dividends_payable', credit: input.grossCents, memo: 'Owed to the shareholder' },
+          { key: 'dividends', debit: input.grossCents, memo: `${w.Word} declared` },
+          { key: 'dividends_payable', credit: input.grossCents, memo: `Owed to the ${w.to}` },
         ],
       });
       const paid = input.paidOn ? await payDividend(tx, { id: d!.id, grossCents: input.grossCents, dwtCents: dwt, netCents: input.grossCents - dwt, shareholder: input.shareholder }, input.paidOn, input.sourceId!, user.id) : null;

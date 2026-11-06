@@ -1,4 +1,4 @@
-import type { AccountType, CategoryKind, LineCategory, ProjectStatus, Role, SourceKind, WorkerKind } from '@shap/shared';
+import type { AccountType, CategoryKind, LineCategory, ProjectStatus, Role, SourceKind, WorkerKind, BusinessType } from '@shap/shared';
 
 export interface User {
   id: string;
@@ -18,7 +18,8 @@ export interface Settings {
   website: string;
   bankDetails: string;
   logoId: string | null;
-  businessType: 'company' | 'sole_prop';
+  businessType: BusinessType;
+  approvedPbo: boolean;
   features: Record<string, boolean>;
   tone: 'casual' | 'formal';
   creditPrefix: string;

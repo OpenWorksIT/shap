@@ -5,7 +5,26 @@
 import { Link, useParams } from 'react-router-dom';
 import { PageHead } from '../components/Shell';
 import { Icon } from '../components/ui';
+import { entity, type TaxedAs } from '@shap/shared';
 import { useAuthed } from '../lib/session';
+
+/** What decides which guides are yours (entities.ts). */
+interface GuideState {
+  /** Files the company return (ITR14): a company, CC, co-op, Inc., or an NPC without PBO approval. */
+  company: boolean;
+  taxedAs: TaxedAs;
+  /** An NPC approved as a public benefit organisation. */
+  pbo: boolean;
+  /** Its payouts carry dividends tax. */
+  dividendsTax: boolean;
+  /** A company or CC registered with CIPC: annual return with beneficial ownership. */
+  cipc: boolean;
+  /** A co-operative: its own annual return under the Co-operatives Act. */
+  coop: boolean;
+  vat: boolean;
+  payroll: boolean;
+  turnover: boolean;
+}
 
 interface Guide {
   key: string;
@@ -16,7 +35,7 @@ interface Guide {
   steps: string[];
   tips: string[];
   source: string;
-  show?: (s: { company: boolean; vat: boolean; payroll: boolean; turnover: boolean }) => boolean;
+  show?: (s: GuideState) => boolean;
 }
 
 const GUIDES: Guide[] = [
@@ -59,12 +78,12 @@ const GUIDES: Guide[] = [
       'If turnover tax applies to you instead, see the turnover tax guide: it replaces provisional tax.',
     ],
     source: 'https://www.sars.gov.za/types-of-tax/provisional-tax/',
-    show: (s) => !s.turnover,
+    show: (s) => !s.turnover && !s.pbo,
   },
   {
     key: 'itr12',
     title: 'Personal income tax return (ITR12), sole proprietors',
-    who: 'You, as a sole proprietor: your business profit is part of your own income.',
+    who: 'You, as a sole proprietor, and each partner in a partnership: the business profit (or your share of it) is part of your own income.',
     when: 'In SARS’s filing season. For 2026: from 13 July 2026; provisional taxpayers by 22 January 2027.',
     figures: [
       { label: 'Accounts → Income statement for the tax year (March to February)', to: '/accounts?tab=income' },
@@ -77,14 +96,18 @@ const GUIDES: Guide[] = [
       'Enter the business’s gross income and its deductible expenses from Shap’s income statement (leave out what you took for yourself: that’s drawings, not a cost).',
       'Add your other income (salary, interest) and deductions (retirement annuity, medical) as usual, then submit.',
     ],
-    tips: ['Keep the slips for at least five years: SARS can ask for them. Shap keeps them with each cost.', 'If you have employees, the payroll guides apply too.'],
+    tips: [
+      'Keep the slips for at least five years: SARS can ask for them. Shap keeps them with each cost.',
+      'If you have employees, the payroll guides apply too.',
+      'In a partnership, the partnership itself files no income tax return: each partner declares their share of the profit (Accounts → Year end shares it) on their own ITR12.',
+    ],
     source: 'https://www.sars.gov.za/types-of-tax/personal-income-tax/tax-season/',
-    show: (s) => !s.company && !s.turnover,
+    show: (s) => (s.taxedAs === 'individual' || s.taxedAs === 'partners') && !s.turnover,
   },
   {
     key: 'itr14',
     title: 'Company income tax return (ITR14)',
-    who: 'Every company (Pty) Ltd, trading or not.',
+    who: 'Every company ((Pty) Ltd, Inc. or co-operative) and every close corporation, trading or not, and a non-profit company without PBO approval.',
     when: 'Within 12 months after the company’s financial year end.',
     figures: [
       { label: 'Accounts → Income statement and balance sheet for the financial year', to: '/accounts?tab=income' },
@@ -149,7 +172,7 @@ const GUIDES: Guide[] = [
   {
     key: 'dividends',
     title: 'Dividends tax return (DTR01)',
-    who: 'Companies that pay a dividend.',
+    who: 'Companies, close corporations and co-operatives that pay a dividend (a CC’s distributions to its members count).',
     when: 'By the last day of the month after the dividend was paid.',
     figures: [{ label: 'Payroll → Dividends: each dividend and the 20% tax held back', to: '/payroll?tab=dividends' }],
     steps: [
@@ -159,14 +182,99 @@ const GUIDES: Guide[] = [
     ],
     tips: ['Dividends paid to a South African company are exempt, but the return is still needed.'],
     source: 'https://www.sars.gov.za/types-of-tax/dividends-tax/',
-    show: (s) => s.company,
+    show: (s) => s.dividendsTax,
+  },
+  {
+    key: 'itr12t',
+    title: 'Trust income tax return (ITR12T)',
+    who: 'Every trust registered with SARS, including a trading trust.',
+    when: 'In SARS’s trust filing season: for 2026, from 19 September 2026 to 22 January 2027.',
+    figures: [
+      { label: 'Accounts → Income statement and balance sheet for the year to February', to: '/accounts?tab=income' },
+      { label: 'Payroll → Distributions: what each beneficiary was given', to: '/payroll?tab=dividends' },
+      { label: 'Accounts → Tax: the trust’s estimate (45% on what it keeps)', to: '/accounts?tab=tax' },
+    ],
+    steps: [
+      'Get the trust’s annual financial statements done for the year ending February. In Shap, enter their figures under Accounts → Year end so the books agree, and lock the year.',
+      'Submit the IT3(t) third-party data first (for 2026, by 30 September 2026): what each beneficiary was given (vested) in the year. The ITR12T fills its beneficiary schedules in from it.',
+      'Log in to eFiling as the trust, open the ITR12T for the year, and check the income, the deductions and the amounts given to beneficiaries (taxed in their hands, not the trust’s).',
+      'Submit, and pay any tax still owing on what the trust kept (45%) with the PRN.',
+    ],
+    tips: [
+      'A trust pays provisional tax like an individual (by the end of August and of February). Accounts → Tax works out the estimate.',
+      'The trustees keep the trust’s beneficial ownership register (who the trustees, founders and beneficiaries are) and lodge it with the Master of the High Court.',
+    ],
+    source: 'https://www.sars.gov.za/latest-news/trust-filing-season-opens-on-19-september-2026/',
+    show: (s) => s.taxedAs === 'trust',
+  },
+  {
+    key: 'it12ei',
+    title: 'Tax-exempt organisation return (IT12EI)',
+    who: 'A non-profit company that SARS has approved as a public benefit organisation (PBO), and other tax-exempt institutions.',
+    when: 'Every year, within 12 months after the financial year end, whether or not any tax is due.',
+    figures: [
+      { label: 'Accounts → Income statement and balance sheet for the financial year', to: '/accounts?tab=income' },
+      { label: 'Accounts → Year end: the accountant’s figures, agreed', to: '/accounts?tab=yearend' },
+    ],
+    steps: [
+      'Get the annual financial statements done (by your accountant), enter their figures under Accounts → Year end, and lock the year.',
+      'Log in to eFiling as the organisation and open the IT12EI for the year.',
+      'Fill in the organisation’s details, its income and expenditure, and its trading activities (if any): trading outside what the PBO rules allow can be taxed.',
+      'Submit. If SARS works out tax on any trading income, pay it with the PRN.',
+    ],
+    tips: ['Keep the PBO approval letter and the records of donations you gave section 18A receipts for: SARS can ask for them.'],
+    source: 'https://www.sars.gov.za/types-of-taxpayers/tax-exempt-institutions',
+    show: (s) => s.pbo,
+  },
+  {
+    key: 'cipc',
+    title: 'CIPC annual return and beneficial ownership',
+    who: 'Every company (including Inc. and non-profit companies) and every close corporation registered with CIPC.',
+    when: 'Every year, within 30 business days after the anniversary of registration.',
+    figures: [{ label: 'Accounts → Income statement: the year’s turnover (the fee depends on it)', to: '/accounts?tab=income' }],
+    steps: [
+      'Log in to CIPC’s online services with the company’s or CC’s customer code.',
+      'First check the beneficial ownership details (who ultimately owns or controls it) are up to date: CIPC won’t accept the annual return until they are.',
+      'File the annual return with the turnover for the year, and pay the fee.',
+      'Keep CIPC’s confirmation: banks and tenders often ask for it.',
+    ],
+    tips: ['Late annual returns cost penalties, and after long enough CIPC deregisters the company or CC.'],
+    source: 'https://accountingacademy.co.za/news/read/cipc-enforcing-beneficial-ownership-information-with-annual-return-filings-for-companies-and-ccs',
+    show: (s) => s.cipc,
+  },
+  {
+    key: 'coop',
+    title: 'Co-operative annual return (CIPC)',
+    who: 'Every co-operative registered with CIPC.',
+    when: 'Every year, with the co-operative’s annual financial statements: check the due date on CIPC’s co-operatives page.',
+    figures: [{ label: 'Accounts → Income statement and balance sheet for the financial year', to: '/accounts?tab=income' }],
+    steps: [
+      'Get the annual financial statements done: under the Co-operatives Act they are audited or independently reviewed, depending on the co-operative.',
+      'Log in to CIPC’s online services with the co-operative’s customer code and file the annual return with the financial statements.',
+      'Keep CIPC’s confirmation.',
+    ],
+    tips: ['Co-operatives don’t file beneficial ownership with CIPC (companies and CCs do).', 'Income tax is separate: the co-operative files the company return (ITR14) with SARS.'],
+    source: 'https://accountingacademy.co.za/news/read/cipc-annual-submission-of-reports-and-filling-of-annual-returns-for-co-operatives',
+    show: (s) => s.coop,
   },
 ];
 
 export default function GuidesPage() {
   const { settings, has } = useAuthed();
   const { topic } = useParams();
-  const state = { company: settings.businessType === 'company', vat: settings.vatRegistered, payroll: has('payroll'), turnover: settings.turnoverTax };
+  const kind = entity(settings.businessType);
+  const pbo = kind.key === 'npc' && settings.approvedPbo;
+  const state: GuideState = {
+    company: kind.taxedAs === 'company' || (kind.taxedAs === 'npc' && !pbo),
+    taxedAs: kind.taxedAs,
+    pbo,
+    dividendsTax: kind.dividendsTax,
+    cipc: ['company', 'inc', 'cc', 'npc'].includes(kind.key),
+    coop: kind.key === 'coop',
+    vat: settings.vatRegistered,
+    payroll: has('payroll'),
+    turnover: settings.turnoverTax,
+  };
   const mine = GUIDES.filter((g) => !g.show || g.show(state));
   const others = GUIDES.filter((g) => g.show && !g.show(state));
   const guide = GUIDES.find((g) => g.key === topic);

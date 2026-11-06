@@ -1,6 +1,7 @@
+import { paysOutProfit } from '@shap/shared';
 import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { useAuthed } from '../lib/session';
+import { entityWords, useAuthed } from '../lib/session';
 import { Logo } from './Logo';
 import { Icon } from './ui';
 
@@ -22,7 +23,7 @@ export function Shell({ children }: { children: ReactNode }) {
     { to: '/log', label: 'Add', icon: 'log', show: true },
     { to: '/jobs', label: 'Jobs', icon: 'jobs', show: has('jobs') },
     { to: '/workers', label: 'Workers', icon: 'workers', show: has('workers') },
-    { to: '/payroll', label: has('payroll') ? 'Payroll' : 'Dividends', icon: 'money', show: has('payroll') || (settings.businessType === 'company' && has('dividends')) },
+    { to: '/payroll', label: has('payroll') ? 'Payroll' : entityWords(settings.businessType).Payouts, icon: 'money', show: has('payroll') || (paysOutProfit(settings.businessType) && has('dividends')) },
     { to: '/costs', label: 'Costs', icon: 'costs', show: true },
     { to: '/bills', label: 'Bills to pay', icon: 'bill', show: has('bills') },
     { to: '/logbook', label: 'Logbook', icon: 'car', show: has('logbook') },

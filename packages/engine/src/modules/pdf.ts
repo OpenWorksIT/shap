@@ -1,5 +1,5 @@
 import PDFDocument from 'pdfkit';
-import { featureOn, formatDate, formatZar, lineLabel, SHAP_LINE, SHAP_URL, type LineCategory } from '@shap/shared';
+import { featureOn, formatDate, formatZar, lineLabel, SHAP_LINE, SHAP_URL, type LineCategory, regPrefix } from '@shap/shared';
 import type { SettingsRow } from '../lib/books.js';
 
 export interface BrandRow {
@@ -241,7 +241,7 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   pdf.font(bold).fontSize(10.5).fillColor(INK).text(tradingName, L, y, { width: colW });
   const fromLines = [
     legal !== tradingName ? legal : '',
-    settings.regNumber ? `Reg. no. ${settings.regNumber}` : '',
+    settings.regNumber ? `${regPrefix(settings.businessType)} ${settings.regNumber}` : '',
     settings.vatRegistered && settings.vatNumber ? `VAT no. ${settings.vatNumber}` : '',
     contact.address,
     [contact.phone, contact.email].filter(Boolean).join('  ·  '),
@@ -414,7 +414,7 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
     pdf.page.margins.bottom = 0;
     const fy = pdf.page.height - (settings.watermark ? 46 : 40);
     pdf.rect(0, pdf.page.height - 6, W, 6).fill(accent);
-    const foot = [legal, settings.regNumber ? `Reg. ${settings.regNumber}` : '', settings.vatRegistered && settings.vatNumber ? `VAT ${settings.vatNumber}` : ''].filter(Boolean).join('  ·  ');
+    const foot = [legal, settings.regNumber ? `${regPrefix(settings.businessType)} ${settings.regNumber}` : '', settings.vatRegistered && settings.vatNumber ? `VAT ${settings.vatNumber}` : ''].filter(Boolean).join('  ·  ');
     pdf.font(regular).fontSize(7.5).fillColor(MUTED).text(foot, L, fy, { width: contentW - 80, lineBreak: false });
     pdf.text(`Page ${i - range.start + 1} of ${range.count}`, R - 80, fy, { width: 80, align: 'right', lineBreak: false });
     if (settings.watermark) shapFooter(pdf, L, fy + 14, contentW, regular);

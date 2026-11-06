@@ -1,3 +1,4 @@
+import { splitByShares } from './entities.js';
 /**
  * South African company income tax, for provisional tax estimates.
  * Source: SARS, "Companies, Trusts and Small Business Corporations (SBC)"
@@ -152,7 +153,18 @@ export function vatWatch(last12Cents: number, pace12Cents: number, on: string): 
 
 // ---------------------------------------------------------------- one estimate, either kind
 export interface TaxEstimateFigures {
-  kind: 'company' | 'individual';
+  /**
+   * Who pays: a company (CC, co-op, Inc.), an individual (a sole proprietor; each partner is
+   * worked out as one), a trust (45% on what it keeps), or a non-profit company (none once
+   * approved as a PBO, else 27% without the small business table).
+   */
+  kind: 'company' | 'individual' | 'trust' | 'npc' | 'partners';
+  /** Partnerships: the partners' shares (basis points). Each is worked out as an individual with no other income. */
+  partners?: { name: string; shareBp: number }[];
+  /** Trusts: income given to beneficiaries in the year (taxed in their hands, not the trust's). */
+  distributedCents?: number;
+  /** Non-profit companies: approved by SARS as a public benefit organisation. */
+  approvedPbo?: boolean;
   profitCents: number;
   assessedLossCents: number;
   fyEnd: string;
@@ -164,7 +176,24 @@ export interface TaxEstimateFigures {
   retirementCents?: number;
 }
 /** Taxable income and the year's tax, the same on the screen and when saved. */
-export function estimateTax(f: TaxEstimateFigures) {
+export function estimateTax(f: TaxEstimateFigures): { taxableCents: number; retirementDeductionCents: number; taxCents: number; partners?: { name: string; shareBp: number; taxableCents: number; taxCents: number }[] } {
+  if (f.kind === 'partners') {
+    // The partnership pays nothing itself: each partner pays on their share, on the individual
+    // tables. Shown without their other income, which only they (and SARS) know. A partnership
+    // has no assessed loss of its own: each year's loss already went to the partners that year.
+    const taxableCents = Math.max(0, f.profitCents);
+    const list = (f.partners ?? []).map((p, i) => ({ id: String(i), name: p.name, shareBp: p.shareBp }));
+    const partners = splitByShares(taxableCents, list).map(({ partner, cents }) => ({ name: partner.name, shareBp: partner.shareBp, taxableCents: cents, taxCents: individualTax(cents, f.fyEnd, 'under65') }));
+    return { taxableCents, retirementDeductionCents: 0, taxCents: partners.reduce((t, p) => t + p.taxCents, 0), partners };
+  }
+  if (f.kind === 'trust') {
+    const taxableCents = Math.max(0, f.profitCents - f.assessedLossCents - (f.distributedCents ?? 0));
+    return { taxableCents, retirementDeductionCents: 0, taxCents: Math.round(taxableCents * 0.45) };
+  }
+  if (f.kind === 'npc') {
+    const taxableCents = f.approvedPbo ? 0 : Math.max(0, f.profitCents - f.assessedLossCents);
+    return { taxableCents, retirementDeductionCents: 0, taxCents: companyTax(taxableCents, f.fyEnd, false) };
+  }
   if (f.kind === 'company') {
     const taxableCents = Math.max(0, f.profitCents - f.assessedLossCents);
     return { taxableCents, retirementDeductionCents: 0, taxCents: companyTax(taxableCents, f.fyEnd, f.sbc ?? true) };

@@ -1,20 +1,6 @@
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import {
-  ACCOUNT_TYPE_LABELS,
-  addMonths,
-  ASSET_CATEGORIES,
-  ASSET_DEFAULT_LIFE_MONTHS,
-  INTANGIBLE_CATEGORIES,
-  ASSET_CATEGORY_LABELS,
-  financialYear,
-  formatAmount,
-  formatDate,
-  formatZar,
-  LEDGER_SOURCE_LABELS,
-  todayIso,
-  type AssetCategory,
-} from '@shap/shared';
+import { ACCOUNT_TYPE_LABELS, addMonths, ASSET_CATEGORIES, ASSET_DEFAULT_LIFE_MONTHS, INTANGIBLE_CATEGORIES, ASSET_CATEGORY_LABELS, financialYear, formatAmount, formatDate, formatZar, LEDGER_SOURCE_LABELS, todayIso, type AssetCategory, equityHeading } from '@shap/shared';
 import { PageHead } from '../components/Shell';
 import { Drawer, Empty, ErrorBox, Field, Icon, Loading, Money, MoneyInput, Segmented, Tabs, useToast } from '../components/ui';
 import { api, ApiError } from '../lib/api';
@@ -261,6 +247,7 @@ function DatePicker({ date, onChange }: { date: string; onChange: (d: string) =>
 
 function BalanceSheet({ onAccount }: { onAccount: (id: string) => void }) {
   const { today } = usePeriods();
+  const { settings } = useAuthed();
   const [date, setDate] = useState(today);
   const { data, error } = useApi<BalanceSheetData>(`/api/reports/balance-sheet?date=${date}`);
   const rows = (items: BsItem[]) =>
@@ -345,7 +332,7 @@ function BalanceSheet({ onAccount }: { onAccount: (id: string) => void }) {
             </tbody>
             <tbody>
               <tr className="group">
-                <th colSpan={2}>Equity</th>
+                <th colSpan={2}>{equityHeading(settings.businessType)}</th>
               </tr>
               {rows(data.equity.items)}
               {sub('Total equity', data.equity.totalCents)}

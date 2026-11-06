@@ -2,6 +2,32 @@
 
 What changed in each version of Shap Pocket, newest first.
 
+## 0.9.0 (internal testing)
+
+- **Every kind of South African business.** As well as sole proprietors and (Pty) Ltd companies:
+  partnerships, close corporations, business (trading) trusts, Inc. companies, non-profit
+  companies and co-operatives. Choose it in setup (“A partnership, CC, trust or something else”)
+  or in Settings. Each one gets:
+  - its own names in the books (a CC’s “Members’ contributions” and “Members’ loan accounts”, a
+    trust’s “Trust capital” and “Accumulated profit”, and so on), with names you chose left alone;
+  - its own year end (sole proprietors, partnerships and trusts on SARS’s year to February);
+  - its own way of paying the owners: dividends, a CC’s distributions to members (with dividends
+    tax), a trust’s distributions to beneficiaries (no dividends tax), or drawings;
+  - the right tax estimate: company or small business rates, the individual tables, 45% on what a
+    trust keeps, or none for an approved PBO;
+  - the right SARS and CIPC guides, including new ones for the trust return (ITR12T and IT3(t)),
+    tax-exempt organisations (IT12EI), CIPC annual returns with beneficial ownership, and
+    co-operatives.
+- **Partnerships, properly.** Each partner has a capital account, a current account and their own
+  “Paid personally”, and a share of the profit. At the year end, Accounts → Year end shares the
+  year’s profit (or loss) into their current accounts in one tap, and the tax estimate and turnover
+  tax are worked out on each partner’s share.
+- **Trusts:** each distribution says whether it’s this year’s income to a beneficiary living in
+  South Africa (taxed in their hands, so it comes off the trust’s taxable income) or not (given to
+  someone abroad, or out of capital: the trust pays).
+- A company, CC or co-op on turnover tax needs its year end in February (SARS’s rule): Settings
+  now says so.
+
 ## 0.8.0 (internal testing)
 
 - **Anonymous prices, to help show what work typically costs.** Once a month, when the phone is

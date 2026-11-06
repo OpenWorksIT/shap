@@ -1,5 +1,5 @@
 import type { Req as FastifyRequest } from '../http.js';
-import { financialYear, safeText, todayIso } from '@shap/shared';
+import { entity, financialYear, safeText, standardNames, todayIso, type BusinessType } from '@shap/shared';
 import type { Db } from '../db/index.js';
 import { badRequest } from './errors.js';
 
@@ -15,7 +15,9 @@ export interface SettingsRow {
   bankDetails: string;
   logoId: string | null;
   defaultBrandId: string | null;
-  businessType: 'company' | 'sole_prop';
+  businessType: BusinessType;
+  /** A non-profit company approved by SARS as a public benefit organisation. */
+  approvedPbo: boolean;
   features: Record<string, boolean>;
   tone: 'casual' | 'formal';
   creditPrefix: string;
@@ -118,17 +120,19 @@ export function toCsv(header: string[], rows: (string | number | null | undefine
 
 export const centsToCsv = (c: number | null | undefined) => (c == null ? '' : (c / 100).toFixed(2));
 
-const OWNER_ACCOUNT = {
-  company: { name: 'Owner’s loan account', type: 'liability' },
-  sole_prop: { name: 'Owner’s capital and drawings', type: 'equity' },
-} as const;
 /**
- * The owner's account: for a company, what it owes the director (a loan); for a sole
- * proprietor, what the owner has put in less what they've taken out (equity). Only the
- * standard name changes; a name you chose yourself stays.
+ * The owners' accounts, named the way this kind of business names them (entities.ts): a CC's
+ * share capital is "Members' contributions", a trust's retained earnings "Accumulated funds".
+ * Only a standard name is replaced; a name someone chose stays. The owner's account is equity
+ * for a sole proprietor (capital less drawings) and a loan (a liability) for everyone else.
  */
-export async function applyBusinessType(db: Db, type: 'company' | 'sole_prop') {
-  const to = OWNER_ACCOUNT[type];
-  const from = OWNER_ACCOUNT[type === 'company' ? 'sole_prop' : 'company'];
-  await db`update accounts set type = ${to.type}, name = case when name = ${from.name} then ${to.name} else name end where system_key = 'owner_loan'`;
+export async function applyBusinessType(db: Db, type: BusinessType) {
+  const names = entity(type).accounts;
+  for (const key of ['share_capital', 'retained_earnings', 'owner_loan', 'dividends', 'dividends_payable', 'director_salary'] as const) {
+    const a = names[key];
+    const to = typeof a === 'string' ? a : a.name;
+    const standard = [...standardNames(key)];
+    await db`update accounts set name = case when name = any(${standard}) then ${to} else name end where system_key = ${key}`;
+  }
+  await db`update accounts set type = ${names.owner_loan.type} where system_key = 'owner_loan'`;
 }
