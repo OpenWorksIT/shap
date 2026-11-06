@@ -6,9 +6,11 @@ import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { bandCents, isMarketItem, lastWholeMonth, marketBand, marketRates } from '@shap/shared';
+import { addMonths, bandCents, isMarketItem, lastWholeMonth, marketBand, marketRates } from '@shap/shared';
 import { today } from '../src/lib/books.js';
-import { shareMarketRates } from '../src/modules/market.js';
+import { addressKey, collectMarket, MARKET_MONTHS_BACK, shareMarketRates } from '../src/modules/market.js';
+
+const MARKET_PLUMBER = { item: 'Geyser 150 L', unit: 'item' };
 import { login, setup, type TestEnv } from './helpers.js';
 
 const INSTALL = '3f2a9c1e-5b7d-4e8a-9c0f-1a2b3c4d5e6f';
@@ -99,6 +101,30 @@ describe('sharing and collecting', () => {
     expect((await send({ rates: [{ item: 'Plug point for Mr Botha', unit: 'point', cents: 65000 }] })).statusCode).toBe(400);
     expect((await send({ rates: [{ item: 'Tiling', unit: 'm²', cents: 40000 }] })).statusCode).toBe(400);
     expect((await send({ month: today().slice(0, 7) })).statusCode).toBe(400);
+    // Nor back-filling history: only the last few months that are over.
+    expect((await send({ month: addMonths(`${month}-01`, -MARKET_MONTHS_BACK).slice(0, 7) })).statusCode).toBe(400);
+    expect((await send({ month: addMonths(`${month}-01`, -(MARKET_MONTHS_BACK - 1)).slice(0, 7) })).statusCode).toBe(201);
     expect(marketFiles()).not.toContain('9b1c2d3e');
+  });
+
+  it('keeps a flood of made-up businesses from swamping an item', async () => {
+    const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+    const counted: number[] = [];
+    for (let n = 1; n <= 30; n++) {
+      const r = await collectMarket(env.ctx, { app: 'pocket', version: '0', installId: id(n), month, industry: 'plumber', rates: [{ item: MARKET_PLUMBER.item, unit: MARKET_PLUMBER.unit, cents: 10 }] });
+      counted.push(r);
+    }
+    // At most 25 new businesses an item a day.
+    expect(counted.filter((c) => c === 1)).toHaveLength(25);
+    const tally = JSON.parse(readFileSync(join(dir, 'market', `${month}.json`), 'utf8'));
+    expect(Object.keys(tally.people[`plumber|${MARKET_PLUMBER.item}|${MARKET_PLUMBER.unit}`])).toHaveLength(25);
+  });
+
+  it('counts an IPv6 connection as its /64', () => {
+    expect(addressKey('2001:db8:85a3:12:1:2:3:4')).toBe('2001:db8:85a3:12::/64');
+    expect(addressKey('2001:db8:85a3:12::99')).toBe('2001:db8:85a3:12::/64');
+    expect(addressKey('2001:db8::1')).toBe('2001:db8:0:0::/64');
+    expect(addressKey('::ffff:192.0.2.7')).toBe('192.0.2.7');
+    expect(addressKey('192.0.2.7')).toBe('192.0.2.7');
   });
 });

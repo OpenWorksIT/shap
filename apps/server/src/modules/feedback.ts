@@ -21,13 +21,14 @@
 import { randomBytes } from 'node:crypto';
 import { appendFile, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { BUSINESS_TYPES, type BusinessType, entity } from '@shap/shared';
 import { requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { badRequest, HttpError, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
+import { addressKey } from './market.js';
 import { appVersion } from './system.js';
 
 const MAX_SHOT_BYTES = 4 * 1024 * 1024;
@@ -87,7 +88,9 @@ const usageInput = z.object({
   vatRegistered: z.boolean().default(false),
   tone: z.enum(['casual', 'formal']).default('casual'),
 });
-export type UsageNote = z.infer<typeof usageInput>;
+export type UsageNote = Omit<z.infer<typeof usageInput>, 'installId'>;
+/** A usage note's file name: a keyed hash of the install id, so the id itself isn't kept. */
+const usageFile = (ctx: Ctx, installId: string) => ctx.secrets.hash(`usage|${installId}`).slice(0, 32);
 
 export interface FeedbackSummary {
   id: string;
@@ -152,7 +155,8 @@ export function registerFeedbackRoutes(app: FastifyInstance, ctx: Ctx): void {
       source,
       who,
       ...extra,
-      client: { ...input.client, ip },
+      // Anonymous feedback from outside keeps no address (it's only used for the day's limits).
+      client: source === 'here' ? { ...input.client, ip } : { ...input.client },
       screenshot: shot ? { file: `screenshot.${shot.ext}`, detailsMasked: input.screenshotMasked } : null,
       trail: input.trail.map((e) => ({ at: new Date(e.t).toISOString(), kind: e.kind, detail: e.detail })),
     };
@@ -205,9 +209,10 @@ export function registerFeedbackRoutes(app: FastifyInstance, ctx: Ctx): void {
     };
     app.options('/collect/*', async (_req, reply) => (open(reply), reply.code(204).send()));
 
-    app.post('/collect/feedback', { bodyLimit: 6 * 1024 * 1024, config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } }, async (req, reply) => {
+    // Nothing about who sent it goes in the request log either.
+    app.post('/collect/feedback', { bodyLimit: 6 * 1024 * 1024, logLevel: 'warn', config: { rateLimit: { max: 10, timeWindow: '10 minutes', keyGenerator: (req: FastifyRequest) => addressKey(req.ip) } } }, async (req, reply) => {
       open(reply);
-      roomFor(req.ip);
+      roomFor(addressKey(req.ip));
       const input = parse(collectedInput, req.body);
       if (input.kind !== 'love' && !input.message) throw badRequest('Please say a few words about it');
       // A day's screenshots have a ceiling in all, so the folder can't be used to fill the disk.
@@ -216,13 +221,13 @@ export function registerFeedbackRoutes(app: FastifyInstance, ctx: Ctx): void {
       else outside.shotBytes += shotBytes;
       const label = input.app === 'pocket' ? `Shap Pocket ${input.version} (${input.platform || 'phone'})` : `another Shap ${input.version}${input.role ? `, ${input.role}` : ''}`;
       const id = await store(input, { anonymous: true, app: input.app, version: input.version, platform: input.platform, role: input.role }, label, input.app, req.ip);
-      counted(req.ip);
+      counted(addressKey(req.ip));
       req.log.info({ feedback: id, from: input.app }, 'feedback collected');
       reply.code(201);
       return { id };
     });
 
-    app.post('/collect/usage', { bodyLimit: 16 * 1024, config: { rateLimit: { max: 20, timeWindow: '10 minutes' } } }, async (req, reply) => {
+    app.post('/collect/usage', { bodyLimit: 16 * 1024, logLevel: 'warn', config: { rateLimit: { max: 20, timeWindow: '10 minutes', keyGenerator: (req: FastifyRequest) => addressKey(req.ip) } } }, async (req, reply) => {
       open(reply);
       // Usage notes have their own room for the day, so they don't use up the room for feedback.
       today();
@@ -230,7 +235,9 @@ export function registerFeedbackRoutes(app: FastifyInstance, ctx: Ctx): void {
       const input = parse(usageInput, req.body);
       outside.usage++;
       await mkdir(usageDir, { recursive: true, mode: 0o750 });
-      await writeFile(join(usageDir, `${input.installId}.json`), JSON.stringify({ ...input, at: new Date().toISOString() }), { mode: 0o640 });
+      // One note per install (the latest), filed under a keyed hash of its id rather than the id itself.
+      const { installId, ...note } = input;
+      await writeFile(join(usageDir, `${usageFile(ctx, installId)}.json`), JSON.stringify({ ...note, at: new Date().toISOString() }), { mode: 0o640 });
       reply.code(201);
       return { ok: true };
     });
@@ -284,8 +291,15 @@ export function registerFeedbackRoutes(app: FastifyInstance, ctx: Ctx): void {
     }
     for (const f of notes) {
       try {
-        const n = JSON.parse(await readFile(join(usageDir, f), 'utf8')) as { at?: string };
+        const n = JSON.parse(await readFile(join(usageDir, f), 'utf8')) as { at?: string; installId?: string };
         if (!n.at || Date.parse(n.at) < cutoff) await rm(join(usageDir, f), { force: true });
+        else if (n.installId) {
+          // Kept by an earlier version under the install id itself: file it under the hash instead.
+          const { installId, ...kept } = n;
+          // (A newer note already filed under the hash wins: 'wx' won't overwrite it.)
+          await writeFile(join(usageDir, `${usageFile(ctx, installId)}.json`), JSON.stringify(kept), { mode: 0o640, flag: 'wx' }).catch(() => undefined);
+          await rm(join(usageDir, f), { force: true });
+        }
       } catch {
         await rm(join(usageDir, f), { force: true });
       }
@@ -375,6 +389,7 @@ export async function reportUsage(ctx: Ctx, s: { usageConsent: boolean; installI
   if (ctx.config.COLLECT) {
     const dir = join(resolve(ctx.config.FEEDBACK_DIR), 'usage');
     await mkdir(dir, { recursive: true, mode: 0o750 });
-    await writeFile(join(dir, `${s.installId}.json`), JSON.stringify({ ...note, at: new Date().toISOString() }), { mode: 0o640 });
+    const { installId, ...kept } = note;
+    await writeFile(join(dir, `${usageFile(ctx, installId)}.json`), JSON.stringify({ ...kept, at: new Date().toISOString() }), { mode: 0o640 });
   } else await forward(ctx.config.COLLECTOR_URL, 'usage', note, log);
 }

@@ -6,11 +6,14 @@
 import type { FastifyInstance } from 'fastify';
 import { financialYear } from '@shap/shared';
 import { z } from 'zod';
-import { requireRole } from '../auth.js';
+import { createHash } from 'node:crypto';
+import { requireRole, userOrThrow } from '../auth.js';
+import { audit } from '../lib/audit.js';
 import type { Ctx } from '../context.js';
 import { getSettings } from '../lib/books.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
+import { wholeJpeg } from '../lib/images.js';
 
 const fyParam = z.object({ fyEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) });
 const replaceInput = z.object({ dataBase64: z.string().min(10), mime: z.literal('image/jpeg') });
@@ -53,18 +56,29 @@ export function registerArchiveRoutes(app: FastifyInstance, ctx: Ctx): void {
       where c.date between ${fy.start}::date and ${fy.end}::date and a.mime like 'image/%'`;
   });
 
-  /** A smaller version of one photo. Kept only if it really is smaller. */
+  /**
+   * A smaller version of one slip photo in a closed year (archiving). Kept only if it really is
+   * smaller and reads as a whole JPEG; the swap is in the audit log with both files' hashes.
+   */
   app.put('/api/attachments/:id', owner, async (req) => {
+    const user = userOrThrow(req);
     const { id } = parse(z.object({ id: z.string().uuid() }), req.params);
     const input = parse(replaceInput, req.body);
     const bytes = Buffer.from(input.dataBase64, 'base64');
-    if (bytes[0] !== 0xff || bytes[1] !== 0xd8) throw badRequest('That isn’t a JPEG photo');
-    const [old] = await sql<{ size: number; mime: string }[]>`select size, mime from attachments where id = ${id}`;
+    if (!wholeJpeg(bytes)) throw badRequest('That isn’t a JPEG photo');
+    const [old] = await sql<{ size: number; mime: string; bytes: Buffer }[]>`select size, mime, bytes from attachments where id = ${id}`;
     if (!old) throw notFound('File');
     if (!old.mime.startsWith('image/')) throw badRequest('Only photos can be made smaller');
+    const { lockDate } = await getSettings(sql);
+    const [slip] = lockDate ? await sql`select 1 from costs where receipt_id = ${id} and date <= ${lockDate}::date limit 1` : [];
+    if (!slip) throw badRequest('Only slips in a closed year are made smaller');
     if (bytes.length >= Number(old.size)) return { kept: false, size: Number(old.size) };
-    await sql`update attachments set bytes = ${bytes}, size = ${bytes.length}, mime = 'image/jpeg',
-              filename = regexp_replace(filename, '\\.\\w+$', '') || '.jpg' where id = ${id}`;
+    const hash = (b: Buffer) => createHash('sha256').update(b).digest('hex');
+    await sql.begin(async (tx) => {
+      await tx`update attachments set bytes = ${bytes}, size = ${bytes.length}, mime = 'image/jpeg',
+                filename = regexp_replace(filename, '\\.\\w+$', '') || '.jpg' where id = ${id}`;
+      await audit(tx, { userId: user.id, action: 'shrink', entity: 'attachment', entityId: id, ip: req.ip, details: { before: hash(old.bytes), after: hash(bytes), bytesBefore: Number(old.size), bytesAfter: bytes.length } });
+    });
     return { kept: true, size: bytes.length };
   });
 

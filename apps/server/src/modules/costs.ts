@@ -3,12 +3,29 @@ import { assignSourceInput, costInput, vatIncluded } from '@shap/shared';
 import { z } from 'zod';
 import { requireRole, seesMoney, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
+import type { Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
 import { assertOpen, getSettings, isIsoDate, q } from '../lib/books.js';
 import { badRequest, forbidden, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 
 const idParam = z.object({ id: z.string().uuid() });
+
+/**
+ * The VAT a cost may claim: none unless the business is a VAT vendor, none on the owner's
+ * personal spending, the same sign as the amount, and no more than the VAT a VAT-inclusive
+ * amount can hold (a cent's rounding allowed).
+ */
+async function claimableVat(db: Db, input: { amountCents: number; vatCents: number; categoryId: string }): Promise<number> {
+  const settings = await getSettings(db);
+  if (!settings.vatRegistered || !input.vatCents) return 0;
+  const [cat] = await db<{ kind: string }[]>`select kind from cost_categories where id = ${input.categoryId}`;
+  if (cat?.kind === 'personal') return 0;
+  if (Math.sign(input.vatCents) !== Math.sign(input.amountCents)) throw badRequest('The VAT has to go the same way as the amount (both negative on a refund).');
+  const most = vatIncluded(Math.abs(input.amountCents), settings.vatRateBp) + 1;
+  if (Math.abs(input.vatCents) > most) throw badRequest(`That’s more VAT than R${(Math.abs(input.amountCents) / 100).toFixed(2)} can include (at most R${(most / 100).toFixed(2)}).`);
+  return input.vatCents;
+}
 
 export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
@@ -99,9 +116,7 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
     const user = userOrThrow(req);
     const input = user.role === 'owner' ? parse(costInput, req.body) : await limitCaptureCost(parse(costInput, req.body));
     await assertOpen(sql, input.date);
-    const settings = await getSettings(sql);
-    // Not a VAT vendor: no input VAT to claim, whatever the slip says.
-    const vat = settings.vatRegistered ? input.vatCents : 0;
+    const vat = await claimableVat(sql, input);
     const [row] = await sql`
       insert into costs ${sql({ ...input, vatCents: vat, projectId: input.projectId ?? null, receiptId: input.receiptId ?? null, plannedItemId: input.plannedItemId ?? null, createdBy: user.id })}
       returning *`;
@@ -117,11 +132,22 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!old) throw notFound('Cost');
     if (user.role !== 'owner' && (old.createdBy !== user.id || Date.now() - old.createdAt.getTime() > 24 * 3600_000)) throw forbidden('Ask the owner to change this cost');
     await assertOpen(sql, old.date, input.date);
-    const settings = await getSettings(sql);
-    const vat = settings.vatRegistered ? input.vatCents : 0;
-    const [row] = await sql`
-      update costs set ${sql({ ...input, vatCents: vat, projectId: input.projectId ?? null, receiptId: input.receiptId ?? null, plannedItemId: input.plannedItemId ?? null })}
-      where id = ${id} returning *`;
+    const vat = await claimableVat(sql, input);
+    // A bill with payments on it: still a bill, and never less than what's been paid.
+    const [bill] = await sql<{ paid: number; sourceId: string | null }[]>`
+      select coalesce(sum(bp.amount_cents), 0)::bigint as paid, c.source_id from costs c join bill_payments bp on bp.cost_id = c.id where c.id = ${id} group by c.source_id`;
+    if (bill) {
+      if (input.sourceId !== bill.sourceId) throw badRequest('This bill has payments recorded on it: it stays a bill. Delete the payments first to change how it was paid.');
+      if (input.amountCents < Number(bill.paid)) throw badRequest(`R${(Number(bill.paid) / 100).toFixed(2)} has been paid on this bill: it can’t be less than that.`);
+    }
+    const row = await sql.begin(async (tx) => {
+      const [r] = await tx`
+        update costs set ${tx({ ...input, vatCents: vat, projectId: input.projectId ?? null, receiptId: input.receiptId ?? null, plannedItemId: input.plannedItemId ?? null })}
+        where id = ${id} returning *`;
+      // An asset bought through this cost keeps the cost's figure (ex VAT).
+      await tx`update assets set cost_cents = ${input.amountCents - vat} where cost_id = ${id} and cost_cents <> ${input.amountCents - vat}`;
+      return r;
+    });
     await audit(sql, { userId: user.id, action: 'update', entity: 'cost', entityId: id, ip: req.ip });
     return row;
   });
@@ -183,8 +209,11 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [old] = await sql<{ date: string }[]>`select date from costs where id = ${id}`;
     if (!old) throw notFound('Cost');
     await assertOpen(sql, old.date);
+    const [asset] = await sql`select 1 from assets where cost_id = ${id}`;
+    if (asset) throw badRequest('This cost bought an asset: delete the asset first (Accounts → Assets).');
+    const [paid] = await sql`select 1 from bill_payments where cost_id = ${id} limit 1`;
+    if (paid) throw badRequest('This bill has payments recorded on it: delete those first (Bills), so the money that left the bank stays in the books until you do.');
     await sql.begin(async (tx) => {
-      await tx`update assets set cost_id = null, source_id = coalesce(source_id, (select source_id from costs where id = ${id})) where cost_id = ${id}`;
       await tx`delete from costs where id = ${id}`;
       await audit(tx, { userId: user.id, action: 'delete', entity: 'cost', entityId: id, ip: req.ip });
     });

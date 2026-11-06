@@ -5,6 +5,8 @@ import {
   AGE_BAND_LABELS,
   entity,
   estimateTax,
+  provisionalPayable,
+  retirementCapCents,
   financialYear,
   formatAmount,
   formatDate,
@@ -375,6 +377,7 @@ export function ProvisionalTax() {
   const [ageBand, setAgeBand] = useState<AgeBand>('under65');
   const [otherIncome, setOtherIncome] = useState(0);
   const [retirement, setRetirement] = useState(0);
+  const [paye, setPaye] = useState(0);
   const [period, setPeriod] = useState(1);
   const [paid, setPaid] = useState(0);
   const [note, setNote] = useState('');
@@ -409,8 +412,7 @@ export function ProvisionalTax() {
   const est = estimateTax({ kind, profitCents: net, assessedLossCents: loss, fyEnd: data.fy.end, sbc: sbc && rules.sbcPossible, ageBand, otherIncomeCents: otherIncome, retirementCents: retirement, distributedCents: data.distributedCents, approvedPbo: data.approvedPbo, partners: data.partners });
   const taxable = est.taxableCents;
   const tax = est.taxCents;
-  const due = period === 1 ? Math.round(tax / 2) : tax;
-  const payable = Math.max(0, due - (period === 1 ? 0 : paid));
+  const { dueCents: due, payableCents: payable } = provisionalPayable({ taxCents: tax, payeCents: individual ? paye : 0, period, paidCents: paid });
   const bands = sbcTableFor(data.fy.end);
 
   const save = async () => {
@@ -426,6 +428,7 @@ export function ProvisionalTax() {
           ageBand,
           otherIncomeCents: individual ? otherIncome : 0,
           retirementCents: individual ? retirement : 0,
+          payeCents: individual ? paye : 0,
           assessedLossCents: loss,
           paidCents: period === 1 ? 0 : paid,
           lines: data.lines.map((l) => ({ accountId: l.accountId, name: l.name, type: l.type, actualCents: l.actualCents, projectedCents: p(l) })),
@@ -567,7 +570,7 @@ export function ProvisionalTax() {
                   <td>
                     Less: retirement annuity contributions
                     <div className="xs muted">
-                      Paid this year. Deductible up to 27.5% of income, at most R350 000{est.retirementDeductionCents < retirement ? `: ${formatZar(est.retirementDeductionCents)} counts` : ''}.
+                      Paid this year. Deductible up to 27.5% of income, at most {formatZar(retirementCapCents(data.fy.end), { cents: false })}{est.retirementDeductionCents < retirement ? `: ${formatZar(est.retirementDeductionCents)} counts` : ''}.
                     </div>
                   </td>
                   <td className="num">{isOwner ? <MoneyInput value={retirement} onChange={(c) => setRetirement(c ?? 0)} aria-label="Retirement annuity contributions" /> : formatZar(retirement)}</td>
@@ -685,6 +688,15 @@ export function ProvisionalTax() {
               </td>
               <td className="num">{formatZar(due)}</td>
             </tr>
+            {individual && (
+              <tr>
+                <td>
+                  Less: PAYE taken off a salary this year
+                  <div className="xs muted">The year’s employees’ tax on that salary (your IRP5s); half of it comes off the first payment.</div>
+                </td>
+                <td className="num">{isOwner ? <MoneyInput value={paye} onChange={(c) => setPaye(c ?? 0)} aria-label="PAYE taken off a salary" /> : formatZar(paye)}</td>
+              </tr>
+            )}
             {period > 1 && (
               <tr>
                 <td>Less: paid in earlier periods</td>

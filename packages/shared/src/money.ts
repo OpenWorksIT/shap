@@ -35,19 +35,29 @@ export function centsToInput(cents: number | null | undefined): string {
   return part ? `${neg}${whole}.${String(part).padStart(2, '0')}` : `${neg}${whole}`;
 }
 
+/**
+ * Rounds to a whole cent the way Postgres (and a calculator) does: halves away from zero, so a
+ * credit note's VAT is the invoice's with the sign turned. Floating-point noise is taken off
+ * first, so 1.005 × R1.00 is 101c, not 100c.
+ */
+export function roundCents(x: number): number {
+  const y = Number(x.toPrecision(15));
+  return Math.sign(y) * Math.round(Math.abs(y)) || 0;
+}
+
 /** Line total for a quantity and unit price, rounded to the cent. */
 export function lineTotal(qty: number, unitPriceCents: number): number {
-  return Math.round(qty * unitPriceCents);
+  return roundCents(qty * unitPriceCents);
 }
 
 /** VAT on an amount, rate in basis points (1500 = 15%). */
 export function vatOn(cents: number, rateBp: number): number {
-  return Math.round((cents * rateBp) / 10000);
+  return roundCents((cents * rateBp) / 10000);
 }
 
 /** VAT contained in a VAT-inclusive amount. */
 export function vatIncluded(inclusiveCents: number, rateBp: number): number {
-  return Math.round((inclusiveCents * rateBp) / (10000 + rateBp));
+  return roundCents((inclusiveCents * rateBp) / (10000 + rateBp));
 }
 
 export function percent(part: number, whole: number): number | null {

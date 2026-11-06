@@ -218,7 +218,8 @@ const RULES: [RegExp, string[]][] = [
   [/vodacom|\bmtn\b|telkom|cell c|\brain\b|afrihost|airtime|\bdata\b|webafrica|axxess|cool ideas/i, ['cellphone', 'airtime', 'phone']],
   [/builders|cashbuild|buco|mica|leroy|timber|hardware|plumb|tile|cement|brick|paint|steel|chamberlain|pennypinchers|penny pinchers/i, ['parts', 'materials']],
   [/tyre|autozone|midas|goldwagen|service centre|mechanic|panel beat|supa quick|tiger wheel/i, ['vehicle maintenance', 'vehicle']],
-  [/accounting|accountant|sars|cipc|bookkeep/i, ['accounting']],
+  // (Not SARS: a payment to SARS is tax owed, paid off — record it under Payroll or as a journal, not a cost.)
+  [/accounting|accountant|cipc|bookkeep/i, ['accounting']],
   [/facebook|google ads|\bmeta\b|advert|gumtree/i, ['advertising']],
   [/spur|steers|kfc|nando|mcdonald|wimpy|restaurant|coffee|cafe/i, ['entertainment']],
 ];

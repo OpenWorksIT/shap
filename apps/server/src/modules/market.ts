@@ -15,9 +15,9 @@
  */
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { isMarketItem, lastWholeMonth, marketBand, marketItems, marketRates, monthRange, type MarketContribution } from '@shap/shared';
+import { addMonths, isMarketItem, lastWholeMonth, marketBand, marketItems, marketRates, monthRange, type MarketContribution } from '@shap/shared';
 import type { Ctx } from '../context.js';
 import type { Db } from '../db/index.js';
 import { getSettings, today } from '../lib/books.js';
@@ -92,9 +92,9 @@ interface MonthTally {
   cells: Record<string, Record<string, number>>;
   /** Keyed hashes of (business, item, month) already counted, so a resend doesn't count twice. */
   seen: Record<string, 1>;
+  /** "industry|item|unit" → keyed hashes of the businesses that shared it that month (for the minimum count). */
+  people?: Record<string, Record<string, 1>>;
 }
-/** "industry|item|unit" → keyed hashes of the businesses that ever shared it (for the minimum count). */
-type Contributors = Record<string, Record<string, 1>>;
 
 const marketDir = (ctx: Ctx) => join(resolve(ctx.config.FEEDBACK_DIR), 'market');
 async function readJson<T>(file: string, empty: T): Promise<T> {
@@ -110,6 +110,13 @@ async function writeJson(file: string, value: unknown) {
   await rename(tmp, file);
 }
 
+/** Months a contribution may be for: the last few that are over (a phone sends last month's). */
+export const MARKET_MONTHS_BACK = 3;
+/** New businesses one item can gain in a day: a flood of made-up ones can't swamp an item. */
+const PER_CELL_PER_DAY = 25;
+const cellsToday = { day: '', counts: new Map<string, number>() };
+const short = (h: string) => h.slice(0, 32);
+
 // One write at a time, so two contributions arriving together don't lose each other's counts.
 let queue: Promise<unknown> = Promise.resolve();
 
@@ -119,29 +126,42 @@ export function collectMarket(ctx: Ctx, c: MarketContribution): Promise<number> 
     const dir = marketDir(ctx);
     await mkdir(dir, { recursive: true, mode: 0o750 });
     const monthFile = join(dir, `${c.month}.json`);
-    const peopleFile = join(dir, 'contributors.json');
-    const tally = await readJson<MonthTally>(monthFile, { cells: {}, seen: {} });
-    const people = await readJson<Contributors>(peopleFile, {});
+    const tally = await readJson<MonthTally>(monthFile, { cells: {}, seen: {}, people: {} });
+    const people = (tally.people ??= {});
+    const day = new Date().toISOString().slice(0, 10);
+    if (cellsToday.day !== day) Object.assign(cellsToday, { day, counts: new Map() });
     let counted = 0;
     for (const r of c.rates) {
       const cell = `${c.industry}|${r.item}|${r.unit}`;
-      const once = ctx.secrets.hash(`market|${c.installId}|${cell}|${c.month}`);
+      const once = short(ctx.secrets.hash(`market|${c.installId}|${cell}|${c.month}`));
       if (tally.seen[once]) continue;
+      if ((cellsToday.counts.get(cell) ?? 0) >= PER_CELL_PER_DAY) continue;
+      cellsToday.counts.set(cell, (cellsToday.counts.get(cell) ?? 0) + 1);
       tally.seen[once] = 1;
       const band = String(marketBand(r.cents));
       const bands = (tally.cells[cell] ??= {});
       bands[band] = (bands[band] ?? 0) + 1;
-      (people[cell] ??= {})[ctx.secrets.hash(`market|${c.installId}|${cell}`)] = 1;
+      (people[cell] ??= {})[short(ctx.secrets.hash(`market|${c.installId}|${cell}`))] = 1;
       counted++;
     }
-    if (counted) {
-      await writeJson(monthFile, tally);
-      await writeJson(peopleFile, people);
-    }
+    if (counted) await writeJson(monthFile, tally);
     return counted;
   });
   queue = run.catch(() => undefined);
   return run;
+}
+
+/**
+ * Who a request counts as for the per-address limits: the address, or for IPv6 its /64 (one
+ * connection's whole block of addresses).
+ */
+export function addressKey(ip: string): string {
+  if (!ip.includes(':') || ip.startsWith('::ffff:')) return ip.replace(/^::ffff:/, '');
+  const [head, tail = ''] = ip.split('::');
+  const h = head ? head.split(':') : [];
+  const t = tail ? tail.split(':') : [];
+  const full = ip.includes('::') ? [...h, ...Array(Math.max(8 - h.length - t.length, 0)).fill('0'), ...t] : h;
+  return `${full.slice(0, 4).map((x) => x.toLowerCase().replace(/^0+(?=.)/, '')).join(':')}::/64`;
 }
 
 /** From outside: Shap Pocket on phones, and other Shap servers. */
@@ -158,17 +178,18 @@ export function registerMarketRoutes(app: FastifyInstance, ctx: Ctx): void {
     reply.header('access-control-allow-headers', 'content-type');
     reply.header('access-control-max-age', '86400');
   };
-  app.post('/collect/market', { bodyLimit: 32 * 1024, config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } }, async (req, reply) => {
+  app.post('/collect/market', { bodyLimit: 32 * 1024, config: { rateLimit: { max: 10, timeWindow: '10 minutes', keyGenerator: (req: FastifyRequest) => addressKey(req.ip) } } }, async (req, reply) => {
     open(reply);
     const day = new Date().toISOString().slice(0, 10);
     if (today_.day !== day) Object.assign(today_, { day, count: 0, byAddress: new Map() });
-    if (today_.count >= PER_DAY || (today_.byAddress.get(req.ip) ?? 0) >= PER_ADDRESS) throw new HttpError(429, 'Thanks: please try again tomorrow.', 'rate_limited');
+    const who = addressKey(req.ip);
+    if (today_.count >= PER_DAY || (today_.byAddress.get(who) ?? 0) >= PER_ADDRESS) throw new HttpError(429, 'Thanks: please try again tomorrow.', 'rate_limited');
     const c = parse(marketInput, req.body);
-    // Only a month that's over (and not years old): no prices for the future.
-    if (c.month >= today().slice(0, 7) || c.month < lastWholeMonth(`${Number(today().slice(0, 4)) - 2}${today().slice(4)}`)) throw new HttpError(400, 'That month can’t be shared', 'bad_month');
+    // Only one of the last few months that are over: no prices for the future, and no back-filling history.
+    if (c.month >= today().slice(0, 7) || c.month < addMonths(`${lastWholeMonth(today())}-01`, -(MARKET_MONTHS_BACK - 1)).slice(0, 7)) throw new HttpError(400, 'That month can’t be shared', 'bad_month');
     const counted = await collectMarket(ctx, c);
     today_.count++;
-    today_.byAddress.set(req.ip, (today_.byAddress.get(req.ip) ?? 0) + 1);
+    today_.byAddress.set(who, (today_.byAddress.get(who) ?? 0) + 1);
     reply.code(201);
     return { counted };
   });

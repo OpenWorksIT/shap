@@ -5,6 +5,7 @@
  */
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
+import { passwordProblem } from '@shap/shared';
 import { createUser } from '../auth.js';
 import { loadConfig } from '../config.js';
 import { createDb } from './index.js';
@@ -29,8 +30,10 @@ if (!password) {
   password = await rl.question('Password (at least 10 characters): ');
   rl.close();
 }
-if (password.length < 10) {
-  console.error('Password must be at least 10 characters.');
+// The same rules as anywhere else in Shap (long enough, not a common one, not your name or email).
+const problem = passwordProblem(password, { email, name });
+if (problem) {
+  console.error(`That password won't do: ${problem}.`);
   process.exit(1);
 }
 

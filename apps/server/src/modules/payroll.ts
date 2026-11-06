@@ -13,7 +13,7 @@
  *     SDL owed                             Cr SDL
  *     the bank (or wherever it's paid from) Cr net pay
  */
-import { dividendInput, dividendTax, dwtDue, emp201Due, employeeInput, payLine, payLineInput, payRunInput, sarsPaymentInput, taxYearEnd, type AgeBand, entity, paysOutProfit, payoutWord } from '@shap/shared';
+import { dividendInput, dividendTax, financialYear, microDividendTax, dwtDue, emp201Due, employeeInput, payLine, payLineInput, payRunInput, sarsPaymentInput, taxYearEnd, type AgeBand, entity, paysOutProfit, payoutWord } from '@shap/shared';
 import PDFDocument from 'pdfkit';
 import { z } from 'zod';
 import { requireRole, userOrThrow } from '../auth.js';
@@ -71,17 +71,23 @@ interface EmployeeRow {
 }
 
 /** Works out one line from the employee and the month's figures. */
-function compute(e: EmployeeRow, salaryCents: number, extraCents: number, payDate: string, sdl: boolean) {
-  return payLine({ salaryCents, extraCents, payDate, age: e.ageBand, medicalMembers: e.medicalMembers, uif: e.uif, sdl });
+function compute(e: EmployeeRow, pay: { salaryCents: number; overtimeCents: number; commissionCents: number; extraCents: number; extraBeforeCents: number }, payDate: string, sdl: boolean) {
+  return payLine({ ...pay, payDate, age: e.ageBand, medicalMembers: e.medicalMembers, uif: e.uif, sdl });
 }
 
 async function recomputeRun(tx: Tx, runId: string) {
   const [run] = await tx<{ payDate: string }[]>`select pay_date::text from pay_runs where id = ${runId}`;
   const settings = await getSettings(tx);
-  const lines = await tx<{ id: string; salaryCents: number; extraCents: number; employeeId: string }[]>`select id, salary_cents, extra_cents, employee_id from pay_lines where run_id = ${runId}`;
+  const yearStart = `${Number(taxYearEnd(run!.payDate).slice(0, 4)) - 1}-03-01`;
+  const lines = await tx<{ id: string; salaryCents: number; overtimeCents: number; commissionCents: number; extraCents: number; employeeId: string }[]>`
+    select id, salary_cents, overtime_cents, commission_cents, extra_cents, employee_id from pay_lines where run_id = ${runId}`;
   for (const l of lines) {
     const [e] = await tx<EmployeeRow[]>`select * from employees where id = ${l.employeeId}`;
-    const r = compute(e!, l.salaryCents, l.extraCents, run!.payDate, settings.sdl);
+    // Once-off pay already paid to this employee earlier in the tax year (other runs, paid before this one).
+    const [b] = await tx<{ t: number }[]>`
+      select coalesce(sum(x.extra_cents), 0)::bigint as t from pay_lines x join pay_runs r on r.id = x.run_id
+      where x.employee_id = ${l.employeeId} and r.id <> ${runId} and r.pay_date >= ${yearStart}::date and r.pay_date < ${run!.payDate}::date`;
+    const r = compute(e!, { salaryCents: Number(l.salaryCents), overtimeCents: Number(l.overtimeCents), commissionCents: Number(l.commissionCents), extraCents: Number(l.extraCents), extraBeforeCents: Number(b!.t) }, run!.payDate, settings.sdl);
     await tx`update pay_lines set is_director = ${e!.isDirector}, gross_cents = ${r.grossCents}, paye_cents = ${r.payeCents}, uif_employee_cents = ${r.uifEmployeeCents},
       uif_employer_cents = ${r.uifEmployerCents}, sdl_cents = ${r.sdlCents}, net_cents = ${r.netCents} where id = ${l.id}`;
   }
@@ -95,9 +101,14 @@ const runTotals = `
 /** What's owed to SARS, month by month: payroll (EMP201) and dividends tax. */
 export async function sarsSummary(db: Db) {
   const emp = await db.unsafe<{ period: string; payeCents: number; uifCents: number; sdlCents: number; paidCents: number }[]>(`
-    select r.period, sum(l.paye_cents)::bigint as paye_cents, sum(l.uif_employee_cents + l.uif_employer_cents)::bigint as uif_cents, sum(l.sdl_cents)::bigint as sdl_cents,
-      coalesce((select sum(p.amount_cents) from sars_payments p where p.kind = 'emp201' and p.period = r.period), 0)::bigint as paid_cents
-    from pay_runs r join pay_lines l on l.run_id = r.id where r.status = 'final' group by r.period order by r.period desc`);
+    select m.period, m.paye_cents, m.uif_cents, m.sdl_cents,
+      coalesce((select sum(p.amount_cents) from sars_payments p where p.kind = 'emp201' and p.period = m.period), 0)::bigint as paid_cents
+    from (
+      -- The month the tax was deducted: the pay date's (SARS), whatever the run is called.
+      select to_char(r.pay_date, 'YYYY-MM') as period, sum(l.paye_cents)::bigint as paye_cents,
+        sum(l.uif_employee_cents + l.uif_employer_cents)::bigint as uif_cents, sum(l.sdl_cents)::bigint as sdl_cents
+      from pay_runs r join pay_lines l on l.run_id = r.id where r.status = 'final' group by 1
+    ) m order by m.period desc`);
   const dwt = await db.unsafe<{ period: string; dwtCents: number; paidCents: number }[]>(`
     select m.period, m.dwt_cents,
       coalesce((select sum(p.amount_cents) from sars_payments p where p.kind = 'dwt' and p.period = m.period), 0)::bigint as paid_cents
@@ -238,7 +249,7 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
     const input = parse(payLineInput, req.body);
     await draft(sql, id);
     await sql.begin(async (tx) => {
-      const r = await tx`update pay_lines set salary_cents = ${input.salaryCents}, extra_cents = ${input.extraCents}, note = ${input.note} where run_id = ${id} and employee_id = ${employeeId}`;
+      const r = await tx`update pay_lines set salary_cents = ${input.salaryCents}, overtime_cents = ${input.overtimeCents}, commission_cents = ${input.commissionCents}, extra_cents = ${input.extraCents}, note = ${input.note} where run_id = ${id} and employee_id = ${employeeId}`;
       if (!r.count) throw notFound('Employee in this pay run');
       await recomputeRun(tx, id);
     });
@@ -386,8 +397,9 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/payroll/year', readers, async (req, reply) => {
     const yearEnd = taxYearEnd(q(req).date ?? today());
     const yearStart = `${Number(yearEnd.slice(0, 4)) - 1}-03-01`;
-    const rows = await sql<{ name: string; idNumber: string; taxNumber: string; gross: number; paye: number; uifEmployee: number; uifEmployer: number; sdl: number; net: number; months: number }[]>`
-      select e.name, e.id_number, e.tax_number, sum(l.gross_cents)::bigint as gross, sum(l.paye_cents)::bigint as paye, sum(l.uif_employee_cents)::bigint as uif_employee,
+    const rows = await sql<{ name: string; idNumber: string; taxNumber: string; salary: number; overtime: number; commission: number; bonus: number; gross: number; paye: number; uifEmployee: number; uifEmployer: number; sdl: number; net: number; months: number }[]>`
+      select e.name, e.id_number, e.tax_number, sum(l.salary_cents)::bigint as salary, sum(l.overtime_cents)::bigint as overtime, sum(l.commission_cents)::bigint as commission, sum(l.extra_cents)::bigint as bonus,
+        sum(l.gross_cents)::bigint as gross, sum(l.paye_cents)::bigint as paye, sum(l.uif_employee_cents)::bigint as uif_employee,
         sum(l.uif_employer_cents)::bigint as uif_employer, sum(l.sdl_cents)::bigint as sdl, sum(l.net_cents)::bigint as net, count(*)::int as months
       from pay_lines l join pay_runs r on r.id = l.run_id join employees e on e.id = l.employee_id
       where r.status = 'final' and r.pay_date between ${yearStart}::date and ${yearEnd}::date
@@ -397,8 +409,9 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
       reply.header('content-disposition', `attachment; filename="payroll-tax-year-${yearEnd.slice(0, 4)}.csv"`);
       return reply.send(
         toCsv(
-          ['Employee', 'ID number', 'Tax number', 'Months', 'Gross pay', 'PAYE', 'UIF (employee)', 'UIF (employer)', 'SDL', 'Net pay'],
-          rows.map((r) => [r.name, r.idNumber, r.taxNumber, r.months, centsToCsv(r.gross), centsToCsv(r.paye), centsToCsv(r.uifEmployee), centsToCsv(r.uifEmployer), centsToCsv(r.sdl), centsToCsv(r.net)]),
+          // IRP5 codes: 3601 salary, 3607 overtime, 3606 commission, 3605 annual payment (bonus).
+          ['Employee', 'ID number', 'Tax number', 'Months', 'Salary (3601)', 'Overtime (3607)', 'Commission (3606)', 'Bonus (3605)', 'Gross pay', 'PAYE', 'UIF (employee)', 'UIF (employer)', 'SDL', 'Net pay'],
+          rows.map((r) => [r.name, r.idNumber, r.taxNumber, r.months, centsToCsv(r.salary), centsToCsv(r.overtime), centsToCsv(r.commission), centsToCsv(r.bonus), centsToCsv(r.gross), centsToCsv(r.paye), centsToCsv(r.uifEmployee), centsToCsv(r.uifEmployer), centsToCsv(r.sdl), centsToCsv(r.net)]),
         ),
       );
     }
@@ -445,7 +458,13 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (input.paidOn && input.paidOn < input.declaredOn) throw badRequest('It can’t be paid before it’s declared');
     await assertOpen(sql, input.declaredOn, input.paidOn);
     // A trust's distributions carry no dividends tax (the beneficiary is taxed on the income).
-    const dwt = kind.dividendsTax ? dividendTax(input.grossCents, input.exempt) : 0;
+    let dwt = kind.dividendsTax ? dividendTax(input.grossCents, input.exempt) : 0;
+    // A micro business on turnover tax: the year's first R200 000 of dividends carry none (s64F(1)(h)).
+    if (dwt && settings.turnoverTax) {
+      const fy = financialYear(input.declaredOn, settings.fyEndMonth);
+      const [earlier] = await sql<{ t: number }[]>`select coalesce(sum(gross_cents), 0)::bigint as t from dividends where declared_on between ${fy.start}::date and ${fy.end}::date`;
+      dwt = microDividendTax(input.grossCents, Number(earlier!.t), input.exempt);
+    }
     const w = words(settings.businessType);
     const id = await sql.begin(async (tx) => {
       const [d] = await tx<{ id: string }[]>`
@@ -507,7 +526,7 @@ const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'Ju
 function renderPayslip(d: {
   settings: Awaited<ReturnType<typeof getSettings>>;
   run: { period: string; payDate: string };
-  line: { name: string; idNumber: string; taxNumber: string; isDirector: boolean; salaryCents: number; extraCents: number; grossCents: number; payeCents: number; uifEmployeeCents: number; uifEmployerCents: number; sdlCents: number; netCents: number; note: string };
+  line: { name: string; idNumber: string; taxNumber: string; isDirector: boolean; salaryCents: number; overtimeCents: number; commissionCents: number; extraCents: number; grossCents: number; payeCents: number; uifEmployeeCents: number; uifEmployerCents: number; sdlCents: number; netCents: number; note: string };
   ytd: { gross: number; paye: number; uif: number };
 }): Promise<Buffer> {
   const { settings, run, line, ytd } = d;
@@ -544,7 +563,7 @@ function renderPayslip(d: {
     }
     return yy + 8;
   };
-  top = table('Earnings', [['Salary', line.salaryCents], ...(line.extraCents ? ([[line.note || 'Bonus / overtime', line.extraCents]] as [string, number][]) : [])], top);
+  top = table('Earnings', [['Salary', line.salaryCents], ...(line.overtimeCents ? ([['Overtime', line.overtimeCents]] as [string, number][]) : []), ...(line.commissionCents ? ([['Commission', line.commissionCents]] as [string, number][]) : []), ...(line.extraCents ? ([[line.note || 'Bonus', line.extraCents]] as [string, number][]) : [])], top);
   top = table('Deductions', [['PAYE (income tax)', line.payeCents], ['UIF (1%)', line.uifEmployeeCents]], top);
 
   pdf.rect(L, top, W, 34).fill(accent);

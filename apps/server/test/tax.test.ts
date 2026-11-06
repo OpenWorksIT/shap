@@ -32,9 +32,11 @@ describe('tax for individuals (SARS tables)', () => {
   });
 
   it('limits retirement contributions to 27.5% of income and R350 000', () => {
-    expect(retirementDeduction(5_000_000, 10_000_000)).toBe(2_750_000);
-    expect(retirementDeduction(1_000_000, 10_000_000)).toBe(1_000_000);
-    expect(retirementDeduction(80_000_000, 500_000_000)).toBe(35_000_000);
+    expect(retirementDeduction(5_000_000, 10_000_000, '2027-02-28')).toBe(2_750_000);
+    expect(retirementDeduction(1_000_000, 10_000_000, '2027-02-28')).toBe(1_000_000);
+    // The cap: R350 000 up to the year to February 2026, R430 000 from the year to February 2027 (Budget 2026).
+    expect(retirementDeduction(80_000_000, 500_000_000, '2026-02-28')).toBe(35_000_000);
+    expect(retirementDeduction(80_000_000, 500_000_000, '2027-02-28')).toBe(43_000_000);
   });
 
   it('adds other income and takes off the retirement deduction', () => {

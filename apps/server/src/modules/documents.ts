@@ -547,6 +547,11 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!doc || doc.kind !== 'invoice') throw notFound('Invoice');
     if (doc.status !== 'issued') throw badRequest(doc.status === 'draft' ? 'Issue the invoice before recording a payment' : 'This invoice is void');
     if (doc.writtenOffOn) throw badRequest('This invoice was written off as delinquent. Undo that first, then record the payment.');
+    // A negative amount is money paid back to the client: never more than they paid.
+    if (input.amountCents < 0) {
+      const [p] = await sql<{ paid: number }[]>`select coalesce(sum(amount_cents), 0)::bigint as paid from receipts where invoice_id = ${id}`;
+      if (Number(p!.paid) + input.amountCents < 0) throw badRequest('That’s more than the client has paid on this invoice.');
+    }
     await assertOpen(sql, input.date);
     const [row] = await sql`insert into receipts ${sql({ ...input, invoiceId: id, createdBy: user.id })} returning *`;
     await syncProjectOfDocument(sql, id);
