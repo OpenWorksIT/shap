@@ -1,4 +1,9 @@
+import groovy.json.JsonSlurper
+
 apply plugin: 'com.android.application'
+
+// The version people see in Google Play is the app's own (apps/web/package.json), so it can't drift.
+def appVersion = new JsonSlurper().parse(file('../../package.json')).version
 
 android {
     namespace = "za.co.openworks.shappocket"
@@ -9,7 +14,7 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         // Every build uploaded to Google Play needs a higher number: the CI run number does it.
         versionCode((System.getenv("GITHUB_RUN_NUMBER") ?: "0").toInteger() + 100)
-        versionName "0.7.0"
+        versionName appVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
