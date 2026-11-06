@@ -23,6 +23,7 @@ import { appendFile, mkdir, readdir, readFile, rename, rm, writeFile } from 'nod
 import { join, resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
+import { BUSINESS_TYPES, type BusinessType, entity } from '@shap/shared';
 import { requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { badRequest, HttpError, notFound } from '../lib/errors.js';
@@ -80,7 +81,7 @@ const usageInput = z.object({
   version: z.string().max(40).default(''),
   installId: z.string().regex(INSTALL_RE),
   platform: z.string().max(20).default(''),
-  businessType: z.enum(['company', 'sole_prop']),
+  businessType: z.enum(BUSINESS_TYPES),
   industry: z.string().max(40).default(''),
   features: z.array(z.string().max(30)).max(20).default([]),
   vatRegistered: z.boolean().default(false),
@@ -361,14 +362,14 @@ export function registerFeedbackRoutes(app: FastifyInstance, ctx: Ctx): void {
       total: notes.length,
       byIndustry: count((n) => [n.industry || 'not said']),
       byApp: count((n) => [`${n.app}${n.platform ? ` (${n.platform})` : ''}`]),
-      byType: count((n) => [n.businessType === 'company' ? 'company' : 'sole proprietor']),
+      byType: count((n) => [entity(n.businessType).label]),
       byFeature: count((n) => n.features),
     };
   });
 }
 
 /** This Shap's own anonymous note, when its owner agreed (sent to OpenWorks, or kept if it is OpenWorks'). */
-export async function reportUsage(ctx: Ctx, s: { usageConsent: boolean; installId: string; businessType: 'company' | 'sole_prop'; industry: string; features: string[]; vatRegistered: boolean; tone: 'casual' | 'formal' }, log: { warn: (o: object, m: string) => void }) {
+export async function reportUsage(ctx: Ctx, s: { usageConsent: boolean; installId: string; businessType: BusinessType; industry: string; features: string[]; vatRegistered: boolean; tone: 'casual' | 'formal' }, log: { warn: (o: object, m: string) => void }) {
   if (!s.usageConsent) return;
   const note = { app: 'shap' as const, version: appVersion(), installId: s.installId, platform: 'server', businessType: s.businessType, industry: s.industry, features: s.features, vatRegistered: s.vatRegistered, tone: s.tone };
   if (ctx.config.COLLECT) {

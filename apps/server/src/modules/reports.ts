@@ -1,14 +1,5 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
-import {
-  ACCOUNT_TYPE_LABELS,
-  assetInput,
-  balanceCheckInput,
-  financialYear,
-  journalInput,
-  monthLabel,
-  monthsBetween,
-  type AccountType,
-} from '@shap/shared';
+import { ACCOUNT_TYPE_LABELS, assetInput, balanceCheckInput, financialYear, journalInput, monthLabel, monthsBetween, type AccountType, entity, equityHeading } from '@shap/shared';
 import { z } from 'zod';
 import { requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -137,8 +128,16 @@ export async function balanceSheet(db: Db, date: string) {
   const liabilities = tb.rows.filter((r) => r.type === 'liability');
   const longTerm = liabilities.filter((r) => byId.get(r.id)?.systemKey === 'owner_loan').map((r) => item(r, -1));
   const shortTerm = liabilities.filter((r) => byId.get(r.id)?.systemKey !== 'owner_loan').map((r) => item(r, -1));
-  const equity = tb.rows.filter((r) => r.type === 'equity').map((r) => item(r, -1));
-  if (currentProfit !== 0) equity.push({ id: 'current-profit', code: '', name: `Profit for the year to date (${fy.label})`, amountCents: currentProfit });
+  let equity = tb.rows.filter((r) => r.type === 'equity').map((r) => item(r, -1));
+  if (entity(settings.businessType).taxedAs === 'partners') {
+    // A partnership's profit belongs to the partners once it's shared (partners.ts): until then
+    // this year's and any earlier year's sit together as "Profit not yet shared between partners".
+    const re = accounts.find((a) => a.systemKey === 'retained_earnings');
+    const line = equity.find((e) => e.id === re?.id);
+    if (line) line.amountCents += currentProfit;
+    else if (re && currentProfit !== 0) equity.push({ id: re.id, code: re.code, name: re.name, amountCents: currentProfit });
+    equity = equity.filter((e) => e.amountCents !== 0);
+  } else if (currentProfit !== 0) equity.push({ id: 'current-profit', code: '', name: `Profit for the year to date (${fy.label})`, amountCents: currentProfit });
   const total = (xs: { amountCents: number }[]) => xs.reduce((s, x) => s + x.amountCents, 0);
   const totalAssets = total(nonCurrent) + total(intangible) + total(current);
   const totalLiabilities = total(longTerm) + total(shortTerm);
@@ -160,7 +159,7 @@ function sendCsv(reply: FastifyReply, filename: string, csv: string) {
 }
 
 /** Journals the app posts itself; changed only where they come from. */
-const MADE_BY_APP: Record<string, string> = { payroll: 'a pay run (Payroll)', dividend: 'a dividend (Payroll → Dividends)', sars: 'a payment to SARS (Payroll → SARS)' };
+const MADE_BY_APP: Record<string, string> = { payroll: 'a pay run (Payroll)', dividend: 'a dividend (Payroll → Dividends)', sars: 'a payment to SARS (Payroll → SARS)', profit_share: 'the partners’ profit share (Accounts → Year end)' };
 
 export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
@@ -209,6 +208,7 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/reports/balance-sheet', readers, async (req, reply) => {
     const { date, format } = q(req);
     const bs = await balanceSheet(sql, isIsoDate(date) ? date : today());
+    const settings = await getSettings(sql);
     if (format === 'csv') {
       const r = (x: { code: string; name: string; amountCents: number }) => [x.code, x.name, centsToCsv(x.amountCents)];
       return sendCsv(reply, `balance-sheet-${bs.date}.csv`, toCsv(['Code', 'Item', 'Amount'], [
@@ -219,7 +219,7 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
         ['', 'Non-current liabilities', ''], ...bs.liabilities.nonCurrent.map(r),
         ['', 'Current liabilities', ''], ...bs.liabilities.current.map(r),
         ['', 'Total liabilities', centsToCsv(bs.liabilities.totalCents)],
-        ['', 'Equity', ''], ...bs.equity.items.map(r),
+        ['', equityHeading(settings.businessType), ''], ...bs.equity.items.map(r),
         ['', 'Total equity', centsToCsv(bs.equity.totalCents)],
       ]));
     }

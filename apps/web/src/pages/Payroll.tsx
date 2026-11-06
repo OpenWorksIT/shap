@@ -4,7 +4,7 @@
  */
 import { useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AGE_BAND_LABELS, formatDate, formatZar, todayIso, type AgeBand } from '@shap/shared';
+import { AGE_BAND_LABELS, formatDate, formatZar, todayIso, type AgeBand, entity, paysOutProfit } from '@shap/shared';
 import { FileButton } from '../components/Files';
 import { PageHead } from '../components/Shell';
 import { Drawer, Empty, ErrorBox, Field, Icon, Loading, Money, MoneyInput, Tabs, useToast } from '../components/ui';
@@ -60,10 +60,9 @@ const monthName = (period: string) => new Date(`${period}-01T00:00:00Z`).toLocal
 const thisPeriod = () => todayIso().slice(0, 7);
 
 export default function PayrollPage() {
-  const { settings, has } = useAuthed();
+  const { settings, has, words } = useAuthed();
   const [params, setParams] = useSearchParams();
-  const company = settings.businessType === 'company';
-  const dividends = company && has('dividends');
+  const dividends = paysOutProfit(settings.businessType) && has('dividends');
   const payroll = has('payroll');
   const fallback: Tab = payroll ? 'runs' : 'dividends';
   const tab = (params.get('tab') as Tab) || fallback;
@@ -75,11 +74,11 @@ export default function PayrollPage() {
         ]
       : []),
     { value: 'sars' as Tab, label: 'SARS' },
-    ...(dividends ? [{ value: 'dividends' as Tab, label: 'Dividends' }] : []),
+    ...(dividends ? [{ value: 'dividends' as Tab, label: words.Payouts }] : []),
   ];
   return (
     <div className="stack-lg">
-      <PageHead title={payroll ? 'Payroll' : 'Dividends'} sub={payroll ? 'Salaries with PAYE, UIF and SDL worked out for you, and payslips to send.' : undefined} />
+      <PageHead title={payroll ? 'Payroll' : words.Payouts} sub={payroll ? 'Salaries with PAYE, UIF and SDL worked out for you, and payslips to send.' : undefined} />
       <Tabs<Tab> value={tab} onChange={(t) => setParams({ tab: t }, { replace: true })} tabs={tabs} />
       {tab === 'runs' && payroll && <Runs />}
       {tab === 'people' && payroll && <Employees />}
@@ -347,7 +346,7 @@ function Employees() {
 }
 
 function EmployeeDrawer({ employee: e, onClose, onSaved }: { employee: Employee | null; onClose: () => void; onSaved: () => void }) {
-  const { settings } = useAuthed();
+  const { settings, words } = useAuthed();
   const toast = useToast();
   const [f, setF] = useState({
     name: e?.name ?? '',
@@ -402,12 +401,12 @@ function EmployeeDrawer({ employee: e, onClose, onSaved }: { employee: Employee 
             {(p) => <input {...p} className="input" type="number" min={0} max={20} value={f.medicalMembers} onChange={(x) => set('medicalMembers', Number(x.target.value))} />}
           </Field>
         </div>
-        {settings.businessType === 'company' && (
+        {entity(settings.businessType).payout !== 'drawings' && (
           <label className="check">
             <input type="checkbox" checked={f.isDirector} onChange={(x) => set('isDirector', x.target.checked)} />
             <span>
-              A director of the company
-              <div className="xs muted">Their pay goes to Director’s remuneration in the books.</div>
+              {words.director}
+              <div className="xs muted">Their pay goes to {words.directorAccount} in the books.</div>
             </span>
           </label>
         )}
@@ -549,7 +548,9 @@ interface Dividend {
   sourceName: string | null;
 }
 function Dividends() {
-  const { ref, settings } = useAuthed();
+  const { ref, settings, words } = useAuthed();
+  const w = words;
+  const kind = entity(settings.businessType);
   const toast = useToast();
   const { data, error, reload } = useApi<{ dividends: Dividend[]; availableCents: number }>('/api/dividends');
   const [open, setOpen] = useState(false);
@@ -561,15 +562,19 @@ function Dividends() {
       <section className="panel panel-pad stack">
         <p className="small">
           Profits available to pay out: <strong>{formatZar(data.availableCents)}</strong>
-          <span className="xs muted"> (all profit in the books, less dividends already declared)</span>
+          <span className="xs muted"> (all profit in the books, less {w.payout}s already made)</span>
         </p>
         <p className="xs muted">
-          The directors must be satisfied the company stays solvent and can pay its debts after the dividend (Companies Act, section 46). 20% dividends tax is withheld and paid to SARS; the shareholder gets the rest.
+          {kind.key === 'trust'
+            ? 'Distributions follow the trust deed: the trustees decide them in writing. There’s no dividends tax. This year’s income given to a beneficiary living in South Africa is taxed in their hands, and the tax estimate takes it off the trust’s taxable income; given to someone abroad, the trust pays the tax.'
+            : kind.key === 'cc'
+              ? 'The members must be satisfied the CC stays solvent and can pay its debts after the distribution (Close Corporations Act, section 51). 20% dividends tax is withheld and paid to SARS; the member gets the rest.'
+              : 'The directors must be satisfied the company stays solvent and can pay its debts after the dividend (Companies Act, section 46). 20% dividends tax is withheld and paid to SARS; the shareholder gets the rest.'}
         </p>
         <div>
           <button className="btn primary" onClick={() => setOpen(true)}>
             <Icon name="plus" size={18} />
-            Declare a dividend
+            {kind.key === 'trust' ? 'Make a distribution' : `Declare a ${w.payout}`}
           </button>
         </div>
       </section>
@@ -582,7 +587,7 @@ function Dividends() {
                   <strong>{d.shareholder}</strong> · {formatZar(d.grossCents)}
                   <div className="xs muted">
                     Declared {formatDate(d.declaredOn)} ·{' '}
-                    {d.paidOn ? `paid ${formatDate(d.paidOn)}: ${formatZar(d.netCents)} after ${d.exempt ? 'no' : formatZar(d.dwtCents)} dividends tax` : 'not paid yet'}
+                    {d.paidOn ? `paid ${formatDate(d.paidOn)}${w.dividendsTax ? `: ${formatZar(d.netCents)} after ${d.exempt ? 'no' : formatZar(d.dwtCents)} dividends tax` : ''}` : 'not paid yet'}
                   </div>
                 </span>
                 {!d.paidOn && (
@@ -592,8 +597,8 @@ function Dividends() {
                 )}
                 <button
                   className="btn quiet small"
-                  aria-label="Delete dividend"
-                  onClick={() => confirm('Delete this dividend? It comes out of the books.') && void api(`/api/dividends/${d.id}`, { method: 'DELETE' }).then(reload).catch((e: Error) => toast(e.message, 'error'))}
+                  aria-label={`Delete ${w.payout}`}
+                  onClick={() => confirm(`Delete this ${w.payout}? It comes out of the books.`) && void api(`/api/dividends/${d.id}`, { method: 'DELETE' }).then(reload).catch((e: Error) => toast(e.message, 'error'))}
                 >
                   <Icon name="trash" size={14} />
                 </button>
@@ -602,7 +607,7 @@ function Dividends() {
           </ul>
         </section>
       )}
-      {open && <DividendDrawer available={data.availableCents} defaultName={settings.companyName ? 'You' : ''} onClose={() => setOpen(false)} onSaved={() => (setOpen(false), void reload(), toast('Dividend in the books'))} />}
+      {open && <DividendDrawer available={data.availableCents} defaultName={settings.companyName ? 'You' : ''} onClose={() => setOpen(false)} onSaved={() => (setOpen(false), void reload(), toast(`${w.Payouts.slice(0, -1)} in the books`))} />}
       {paying && (
         <PayDividendDrawer
           d={paying}
@@ -616,17 +621,17 @@ function Dividends() {
 }
 
 function DividendDrawer({ available, defaultName, onClose, onSaved }: { available: number; defaultName: string; onClose: () => void; onSaved: () => void }) {
-  const { ref } = useAuthed();
+  const { ref, words: w } = useAuthed();
   const sources = ref.sources.filter((s) => s.active && !s.role);
-  const [f, setF] = useState({ declaredOn: todayIso(), paidNow: true, shareholder: defaultName, grossCents: null as number | null, exempt: false, sourceId: sources.find((s) => s.kind === 'bank')?.id ?? sources[0]?.id ?? '', note: '' });
+  const [f, setF] = useState({ declaredOn: todayIso(), paidNow: true, shareholder: defaultName, grossCents: null as number | null, exempt: false, conduit: true, sourceId: sources.find((s) => s.kind === 'bank')?.id ?? sources[0]?.id ?? '', note: '' });
   const [error, setError] = useState('');
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((x) => ({ ...x, [k]: v }));
-  const tax = f.exempt ? 0 : Math.round((f.grossCents ?? 0) * 0.2);
+  const tax = f.exempt || !w.dividendsTax ? 0 : Math.round((f.grossCents ?? 0) * 0.2);
   const save = async (e: FormEvent) => {
     e.preventDefault();
     try {
       await api('/api/dividends', {
-        body: { declaredOn: f.declaredOn, paidOn: f.paidNow ? f.declaredOn : null, shareholder: f.shareholder, grossCents: f.grossCents ?? 0, exempt: f.exempt, sourceId: f.paidNow ? f.sourceId : null, note: f.note },
+        body: { declaredOn: f.declaredOn, paidOn: f.paidNow ? f.declaredOn : null, shareholder: f.shareholder, grossCents: f.grossCents ?? 0, exempt: f.exempt, conduit: f.conduit, sourceId: f.paidNow ? f.sourceId : null, note: f.note },
       });
       onSaved();
     } catch (err) {
@@ -634,19 +639,30 @@ function DividendDrawer({ available, defaultName, onClose, onSaved }: { availabl
     }
   };
   return (
-    <Drawer title="Declare a dividend" onClose={onClose}>
+    <Drawer title={w.payout === 'dividend' ? 'Declare a dividend' : 'A distribution'} onClose={onClose}>
       <form className="stack" onSubmit={save}>
-        <Field label="Paid to (shareholder)">{(p) => <input {...p} className="input" value={f.shareholder} onChange={(e) => set('shareholder', e.target.value)} required />}</Field>
-        <Field label="Dividend (before tax)">{(p) => <MoneyInput {...p} value={f.grossCents} onChange={(c) => set('grossCents', c)} />}</Field>
+        <Field label={`Paid to (${w.to})`}>{(p) => <input {...p} className="input" value={f.shareholder} onChange={(e) => set('shareholder', e.target.value)} required />}</Field>
+        <Field label={w.dividendsTax ? `${w.Payouts.slice(0, -1)} (before tax)` : 'Amount'}>{(p) => <MoneyInput {...p} value={f.grossCents} onChange={(c) => set('grossCents', c)} />}</Field>
         {(f.grossCents ?? 0) > available && <div className="banner alert small">That’s more than the profits available ({formatZar(available)}). Check with your accountant first.</div>}
         <Field label="Declared on">{(p) => <input {...p} className="input" type="date" value={f.declaredOn} onChange={(e) => set('declaredOn', e.target.value)} />}</Field>
-        <label className="check">
-          <input type="checkbox" checked={f.exempt} onChange={(e) => set('exempt', e.target.checked)} />
-          <span>
-            The shareholder is a South African company
-            <div className="xs muted">Then there’s no dividends tax (they must give you the exemption declaration).</div>
-          </span>
-        </label>
+        {!w.dividendsTax && (
+          <label className="check">
+            <input type="checkbox" checked={f.conduit} onChange={(e) => set('conduit', e.target.checked)} />
+            <span>
+              This year’s income, to a beneficiary who lives in South Africa
+              <div className="xs muted">Then it’s taxed in their hands and comes off the trust’s taxable income. Untick it for a beneficiary living abroad, or a distribution out of capital or earlier years’ income: the trust pays the tax on those.</div>
+            </span>
+          </label>
+        )}
+        {w.dividendsTax && (
+          <label className="check">
+            <input type="checkbox" checked={f.exempt} onChange={(e) => set('exempt', e.target.checked)} />
+            <span>
+              The {w.to} is a South African company
+              <div className="xs muted">Then there’s no dividends tax (they must give you the exemption declaration).</div>
+            </span>
+          </label>
+        )}
         <label className="check">
           <input type="checkbox" checked={f.paidNow} onChange={(e) => set('paidNow', e.target.checked)} />
           Paid the same day
@@ -664,9 +680,9 @@ function DividendDrawer({ available, defaultName, onClose, onSaved }: { availabl
             )}
           </Field>
         )}
-        {(f.grossCents ?? 0) > 0 && (
+        {(f.grossCents ?? 0) > 0 && w.dividendsTax && (
           <p className="small">
-            Dividends tax {formatZar(tax)} (to SARS) · the shareholder gets <strong>{formatZar((f.grossCents ?? 0) - tax)}</strong>
+            Dividends tax {formatZar(tax)} (to SARS) · the {w.to} gets <strong>{formatZar((f.grossCents ?? 0) - tax)}</strong>
           </p>
         )}
         {error && <div className="banner alert small">{error}</div>}
@@ -681,7 +697,7 @@ function PayDividendDrawer({ d, sources, onClose, onSaved }: { d: Dividend; sour
   const [sourceId, setSourceId] = useState(sources.find((s) => s.kind === 'bank')?.id ?? sources[0]?.id ?? '');
   const [error, setError] = useState('');
   return (
-    <Drawer title={`Pay ${d.shareholder}`} sub={`${formatZar(d.netCents)} after dividends tax`} onClose={onClose}>
+    <Drawer title={`Pay ${d.shareholder}`} sub={d.dwtCents ? `${formatZar(d.netCents)} after dividends tax` : formatZar(d.netCents)} onClose={onClose}>
       <form
         className="stack"
         onSubmit={(e) => {

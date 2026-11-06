@@ -48,14 +48,14 @@ export type CompanyFile = z.input<typeof fileSchema>;
 const SETTINGS_KEYS = [
   'companyName', 'tradingName', 'regNumber', 'vatNumber', 'address', 'phone', 'email', 'website', 'bankDetails', 'businessType', 'vatRegistered', 'vatRateBp', 'fyEndMonth',
   'invoicePrefix', 'invoicePad', 'quotePrefix', 'quotePad', 'paymentDays', 'quoteValidDays', 'invoiceTerms', 'quoteTerms', 'markupBp', 'lockDate',
-  'creditPrefix', 'creditPad', 'proformaPrefix', 'payshapId', 'vatCategory', 'turnoverTax',
+  'creditPrefix', 'creditPad', 'proformaPrefix', 'payshapId', 'vatCategory', 'turnoverTax', 'approvedPbo',
 ] as const;
 const SETTINGS_COLUMNS: Record<(typeof SETTINGS_KEYS)[number], string> = {
   companyName: 'company_name', tradingName: 'trading_name', regNumber: 'reg_number', vatNumber: 'vat_number', address: 'address', phone: 'phone', email: 'email',
   website: 'website', bankDetails: 'bank_details', businessType: 'business_type', vatRegistered: 'vat_registered', vatRateBp: 'vat_rate_bp', fyEndMonth: 'fy_end_month', invoicePrefix: 'invoice_prefix',
   invoicePad: 'invoice_pad', quotePrefix: 'quote_prefix', quotePad: 'quote_pad', paymentDays: 'payment_days', quoteValidDays: 'quote_valid_days',
   invoiceTerms: 'invoice_terms', quoteTerms: 'quote_terms', markupBp: 'markup_bp', lockDate: 'lock_date',
-  creditPrefix: 'credit_prefix', creditPad: 'credit_pad', proformaPrefix: 'proforma_prefix', payshapId: 'payshap_id', vatCategory: 'vat_category', turnoverTax: 'turnover_tax',
+  creditPrefix: 'credit_prefix', creditPad: 'credit_pad', proformaPrefix: 'proforma_prefix', payshapId: 'payshap_id', vatCategory: 'vat_category', turnoverTax: 'turnover_tax', approvedPbo: 'approved_pbo',
 };
 
 export async function exportCompanyFile(tx: Tx | import('../db/index.js').Sql): Promise<CompanyFile> {

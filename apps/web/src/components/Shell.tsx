@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { ROLE_LABELS } from '@shap/shared';
-import { useAuthed } from '../lib/session';
+import { ROLE_LABELS, paysOutProfit } from '@shap/shared';
+import { entityWords, useAuthed } from '../lib/session';
 import { AccountDrawer } from './AccountDrawer';
 import { Logo } from './Logo';
 import { Avatar, Icon } from './ui';
@@ -25,7 +25,7 @@ export function Shell({ children }: { children: ReactNode }) {
     { to: '/log', label: 'Log', icon: 'log', show: user.role !== 'accountant' },
     { to: '/jobs', label: 'Jobs', icon: 'jobs', show: has('jobs') },
     { to: '/workers', label: 'Workers', icon: 'workers', show: seesMoney && has('workers') },
-    { to: '/payroll', label: has('payroll') ? 'Payroll' : 'Dividends', icon: 'money', show: seesMoney && (has('payroll') || (settings.businessType === 'company' && has('dividends'))) },
+    { to: '/payroll', label: has('payroll') ? 'Payroll' : entityWords(settings.businessType).Payouts, icon: 'money', show: seesMoney && (has('payroll') || (paysOutProfit(settings.businessType) && has('dividends'))) },
     { to: '/costs', label: 'Costs', icon: 'costs', show: seesMoney },
     { to: '/bills', label: 'Bills to pay', icon: 'bill', show: seesMoney && has('bills') },
     { to: '/logbook', label: 'Logbook', icon: 'car', show: seesMoney && has('logbook') },

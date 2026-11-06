@@ -1,15 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import {
-  accountInput,
-  industryProfile,
-  attachmentInput,
-  brandInput,
-  categoryInput,
-  settingsInput,
-  sourceInput,
-  userInput,
-  workTypeInput,
-} from '@shap/shared';
+import { accountInput, attachmentInput, brandInput, categoryInput, entity, industryProfile, settingsInput, sourceInput, userInput, workTypeInput } from '@shap/shared';
 import { z } from 'zod';
 import { checkNewPassword, confirmPassword, createUser, endOtherSessions, hashPassword, requireRole, seesMoney, sessionToken, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -103,8 +93,14 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.put('/api/settings', { preHandler: requireRole('owner') }, async (req) => {
     const user = userOrThrow(req);
     const input = parse(settingsInput, req.body);
-    // A sole proprietor's tax year is SARS's year for individuals: it ends in February.
-    if (input.businessType === 'sole_prop') input.fyEndMonth = 2;
+    // Sole proprietors, partners and trusts are taxed on SARS's year ending in February.
+    const kind = entity(input.businessType);
+    if (kind.febYearEnd) input.fyEndMonth = 2;
+    // Turnover tax and PBO approval only exist for the kinds of business that can have them.
+    if (!kind.turnoverTax) input.turnoverTax = false;
+    if (input.businessType !== 'npc') input.approvedPbo = false;
+    // SARS: a company (CC, co-op) on turnover tax must have its year end on the last day of February.
+    if (input.turnoverTax && input.fyEndMonth !== 2) throw badRequest('Turnover tax needs the year to end in February: change the financial year end first (SARS’s rule for companies on turnover tax).');
     const before = await getSettings(sql);
     await sql.begin(async (tx) => {
       const row: Record<string, unknown> = { ...input, features: tx.json(input.features as never), logoLayout: tx.json(input.logoLayout as never), lockDate: input.lockDate ?? null, updatedAt: new Date() };

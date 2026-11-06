@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { BUSINESS_TYPES } from './entities.js';
 import {
   ACCOUNT_TYPES,
   ASSET_CATEGORIES,
@@ -47,7 +48,9 @@ export const settingsInput = z.object({
   email: z.string().trim().max(120).default(''),
   website: text(120).default(''),
   bankDetails: text(600).default(''),
-  businessType: z.enum(['company', 'sole_prop']).default('company'),
+  businessType: z.enum(BUSINESS_TYPES).default('company'),
+  /** A non-profit company that SARS has approved as a public benefit organisation (tax-exempt). */
+  approvedPbo: z.boolean().default(false),
   features: z.record(z.string(), z.boolean()).default({}),
   /** Casual ("Howzit, lekker") or formal words in the app. */
   tone: z.enum(['casual', 'formal']).default('casual'),
@@ -394,8 +397,8 @@ export const taxEstimateInput = z.object({
   assessedLossCents: positiveCents.default(0),
   paidCents: positiveCents.default(0),
   sbc: z.boolean().default(true),
-  /** Sole proprietors: taxed as individuals. */
-  kind: z.enum(['company', 'individual']).default('company'),
+  /** Who pays (set by the server from the kind of business; entities.ts). */
+  kind: z.enum(['company', 'individual', 'trust', 'npc', 'partners']).default('company'),
   ageBand: z.enum(['under65', '65to74', '75plus']).default('under65'),
   otherIncomeCents: positiveCents.default(0),
   retirementCents: positiveCents.default(0),
@@ -437,6 +440,8 @@ export const dividendInput = z.object({
   grossCents: positiveCents.refine((c) => c > 0, 'Enter the dividend'),
   /** The shareholder is a South African company: no dividends tax. */
   exempt: z.boolean().default(false),
+  /** Trusts: this year's income, to a beneficiary who is a South African resident (taxed in their hands). */
+  conduit: z.boolean().default(true),
   sourceId: uuid.nullable().default(null),
   note: text(300).default(''),
 });

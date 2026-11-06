@@ -1,8 +1,9 @@
 import type { FastifyInstance } from 'fastify';
-import { addMonths, companyTax, estimateTax, financialYear, isoDate, monthEnd, monthsBetween, taxEstimateInput, yearEndInput, type AccountType } from '@shap/shared';
+import { addMonths, companyTax, estimateTax, financialYear, isoDate, monthEnd, monthsBetween, taxEstimateInput, yearEndInput, type AccountType, entity } from '@shap/shared';
 import { z } from 'zod';
 import { requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
+import type { Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
 import { getSettings, isIsoDate, q, today, freshTotals } from '../lib/books.js';
 import { badRequest, notFound } from '../lib/errors.js';
@@ -11,6 +12,21 @@ import { parse } from '../lib/validate.js';
 const PL: AccountType[] = ['income', 'cost_of_sales', 'expense'];
 /** Debit-positive ledger figures ↔ the way a statement shows them (income, liabilities and equity positive). */
 export const natural = (type: AccountType) => (type === 'asset' || type === 'expense' || type === 'cost_of_sales' ? 1 : -1);
+
+/** The tax estimate's kind for a kind of business (entities.ts). */
+export const taxKind = (businessType: string) => ({ individual: 'individual', partners: 'partners', company: 'company', trust: 'trust', npc: 'npc' } as const)[entity(businessType).taxedAs];
+
+/**
+ * What else a tax estimate needs: a partnership's partners and their shares, and for a trust,
+ * what it has given its beneficiaries this year that's taxed in their hands rather than the
+ * trust's: this year's income, to beneficiaries who are South African residents (section 25B).
+ */
+export async function taxFigures(db: Db, businessType: string, fy: { start: string; end: string }) {
+  const kind = entity(businessType).taxedAs;
+  const partners = kind === 'partners' ? await db<{ name: string; shareBp: number }[]>`select name, share_bp from partners where active order by created_at` : [];
+  const [d] = kind === 'trust' ? await db<{ t: number }[]>`select coalesce(sum(gross_cents), 0)::bigint as t from dividends where conduit and declared_on between ${fy.start}::date and ${fy.end}::date` : [{ t: 0 }];
+  return { partners: partners.map((p) => ({ name: p.name, shareBp: p.shareBp })), distributedCents: Number(d!.t) };
+}
 
 export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
@@ -120,8 +136,8 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
         coalesce((select sum(l.amount_cents) from ledger_totals l where l.account_id = a.id and l.date between ${prev.start}::date and ${prev.end}::date), 0)::bigint as prior
       from accounts a where a.type in ('income', 'cost_of_sales', 'expense') and coalesce(a.system_key, '') <> 'income_tax'
       order by a.code`;
-    // A sole proprietor doesn't pay themselves a salary: what they take out is drawings, not a cost.
-    const always = new Set(settings.businessType === 'sole_prop' ? ['depreciation'] : ['director_salary', 'depreciation']);
+    // A sole proprietor or partner doesn't pay themselves a salary: what they take out is drawings, not a cost.
+    const always = new Set(entity(settings.businessType).payout === 'drawings' ? ['depreciation'] : ['director_salary', 'depreciation']);
     const lines = rows
       .filter((r) => r.actual !== 0 || r.prior !== 0 || always.has(r.systemKey ?? ''))
       .map((r) => {
@@ -143,18 +159,37 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
       where a.type in ('income', 'cost_of_sales', 'expense') and coalesce(a.system_key, '') <> 'income_tax' and l.date < ${fy.start}::date`;
     const assessedLoss = Math.max(0, prior!.t); // debit-positive: a net loss is positive
     const saved = await sql`select id, period, as_at, taxable_income_cents, tax_cents, payable_cents, note, created_at from tax_estimates where fy_end = ${fy.end} order by created_at desc`;
-    return { fy, asAt, months, prev, lines, assessedLossCents: assessedLoss, saved, businessType: settings.businessType, exampleTaxOn100k: companyTax(10_000_000, fy.end, true) };
+    return {
+      fy,
+      asAt,
+      months,
+      prev,
+      lines,
+      // A partnership has no assessed loss of its own (each year's loss went to the partners).
+      assessedLossCents: taxKind(settings.businessType) === 'partners' ? 0 : assessedLoss,
+      saved,
+      businessType: settings.businessType,
+      kind: taxKind(settings.businessType),
+      approvedPbo: settings.approvedPbo,
+      ...(await taxFigures(sql, settings.businessType, fy)),
+      exampleTaxOn100k: companyTax(10_000_000, fy.end, true),
+    };
   });
 
   app.post('/api/tax-estimates', owner, async (req) => {
     const user = userOrThrow(req);
     const input = parse(taxEstimateInput, req.body);
+    // Who pays, and on what, comes from the kind of business, not from the screen.
+    const settings = await getSettings(sql);
+    input.kind = taxKind(settings.businessType);
+    const fy = financialYear(input.fyEnd, settings.fyEndMonth);
+    const extra = await taxFigures(sql, settings.businessType, fy);
     const income = input.lines.reduce((s, l) => s + (l.type === 'income' ? l.projectedCents : -l.projectedCents), 0);
-    const { taxableCents: taxable, taxCents: tax } = estimateTax({ ...input, profitCents: income });
+    const { taxableCents: taxable, taxCents: tax } = estimateTax({ ...input, profitCents: income, approvedPbo: settings.approvedPbo, distributedCents: extra.distributedCents, partners: extra.partners });
     const payable = Math.max(0, (input.period === 1 ? Math.round(tax / 2) : tax) - input.paidCents);
     const [row] = await sql`
       insert into tax_estimates (fy_end, period, as_at, lines, taxable_income_cents, tax_cents, payable_cents, note, created_by)
-      values (${input.fyEnd}, ${input.period}, ${input.asAt}, ${sql.json({ lines: input.lines, assessedLossCents: input.assessedLossCents, paidCents: input.paidCents, sbc: input.sbc, kind: input.kind, ageBand: input.ageBand, otherIncomeCents: input.otherIncomeCents, retirementCents: input.retirementCents } as never)},
+      values (${input.fyEnd}, ${input.period}, ${input.asAt}, ${sql.json({ lines: input.lines, assessedLossCents: input.assessedLossCents, paidCents: input.paidCents, sbc: input.sbc, kind: input.kind, approvedPbo: settings.approvedPbo, distributedCents: extra.distributedCents, partners: extra.partners, ageBand: input.ageBand, otherIncomeCents: input.otherIncomeCents, retirementCents: input.retirementCents } as never)},
               ${taxable}, ${tax}, ${payable}, ${input.note}, ${user.id})
       returning id`;
     await audit(sql, { userId: user.id, action: 'create', entity: 'tax_estimate', entityId: row!.id, ip: req.ip });

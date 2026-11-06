@@ -3,6 +3,7 @@ import {
   ACCOUNT_TYPE_LABELS,
   addMonths,
   AGE_BAND_LABELS,
+  entity,
   estimateTax,
   financialYear,
   formatAmount,
@@ -20,6 +21,7 @@ import { api, ApiError, apiBlob } from '../lib/api';
 import { ARCHIVED_SLIP, fileToBase64, squeezePhoto } from '../lib/files';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
+import { ProfitShare } from '../components/ProfitShare';
 
 const fmt = (c: number) => (c === 0 ? '–' : formatAmount(c));
 
@@ -112,6 +114,7 @@ export function YearEnd() {
 
   return (
     <div className="stack-lg">
+      <ProfitShare />
       <section className="panel panel-pad stack">
         <p className="small">
           Type in the figures from the accountant’s annual financial statements. Shap keeps its own detail and posts one adjustment per account on the last
@@ -343,7 +346,12 @@ interface TaxData {
   months: number;
   lines: TaxLine[];
   assessedLossCents: number;
-  businessType?: 'company' | 'sole_prop';
+  businessType?: string;
+  /** Who pays (entities.ts), and what that needs. */
+  kind?: 'company' | 'individual' | 'trust' | 'npc' | 'partners';
+  approvedPbo?: boolean;
+  partners?: { name: string; shareBp: number }[];
+  distributedCents?: number;
   saved: { id: string; period: number; asAt: string; taxableIncomeCents: number; taxCents: number; payableCents: number; note: string; createdAt: string }[];
 }
 
@@ -373,6 +381,9 @@ export function ProvisionalTax() {
 
   useEffect(() => {
     if (!data) return;
+    // Most Inc.s give a personal service (law, accounting, engineering), which rules out the
+    // small business corporation table: it starts off for them.
+    setSbc(data.businessType !== 'inc');
     setProj(Object.fromEntries(data.lines.map((l) => [l.accountId, l.projectedCents])));
     setLoss(data.assessedLossCents);
     // First period runs to the half-year; after that it's the second.
@@ -392,9 +403,10 @@ export function ProvisionalTax() {
     return { income, cos, gross: income - cos, exp, net: income - cos - exp };
   });
   const net = totals[2]!.net;
-  const individual = data.businessType === 'sole_prop';
-  const kind = individual ? ('individual' as const) : ('company' as const);
-  const est = estimateTax({ kind, profitCents: net, assessedLossCents: loss, fyEnd: data.fy.end, sbc, ageBand, otherIncomeCents: otherIncome, retirementCents: retirement });
+  const kind = data.kind ?? (data.businessType === 'sole_prop' ? 'individual' : 'company');
+  const individual = kind === 'individual';
+  const rules = entity(data.businessType ?? settings.businessType);
+  const est = estimateTax({ kind, profitCents: net, assessedLossCents: loss, fyEnd: data.fy.end, sbc: sbc && rules.sbcPossible, ageBand, otherIncomeCents: otherIncome, retirementCents: retirement, distributedCents: data.distributedCents, approvedPbo: data.approvedPbo, partners: data.partners });
   const taxable = est.taxableCents;
   const tax = est.taxCents;
   const due = period === 1 ? Math.round(tax / 2) : tax;
@@ -467,7 +479,16 @@ export function ProvisionalTax() {
       <section className="panel panel-pad stack no-print">
         <p className="small">
           Shap takes this year’s figures to date, projects them to twelve months at the same monthly rate, and works out the tax
-          {individual ? ' on SARS’s tables for individuals (a sole proprietor’s profit is your own income).' : ' on the small business corporation table.'} Change any projected figure (a big job you know is coming, a cost that won’t repeat) before saving. Your accountant still files
+          {
+            {
+              individual: ' on SARS’s tables for individuals (a sole proprietor’s profit is your own income).',
+              partners: ': the partnership pays none itself, so each partner’s share is worked out on SARS’s tables for individuals.',
+              company: rules.sbcPossible ? ' on the small business corporation table (if it qualifies), or the 27% company rate.' : ' at the 27% company rate.',
+              trust: ' at the trust rate (45%) on the income the trust keeps: this year’s income given to beneficiaries who live in South Africa is taxed in their hands instead.',
+              npc: data.approvedPbo ? ': as an approved public benefit organisation, most of its income is tax-free.' : ' at the 27% company rate (a non-profit company without PBO approval).',
+            }[kind]
+          }{' '}
+          Change any projected figure (a big job you know is coming, a cost that won’t repeat) before saving. Your accountant still files
           the IRP6; this gets you the number to talk about.
         </p>
         <div className="toolbar wrap">
@@ -526,13 +547,13 @@ export function ProvisionalTax() {
               <td>Estimated net profit</td>
               <td className="num">{formatZar(net)}</td>
             </tr>
-            <tr>
+            {kind !== 'partners' && <tr>
               <td>
                 Less: assessed loss brought forward
                 <div className="xs muted">From earlier years in the books; check it against last year’s assessment (ITA34).</div>
               </td>
               <td className="num">{isOwner ? <MoneyInput value={loss} onChange={(c) => setLoss(c ?? 0)} aria-label="Assessed loss brought forward" /> : formatZar(loss)}</td>
-            </tr>
+            </tr>}
             {individual && (
               <>
                 <tr>
@@ -553,11 +574,61 @@ export function ProvisionalTax() {
                 </tr>
               </>
             )}
+            {kind === 'trust' && (
+              <tr>
+                <td>
+                  Less: this year’s income given to South African beneficiaries
+                  <div className="xs muted">Distributions this year marked as this year’s income to a beneficiary living in South Africa: they’re taxed on it, not the trust. Given to someone abroad, or out of capital, it stays the trust’s.</div>
+                </td>
+                <td className="num">{formatZar(data.distributedCents ?? 0)}</td>
+              </tr>
+            )}
             <tr className="sub">
               <td>Taxable income</td>
               <td className="num">{formatZar(taxable)}</td>
             </tr>
-            {individual ? (
+            {kind === 'partners' ? (
+              <>
+                {(est.partners ?? []).map((p) => (
+                  <tr key={p.name}>
+                    <td>
+                      {p.name} ({(p.shareBp / 100).toLocaleString('en-ZA')}%): {formatZar(p.taxableCents)}
+                      <div className="xs muted">On the individual tables, as if it were their only income.</div>
+                    </td>
+                    <td className="num">{formatZar(p.taxCents)}</td>
+                  </tr>
+                ))}
+                {!est.partners?.length && (
+                  <tr>
+                    <td colSpan={2} className="small muted">
+                      Add the partners and their shares under Settings → Company.
+                    </td>
+                  </tr>
+                )}
+                <tr>
+                  <td colSpan={2} className="xs muted">
+                    Each partner pays their own provisional tax, on their share plus their other income (a salary, interest, rent), which isn’t in these books. The total below is all the partners together.
+                  </td>
+                </tr>
+              </>
+            ) : kind === 'trust' ? (
+              <tr>
+                <td>Tax at 45% (trusts)</td>
+                <td className="num">{formatZar(tax)}</td>
+              </tr>
+            ) : kind === 'npc' ? (
+              <tr>
+                <td>
+                  {data.approvedPbo ? 'No income tax: approved public benefit organisation' : 'Company tax at 27%'}
+                  <div className="xs muted">
+                    {data.approvedPbo
+                      ? 'Trading income outside what the PBO rules allow can still be taxed: your accountant works that out on the IT12EI.'
+                      : 'A non-profit company doesn’t get the small business rates. Once SARS approves it as a PBO (Settings), most of its income is tax-free.'}
+                  </div>
+                </td>
+                <td className="num">{formatZar(tax)}</td>
+              </tr>
+            ) : individual ? (
               <tr>
                 <td>
                   <div className="row wrap">
@@ -577,6 +648,11 @@ export function ProvisionalTax() {
                 </td>
                 <td className="num">{formatZar(tax)}</td>
               </tr>
+            ) : !rules.sbcPossible ? (
+              <tr>
+                <td>Company tax at 27%</td>
+                <td className="num">{formatZar(tax)}</td>
+              </tr>
             ) : (
               <tr>
                 <td>
@@ -585,6 +661,7 @@ export function ProvisionalTax() {
                     <span>
                       Small business corporation rates
                       <div className="xs muted">
+                        {data.businessType === 'inc' && 'Usually not for an Inc.: a personal service (law, accounting, engineering, health) with fewer than three full-time employees who aren’t connected to the owners can’t use it. '}
                         {sbc
                           ? bands.map((b, i) => (i === 0 ? `0% to R${b.upTo!.toLocaleString('en-ZA')}` : `${Math.round(b.rate * 100)}% above R${b.over.toLocaleString('en-ZA')}`)).join(', ')
                           : 'Flat 27% company rate'}

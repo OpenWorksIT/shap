@@ -18,6 +18,7 @@ import { registerDuplicateRoutes } from './modules/duplicates.js';
 import { registerRecurringRoutes } from './modules/recurring.js';
 import { registerVatRoutes } from './modules/vat.js';
 import { registerPayrollRoutes } from './modules/payroll.js';
+import { registerPartnerRoutes } from './modules/partners.js';
 import { registerFeedbackRoutes } from './modules/feedback.js';
 import { registerMarketRoutes } from './modules/market.js';
 import { setPdfFonts } from './modules/pdf.js';
@@ -206,6 +207,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   registerMonthlyRoutes(app, ctx);
   registerVatRoutes(app, ctx);
   registerPayrollRoutes(app, ctx);
+  registerPartnerRoutes(app, ctx);
   registerFeedbackRoutes(app, ctx);
   registerMarketRoutes(app, ctx);
   registerReportRoutes(app, ctx);
