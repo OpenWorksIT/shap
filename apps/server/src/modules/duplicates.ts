@@ -232,6 +232,14 @@ export async function mergeCosts(tx: Db, removeId: string, keepId: string | null
     else return 'The bank shows these as two separate payments';
   }
   const dropIds = action === 'drop' ? lines.map((l) => l.id) : [];
+  // A supplier bill is paid through Bills, never by taking over a statement payment (that would
+  // pay it twice); and a cost that was paid as a bill, or bought an asset, isn't merged away.
+  if (action === 'move' && keepId) {
+    const [bill] = await tx`select 1 from costs k join payment_sources s on s.id = k.source_id where k.id = ${keepId} and s.role is not null`;
+    if (bill) return 'The one to keep is a supplier bill: record the payment on the bill (Bills) instead of merging.';
+  }
+  const [tied] = await tx`select 1 from bill_payments where cost_id = ${removeId} union all select 1 from assets where cost_id = ${removeId} limit 1`;
+  if (tied) return 'That one has bill payments or an asset of its own, so it can’t be merged away.';
 
   // The record to undo from, taken before anything changes.
   await tx`

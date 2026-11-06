@@ -520,7 +520,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (left <= 0) throw badRequest('Nothing is owed on this invoice');
     if (input.date < doc.issueDate) throw badRequest('The write-off can’t be dated before the invoice');
     await assertOpen(sql, input.date);
-    await sql`update documents set written_off_on = ${input.date}, written_off_cents = ${left}, written_off_reason = ${input.reason}, updated_at = now() where id = ${id}`;
+    await sql`update documents set written_off_on = ${input.date}, written_off_cents = ${left}, written_off_reason = ${input.reason}, written_off_vat_relief = true, updated_at = now() where id = ${id}`;
     await syncProjectStatus(sql, doc.projectId);
     await audit(sql, { userId: user.id, action: 'write_off', entity: 'invoice', entityId: id, ip: req.ip, details: { amount: left, reason: input.reason } });
     return loadDocument(sql, id);
@@ -547,6 +547,11 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!doc || doc.kind !== 'invoice') throw notFound('Invoice');
     if (doc.status !== 'issued') throw badRequest(doc.status === 'draft' ? 'Issue the invoice before recording a payment' : 'This invoice is void');
     if (doc.writtenOffOn) throw badRequest('This invoice was written off as delinquent. Undo that first, then record the payment.');
+    // A negative amount is money paid back to the client: never more than they paid.
+    if (input.amountCents < 0) {
+      const [p] = await sql<{ paid: number }[]>`select coalesce(sum(amount_cents), 0)::bigint as paid from receipts where invoice_id = ${id}`;
+      if (Number(p!.paid) + input.amountCents < 0) throw badRequest('That’s more than the client has paid on this invoice.');
+    }
     await assertOpen(sql, input.date);
     const [row] = await sql`insert into receipts ${sql({ ...input, invoiceId: id, createdBy: user.id })} returning *`;
     await syncProjectOfDocument(sql, id);

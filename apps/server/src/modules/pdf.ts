@@ -1,5 +1,5 @@
 import PDFDocument from 'pdfkit';
-import { featureOn, formatDate, formatZar, lineLabel, SHAP_LINE, SHAP_URL, type LineCategory } from '@shap/shared';
+import { featureOn, formatDate, formatZar, lineLabel, SHAP_LINE, SHAP_URL, type LineCategory, regPrefix } from '@shap/shared';
 import type { SettingsRow } from '../lib/books.js';
 import { cleanImageCached } from '../lib/images.js';
 
@@ -244,7 +244,7 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   pdf.font(bold).fontSize(10.5).fillColor(INK).text(tradingName, L, y, { width: colW });
   const fromLines = [
     legal !== tradingName ? legal : '',
-    settings.regNumber ? `Reg. no. ${settings.regNumber}` : '',
+    settings.regNumber ? `${regPrefix(settings.businessType)} ${settings.regNumber}` : '',
     settings.vatRegistered && settings.vatNumber ? `VAT no. ${settings.vatNumber}` : '',
     contact.address,
     [contact.phone, contact.email].filter(Boolean).join('  ·  '),
@@ -327,14 +327,20 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   const deposit = Math.min(doc.depositDueCents ?? 0, doc.totalCents);
   const depositLabel = `Deposit${doc.depositBp ? ` (${(doc.depositBp / 100).toFixed(doc.depositBp % 100 ? 1 : 0)}%)` : ''}`;
   const depositDue = isInvoice && deposit > 0 && doc.paidCents < deposit;
+  // What credit notes settled isn't money paid: it's shown as credited.
+  const credited = ((data as { receipts?: { method: string; amountCents: number }[] }).receipts ?? []).filter((r) => r.method === 'credit').reduce((t, r) => t + Number(r.amountCents), 0);
+  const settled = (paidLabel: string) => {
+    if (doc.paidCents - credited) totals.push([paidLabel, -(doc.paidCents - credited)]);
+    if (credited) totals.push(['Credited (credit notes)', -credited]);
+  };
   if (deposit > 0 && (!isInvoice || depositDue)) {
     totals.push(['Total', doc.totalCents]);
     totals.push([isInvoice ? `${depositLabel} due now` : `${depositLabel} to confirm`, deposit]);
-    if (doc.paidCents) totals.push(['Paid', -doc.paidCents]);
+    if (doc.paidCents) settled('Paid');
     if (!isInvoice || doc.depositShowBalance) totals.push([isInvoice ? 'Balance after the deposit' : 'Balance on completion', doc.totalCents - deposit]);
   } else if (isInvoice && doc.paidCents) {
     totals.push(['Total', doc.totalCents]);
-    totals.push([deposit > 0 ? 'Paid (incl. deposit)' : 'Paid', -doc.paidCents]);
+    settled(deposit > 0 ? 'Paid (incl. deposit)' : 'Paid');
   }
   const bigLabel = isCredit
     ? 'Credited'
@@ -417,7 +423,7 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
     pdf.page.margins.bottom = 0;
     const fy = pdf.page.height - (settings.watermark ? 46 : 40);
     pdf.rect(0, pdf.page.height - 6, W, 6).fill(accent);
-    const foot = [legal, settings.regNumber ? `Reg. ${settings.regNumber}` : '', settings.vatRegistered && settings.vatNumber ? `VAT ${settings.vatNumber}` : ''].filter(Boolean).join('  ·  ');
+    const foot = [legal, settings.regNumber ? `${regPrefix(settings.businessType)} ${settings.regNumber}` : '', settings.vatRegistered && settings.vatNumber ? `VAT ${settings.vatNumber}` : ''].filter(Boolean).join('  ·  ');
     pdf.font(regular).fontSize(7.5).fillColor(MUTED).text(foot, L, fy, { width: contentW - 80, lineBreak: false });
     pdf.text(`Page ${i - range.start + 1} of ${range.count}`, R - 80, fy, { width: 80, align: 'right', lineBreak: false });
     if (settings.watermark) shapFooter(pdf, L, fy + 14, contentW, regular);

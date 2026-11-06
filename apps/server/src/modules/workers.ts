@@ -22,6 +22,9 @@ function checkTarget(projectId: string | null | undefined, workTypeId: string | 
   if (projectId && workTypeId) throw badRequest('Choose a job or a type of general work, not both');
 }
 
+/** Days site staff may log for one worker on one date (a split across jobs, or a correction). */
+const LABOUR_DAY_CAP = 2;
+
 export function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
 
@@ -140,7 +143,7 @@ export function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx): void {
       // A worker is about one day per calendar day. Allow a split across jobs or a correction, but
       // not days piling up (repeating this call would otherwise run the wages-payable liability up
       // without limit). The owner, who is trusted, can still batch many days in one go.
-      const CAP = 2;
+      const CAP = LABOUR_DAY_CAP;
       const adding = new Map<string, number>();
       for (const e of input.entries) adding.set(e.workerId, (adding.get(e.workerId) ?? 0) + e.days);
       const existing = await sql<{ workerId: string; days: number }[]>`
@@ -152,6 +155,7 @@ export function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx): void {
       }
     }
     const rates = user.role === 'capture' ? await ratesFor(sql, input.entries.map((e) => e.workerId)) : null;
+    if (rates && input.entries.some((e) => !rates.has(e.workerId))) throw notFound('Worker');
     const ids = await sql.begin(async (tx) => {
       const out: string[] = [];
       for (const e of input.entries) {
@@ -188,7 +192,13 @@ export function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx): void {
     await assertOpen(sql, old.date, input.date);
     let { wageCents, allowanceCents } = input;
     if (user.role === 'capture') {
-      const r = (await ratesFor(sql, [input.workerId])).get(input.workerId)!;
+      // The same limit as logging: about a day per worker per date, this entry included.
+      const [have] = await sql<{ days: number }[]>`
+        select coalesce(sum(days), 0)::float8 as days from labour_entries
+        where date = ${input.date} and worker_id = ${input.workerId} and id <> ${id}`;
+      if (Number(have!.days) + input.days > LABOUR_DAY_CAP) throw badRequest('That’s more days than a worker can be logged for on that date. Ask the owner.');
+      const r = (await ratesFor(sql, [input.workerId])).get(input.workerId);
+      if (!r) throw notFound('Worker');
       wageCents = Math.round(r.dayRateCents * input.days);
       allowanceCents = Math.round(r.allowanceCents * Math.ceil(input.days));
     }

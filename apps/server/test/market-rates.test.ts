@@ -57,9 +57,32 @@ describe('publishing ranges', () => {
     expect(plug.lowCents).toBeGreaterThan(50000);
     expect(plug.highCents).toBeLessThan(80000);
     const owner = await login(env.app, 'owner@example.co.za');
+    // Not until the owner has been told about sharing (and hasn't switched it off).
+    expect((await owner.get('/api/market/rates')).items).toEqual([]);
+    await env.sql`update settings set market_notice_seen = true where id`;
     expect((await owner.get('/api/market/rates')).items.map((i: { item: string }) => i.item)).toEqual(['Fault finding', 'Install plug point']);
+    await env.sql`update settings set market_consent = false where id`;
+    expect((await owner.get('/api/market/rates')).items).toEqual([]);
     // Site staff don't get it (they don't quote).
     const site = await login(env.app, 'site@example.co.za');
     expect((await site.call({ method: 'GET', url: '/api/market/rates' })).statusCode).toBe(403);
+  });
+});
+
+describe('a count that can’t be gamed', () => {
+  let env: TestEnv;
+  beforeAll(async () => {
+    env = await setup({ env: { FEEDBACK_DIR: mkdtempSync(join(tmpdir(), 'shap-rates-')), COLLECT: 'true', TRUST_PROXY: 'true' } });
+  });
+  afterAll(() => env.close());
+
+  it('counts the businesses in the same twelve months as the prices', async () => {
+    const { collectMarket, marketRanges } = await import('../src/modules/market.js');
+    const { addMonths } = await import('@shap/shared');
+    const old = addMonths(`${lastWholeMonth(today())}-01`, -14).slice(0, 7);
+    // Four businesses long ago (outside the window), one last month.
+    for (let n = 1; n <= 4; n++) await collectMarket(env.ctx, { app: 'pocket', version: '0', installId: install(n), month: old, industry: 'electrician', rates: [{ item: 'Install plug point', unit: 'point', cents: 50000 }] });
+    await collectMarket(env.ctx, { app: 'pocket', version: '0', installId: install(9), month: lastWholeMonth(today()), industry: 'electrician', rates: [{ item: 'Install plug point', unit: 'point', cents: 123400 }] });
+    expect(await marketRanges(env.ctx, 'electrician')).toEqual([]);
   });
 });

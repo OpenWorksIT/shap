@@ -32,7 +32,11 @@ main() {
   if [ -z "$action" ]; then
     # The app's request comes from the drop-box. Only a-z and - survive, then it must match a
     # fixed action below, so even a symlinked/odd request file can at most pick a known action.
-    action="$(tr -dc 'a-z-' < "$CTL_IN/request" 2>/dev/null || true)"
+    # Only a plain file of a few bytes is read: a FIFO (or a device) would hang this helper, and
+    # with it the nightly backups.
+    if [ -f "$CTL_IN/request" ] && [ ! -L "$CTL_IN/request" ]; then
+      action="$(head -c 64 "$CTL_IN/request" 2>/dev/null | tr -dc 'a-z-' || true)"
+    fi
     rm -f "$CTL_IN/request"
     [ -n "$action" ] || action=check
   fi

@@ -169,6 +169,10 @@ describe('agreeing a year to the accountant’s figures', () => {
   });
 
   it('goes back to Shap’s own detail when a year end is removed', async () => {
+    // Not while that year is closed: its agreed figures are its books.
+    expect((await owner.call({ method: 'DELETE', url: `/api/year-ends/${FY26.end}` })).statusCode).toBe(400);
+    expect((await owner.call({ method: 'PUT', url: '/api/year-ends', payload: { fyEnd: FY26.end, figures: [] } })).statusCode).toBe(400);
+    await env.sql`update settings set lock_date = ${FY25.end}`;
     await owner.post(`/api/year-ends/${FY26.end}`, {}, 'DELETE');
     expect(await balance(env.sql, 'bank', FY26.end)).toBe(-80000);
   });

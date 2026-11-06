@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { BUSINESS_TYPES } from './entities.js';
 import {
   ACCOUNT_TYPES,
   ASSET_CATEGORIES,
@@ -47,7 +48,9 @@ export const settingsInput = z.object({
   email: z.string().trim().max(120).default(''),
   website: text(120).default(''),
   bankDetails: text(600).default(''),
-  businessType: z.enum(['company', 'sole_prop']).default('company'),
+  businessType: z.enum(BUSINESS_TYPES).default('company'),
+  /** A non-profit company that SARS has approved as a public benefit organisation (tax-exempt). */
+  approvedPbo: z.boolean().default(false),
   features: z.record(z.string(), z.boolean()).default({}),
   /** Casual ("Howzit, lekker") or formal words in the app. */
   tone: z.enum(['casual', 'formal']).default('casual'),
@@ -56,8 +59,8 @@ export const settingsInput = z.object({
   industry: text(40).default(''),
   /** May the app tell OpenWorks, anonymously, what kind of business uses it. */
   usageConsent: z.boolean().default(false),
-  /** May the app share, anonymously, what the trade's standard items cost (market.ts). On unless switched off. */
-  marketConsent: z.boolean().default(true),
+  /** May the app share, anonymously, what the trade’s standard items cost (market.ts). On unless switched off (left unchanged when not sent). */
+  marketConsent: z.boolean().optional(),
   /** The owner has been told about sharing market rates (left unchanged when not sent). */
   marketNoticeSeen: z.boolean().optional(),
   /** Registered for the Skills Development Levy (payroll over R500 000 a year). */
@@ -338,7 +341,13 @@ export const assetInput = z.object({
   residualCents: positiveCents.default(0),
   disposedOn: isoDate.nullable().optional(),
   disposalProceedsCents: positiveCents.default(0),
+  /** VAT vendors: the VAT in what it sold for (output VAT on a sale of the business's assets). */
+  disposalVatCents: positiveCents.default(0),
   disposalSourceId: optionalUuid,
+  /** VAT vendors, bought straight from an account: the VAT on the purchase (cost is before VAT). */
+  vatCents: positiveCents.default(0),
+  /** A motor car (sedan, station wagon, minibus, double cab): no VAT back on it, none charged when it's sold. */
+  inputVatDenied: z.boolean().default(false),
   notes: text(1000).default(''),
 });
 
@@ -394,11 +403,13 @@ export const taxEstimateInput = z.object({
   assessedLossCents: positiveCents.default(0),
   paidCents: positiveCents.default(0),
   sbc: z.boolean().default(true),
-  /** Sole proprietors: taxed as individuals. */
-  kind: z.enum(['company', 'individual']).default('company'),
+  /** Who pays (set by the server from the kind of business; entities.ts). */
+  kind: z.enum(['company', 'individual', 'trust', 'npc', 'partners']).default('company'),
   ageBand: z.enum(['under65', '65to74', '75plus']).default('under65'),
   otherIncomeCents: positiveCents.default(0),
   retirementCents: positiveCents.default(0),
+  /** Individuals: PAYE taken off a salary this year (it counts toward the year's tax). */
+  payeCents: positiveCents.default(0),
 });
 
 // ---------------------------------------------------------------- payroll and dividends
@@ -426,6 +437,10 @@ export const payRunInput = z.object({
 
 export const payLineInput = z.object({
   salaryCents: positiveCents,
+  /** Overtime and commission: regular pay, taxed with the salary. */
+  overtimeCents: positiveCents.default(0),
+  commissionCents: positiveCents.default(0),
+  /** A bonus or other once-off payment. */
   extraCents: positiveCents.default(0),
   note: text(200).default(''),
 });
@@ -437,6 +452,8 @@ export const dividendInput = z.object({
   grossCents: positiveCents.refine((c) => c > 0, 'Enter the dividend'),
   /** The shareholder is a South African company: no dividends tax. */
   exempt: z.boolean().default(false),
+  /** Trusts: this year's income, to a beneficiary who is a South African resident (taxed in their hands). */
+  conduit: z.boolean().default(true),
   sourceId: uuid.nullable().default(null),
   note: text(300).default(''),
 });

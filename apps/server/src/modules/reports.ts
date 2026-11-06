@@ -1,14 +1,5 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
-import {
-  ACCOUNT_TYPE_LABELS,
-  assetInput,
-  balanceCheckInput,
-  financialYear,
-  journalInput,
-  monthLabel,
-  monthsBetween,
-  type AccountType,
-} from '@shap/shared';
+import { ACCOUNT_TYPE_LABELS, assetInput, balanceCheckInput, financialYear, journalInput, monthLabel, monthsBetween, vatIncluded, vatOn, type AccountType, entity, equityHeading } from '@shap/shared';
 import { z } from 'zod';
 import { requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -49,14 +40,15 @@ export async function trialBalance(db: Db, date: string) {
   const [all, pl, prior] = await Promise.all([
     accountBalances(db, { to: date }),
     accountBalances(db, { from: fy.start, to: date }),
+    // Earlier years' profit, less their dividends, is retained earnings now (closed at each year end).
     db<{ total: number }[]>`
       select coalesce(sum(l.amount_cents), 0)::bigint as total from ledger_totals l join accounts a on a.id = l.account_id
-      where a.type in ('income', 'cost_of_sales', 'expense') and l.date < ${fy.start}::date`,
+      where (a.type in ('income', 'cost_of_sales', 'expense') or a.system_key = 'dividends') and l.date < ${fy.start}::date`,
   ]);
   const plMap = new Map(pl.map((a) => [a.id, a]));
   const priorProfit = prior[0]!.total; // debit-positive: a profit is negative
   const rows = all.map((a) => {
-    let bal = PL.includes(a.type) ? (plMap.get(a.id)?.balanceCents ?? 0) : a.balanceCents;
+    let bal = PL.includes(a.type) || a.systemKey === 'dividends' ? (plMap.get(a.id)?.balanceCents ?? 0) : a.balanceCents;
     if (a.systemKey === 'retained_earnings') bal += priorProfit;
     return { id: a.id, code: a.code, name: a.name, type: a.type, debitCents: bal > 0 ? bal : 0, creditCents: bal < 0 ? -bal : 0, balanceCents: bal };
   });
@@ -137,8 +129,16 @@ export async function balanceSheet(db: Db, date: string) {
   const liabilities = tb.rows.filter((r) => r.type === 'liability');
   const longTerm = liabilities.filter((r) => byId.get(r.id)?.systemKey === 'owner_loan').map((r) => item(r, -1));
   const shortTerm = liabilities.filter((r) => byId.get(r.id)?.systemKey !== 'owner_loan').map((r) => item(r, -1));
-  const equity = tb.rows.filter((r) => r.type === 'equity').map((r) => item(r, -1));
-  if (currentProfit !== 0) equity.push({ id: 'current-profit', code: '', name: `Profit for the year to date (${fy.label})`, amountCents: currentProfit });
+  let equity = tb.rows.filter((r) => r.type === 'equity').map((r) => item(r, -1));
+  if (entity(settings.businessType).taxedAs === 'partners') {
+    // A partnership's profit belongs to the partners once it's shared (partners.ts): until then
+    // this year's and any earlier year's sit together as "Profit not yet shared between partners".
+    const re = accounts.find((a) => a.systemKey === 'retained_earnings');
+    const line = equity.find((e) => e.id === re?.id);
+    if (line) line.amountCents += currentProfit;
+    else if (re && currentProfit !== 0) equity.push({ id: re.id, code: re.code, name: re.name, amountCents: currentProfit });
+    equity = equity.filter((e) => e.amountCents !== 0);
+  } else if (currentProfit !== 0) equity.push({ id: 'current-profit', code: '', name: `Profit for the year to date (${fy.label})`, amountCents: currentProfit });
   const total = (xs: { amountCents: number }[]) => xs.reduce((s, x) => s + x.amountCents, 0);
   const totalAssets = total(nonCurrent) + total(intangible) + total(current);
   const totalLiabilities = total(longTerm) + total(shortTerm);
@@ -160,7 +160,7 @@ function sendCsv(reply: FastifyReply, filename: string, csv: string) {
 }
 
 /** Journals the app posts itself; changed only where they come from. */
-const MADE_BY_APP: Record<string, string> = { payroll: 'a pay run (Payroll)', dividend: 'a dividend (Payroll → Dividends)', sars: 'a payment to SARS (Payroll → SARS)' };
+const MADE_BY_APP: Record<string, string> = { payroll: 'a pay run (Payroll)', dividend: 'a dividend (Payroll → Dividends)', sars: 'a payment to SARS (Payroll → SARS)', profit_share: 'the partners’ profit share (Accounts → Year end)' };
 
 export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
@@ -209,6 +209,7 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/reports/balance-sheet', readers, async (req, reply) => {
     const { date, format } = q(req);
     const bs = await balanceSheet(sql, isIsoDate(date) ? date : today());
+    const settings = await getSettings(sql);
     if (format === 'csv') {
       const r = (x: { code: string; name: string; amountCents: number }) => [x.code, x.name, centsToCsv(x.amountCents)];
       return sendCsv(reply, `balance-sheet-${bs.date}.csv`, toCsv(['Code', 'Item', 'Amount'], [
@@ -219,7 +220,7 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
         ['', 'Non-current liabilities', ''], ...bs.liabilities.nonCurrent.map(r),
         ['', 'Current liabilities', ''], ...bs.liabilities.current.map(r),
         ['', 'Total liabilities', centsToCsv(bs.liabilities.totalCents)],
-        ['', 'Equity', ''], ...bs.equity.items.map(r),
+        ['', equityHeading(settings.businessType), ''], ...bs.equity.items.map(r),
         ['', 'Total equity', centsToCsv(bs.equity.totalCents)],
       ]));
     }
@@ -377,6 +378,22 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { journalId: jid, differenceCents: diff };
   });
 
+  /**
+   * VAT on an asset (VAT vendors): what was claimed on a purchase straight from an account, and
+   * what was charged on selling it. None for a business that isn't registered, or on a motor car.
+   */
+  const assetVat = async (input: { costId?: string | null; costCents: number; vatCents: number; disposalProceedsCents: number; disposalVatCents: number; inputVatDenied: boolean }) => {
+    const { vatRegistered, vatRateBp } = await getSettings(sql);
+    if (!vatRegistered || input.inputVatDenied) {
+      input.vatCents = 0;
+      input.disposalVatCents = 0;
+      return;
+    }
+    if (input.costId) input.vatCents = 0; // the cost entry carries its own VAT
+    if (input.vatCents > vatOn(input.costCents, vatRateBp) + 1) throw badRequest('That’s more VAT than the cost can carry: the cost is before VAT.');
+    if (input.disposalVatCents > vatIncluded(input.disposalProceedsCents, vatRateBp) + 1) throw badRequest('That’s more VAT than the sale price can include.');
+  };
+
   // ---- asset register
   app.get('/api/assets', readers, async (req) => {
     const d = q(req).date;
@@ -401,7 +418,9 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
       const [c] = await sql<{ amountCents: number; vatCents: number }[]>`select amount_cents, vat_cents from costs where id = ${input.costId}`;
       if (!c) throw notFound('Cost');
       input.costCents = c.amountCents - c.vatCents; // the cost entry is what posts; keep them equal
+      if (input.inputVatDenied && Number(c.vatCents)) throw badRequest('SARS gives no VAT back on a motor car: take the VAT off the cost first (the whole amount is its cost).');
     }
+    await assetVat(input);
     const [row] = await sql`insert into assets ${sql({ ...input, costId: input.costId ?? null, sourceId: input.costId ? null : (input.sourceId ?? null), disposedOn: input.disposedOn ?? null, disposalSourceId: input.disposalSourceId ?? null })} returning *`;
     await audit(sql, { userId: user.id, action: 'create', entity: 'asset', entityId: row!.id, ip: req.ip });
     return row;
@@ -419,7 +438,9 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (costId) {
       const [c] = await sql<{ amountCents: number; vatCents: number }[]>`select amount_cents, vat_cents from costs where id = ${costId}`;
       if (c) input.costCents = c.amountCents - c.vatCents;
+      if (c && input.inputVatDenied && Number(c.vatCents)) throw badRequest('SARS gives no VAT back on a motor car: take the VAT off the cost first (the whole amount is its cost).');
     }
+    await assetVat({ ...input, costId });
     const [row] = await sql`update assets set ${sql({ ...input, costId: costId ?? null, sourceId: costId ? null : (input.sourceId ?? null), disposedOn: input.disposedOn ?? null, disposalSourceId: input.disposalSourceId ?? null })} where id = ${id} returning *`;
     await audit(sql, { userId: user.id, action: 'update', entity: 'asset', entityId: id, ip: req.ip });
     return row;

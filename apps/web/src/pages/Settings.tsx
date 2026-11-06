@@ -5,7 +5,11 @@ import {
   ACCOUNT_TYPES,
   CATEGORY_KIND_LABELS,
   CATEGORY_KINDS,
+  BUSINESS_TYPES,
+  ENTITIES,
+  entity,
   formatDate,
+  paysOutProfit,
   formatZar,
   monthLabel,
   passwordProblem,
@@ -28,6 +32,7 @@ import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
 import type { Brand, Settings } from '../lib/types';
 import { SystemSettings } from './System';
+import { Partners } from '../components/Partners';
 import { FeedbackInbox } from './FeedbackInbox';
 import { LogoPlacer } from '../components/LogoPlacer';
 import { LogoField } from '../components/BusinessForm';
@@ -68,6 +73,7 @@ export default function SettingsPage() {
       {tab === 'company' && (
         <>
           <SettingsForm section="company" />
+          <Partners />
           {has('brands') ? <TradingNames /> : <BusinessDetails />}
         </>
       )}
@@ -107,6 +113,7 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setF((x) => ({ ...x, [k]: v }));
+  const kind = entity(f.businessType);
   const save = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -148,7 +155,7 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
             <p className="xs muted">The registered company. How it presents itself on quotes and invoices (name, logo, contacts, bank) is set below.</p>
             <div className="form-grid">
               {text('companyName', 'Registered name', 'e.g. Example Builders (Pty) Ltd')}
-              {text('regNumber', 'Registration number')}
+              {text('regNumber', kind.regLabel ?? 'Registration number')}
               {text('vatNumber', 'VAT number')}
             </div>
             {ref.brands.length > 1 && (
@@ -234,18 +241,32 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
               {(p) => (
                 <select {...p} className="select" value={f.businessType} onChange={(e) => {
                   const v = e.target.value as Settings['businessType'];
-                  setF((x) => ({ ...x, businessType: v, fyEndMonth: v === 'sole_prop' ? 2 : x.fyEndMonth }));
+                  const k = entity(v);
+                  // The same rules the server applies on saving (entities.ts).
+                  setF((x) => ({ ...x, businessType: v, fyEndMonth: k.febYearEnd ? 2 : x.fyEndMonth, turnoverTax: k.turnoverTax && x.turnoverTax, approvedPbo: v === 'npc' && x.approvedPbo }));
                 }}>
-                  <option value="company">A company (Pty Ltd)</option>
-                  <option value="sole_prop">Just me (sole proprietor)</option>
+                  {BUSINESS_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {ENTITIES[t].label}
+                    </option>
+                  ))}
                 </select>
               )}
             </Field>
             <p className="xs muted">
-              {f.businessType === 'sole_prop'
-                ? 'The profit is taxed as your own income, on the tables for individuals, and the year ends in February. Money you put in or take out goes to your owner’s account (capital and drawings): what you take out is not a cost.'
-                : 'The company pays company tax (small business corporation rates if it qualifies). Money between you and the company goes on your loan account.'}
+              {kind.description} {kind.ownerMoney}
+              {kind.febYearEnd && ' The year ends in February (SARS’s year).'}
             </p>
+            {f.businessType === 'partnership' && settings.businessType !== 'partnership' && <div className="banner small">Save, then add the partners and their shares below.</div>}
+            {f.businessType === 'npc' && (
+              <label className="check">
+                <input type="checkbox" checked={f.approvedPbo} onChange={(e) => set('approvedPbo', e.target.checked)} />
+                <span>
+                  Approved by SARS as a public benefit organisation (PBO)
+                  <div className="xs muted">With the PBO letter, most of its income is tax-free and the tax estimate shows none. Trading beyond what the PBO rules allow (more than the greater of 5% of its receipts or R200 000) is still taxed: your accountant works that out. Without the letter, it pays company tax.</div>
+                </span>
+              </label>
+            )}
             <label className="check">
               <input type="checkbox" checked={f.vatRegistered} onChange={(e) => set('vatRegistered', e.target.checked)} />
               <span>
@@ -265,21 +286,23 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
                 )}
               </Field>
             )}
-            <label className="check">
+            {kind.turnoverTax && <label className="check">
               <input type="checkbox" checked={f.turnoverTax} onChange={(e) => set('turnoverTax', e.target.checked)} />
               <span>
                 Registered for turnover tax
                 <div className="xs muted">
                   SARS’s simpler tax for micro businesses (turnover up to {formatZar(TURNOVER_TAX_LIMIT_CENTS)} a year): a small percentage of turnover instead of income
                   tax on profit, and no provisional tax. Only if you registered for it (form TT01). The tax estimate switches to it.
+                  {kind.taxedAs === 'company' && ' For now a company on turnover tax needs its year to end in February (the 2026 Budget proposed dropping this; it isn’t law yet).'}
+                  {kind.taxedAs === 'partners' && ' Each partner registers and pays on their own share of the turnover.'}
                 </div>
               </span>
-            </label>
+            </label>}
             <div className="form-grid">
               {f.vatRegistered && <Field label="VAT rate (%)">{(p) => <input {...p} className="input" type="number" step="0.5" value={f.vatRateBp / 100} onChange={(e) => set('vatRateBp', Math.round(Number(e.target.value) * 100))} />}</Field>}
-              <Field label="Financial year ends in" hint={f.businessType === 'sole_prop' ? 'February: SARS’s tax year for individuals' : undefined}>
+              <Field label="Financial year ends in" hint={kind.febYearEnd ? `February: SARS’s tax year for ${kind.taxedAs === 'trust' ? 'trusts' : 'individuals'}` : undefined}>
                 {(p) => (
-                  <select {...p} className="select" value={f.fyEndMonth} onChange={(e) => set('fyEndMonth', Number(e.target.value))} disabled={f.businessType === 'sole_prop'}>
+                  <select {...p} className="select" value={f.fyEndMonth} onChange={(e) => set('fyEndMonth', Number(e.target.value))} disabled={kind.febYearEnd}>
                     {MONTHS.map((m, i) => (
                       <option key={m} value={i + 1}>
                         {m}
@@ -1290,7 +1313,7 @@ function Sections() {
           <div key={g.label}>
             <div className="list-group-head xs muted">{g.label}</div>
             <ul className="list">
-              {g.keys.filter((k) => k !== 'dividends' || settings.businessType === 'company').map((k) => (
+              {g.keys.filter((k) => k !== 'dividends' || paysOutProfit(settings.businessType)).map((k) => (
                 <li key={k} className="list-row">
                   <label className="check grow">
                     <input type="checkbox" checked={on[k]} onChange={(e) => void toggle(k, e.target.checked)} />

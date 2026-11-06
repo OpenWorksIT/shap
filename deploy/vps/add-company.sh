@@ -74,6 +74,11 @@ cat >> companies.yml <<YML
       TZ: Africa/Johannesburg
     expose:
       - '8080'
+    # As hardened as the first company's app.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     networks:
       default:
         aliases: [shap-app-$SLUG]

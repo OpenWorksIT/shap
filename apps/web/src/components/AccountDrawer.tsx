@@ -111,19 +111,20 @@ export function AccountDrawer({ onClose }: { onClose: () => void }) {
               onSubmit={(e) => {
                 e.preventDefault();
                 void run(async () => {
-                  const r = await api<{ recoveryCodes: string[] }>('/api/auth/mfa/recovery-codes', { body: { code: code.replace(/\s/g, '') } });
+                  const r = await api<{ recoveryCodes: string[] }>('/api/auth/mfa/recovery-codes', { body: { code: code.replace(/\s/g, ''), password } });
                   setCodes(r.recoveryCodes);
                   setMode('codes');
                 });
               }}
             >
-              <label htmlFor="regen-code" className="small">
-                Enter a code from your authenticator app. Your old recovery codes will stop working.
+              <label htmlFor="regen-pw" className="small">
+                Your password, then a code from your authenticator app. Your old recovery codes will stop working.
               </label>
+              <input id="regen-pw" className="input" type="password" autoComplete="current-password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} autoFocus />
               <CodeInput id="regen-code" value={code} onChange={setCode} />
               {error && <div className="banner alert small">{error}</div>}
               <div className="row">
-                <button className="btn primary" disabled={busy}>
+                <button className="btn primary" disabled={busy || !password}>
                   Make new codes
                 </button>
                 <button type="button" className="btn quiet" onClick={() => setMode('view')}>

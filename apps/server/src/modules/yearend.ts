@@ -1,16 +1,32 @@
 import type { FastifyInstance } from 'fastify';
-import { addMonths, companyTax, estimateTax, financialYear, isoDate, monthEnd, monthsBetween, taxEstimateInput, yearEndInput, type AccountType } from '@shap/shared';
+import { addMonths, companyTax, estimateTax, provisionalPayable, financialYear, isoDate, monthEnd, monthsBetween, taxEstimateInput, yearEndInput, type AccountType, entity } from '@shap/shared';
 import { z } from 'zod';
 import { requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
+import type { Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
-import { getSettings, isIsoDate, q, today, freshTotals } from '../lib/books.js';
+import { assertOpen, getSettings, isIsoDate, q, today, freshTotals } from '../lib/books.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 
 const PL: AccountType[] = ['income', 'cost_of_sales', 'expense'];
 /** Debit-positive ledger figures ↔ the way a statement shows them (income, liabilities and equity positive). */
 export const natural = (type: AccountType) => (type === 'asset' || type === 'expense' || type === 'cost_of_sales' ? 1 : -1);
+
+/** The tax estimate's kind for a kind of business (entities.ts). */
+export const taxKind = (businessType: string) => ({ individual: 'individual', partners: 'partners', company: 'company', trust: 'trust', npc: 'npc' } as const)[entity(businessType).taxedAs];
+
+/**
+ * What else a tax estimate needs: a partnership's partners and their shares, and for a trust,
+ * what it has given its beneficiaries this year that's taxed in their hands rather than the
+ * trust's: this year's income, to beneficiaries who are South African residents (section 25B).
+ */
+export async function taxFigures(db: Db, businessType: string, fy: { start: string; end: string }) {
+  const kind = entity(businessType).taxedAs;
+  const partners = kind === 'partners' ? await db<{ name: string; shareBp: number }[]>`select name, share_bp from partners where active order by created_at` : [];
+  const [d] = kind === 'trust' ? await db<{ t: number }[]>`select coalesce(sum(gross_cents), 0)::bigint as t from dividends where conduit and declared_on between ${fy.start}::date and ${fy.end}::date` : [{ t: 0 }];
+  return { partners: partners.map((p) => ({ name: p.name, shareBp: p.shareBp })), distributedCents: Number(d!.t) };
+}
 
 export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
@@ -21,7 +37,7 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/year-ends', readers, async () => {
     await freshTotals(sql);
     return sql`
-      select y.fy_end, y.note, y.created_at, count(f.account_id)::int as figures,
+      select y.fy_end, y.note, y.created_at, count(f.account_id) filter (where f.amount_cents <> 0)::int as figures,
         coalesce((select sum(l.amount_cents) from ledger_totals l where l.source = 'year_end' and l.date = y.fy_end and l.account_id = sys_account('suspense')), 0)::bigint as suspense_cents
       from year_ends y left join year_end_figures f on f.fy_end = y.fy_end group by y.fy_end order by y.fy_end desc`;
   });
@@ -42,16 +58,17 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
         coalesce((select sum(l.amount_cents) from ledger_totals l
           where l.account_id = a.id and not (l.source = 'year_end' and l.date = ${fyEnd}::date)
             and l.date <= ${fyEnd}::date
-            and (a.type not in ('income', 'cost_of_sales', 'expense') or l.date >= ${fy.start}::date)), 0)::bigint as shap_cents,
+            and (a.type not in ('income', 'cost_of_sales', 'expense') and coalesce(a.system_key, '') <> 'dividends' or l.date >= ${fy.start}::date)), 0)::bigint as shap_cents,
         (select f.amount_cents from year_end_figures f where f.fy_end = ${fyEnd} and f.account_id = a.id) as target_cents
       from accounts a
       where coalesce(a.system_key, '') not in ('retained_earnings', 'suspense')
       order by a.code`;
     const [ye] = await sql`select * from year_ends where fy_end = ${fyEnd}`;
-    // Retained earnings at the start of the year (earlier years' profit, adjustments included).
+    // Retained earnings at the start of the year (earlier years' profit less their dividends, the
+    // opening balance and adjustments included).
     const [re] = await sql<{ t: number }[]>`
       select coalesce(sum(l.amount_cents), 0)::bigint as t from ledger_totals l join accounts a on a.id = l.account_id
-      where a.type in ('income', 'cost_of_sales', 'expense') and l.date < ${fy.start}::date`;
+      where (a.type in ('income', 'cost_of_sales', 'expense') or a.system_key in ('dividends', 'retained_earnings')) and l.date < ${fy.start}::date`;
     return {
       fyEnd,
       fyStart: fy.start,
@@ -60,7 +77,8 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
       note: ye?.note ?? '',
       openingRetainedCents: -re!.t,
       rows: rows
-        .filter((r) => r.shapCents !== 0 || r.targetCents != null)
+        // (Accounts pinned at nothing when the year was agreed stay out of the way.)
+        .filter((r) => r.shapCents !== 0 || (r.targetCents != null && r.targetCents !== 0))
         .map((r) => ({ ...r, shapCents: r.shapCents * natural(r.type), targetCents: r.targetCents == null ? null : r.targetCents * natural(r.type) })),
       allAccounts: rows.map((r) => ({ id: r.id, code: r.code, name: r.name, type: r.type })),
     };
@@ -71,7 +89,12 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
     const input = parse(yearEndInput, req.body);
     const settings = await getSettings(sql);
     if (financialYear(input.fyEnd, settings.fyEndMonth).end !== input.fyEnd) throw badRequest('That date isn’t the end of a financial year');
+    // A closed year's agreed figures are what its books are: move the lock date back to change them.
+    // (Agreeing a year for the first time is how a closed year gets the accountant's figures.)
+    const [already] = await sql`select 1 from year_ends where fy_end = ${input.fyEnd}`;
+    if (already) await assertOpen(sql, input.fyEnd);
     const types = new Map((await sql<{ id: string; type: AccountType }[]>`select id, type from accounts`).map((a) => [a.id, a.type]));
+    const fy = financialYear(input.fyEnd, settings.fyEndMonth);
     await sql.begin(async (tx) => {
       await tx`insert into year_ends (fy_end, note) values (${input.fyEnd}, ${input.note}) on conflict (fy_end) do update set note = excluded.note`;
       await tx`delete from year_end_figures where fy_end = ${input.fyEnd}`;
@@ -82,6 +105,18 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
         if (!t) throw badRequest('Unknown account');
         await tx`insert into year_end_figures (fy_end, account_id, amount_cents) values (${input.fyEnd}, ${f.accountId}, ${f.amountCents * natural(t)})`;
       }
+      // Agreed in full: every other account is pinned at what the books say now, so a later change
+      // that reaches back into this year can't move its figures (it shows in suspense instead).
+      await freshTotals(tx);
+      await tx`
+        insert into year_end_figures (fy_end, account_id, amount_cents)
+        select ${input.fyEnd}, a.id,
+          coalesce((select sum(l.amount_cents) from ledger_totals l
+            where l.account_id = a.id and not (l.source = 'year_end' and l.date = ${input.fyEnd}::date) and l.date <= ${input.fyEnd}::date
+              and (a.type not in ('income', 'cost_of_sales', 'expense') and coalesce(a.system_key, '') <> 'dividends' or l.date >= ${fy.start}::date)), 0)::bigint
+        from accounts a
+        where coalesce(a.system_key, '') not in ('retained_earnings', 'suspense')
+          and not exists (select 1 from year_end_figures f where f.fy_end = ${input.fyEnd} and f.account_id = a.id)`;
       if (input.lock) await tx`update settings set lock_date = greatest(coalesce(lock_date, ${input.fyEnd}::date), ${input.fyEnd}::date) where id`;
       await audit(tx, { userId: user.id, action: 'agree_year_end', entity: 'year_end', entityId: input.fyEnd, ip: req.ip, details: { figures: input.figures.length } });
     });
@@ -91,6 +126,7 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.delete('/api/year-ends/:fyEnd', owner, async (req) => {
     const user = userOrThrow(req);
     const { fyEnd } = parse(z.object({ fyEnd: isoDate }), req.params);
+    await assertOpen(sql, fyEnd);
     const r = await sql`delete from year_ends where fy_end = ${fyEnd}`;
     if (!r.count) throw notFound('Year end');
     await audit(sql, { userId: user.id, action: 'remove_year_end', entity: 'year_end', entityId: fyEnd, ip: req.ip });
@@ -120,8 +156,8 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
         coalesce((select sum(l.amount_cents) from ledger_totals l where l.account_id = a.id and l.date between ${prev.start}::date and ${prev.end}::date), 0)::bigint as prior
       from accounts a where a.type in ('income', 'cost_of_sales', 'expense') and coalesce(a.system_key, '') <> 'income_tax'
       order by a.code`;
-    // A sole proprietor doesn't pay themselves a salary: what they take out is drawings, not a cost.
-    const always = new Set(settings.businessType === 'sole_prop' ? ['depreciation'] : ['director_salary', 'depreciation']);
+    // A sole proprietor or partner doesn't pay themselves a salary: what they take out is drawings, not a cost.
+    const always = new Set(entity(settings.businessType).payout === 'drawings' ? ['depreciation'] : ['director_salary', 'depreciation']);
     const lines = rows
       .filter((r) => r.actual !== 0 || r.prior !== 0 || always.has(r.systemKey ?? ''))
       .map((r) => {
@@ -143,18 +179,37 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
       where a.type in ('income', 'cost_of_sales', 'expense') and coalesce(a.system_key, '') <> 'income_tax' and l.date < ${fy.start}::date`;
     const assessedLoss = Math.max(0, prior!.t); // debit-positive: a net loss is positive
     const saved = await sql`select id, period, as_at, taxable_income_cents, tax_cents, payable_cents, note, created_at from tax_estimates where fy_end = ${fy.end} order by created_at desc`;
-    return { fy, asAt, months, prev, lines, assessedLossCents: assessedLoss, saved, businessType: settings.businessType, exampleTaxOn100k: companyTax(10_000_000, fy.end, true) };
+    return {
+      fy,
+      asAt,
+      months,
+      prev,
+      lines,
+      // A partnership has no assessed loss of its own (each year's loss went to the partners).
+      assessedLossCents: taxKind(settings.businessType) === 'partners' ? 0 : assessedLoss,
+      saved,
+      businessType: settings.businessType,
+      kind: taxKind(settings.businessType),
+      approvedPbo: settings.approvedPbo,
+      ...(await taxFigures(sql, settings.businessType, fy)),
+      exampleTaxOn100k: companyTax(10_000_000, fy.end, true),
+    };
   });
 
   app.post('/api/tax-estimates', owner, async (req) => {
     const user = userOrThrow(req);
     const input = parse(taxEstimateInput, req.body);
+    // Who pays, and on what, comes from the kind of business, not from the screen.
+    const settings = await getSettings(sql);
+    input.kind = taxKind(settings.businessType);
+    const fy = financialYear(input.fyEnd, settings.fyEndMonth);
+    const extra = await taxFigures(sql, settings.businessType, fy);
     const income = input.lines.reduce((s, l) => s + (l.type === 'income' ? l.projectedCents : -l.projectedCents), 0);
-    const { taxableCents: taxable, taxCents: tax } = estimateTax({ ...input, profitCents: income });
-    const payable = Math.max(0, (input.period === 1 ? Math.round(tax / 2) : tax) - input.paidCents);
+    const { taxableCents: taxable, taxCents: tax } = estimateTax({ ...input, profitCents: income, approvedPbo: settings.approvedPbo, distributedCents: extra.distributedCents, partners: extra.partners });
+    const { payableCents: payable } = provisionalPayable({ taxCents: tax, payeCents: input.kind === 'individual' ? input.payeCents : 0, period: input.period, paidCents: input.paidCents });
     const [row] = await sql`
       insert into tax_estimates (fy_end, period, as_at, lines, taxable_income_cents, tax_cents, payable_cents, note, created_by)
-      values (${input.fyEnd}, ${input.period}, ${input.asAt}, ${sql.json({ lines: input.lines, assessedLossCents: input.assessedLossCents, paidCents: input.paidCents, sbc: input.sbc, kind: input.kind, ageBand: input.ageBand, otherIncomeCents: input.otherIncomeCents, retirementCents: input.retirementCents } as never)},
+      values (${input.fyEnd}, ${input.period}, ${input.asAt}, ${sql.json({ lines: input.lines, assessedLossCents: input.assessedLossCents, paidCents: input.paidCents, sbc: input.sbc, kind: input.kind, approvedPbo: settings.approvedPbo, distributedCents: extra.distributedCents, partners: extra.partners, ageBand: input.ageBand, otherIncomeCents: input.otherIncomeCents, retirementCents: input.retirementCents, payeCents: input.payeCents } as never)},
               ${taxable}, ${tax}, ${payable}, ${input.note}, ${user.id})
       returning id`;
     await audit(sql, { userId: user.id, action: 'create', entity: 'tax_estimate', entityId: row!.id, ip: req.ip });

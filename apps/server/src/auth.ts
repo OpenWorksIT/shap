@@ -104,6 +104,16 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
   };
 
   app.addHook('onRequest', async (req) => {
+    await signIn(req);
+    // A change from someone who isn't signed in is refused before its body is read (up to
+    // UPLOAD_MB of it): only signing in itself, leaving the demo and the collector take one.
+    if (!req.user && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+      const path = req.url.split('?')[0]!;
+      if (path.startsWith('/api/') && !path.startsWith('/api/auth/') && path !== '/api/demo/leave') throw unauthorized();
+    }
+  });
+
+  const signIn = async (req: FastifyRequest) => {
     const token = tokenFrom(req);
     if (!token) return;
 
@@ -124,7 +134,7 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
         where token_hash = ${sha256(token)}
       `;
     }
-  });
+  };
 
   /** Create a session and set the cookie. Returns the token too, for native clients. */
   const startSession = async (req: FastifyRequest, reply: FastifyReply, user: AuthUser, method: string) => {
@@ -304,16 +314,37 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
     return { enabled: row!.enabled, required: config.mfaRequired, recoveryCodesLeft: row!.left };
   });
 
+  /**
+   * New recovery codes. A stolen session mustn't be enough to swap them for the attacker's: it
+   * takes the password and a fresh authenticator code, wrong codes count toward the same limit as
+   * signing in, and a code can't be used twice.
+   */
   app.post('/api/auth/mfa/recovery-codes', { config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async (req) => {
     if (!req.user) throw unauthorized();
-    const { code } = parse(z.object({ code: z.string().trim().min(6).max(10) }), req.body);
-    const [row] = await sql<{ totpSecretEnc: string | null }[]>`select totp_secret_enc from users where id = ${req.user.id}`;
-    if (!row?.totpSecretEnc || verifyTotp(secrets.open(row.totpSecretEnc), code) == null) throw badRequest('That code isn’t right.');
+    const uid = req.user.id;
+    const { code, password } = parse(z.object({ code: z.string().trim().min(6).max(10), password: z.string().max(200).optional() }), req.body);
+    await confirmPassword(sql, uid, password, req.ip);
+    const outcome = await sql.begin(async (tx) => {
+      await tx`select pg_advisory_xact_lock(hashtext(${`mfa:${uid}`}))`;
+      if ((await failures(tx, 'mfa_failed', { userId: uid }, LIMITS.mfa.minutes)) >= LIMITS.mfa.tries) return 'too_many' as const;
+      const [row] = await tx<{ totpSecretEnc: string | null; totpLastStep: string | null }[]>`select totp_secret_enc, totp_last_step from users where id = ${uid}`;
+      if (!row?.totpSecretEnc) return 'off' as const;
+      const step = verifyTotp(secrets.open(row.totpSecretEnc), code, { afterStep: row.totpLastStep == null ? null : Number(row.totpLastStep) });
+      const [claimed] = step == null ? [] : await tx`update users set totp_last_step = ${step} where id = ${uid} and (totp_last_step is null or totp_last_step < ${step}) returning id`;
+      if (!claimed) {
+        await audit(tx, { userId: uid, action: 'mfa_failed', entity: 'user', entityId: uid, ip: req.ip, details: { kind: 'recovery_codes' } });
+        return 'wrong' as const;
+      }
+      return 'ok' as const;
+    });
+    if (outcome === 'too_many') throw tooMany(LIMITS.mfa.minutes);
+    if (outcome === 'off') throw badRequest('Two-factor sign-in isn’t on.');
+    if (outcome === 'wrong') throw badRequest('That code isn’t right. Try the newest code from your app.');
     const codes = newRecoveryCodes();
     await sql.begin(async (tx) => {
-      await tx`delete from recovery_codes where user_id = ${req.user!.id}`;
-      for (const c of codes) await tx`insert into recovery_codes (user_id, code_hash) values (${req.user!.id}, ${secrets.hash(normaliseRecoveryCode(c))})`;
-      await audit(tx, { userId: req.user!.id, action: 'mfa_recovery_codes', entity: 'user', entityId: req.user!.id, ip: req.ip });
+      await tx`delete from recovery_codes where user_id = ${uid}`;
+      for (const c of codes) await tx`insert into recovery_codes (user_id, code_hash) values (${uid}, ${secrets.hash(normaliseRecoveryCode(c))})`;
+      await audit(tx, { userId: uid, action: 'mfa_recovery_codes', entity: 'user', entityId: uid, ip: req.ip });
     });
     return { recoveryCodes: codes };
   });

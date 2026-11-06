@@ -3,6 +3,104 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.16.0 (6 November 2026)
+
+A full review of the figures, the tax rules and the security, with what it found put right.
+
+**Figures that came out wrong**
+
+- **Bad debts:** writing off an invoice now claims the VAT in it back in the books, as the VAT201
+  already did (field 17). Before, the whole amount went to bad debts, so the VAT account didn’t
+  agree with the return and profit was understated by the VAT. Years already closed stay as they
+  were.
+- **The bank and bills:** a statement line is matched to the payment made on a supplier bill,
+  never to the bill itself (that paid it twice). The match screen now also offers payments
+  recorded on bills and invoices, refunds and journals on that account.
+- **Transfers:** the second side of a transfer between two of your accounts is ticked off against
+  the journal already there, instead of moving the money twice.
+- A payment recorded into another account (Cash, say) and matched to a bank line now moves to the
+  bank, and back again if you unmatch it.
+- **EMP201 in parts:** paying a month’s PAYE, UIF and SDL in two goes now clears each tax in turn,
+  as paying at once would.
+- **Dividends** are closed into retained earnings at each year end, as an accountant’s trial
+  balance shows them. Years already agreed keep the figures they had.
+- A job marked finished or cancelled takes its costs to cost of sales on that day, not back on
+  the dates they were spent (which could be in a closed year).
+
+**A closed year stays closed**
+
+- An agreed year can’t be changed or removed while it’s locked, and agreeing a year now pins every
+  account, so a later change can’t quietly move its figures.
+- Moving a cost type or an account to another account in the books, or changing an account’s
+  type, is refused once a closed year has postings on it.
+- A job finished in a closed year can’t be reopened.
+
+**Tax**
+
+- **Retirement annuities:** the deduction cap is R430 000 from the year to February 2027
+  (Budget 2026; it was R350 000).
+- **Provisional tax:** a sole proprietor with a salary can enter the PAYE already taken off it,
+  and it comes off the payments as SARS works them out.
+- **Payroll:** overtime and commission are regular pay, taxed with the salary. A bonus is taxed on
+  top of any earlier bonus that tax year, and commission no longer counts for UIF. The EMP201
+  month is the month the pay was paid, so February’s run paid on 1 March is on March’s EMP201.
+  Payslips and the tax-year totals show salary, overtime, commission and bonus apart, with their
+  IRP5 codes.
+- **Turnover tax:** half of what selling the business’s assets brought in counts as turnover. An
+  individual’s interest doesn’t (there’s a new “Interest received” account for it). A micro
+  business pays no dividends tax on its first R200 000 of dividends a year.
+- **VAT on assets:** an asset bought straight from the bank can claim its VAT, and selling one
+  charges VAT (fields 1A and 4A), with the profit worked out before VAT. A motor car (sedan,
+  station wagon, minibus or double cab) gets no VAT back and charges none when it’s sold. VAT on
+  costs moved onto the asset register goes in field 14.
+- A cost’s VAT can’t be more than its amount can hold, and personal spending claims none.
+- Older years use their own tax tables (2023 rates, the 28% company rate before April 2023, and
+  the R1 million turnover tax limit before 2026/27).
+- Due dates move back over public holidays, not just weekends.
+- Rounding to the cent now matches the database exactly (halves away from zero).
+
+**Security**
+
+- A request with a list of millions of items is turned away at once instead of tying up the
+  server.
+- A change from someone who isn’t signed in is refused before its body is read.
+- New recovery codes need your password and a fresh authenticator code, and wrong codes count
+  toward the sign-in limit.
+- Site staff can’t pile up a worker’s days by editing an entry afterwards.
+- Slip photos can only be swapped for smaller ones in a closed year, and each swap is logged.
+  Stored files of any other type are only ever downloaded, never opened as a page.
+- Leaving the lock date or market-rate sharing out of a settings save no longer changes them.
+- The anonymous collector keeps no sender addresses or install ids, and it limits how much any
+  one sender, month or item can add.
+- Deploying: secrets stay out of the Docker build, added companies get the same container
+  hardening, and the root helper can’t be made to hang.
+
+## 1.15.0 (6 November 2026)
+
+- **Every kind of South African business.** As well as sole proprietors and (Pty) Ltd companies:
+  partnerships, close corporations, business (trading) trusts, Inc. companies, non-profit
+  companies and co-operatives. Choose it in setup (“A partnership, CC, trust or something else”)
+  or in Settings. Each one gets:
+  - its own names in the books (a CC’s “Members’ contributions” and “Members’ loan accounts”, a
+    trust’s “Trust capital” and “Accumulated profit”, and so on), with names you chose left alone;
+  - its own year end (sole proprietors, partnerships and trusts on SARS’s year to February);
+  - its own way of paying the owners: dividends, a CC’s distributions to members (with dividends
+    tax), a trust’s distributions to beneficiaries (no dividends tax), or drawings;
+  - the right tax estimate: company or small business rates, the individual tables, 45% on what a
+    trust keeps, or none for an approved PBO;
+  - the right SARS and CIPC guides, including new ones for the trust return (ITR12T and IT3(t)),
+    tax-exempt organisations (IT12EI), CIPC annual returns with beneficial ownership, and
+    co-operatives.
+- **Partnerships, properly.** Each partner has a capital account, a current account and their own
+  “Paid personally”, and a share of the profit. At the year end, Accounts → Year end shares the
+  year’s profit (or loss) into their current accounts in one tap, and the tax estimate and turnover
+  tax are worked out on each partner’s share.
+- **Trusts:** each distribution says whether it’s this year’s income to a beneficiary living in
+  South Africa (taxed in their hands, so it comes off the trust’s taxable income) or not (given to
+  someone abroad, or out of capital: the trust pays).
+- A company, CC or co-op on turnover tax needs its year end in February (SARS’s rule): Settings
+  now says so.
+
 ## 1.14.0 (5 November 2026)
 
 - **Anonymous prices, to help show what work typically costs.** Once a month, Shap shares the

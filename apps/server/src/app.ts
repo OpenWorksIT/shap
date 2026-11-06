@@ -7,7 +7,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { registerAuth } from './auth.js';
 import type { Config } from './config.js';
 import type { Ctx } from './context.js';
-import type { Sql } from './db/index.js';
+import { pgCode, PG, type Sql } from './db/index.js';
 import { Secrets } from './lib/crypto.js';
 import { HttpError } from './lib/errors.js';
 import { routePath } from './lib/http.js';
@@ -18,6 +18,7 @@ import { registerDuplicateRoutes } from './modules/duplicates.js';
 import { registerRecurringRoutes } from './modules/recurring.js';
 import { registerVatRoutes } from './modules/vat.js';
 import { registerPayrollRoutes } from './modules/payroll.js';
+import { registerPartnerRoutes } from './modules/partners.js';
 import { registerFeedbackRoutes } from './modules/feedback.js';
 import { registerMarketRoutes } from './modules/market.js';
 import { setPdfFonts } from './modules/pdf.js';
@@ -151,7 +152,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
     // Shap's own pages always send their version; a form or script on another site can't add that
     // header (browsers only allow it from Shap's own address), so a change without it is refused.
     // This is what stops another site from acting with your session. The phone app uses a token.
-    const oldPage = theirs === undefined && !req.headers.authorization;
+    const oldPage = theirs === undefined && !req.headers.authorization?.startsWith('Bearer ');
     if (oldPage || (typeof theirs === 'string' && theirs !== version && req.headers['x-shap-client'] !== 'native')) {
       return reply.code(409).send({ error: 'Shap was updated while this page was open. Reload the page, then try again.', code: 'stale_client' });
     }
@@ -180,6 +181,10 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
     if (status && status >= 400 && status < 500) {
       return reply.code(status).send({ error: err.message, code: (err as { code?: string }).code ?? 'bad_request' });
     }
+    // A rule the books keep themselves (migrations raise these with code SH001), said as it is.
+    if (pgCode(err) === 'SH001') return reply.code(400).send({ error: err.message, code: 'books_rule' });
+    // Something chosen that isn't there (a worker or job deleted meanwhile, a made-up id).
+    if (pgCode(err) === PG.foreignKeyViolation) return reply.code(400).send({ error: 'Something you chose isn’t there any more. Reload the page and try again.', code: 'missing' });
     // Database rule broken (e.g. an unbalanced journal): say so plainly.
     const msg = err.message ?? '';
     if (/does not balance/.test(msg)) return reply.code(400).send({ error: msg, code: 'unbalanced' });
@@ -206,6 +211,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   registerMonthlyRoutes(app, ctx);
   registerVatRoutes(app, ctx);
   registerPayrollRoutes(app, ctx);
+  registerPartnerRoutes(app, ctx);
   registerFeedbackRoutes(app, ctx);
   registerMarketRoutes(app, ctx);
   registerReportRoutes(app, ctx);

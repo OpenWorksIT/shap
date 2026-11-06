@@ -173,6 +173,11 @@ describe('breaking in', () => {
     expect((await site.call({ method: 'POST', url: '/api/labour', payload: { date: '2026-10-05', entries: [{ workerId: worker.id, days: 3, wageCents: 0 }] } })).statusCode).toBe(400);
     expect((await site.call({ method: 'POST', url: '/api/labour', payload: { date: '2026-10-05', entries: [{ workerId: worker.id, days: 1, wageCents: 0 }] } })).statusCode).toBe(200);
     expect((await site.call({ method: 'POST', url: '/api/labour', payload: { date: '2026-10-05', entries: [{ workerId: worker.id, days: 1.5, wageCents: 0 }] } })).statusCode).toBe(400);
+    // Nor by editing an entry up afterwards.
+    const one = (await site.post('/api/labour', { date: '2026-10-06', entries: [{ workerId: worker.id, days: 1, wageCents: 0 }] })).ids[0];
+    expect((await site.call({ method: 'PUT', url: `/api/labour/${one}`, payload: { date: '2026-10-06', workerId: worker.id, days: 31, wageCents: 0 } })).statusCode).toBe(400);
+    expect((await site.call({ method: 'PUT', url: `/api/labour/${one}`, payload: { date: '2026-10-05', workerId: worker.id, days: 1.5, wageCents: 0 } })).statusCode).toBe(400);
+    expect((await site.call({ method: 'PUT', url: `/api/labour/${one}`, payload: { date: '2026-10-06', workerId: worker.id, days: 2, wageCents: 0 } })).statusCode).toBe(200);
   });
 
   it('a closed year can’t be rewritten through an asset edit', async () => {
