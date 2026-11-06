@@ -110,6 +110,23 @@ export async function sarsSummary(db: Db) {
   };
 }
 
+/**
+ * How a payment to SARS for a month's EMP201 splits between PAYE, UIF and SDL: paid in that
+ * order, carrying on from what earlier payments for the month already covered, so paying in
+ * parts clears each tax as paying at once would. Anything over the month's total sits against PAYE.
+ */
+export function emp201Split(owed: { payeCents: number; uifCents: number; sdlCents: number }, paidBefore: number, amount: number) {
+  // What a running total of `paid` has covered of each; PAYE takes the rest (and any overpayment).
+  const upTo = (paid: number) => {
+    const uif = Math.min(Math.max(paid - owed.payeCents, 0), owed.uifCents);
+    const sdl = Math.min(Math.max(paid - owed.payeCents - owed.uifCents, 0), owed.sdlCents);
+    return { paye: paid - uif - sdl, uif, sdl };
+  };
+  const before = upTo(paidBefore);
+  const after = upTo(paidBefore + amount);
+  return { paye: after.paye - before.paye, uif: after.uif - before.uif, sdl: after.sdl - before.sdl };
+}
+
 /** Profits the company can still pay out: all profit ever, less dividends already declared. */
 export async function distributable(db: Db): Promise<number> {
   await freshTotals(db);
@@ -322,20 +339,11 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (input.kind === 'emp201') {
         const m = s.emp201.find((r) => r.period === input.period);
         if (!m) throw badRequest(`No final pay run for ${input.period}`);
-        // Paid in order: PAYE, then UIF, then SDL; anything over sits against PAYE.
-        let left = input.amountCents;
-        const take = (n: number) => {
-          const t = Math.min(left, n);
-          left -= t;
-          return t;
-        };
-        const paye = take(m.payeCents);
-        const uif = take(m.uifCents);
-        const sdl = take(m.sdlCents);
+        const split = emp201Split({ payeCents: Number(m.payeCents), uifCents: Number(m.uifCents), sdlCents: Number(m.sdlCents) }, Number(m.paidCents), input.amountCents);
         lines = [
-          { key: 'paye_payable', debit: paye + left, memo: 'PAYE' },
-          { key: 'uif_payable', debit: uif, memo: 'UIF' },
-          { key: 'sdl_payable', debit: sdl, memo: 'SDL' },
+          { key: 'paye_payable', debit: split.paye, memo: 'PAYE' },
+          { key: 'uif_payable', debit: split.uif, memo: 'UIF' },
+          { key: 'sdl_payable', debit: split.sdl, memo: 'SDL' },
           { key: src.accountId, credit: input.amountCents, memo: `Paid from ${src.name}` },
         ];
       } else {

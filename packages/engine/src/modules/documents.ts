@@ -495,7 +495,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (left <= 0) throw badRequest('Nothing is owed on this invoice');
     if (input.date < doc.issueDate) throw badRequest('The write-off can’t be dated before the invoice');
     await assertOpen(sql, input.date);
-    await sql`update documents set written_off_on = ${input.date}, written_off_cents = ${left}, written_off_reason = ${input.reason}, updated_at = now() where id = ${id}`;
+    await sql`update documents set written_off_on = ${input.date}, written_off_cents = ${left}, written_off_reason = ${input.reason}, written_off_vat_relief = true, updated_at = now() where id = ${id}`;
     await syncProjectStatus(sql, doc.projectId);
     await audit(sql, { userId: user.id, action: 'write_off', entity: 'invoice', entityId: id, ip: req.ip, details: { amount: left, reason: input.reason } });
     return loadDocument(sql, id);
