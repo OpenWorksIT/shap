@@ -11,8 +11,58 @@
     <meta name="apple-mobile-web-app-title" content="Shap" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Shap</title>
+    <style>
+      /* The loading screen: drawn before any script, so opening never looks frozen (src/lib/boot.ts runs it). */
+      #boot { position: fixed; inset: 0; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+        padding: 24px; background: #f5f2ed; color: #1f2b33; font: 16px/1.4 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; transition: opacity .25s ease; }
+      #boot.done { opacity: 0; pointer-events: none; }
+      #boot .ledger { width: 132px; height: 96px; }
+      #boot .ledger .line { stroke: #e8731c; stroke-width: 3; stroke-linecap: round; stroke-dasharray: 40; stroke-dashoffset: 40; animation: boot-write 1.8s ease-in-out infinite; }
+      #boot .ledger .line:nth-of-type(2) { animation-delay: .3s; } #boot .ledger .line:nth-of-type(3) { animation-delay: .6s; }
+      #boot .ledger .line:nth-of-type(4) { animation-delay: .9s; } #boot .ledger .line:nth-of-type(5) { animation-delay: 1.2s; }
+      #boot .ledger .pen { animation: boot-pen 1.8s ease-in-out infinite; transform-origin: 100px 30px; }
+      #boot .name { font-weight: 700; font-size: 20px; letter-spacing: .01em; }
+      #boot .bar { width: min(280px, 80vw); height: 10px; border-radius: 99px; background: #ece7e0; overflow: hidden; }
+      #boot .fill { height: 100%; width: 0; border-radius: 99px; background: #e8731c; transition: width .3s ease; }
+      #boot .pct { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 15px; min-width: 4ch; text-align: center; }
+      #boot .what { min-height: 2.8em; max-width: 300px; text-align: center; color: #4c5961; font-size: 15px; }
+      @keyframes boot-write { 0% { stroke-dashoffset: 40; } 45%, 70% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: 0; opacity: .35; } }
+      @keyframes boot-pen { 0%, 100% { transform: translate(-6px, 0) rotate(-4deg); } 50% { transform: translate(6px, 14px) rotate(4deg); } }
+      @media (prefers-color-scheme: dark) {
+        #boot { background: #172026; color: #e9edef; } #boot .bar { background: #2a363e; } #boot .what { color: #aab5bb; }
+        #boot .ledger .page { fill: #22303a; stroke: #3a4a54; }
+      }
+      @media (prefers-reduced-motion: reduce) { #boot .ledger .line, #boot .ledger .pen { animation: none; stroke-dashoffset: 0; } }
+    </style>
   </head>
   <body>
+    <div id="boot" role="progressbar" aria-label="Opening Shap Pocket" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+      <svg class="ledger" viewBox="0 0 132 96" aria-hidden="true">
+        <path class="page" d="M8 14 Q36 6 64 14 L64 90 Q36 82 8 90 Z M68 14 Q96 6 124 14 L124 90 Q96 82 68 90 Z" fill="#fff" stroke="#dcd5cb" stroke-width="2" />
+        <line class="line" x1="16" y1="30" x2="56" y2="30" />
+        <line class="line" x1="16" y1="44" x2="56" y2="44" />
+        <line class="line" x1="16" y1="58" x2="56" y2="58" />
+        <line class="line" x1="76" y1="30" x2="116" y2="30" />
+        <line class="line" x1="76" y1="44" x2="116" y2="44" />
+        <g class="pen"><path d="M92 8 L112 28 L104 36 L84 16 Z" fill="#1f2b33" /><path d="M104 36 L112 28 L116 40 Z" fill="#e8731c" /></g>
+      </svg>
+      <div class="name">Shap Pocket</div>
+      <div class="bar"><div class="fill"></div></div>
+      <div class="pct">0%</div>
+      <div class="what" aria-live="polite">Howzit! Opening your books…</div>
+    </div>
+    <script>
+      // Before the app's own code arrives: the bar starts moving at once (src/lib/boot.ts takes over).
+      (function () {
+        var b = document.getElementById('boot'); var p = 0;
+        window.__bootTick = setInterval(function () {
+          p = Math.min(18, p + (18 - p) * 0.12);
+          b.querySelector('.fill').style.width = p + '%';
+          b.querySelector('.pct').textContent = Math.floor(p) + '%';
+          b.setAttribute('aria-valuenow', String(Math.floor(p)));
+        }, 120);
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

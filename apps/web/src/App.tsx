@@ -6,6 +6,7 @@ import { listenForReminder } from './lib/backup';
 import { FeedbackButton } from './components/Feedback';
 import { Shell } from './components/Shell';
 import { Loading } from './components/ui';
+import { bootDone } from './lib/boot';
 import { SessionProvider, useAuthed, useSession } from './lib/session';
 
 const HomePage = lazy(() => import('./pages/Home'));
@@ -41,7 +42,11 @@ export function App() {
 
 function Opened() {
   const { ready, error, ref } = useSession();
-  if (!ready) return <Loading />;
+  // The loading screen (lib/boot.ts) stays up until there's something to show.
+  useEffect(() => {
+    if (ready) bootDone();
+  }, [ready]);
+  if (!ready) return null;
   if (error || !ref)
     return (
       <div className="stack narrow" style={{ padding: 24 }}>

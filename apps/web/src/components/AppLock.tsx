@@ -3,6 +3,7 @@
  * when Shap opens, and again after it's been in the background a while. Nothing new to
  * remember: it's the same lock as the phone's. Switched on in Settings → Backup & security.
  */
+import { bootDone } from '../lib/boot';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { isNative } from '../lib/native';
 import { Logo } from './Logo';
@@ -50,6 +51,8 @@ export function AppLock({ children }: { children: ReactNode }) {
   const hiddenAt = useRef<number | null>(null);
 
   const ask = useCallback(async () => {
+    // The lock screen comes up over the loading screen's place, not under it.
+    bootDone();
     setState('locked');
     if (await unlock()) setState('open');
   }, []);

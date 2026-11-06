@@ -2,7 +2,8 @@
  * The screens' side of the engine: send a request, get the reply. Shap's screens were written
  * for a web server; in Pocket the "server" is a worker on the phone.
  */
-import type { EngineReply, EngineRequest } from './engine.worker';
+import type { EngineBoot, EngineReply, EngineRequest } from './engine.worker';
+import { bootStage } from '../lib/boot';
 import { forgetSnapshots } from '../lib/snapshot';
 
 export interface EngineResponse {
@@ -20,7 +21,9 @@ const waiting = new Map<number, { ok: (v: unknown) => void; fail: (e: Error) => 
 function engine(): Worker {
   if (worker) return worker;
   worker = new Worker(new URL('./engine.worker.ts', import.meta.url), { type: 'module' });
-  worker.onmessage = (e: MessageEvent<EngineReply>) => {
+  worker.onmessage = (e: MessageEvent<EngineReply | EngineBoot>) => {
+    // A step of opening the books, for the loading screen.
+    if ('boot' in e.data) return bootStage(e.data.boot, e.data.first);
     const w = waiting.get(e.data.id);
     if (!w) return;
     waiting.delete(e.data.id);

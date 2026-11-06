@@ -2,9 +2,17 @@
 
 What changed in each version of Shap Pocket, newest first.
 
-## 0.10.0 (internal testing)
+## 1.0.0 (6 November 2026)
 
-A full review of the figures, the tax rules and the security, with what it found put right.
+The first full release.
+
+- **A loading screen.** Opening the books shows a bar with how far it’s got, and what it’s busy
+  with (“Fetching the books off the shelf…”, “Counting the rands…”), so it never looks frozen.
+  The very first open, when a new set of books is set up, walks through each step.
+- **Feels like an app.** The screen no longer zooms in on a pinch or a double tap, and nothing
+  slides sideways or leaves scroll bars behind. In an ordinary browser tab, zooming still works.
+
+And a full review of the figures, the tax rules and the security, with what it found put right:
 
 **Figures that came out wrong**
 

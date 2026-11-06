@@ -23,6 +23,9 @@ export type EngineRequest =
   | { id: number; op: 'erase' }
   | { id: number; op: 'status'; template?: string };
 export type EngineReply = { id: number; ok: true; result: unknown } | { id: number; ok: false; error: string };
+/** A step of opening the books, for the loading screen (lib/boot.ts). */
+export type EngineBoot = { boot: 'template' | 'open' | 'migrate' | 'app'; first?: boolean };
+const step = (boot: EngineBoot['boot'], first?: boolean) => (self as unknown as Worker).postMessage({ boot, first } satisfies EngineBoot);
 
 let pg: PGlite | null = null;
 let app: App | null = null;
@@ -41,6 +44,7 @@ const STORE = '/pglite/' + DATA_DIR.slice('idb://'.length);
 async function start(from?: Blob) {
   fresh = false;
   if (!from && templateUrl && !(await storeExists())) {
+    step('template', true);
     try {
       const r = await fetch(templateUrl);
       if (r.ok) {
@@ -55,14 +59,17 @@ async function start(from?: Blob) {
   // Every change is written to the phone's storage before the answer comes back. (Relaxed
   // durability was tried: quicker, but PGlite then finishes writing after close(), which broke
   // restoring a backup.)
+  step('open', usedTemplate);
   pg = new PGlite(DATA_DIR, from ? { loadDataDir: from } : {});
   await pg.waitReady;
   const sql = createDb(pg);
+  step('migrate');
   fresh = usedTemplate || (await migrate(sql, MIGRATIONS)).includes(MIGRATIONS.map((m) => m.name).sort()[0]!);
   if (usedTemplate) await migrate(sql, MIGRATIONS);
   // The template is the same file for every phone: each set of books gets its own install id
   // (what the anonymous market rates and usage notes count as one business).
   if (usedTemplate) await sql`update settings set install_id = gen_random_uuid()`;
+  step('app');
   app = (await buildApp({ sql })).app;
 }
 
