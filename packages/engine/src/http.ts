@@ -197,6 +197,16 @@ function errorReply(err: unknown, reply: Reply, log: Logger) {
     reply.code(e.statusCode).send({ error: e.message, code: e.code ?? 'bad_request' });
     return;
   }
+  // A rule the books keep themselves (migrations raise these with code SH001), said as it is.
+  if (e.code === 'SH001') {
+    reply.code(400).send({ error: e.message, code: 'books_rule' });
+    return;
+  }
+  // Something chosen that isn't there (deleted meanwhile).
+  if (e.code === '23503') {
+    reply.code(400).send({ error: 'Something you chose isn’t there any more. Go back and try again.', code: 'missing' });
+    return;
+  }
   // Database rule broken (e.g. an unbalanced journal): say so plainly.
   if (/does not balance/.test(e.message ?? '')) {
     reply.code(400).send({ error: e.message, code: 'unbalanced' });

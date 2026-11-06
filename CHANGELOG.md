@@ -2,6 +2,61 @@
 
 What changed in each version of Shap Pocket, newest first.
 
+## 0.10.0 (internal testing)
+
+A full review of the figures, the tax rules and the security, with what it found put right.
+
+**Figures that came out wrong**
+
+- **Bad debts:** writing off an invoice now claims the VAT in it back in the books, as the VAT201
+  already did (field 17). Before, the whole amount went to bad debts, so the VAT account didn’t
+  agree with the return and profit was understated by the VAT. Years already closed stay as they
+  were.
+- **The bank and bills:** a statement line is matched to the payment made on a supplier bill,
+  never to the bill itself (that paid it twice). The match screen also offers payments recorded on
+  bills and invoices, refunds and journals on that account.
+- **Transfers:** the second side of a transfer between two of your accounts is ticked off against
+  the journal already there, instead of moving the money twice.
+- A payment recorded into another account and matched to a bank line now moves to the bank, and
+  back again if you unmatch it.
+- **EMP201 in parts:** paying a month’s PAYE, UIF and SDL in two goes now clears each tax in turn.
+- **Dividends** are closed into retained earnings at each year end. Years already agreed keep the
+  figures they had.
+- A job marked finished or cancelled takes its costs to cost of sales on that day, not back on the
+  dates they were spent.
+- Each partner has their own “Personal” cost type, against their current account.
+
+**A closed year stays closed**
+
+- An agreed year can’t be changed or removed while it’s locked, and agreeing a year pins every
+  account. Moving a cost type or an account to another account in the books, or changing an
+  account’s type, is refused once a closed year has postings on it. A job finished in a closed
+  year can’t be reopened.
+
+**Tax**
+
+- Retirement annuity cap R430 000 from the year to February 2027; PAYE taken off a salary comes
+  off provisional tax; overtime and commission taxed with the salary, a bonus on top of earlier
+  ones, no UIF on commission; the EMP201 month is the month pay was paid.
+- Turnover tax counts half of what selling the business’s assets brought in, not an individual’s
+  interest (new “Interest received” account); a micro business pays no dividends tax on its first
+  R200 000 of dividends a year.
+- VAT on assets: claimed on an asset bought straight from the bank, charged when one is sold
+  (fields 1A and 4A), none on a motor car. A cost’s VAT can’t be more than its amount can hold.
+- Older years use their own tax tables; due dates move back over public holidays; rounding matches
+  the database exactly.
+
+**Privacy and security**
+
+- Each phone now has its own install id (every phone on a build had the same one, so the
+  anonymous market rates counted them all as one business).
+- On a computer, the web app no longer copies Home’s figures into the browser’s storage.
+- Android backups of the books only go to an end-to-end encrypted Google backup (a phone with a
+  screen lock) or a phone-to-phone transfer.
+- A restored backup can’t make a stored file open as a page: anything that isn’t a photo or PDF is
+  only downloaded.
+- Slip photos can only be swapped for smaller ones in a closed year, and each swap is logged.
+
 ## 0.9.0 (internal testing)
 
 - **Every kind of South African business.** As well as sole proprietors and (Pty) Ltd companies:

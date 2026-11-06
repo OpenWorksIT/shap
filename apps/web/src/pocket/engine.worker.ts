@@ -60,6 +60,9 @@ async function start(from?: Blob) {
   const sql = createDb(pg);
   fresh = usedTemplate || (await migrate(sql, MIGRATIONS)).includes(MIGRATIONS.map((m) => m.name).sort()[0]!);
   if (usedTemplate) await migrate(sql, MIGRATIONS);
+  // The template is the same file for every phone: each set of books gets its own install id
+  // (what the anonymous market rates and usage notes count as one business).
+  if (usedTemplate) await sql`update settings set install_id = gen_random_uuid()`;
   app = (await buildApp({ sql })).app;
 }
 

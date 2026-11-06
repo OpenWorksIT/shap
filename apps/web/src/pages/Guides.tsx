@@ -157,7 +157,7 @@ const GUIDES: Guide[] = [
   {
     key: 'turnover',
     title: 'Turnover tax (TT02 and TT03)',
-    who: 'Micro businesses registered for turnover tax (turnover up to R2.3 million a year). It replaces income tax, provisional tax, capital gains tax and dividends tax.',
+    who: 'Micro businesses registered for turnover tax (turnover up to R2.3 million a year). It replaces income tax, provisional tax and capital gains tax, and dividends tax on the first R200 000 of dividends a year (above that, dividends tax applies as usual).',
     when: 'Two interim payments (by the last business day of August and of February, for a March–February year), and the annual return (TT03) from 1 July to 31 January.',
     figures: [{ label: 'Accounts → Tax estimate: turnover so far, the year projected, the two payments', to: '/accounts?tab=tax' }],
     steps: [

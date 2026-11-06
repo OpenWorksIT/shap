@@ -135,4 +135,7 @@ export async function applyBusinessType(db: Db, type: BusinessType) {
     await db`update accounts set name = case when name = any(${standard}) then ${to} else name end where system_key = ${key}`;
   }
   await db`update accounts set type = ${names.owner_loan.type} where system_key = 'owner_loan'`;
+  // A partnership's personal spending is each partner's own (their "Personal (name)" cost type,
+  // against their current account), not one shared owner's: the shared one is put away.
+  if (type === 'partnership') await db`update cost_categories set active = false where name = 'Personal (owner)' and kind = 'personal'`;
 }

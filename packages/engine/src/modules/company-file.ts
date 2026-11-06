@@ -97,7 +97,8 @@ export async function exportCompanyFile(tx: Tx | import('../db/index.js').Sql): 
 }
 
 export async function restoreCompanyFile(tx: Tx, raw: unknown) {
-  const file = parse(fileSchema, raw);
+  // A company file can hold years of jobs: more room than a request.
+  const file = parse(fileSchema, raw, { maxItems: 500_000 });
   const done: Record<string, number> = {};
   const count = (k: string) => (done[k] = (done[k] ?? 0) + 1);
 
@@ -220,7 +221,7 @@ export function registerCompanyFileRoutes(app: FastifyInstance, ctx: Ctx): void 
 
   app.post('/api/company-file', { preHandler: requireRole('owner') }, async (req) => {
     const user = userOrThrow(req);
-    const { file } = parse(z.object({ file: z.unknown() }), req.body);
+    const { file } = parse(z.object({ file: z.unknown() }), req.body, { maxItems: 500_000 });
     const result = await sql.begin(async (tx) => {
       const r = await restoreCompanyFile(tx, file);
       await audit(tx, { userId: user.id, action: 'restore_company_file', entity: 'settings', ip: req.ip, details: r });

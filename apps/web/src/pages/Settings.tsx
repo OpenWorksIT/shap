@@ -451,7 +451,7 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
                 <div className="xs muted">
                   SARS’s simpler tax for micro businesses (turnover up to {formatZar(TURNOVER_TAX_LIMIT_CENTS)} a year): a small percentage of turnover instead of income
                   tax on profit, and no provisional tax. Only if you registered for it (form TT01). The tax estimate switches to it.
-                  {kind.taxedAs === 'company' && ' A company on turnover tax must have its year end in February.'}
+                  {kind.taxedAs === 'company' && ' For now a company on turnover tax needs its year to end in February (the 2026 Budget proposed dropping this; it isn’t law yet).'}
                   {kind.taxedAs === 'partners' && ' Each partner registers and pays on their own share of the turnover.'}
                 </div>
               </span>

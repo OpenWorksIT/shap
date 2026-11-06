@@ -7,15 +7,19 @@
  * replace them as soon as the books are open. Only these two answers are kept, they're small,
  * and they're dropped when the books are restored or erased. A copy saved by another version
  * of the app is ignored, in case what Home expects has changed.
+ *
+ * Only on the phone: the web app on a computer opens quickly anyway, and its storage is shared
+ * with the rest of the website it's served from, so nothing is copied there in plain text.
  */
 const APP_VERSION = __SHAP_VERSION__;
+const ON = !__POCKET_WEB__;
 
 const KEY = 'shap-snapshot:';
 const KEPT = new Set(['/api/reference', '/api/dashboard']);
 const MAX_CHARS = 300_000;
 
 export function remembered<T>(path: string): T | undefined {
-  if (!KEPT.has(path)) return undefined;
+  if (!ON || !KEPT.has(path)) return undefined;
   try {
     const raw = localStorage.getItem(KEY + path);
     if (!raw) return undefined;
@@ -28,6 +32,7 @@ export function remembered<T>(path: string): T | undefined {
 
 export function remember(path: string, data: unknown) {
   if (!KEPT.has(path)) return;
+  if (!ON) return forgetSnapshots(); // and drop any an earlier version kept
   try {
     const raw = JSON.stringify({ v: APP_VERSION, data });
     if (raw.length <= MAX_CHARS) localStorage.setItem(KEY + path, raw);

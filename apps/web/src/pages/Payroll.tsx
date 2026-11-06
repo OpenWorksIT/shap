@@ -46,6 +46,8 @@ interface Line {
   name: string;
   isDirector: boolean;
   salaryCents: number;
+  overtimeCents: number;
+  commissionCents: number;
   extraCents: number;
   grossCents: number;
   payeCents: number;
@@ -223,6 +225,8 @@ function RunDrawer({ id, onClose }: { id: string; onClose: () => void }) {
                     ) : (
                       l.name
                     )}
+                    {l.overtimeCents > 0 && <div className="xs muted">+ {formatZar(l.overtimeCents)} overtime</div>}
+                    {l.commissionCents > 0 && <div className="xs muted">+ {formatZar(l.commissionCents)} commission</div>}
                     {l.extraCents > 0 && <div className="xs muted">+ {formatZar(l.extraCents)} {l.note || 'bonus'}</div>}
                   </td>
                   <td className="num hide-sm"><Money cents={l.grossCents} /></td>
@@ -283,15 +287,19 @@ function RunDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   );
 }
 
-function LineDrawer({ line, onClose, onSave, onRemove }: { line: Line; onClose: () => void; onSave: (b: { salaryCents: number; extraCents: number; note: string }) => void; onRemove: () => void }) {
+function LineDrawer({ line, onClose, onSave, onRemove }: { line: Line; onClose: () => void; onSave: (b: { salaryCents: number; overtimeCents: number; commissionCents: number; extraCents: number; note: string }) => void; onRemove: () => void }) {
   const [salary, setSalary] = useState<number | null>(line.salaryCents);
+  const [overtime, setOvertime] = useState<number | null>(line.overtimeCents || null);
+  const [commission, setCommission] = useState<number | null>(line.commissionCents || null);
   const [extra, setExtra] = useState<number | null>(line.extraCents || null);
   const [note, setNote] = useState(line.note);
   return (
     <Drawer title={line.name} sub="This month only" onClose={onClose}>
-      <form className="stack" onSubmit={(e) => (e.preventDefault(), onSave({ salaryCents: salary ?? 0, extraCents: extra ?? 0, note }))}>
+      <form className="stack" onSubmit={(e) => (e.preventDefault(), onSave({ salaryCents: salary ?? 0, overtimeCents: overtime ?? 0, commissionCents: commission ?? 0, extraCents: extra ?? 0, note }))}>
         <Field label="Salary this month" hint="Less for a part month or unpaid leave">{(p) => <MoneyInput {...p} value={salary} onChange={setSalary} />}</Field>
-        <Field label="Bonus, overtime or commission (optional)">{(p) => <MoneyInput {...p} value={extra} onChange={setExtra} />}</Field>
+        <Field label="Overtime (optional)" hint="Taxed with the salary, as SARS’s tables do">{(p) => <MoneyInput {...p} value={overtime} onChange={setOvertime} />}</Field>
+        <Field label="Commission (optional)" hint="Taxed with the salary; no UIF on commission">{(p) => <MoneyInput {...p} value={commission} onChange={setCommission} />}</Field>
+        <Field label="Bonus or other once-off pay (optional)" hint="Taxed as the tax it adds to the year, on top of any earlier bonus">{(p) => <MoneyInput {...p} value={extra} onChange={setExtra} />}</Field>
         {Boolean(extra) && <Field label="What it’s for">{(p) => <input {...p} className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Year-end bonus" />}</Field>}
         <button className="btn primary big block">Work it out</button>
         <button type="button" className="btn quiet danger" onClick={onRemove}>

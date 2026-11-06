@@ -4,7 +4,7 @@
  * checks them and files on eFiling. Shap doesn't file, and isn't a tax practitioner.
  */
 import type { App as FastifyInstance } from '../http.js';
-import { addMonths, entity, financialYear, lastBusinessDay, monthEnd, monthsBetween, splitByShares, turnoverTax, turnoverTaxTable, TURNOVER_TAX_LIMIT_CENTS, vat201Due, vatPeriod } from '@shap/shared';
+import { addMonths, entity, financialYear, lastBusinessDay, monthEnd, monthsBetween, splitByShares, turnoverTax, turnoverTaxLimit, turnoverTaxTable, vat201Due, vatPeriod } from '@shap/shared';
 import { z } from 'zod';
 import { requireRole } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -23,23 +23,30 @@ export async function vat201(db: Db, start: string, end: string) {
       coalesce(sum(case when d.vat_rate_bp = 0 then (case d.kind when 'credit_note' then -1 else 1 end) * d.total_cents end), 0)::bigint as zero
     from documents d
     where d.kind in ('invoice', 'credit_note') and d.status = 'issued' and d.issue_date between ${start}::date and ${end}::date`;
+  // Input VAT: capital goods (field 14) are the costs of the asset type or on the asset register,
+  // and assets bought straight from an account; everything else is field 15.
   const [inp] = await db<{ capital: number; other: number }[]>`
-    select coalesce(sum(c.vat_cents) filter (where k.kind = 'asset'), 0)::bigint as capital,
-           coalesce(sum(c.vat_cents) filter (where k.kind <> 'asset'), 0)::bigint as other
+    select coalesce(sum(c.vat_cents) filter (where k.kind = 'asset' or exists (select 1 from assets a where a.cost_id = c.id)), 0)::bigint
+             + (select coalesce(sum(a.vat_cents), 0) from assets a where a.cost_id is null and a.vat_cents <> 0 and a.purchase_date between ${start}::date and ${end}::date)::bigint as capital,
+           coalesce(sum(c.vat_cents) filter (where k.kind <> 'asset' and not exists (select 1 from assets a where a.cost_id = c.id)), 0)::bigint as other
     from costs c join cost_categories k on k.id = c.category_id
     where c.vat_cents <> 0 and c.date between ${start}::date and ${end}::date`;
+  // Output VAT on selling the business's own assets (capital goods supplied): fields 1A and 4A.
+  const [sold] = await db<{ incl: number; vat: number }[]>`
+    select coalesce(sum(disposal_proceeds_cents), 0)::bigint as incl, coalesce(sum(disposal_vat_cents), 0)::bigint as vat
+    from assets where disposal_vat_cents <> 0 and disposed_on between ${start}::date and ${end}::date`;
   // Bad debts written off: the VAT in what was written off can be claimed back.
   const [bad] = await db<{ vat: number }[]>`
     select coalesce(sum(round(d.written_off_cents * d.vat_rate_bp::numeric / (10000 + d.vat_rate_bp))), 0)::bigint as vat
     from documents d where d.kind = 'invoice' and d.vat_rate_bp > 0 and d.written_off_on between ${start}::date and ${end}::date`;
   const f = {
     field1: Number(out!.std),
-    field1A: 0,
+    field1A: Number(sold!.incl),
     field2: Number(out!.zero),
     field2A: 0,
     field3: 0,
     field4: Number(out!.stdVat),
-    field4A: 0,
+    field4A: Number(sold!.vat),
     field14: Number(inp!.capital),
     field15: Number(inp!.other),
     field17: Number(bad!.vat),
@@ -82,11 +89,19 @@ export function registerTaxFormRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (asAt < fy.start) throw badRequest('That year hasn’t started');
     const months = monthsBetween(fy.start, asAt).filter((m) => monthEnd(`${m}-01`) <= asAt).length || 1;
     await freshTotals(sql);
-    // Turnover: business income, not profit (gains on selling assets are left out).
+    // Taxable turnover (Sixth Schedule; SARS's TT01 FAQ): business income, not profit. Gains on
+    // selling assets are left out, but half of what selling the business's assets brought in counts.
+    // An individual's (or partner's) investment income (interest) isn't turnover; a company's is.
+    const individual = entity(settings.businessType).taxedAs !== 'company';
     const [r] = await sql<{ income: number }[]>`
       select coalesce(-sum(l.amount_cents), 0)::bigint as income from ledger_totals l join accounts a on a.id = l.account_id
-      where a.type = 'income' and coalesce(a.system_key, '') <> 'disposal_gain_loss' and l.date between ${fy.start}::date and ${asAt}::date`;
-    const actual = Number(r!.income);
+      where a.type = 'income' and coalesce(a.system_key, '') <> 'disposal_gain_loss'
+        and not (${individual} and coalesce(a.system_key, '') = 'interest_income')
+        and l.date between ${fy.start}::date and ${asAt}::date`;
+    const [sold] = await sql<{ proceeds: number }[]>`
+      select coalesce(sum(disposal_proceeds_cents - disposal_vat_cents), 0)::bigint as proceeds from assets
+      where disposed_on between ${fy.start}::date and ${asAt}::date`;
+    const actual = Number(r!.income) + Math.round(Number(sold!.proceeds) / 2);
     const projected = Math.round((actual / months) * 12);
     // A partnership's partners each pay turnover tax on their own share of the turnover.
     const partners = entity(settings.businessType).taxedAs === 'partners' ? await sql<{ id: string; name: string; shareBp: number }[]>`select id, name, share_bp from partners where active order by created_at` : [];
@@ -102,9 +117,10 @@ export function registerTaxFormRoutes(app: FastifyInstance, ctx: Ctx): void {
       turnoverCents: actual,
       projectedCents: projected,
       taxCents: tax,
-      overLimit: projected > TURNOVER_TAX_LIMIT_CENTS,
+      overLimit: projected > turnoverTaxLimit(fy.end),
       partners: perPartner,
-      limitCents: TURNOVER_TAX_LIMIT_CENTS,
+      limitCents: turnoverTaxLimit(fy.end),
+      halfOfAssetSalesCents: Math.round(Number(sold!.proceeds) / 2),
       bands: turnoverTaxTable(fy.end),
       // Two interim payments (TT02): half by the end of the sixth month, the rest by year end.
       interim: [

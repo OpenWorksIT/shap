@@ -324,14 +324,20 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   const deposit = Math.min(doc.depositDueCents ?? 0, doc.totalCents);
   const depositLabel = `Deposit${doc.depositBp ? ` (${(doc.depositBp / 100).toFixed(doc.depositBp % 100 ? 1 : 0)}%)` : ''}`;
   const depositDue = isInvoice && deposit > 0 && doc.paidCents < deposit;
+  // What credit notes settled isn't money paid: it's shown as credited.
+  const credited = ((data as { receipts?: { method: string; amountCents: number }[] }).receipts ?? []).filter((r) => r.method === 'credit').reduce((t, r) => t + Number(r.amountCents), 0);
+  const settled = (paidLabel: string) => {
+    if (doc.paidCents - credited) totals.push([paidLabel, -(doc.paidCents - credited)]);
+    if (credited) totals.push(['Credited (credit notes)', -credited]);
+  };
   if (deposit > 0 && (!isInvoice || depositDue)) {
     totals.push(['Total', doc.totalCents]);
     totals.push([isInvoice ? `${depositLabel} due now` : `${depositLabel} to confirm`, deposit]);
-    if (doc.paidCents) totals.push(['Paid', -doc.paidCents]);
+    if (doc.paidCents) settled('Paid');
     if (!isInvoice || doc.depositShowBalance) totals.push([isInvoice ? 'Balance after the deposit' : 'Balance on completion', doc.totalCents - deposit]);
   } else if (isInvoice && doc.paidCents) {
     totals.push(['Total', doc.totalCents]);
-    totals.push([deposit > 0 ? 'Paid (incl. deposit)' : 'Paid', -doc.paidCents]);
+    settled(deposit > 0 ? 'Paid (incl. deposit)' : 'Paid');
   }
   const bigLabel = isCredit
     ? 'Credited'

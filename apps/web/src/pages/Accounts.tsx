@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ACCOUNT_TYPE_LABELS, addMonths, ASSET_CATEGORIES, ASSET_DEFAULT_LIFE_MONTHS, INTANGIBLE_CATEGORIES, ASSET_CATEGORY_LABELS, financialYear, formatAmount, formatDate, formatZar, LEDGER_SOURCE_LABELS, todayIso, type AssetCategory, equityHeading } from '@shap/shared';
+import { ACCOUNT_TYPE_LABELS, addMonths, ASSET_CATEGORIES, ASSET_DEFAULT_LIFE_MONTHS, INTANGIBLE_CATEGORIES, ASSET_CATEGORY_LABELS, financialYear, formatAmount, formatDate, formatZar, LEDGER_SOURCE_LABELS, todayIso, vatIncluded, vatOn, type AssetCategory, equityHeading } from '@shap/shared';
 import { PageHead } from '../components/Shell';
 import { Drawer, Empty, ErrorBox, Field, Icon, Loading, Money, MoneyInput, Segmented, Tabs, useToast } from '../components/ui';
 import { api, ApiError } from '../lib/api';
@@ -710,7 +710,10 @@ interface AssetRow {
   residualCents: number;
   disposedOn: string | null;
   disposalProceedsCents: number;
+  disposalVatCents: number;
   disposalSourceId: string | null;
+  vatCents: number;
+  inputVatDenied: boolean;
   notes: string;
   accumulatedCents: number;
   depreciationThisYearCents: number;
@@ -805,7 +808,8 @@ function Assets() {
 }
 
 function AssetDrawer({ asset, onClose, onSaved }: { asset: AssetRow | null; onClose: () => void; onSaved: () => void }) {
-  const { ref, isOwner, words } = useAuthed();
+  const { ref, isOwner, words, settings } = useAuthed();
+  const vat = settings.vatRegistered;
   const toast = useToast();
   const [f, setF] = useState({
     name: asset?.name ?? '',
@@ -818,9 +822,15 @@ function AssetDrawer({ asset, onClose, onSaved }: { asset: AssetRow | null; onCl
     residualCents: asset?.residualCents ?? 0,
     disposedOn: asset?.disposedOn ?? null,
     disposalProceedsCents: asset?.disposalProceedsCents ?? 0,
+    disposalVatCents: Number(asset?.disposalVatCents ?? 0),
     disposalSourceId: asset?.disposalSourceId ?? null,
+    vatCents: Number(asset?.vatCents ?? 0),
+    inputVatDenied: asset?.inputVatDenied ?? false,
     notes: asset?.notes ?? '',
   });
+  // VAT vendors: the VAT on the cost (before VAT) and in the price it sold for, filled in at 15%.
+  const vatBp = settings.vatRateBp ?? 1500;
+  const claims = vat && !f.inputVatDenied;
   const [error, setError] = useState('');
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -872,7 +882,8 @@ function AssetDrawer({ asset, onClose, onSaved }: { asset: AssetRow | null; onCl
           <div className="banner small">Bought through a cost entry, so the cost comes from there ({formatZar(f.costCents ?? 0)}).</div>
         ) : (
           <div className="form-grid">
-            <Field label="Cost">{(p) => <MoneyInput {...p} value={f.costCents} onChange={(c) => setF({ ...f, costCents: c })} />}</Field>
+            <Field label={claims ? 'Cost before VAT' : 'Cost'}>{(p) => <MoneyInput {...p} value={f.costCents} onChange={(c) => setF({ ...f, costCents: c, vatCents: claims ? vatOn(c ?? 0, vatBp) : 0 })} />}</Field>
+            {claims && <Field label="VAT on it" hint="Claimed back on the VAT201 (field 14)">{(p) => <MoneyInput {...p} value={f.vatCents} onChange={(c) => setF({ ...f, vatCents: c ?? 0 })} />}</Field>}
             <Field label="Paid from" hint={`“Paid personally” if you sold it to ${words.business}: it goes onto your ${words.ownerAccount}.`}>
               {(p) => (
                 <select {...p} className="select" value={f.sourceId ?? ''} onChange={(e) => setF({ ...f, sourceId: e.target.value || null })}>
@@ -886,6 +897,15 @@ function AssetDrawer({ asset, onClose, onSaved }: { asset: AssetRow | null; onCl
             </Field>
           </div>
         )}
+        {vat && (
+          <label className="check">
+            <input type="checkbox" checked={f.inputVatDenied} onChange={(e) => setF({ ...f, inputVatDenied: e.target.checked, vatCents: e.target.checked ? 0 : f.vatCents, disposalVatCents: e.target.checked ? 0 : f.disposalVatCents })} />
+            <span>
+              A motor car
+              <div className="xs muted">A sedan, station wagon, minibus or double-cab bakkie: SARS gives no VAT back on it, and none is charged when it’s sold. Its cost includes the VAT.</div>
+            </span>
+          </label>
+        )}
         <div className="form-grid">
           <Field
             label="Useful life (months)"
@@ -897,7 +917,8 @@ function AssetDrawer({ asset, onClose, onSaved }: { asset: AssetRow | null; onCl
           <legend>Sold or scrapped</legend>
           <div className="form-grid">
             <Field label="Date">{(p) => <input {...p} className="input" type="date" value={f.disposedOn ?? ''} onChange={(e) => setF({ ...f, disposedOn: e.target.value || null })} />}</Field>
-            <Field label="Sold for">{(p) => <MoneyInput {...p} value={f.disposalProceedsCents} onChange={(c) => setF({ ...f, disposalProceedsCents: c ?? 0 })} />}</Field>
+            <Field label={claims ? 'Sold for (with VAT)' : 'Sold for'}>{(p) => <MoneyInput {...p} value={f.disposalProceedsCents} onChange={(c) => setF({ ...f, disposalProceedsCents: c ?? 0, disposalVatCents: claims ? vatIncluded(c ?? 0, vatBp) : 0 })} />}</Field>
+            {claims && <Field label="VAT in it" hint="Owed to SARS (field 4A)">{(p) => <MoneyInput {...p} value={f.disposalVatCents} onChange={(c) => setF({ ...f, disposalVatCents: c ?? 0 })} />}</Field>}
             <Field label="Money went to">
               {(p) => (
                 <select {...p} className="select" value={f.disposalSourceId ?? ''} onChange={(e) => setF({ ...f, disposalSourceId: e.target.value || null })}>

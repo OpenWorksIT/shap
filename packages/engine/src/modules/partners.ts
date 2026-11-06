@@ -46,6 +46,7 @@ export interface PartnerRow {
 const capitalName = (name: string) => `Capital: ${name}`;
 const currentName = (name: string) => `Current account: ${name}`;
 const paidName = (name: string) => `Paid personally (${name})`;
+const personalName = (name: string) => `Personal (${name})`;
 
 /** The partners, with what's in their accounts (credit balances shown as positive). */
 export async function listPartners(db: Db): Promise<PartnerRow[]> {
@@ -106,6 +107,9 @@ export function registerPartnerRoutes(app: FastifyInstance, ctx: Ctx): void {
         values (${input.name}, ${input.shareBp}, ${input.active}, ${capital!.id}, ${current!.id}) returning id`;
       // What a partner pays for the business themselves goes onto their own current account.
       await tx`insert into payment_sources (name, kind, account_id, active, sort) values (${paidName(input.name)}, 'owner', ${current!.id}, ${input.active}, 50)`;
+      // And what the business pays for them personally is their drawings, against the same account.
+      await tx`insert into cost_categories (name, kind, account_id, active, sort) values (${personalName(input.name)}, 'personal', ${current!.id}, ${input.active}, 50)
+        on conflict do nothing`;
       return p!.id;
     });
     await audit(sql, { userId: user.id, action: 'create', entity: 'partner', entityId: id, ip: req.ip });
@@ -124,6 +128,7 @@ export function registerPartnerRoutes(app: FastifyInstance, ctx: Ctx): void {
       await tx`update accounts set name = ${capitalName(input.name)} where id = ${old.capitalAccountId} and name = ${capitalName(old.name)}`;
       await tx`update accounts set name = ${currentName(input.name)} where id = ${old.currentAccountId} and name = ${currentName(old.name)}`;
       await tx`update payment_sources set name = case when name = ${paidName(old.name)} then ${paidName(input.name)} else name end, active = ${input.active} where account_id = ${old.currentAccountId} and kind = 'owner'`;
+      await tx`update cost_categories set name = case when name = ${personalName(old.name)} then ${personalName(input.name)} else name end, active = ${input.active} where account_id = ${old.currentAccountId} and kind = 'personal'`;
     });
     await audit(sql, { userId: user.id, action: 'update', entity: 'partner', entityId: id, ip: req.ip });
     return { ok: true };

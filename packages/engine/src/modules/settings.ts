@@ -63,6 +63,16 @@ export async function saveAttachment(db: Db, input: z.infer<typeof attachmentInp
   return row!.id;
 }
 
+/** The file types attachments are uploaded as (schemas.ts attachmentInput, logos, statements). */
+const SERVED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']);
+
+/** Is there anything (the query's rows) on or before the lock date? No lock date: nothing is closed. */
+async function postedInClosedYear(db: Db, query: () => PromiseLike<readonly unknown[]>): Promise<boolean> {
+  const [s] = await db<{ lockDate: string | null }[]>`select lock_date from settings where id`;
+  if (!s?.lockDate) return false;
+  return (await query()).length > 0;
+}
+
 export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
 
@@ -86,11 +96,12 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     // Turnover tax and PBO approval only exist for the kinds of business that can have them.
     if (!kind.turnoverTax) input.turnoverTax = false;
     if (input.businessType !== 'npc') input.approvedPbo = false;
-    // SARS: a company (CC, co-op) on turnover tax must have its year end on the last day of February.
+    // SARS: a company (CC, co-op) on turnover tax must have its year end on the last day of February
+    // (TT01 FAQ). The 2026 Budget proposed dropping this; until the law changes, it stays.
     if (input.turnoverTax && input.fyEndMonth !== 2) throw badRequest('Turnover tax needs the year to end in February: change the financial year end first (SARS’s rule for companies on turnover tax).');
     const before = await getSettings(sql);
     await sql.begin(async (tx) => {
-      const row: Record<string, unknown> = { ...input, features: tx.json(input.features), logoLayout: tx.json(input.logoLayout), lockDate: input.lockDate ?? null, updatedAt: new Date() };
+      const row: Record<string, unknown> = { ...input, features: tx.json(input.features), logoLayout: tx.json(input.logoLayout), lockDate: input.lockDate, updatedAt: new Date() };
       for (const k of Object.keys(row)) if (row[k] === undefined) delete row[k];
       await tx`update settings set ${tx(row as never)} where id`;
       await applyBusinessType(tx, input.businessType);
@@ -169,8 +180,11 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
       : await sql<{ filename: string; mime: string; bytes: Buffer }[]>`select a.filename, a.mime, a.bytes from attachments a
           where a.id = ${id} and exists (select 1 from costs c where c.receipt_id = a.id and c.created_by = ${user.id})`;
     if (!row) throw notFound('File');
-    reply.header('content-type', row.mime);
-    reply.header('content-disposition', `inline; filename="${row.filename.replace(/[^\w.\- ]/g, '_')}"`);
+    // Only the kinds of file Shap takes in are served as themselves: anything else (from a doctored
+    // backup, say) is handed over as plain bytes to save, never opened as a page.
+    const safe = SERVED_TYPES.has(row.mime);
+    reply.header('content-type', safe ? row.mime : 'application/octet-stream');
+    reply.header('content-disposition', `${safe ? 'inline' : 'attachment'}; filename="${row.filename.replace(/[^\w.\- ]/g, '_')}"`);
     reply.header('cache-control', 'private, max-age=86400');
     return reply.send(row.bytes);
   });
@@ -192,6 +206,9 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [existing] = await sql<{ systemKey: string | null; type: string }[]>`select system_key, type from accounts where id = ${id}`;
     if (!existing) throw notFound('Account');
     if (existing.systemKey && existing.type !== input.type) throw badRequest('Shap posts to this account automatically, so its type can’t change. You can rename it.');
+    // Its type decides where its postings land (profit or the balance sheet): not for a closed year's.
+    if (existing.type !== input.type && (await postedInClosedYear(sql, () => sql`select 1 from ledger l where l.account_id = ${id} and l.date <= (select lock_date from settings where id) limit 1`)))
+      throw badRequest('This account has postings in a closed year, so its type can’t change. Make a new account for what’s coming instead.');
     try {
       const [row] = await sql`update accounts set ${sql(input)} where id = ${id} returning *`;
       return row;
@@ -216,6 +233,17 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     app.put(`/api/${path}/:id`, { preHandler: requireRole('owner') }, async (req) => {
       const { id } = parse(idParam, req.params);
       const input = parse(schema, req.body) as Record<string, unknown>;
+      // Moving a cost type or a payment account to another account in the books moves everything
+      // already captured with it: not what's in a closed year.
+      if (input.accountId) {
+        const [old] = await sql<{ accountId: string }[]>`select account_id from ${sql(table)} where id = ${id}`;
+        const used = () =>
+          table === 'cost_categories'
+            ? sql`select 1 from costs where category_id = ${id} and date <= (select lock_date from settings where id) limit 1`
+            : sql`select 1 from ledger l where l.account_id = ${old?.accountId ?? null} and l.date <= (select lock_date from settings where id) limit 1`;
+        if (old && old.accountId !== input.accountId && (await postedInClosedYear(sql, used)))
+          throw badRequest('What’s already captured with this goes to its account in a closed year, so the account can’t change. Make a new one for what’s coming instead.');
+      }
       try {
         const [row] = await sql`update ${sql(table)} set ${sql(input)} where id = ${id} returning *`;
         if (!row) throw notFound();

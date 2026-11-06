@@ -15,7 +15,7 @@ const HAND_ROUNDING_CENTS = 100;
 import { fingerprints, parseStatementCsv } from './parse.js';
 
 const uuid = z.string().uuid();
-const KINDS = ['cost', 'receipt', 'wage_payment', 'journal'] as const;
+const KINDS = ['cost', 'receipt', 'wage_payment', 'journal', 'bill_payment'] as const;
 type Kind = (typeof KINDS)[number];
 
 interface LineRow {
@@ -77,6 +77,7 @@ async function twinsFor(db: Db, lines: { id: string; date: string; amountCents: 
        select c.* from costs c
        where abs(c.amount_cents + x.a) <= 100 and c.date between x.d - 12 and x.d + 5
          and not exists (select 1 from bank_matches m where m.kind = 'cost' and m.record_id = c.id)
+         and ${NOT_A_BILL}
        order by (c.amount_cents = -x.a) desc, abs(c.date - x.d) limit 8
      ) c on true
      left join projects p on p.id = c.project_id`,
@@ -112,13 +113,18 @@ const isOpen = (db: Db, date: string) => assertOpen(db, date).then(() => true, (
 
 /** Records already tied to a statement line, so they aren't suggested twice. */
 const unmatched = (kind: Kind, alias: string) => `not exists (select 1 from bank_matches m where m.kind = '${kind}' and m.record_id = ${alias}.id)`;
+/**
+ * A supplier bill ("Not paid yet") or a credit note's settlement is a cost of the books' own
+ * accounts, not a payment: the payment made on a bill is what a statement line matches.
+ */
+const NOT_A_BILL = `not exists (select 1 from payment_sources rs where rs.id = c.source_id and rs.role is not null)`;
 
 async function candidates(db: Db, sourceId: string, from: string, to: string) {
   const [costs, receipts, wages, invoices] = await Promise.all([
     db.unsafe(
       `select c.id, c.date::text, c.amount_cents, c.supplier, c.description, c.source_id, s.name as source_name, p.name as project_name
        from costs c left join payment_sources s on s.id = c.source_id left join projects p on p.id = c.project_id
-       where c.date between ($1::date - 12) and ($2::date + 5) and ${unmatched('cost', 'c')}`,
+       where c.date between ($1::date - 12) and ($2::date + 5) and ${unmatched('cost', 'c')} and ${NOT_A_BILL}`,
       [from, to],
     ),
     db.unsafe(
@@ -174,13 +180,33 @@ async function matchesFor(db: Db, lineIds: string[]) {
   return out;
 }
 
-/** Ties records to a statement line; costs not yet matched to a payment take the statement's account. */
+/** The table each kind of record lives in, for the ones that say which account paid. */
+const PAID_FROM = { receipt: 'receipts', wage_payment: 'wage_payments', bill_payment: 'bill_payments' } as const;
+
+/**
+ * Ties records to a statement line. Costs not yet matched to a payment, and payments recorded
+ * against another account, take the statement's account (what they said before is kept for
+ * unmatching): the statement is what says where the money went.
+ */
 async function link(tx: Db, line: LineRow, items: { kind: Kind; id: string }[]) {
-  for (const it of items) {
-    await tx`insert into bank_matches (bank_line_id, kind, record_id) values (${line.id}, ${it.kind}, ${it.id})
-      on conflict (kind, record_id) do update set bank_line_id = excluded.bank_line_id`;
+  const costIdsIn = items.filter((i) => i.kind === 'cost').map((i) => i.id);
+  if (costIdsIn.length) {
+    const [bill] = await tx`select 1 from costs c join payment_sources rs on rs.id = c.source_id where c.id = any(${costIdsIn}::uuid[]) and rs.role is not null`;
+    if (bill) throw badRequest('That’s a supplier bill: record its payment under Bills, then match the line to that payment.');
   }
-  const costIds = items.filter((i) => i.kind === 'cost').map((i) => i.id);
+  for (const it of items) {
+    await tx`insert into bank_matches (bank_line_id, kind, record_id, source_id) values (${line.id}, ${it.kind}, ${it.id}, ${line.sourceId})
+      on conflict (kind, record_id, source_id) do update set bank_line_id = excluded.bank_line_id`;
+  }
+  for (const [kind, table] of Object.entries(PAID_FROM) as [Kind, string][]) {
+    const ids = items.filter((i) => i.kind === kind).map((i) => i.id);
+    if (!ids.length) continue;
+    await tx`update bank_matches m set source_changed = true, prev_source_id = r.source_id from ${tx(table)} r
+      where m.kind = ${kind} and m.record_id = r.id and m.bank_line_id = ${line.id} and r.id = any(${ids}::uuid[])
+        and r.source_id is distinct from ${line.sourceId}::uuid and not m.source_changed`;
+    await tx`update ${tx(table)} set source_id = ${line.sourceId} where id = any(${ids}::uuid[]) and source_id is distinct from ${line.sourceId}::uuid`;
+  }
+  const costIds = costIdsIn;
   if (costIds.length) {
     // The statement says which account paid; what the cost said before is kept for unmatching.
     await tx`update bank_matches m set source_changed = true, prev_source_id = c.source_id from costs c
@@ -209,6 +235,10 @@ async function link(tx: Db, line: LineRow, items: { kind: Kind; id: string }[]) 
 /** Undoes matches on these lines: costs get back the account (and amount) they had before matching. */
 async function unlink(tx: Db, lineIds: string[]) {
   if (!lineIds.length) return;
+  for (const [kind, table] of Object.entries(PAID_FROM) as [Kind, string][]) {
+    await tx`update ${tx(table)} r set source_id = m.prev_source_id
+      from bank_matches m where m.kind = ${kind} and m.record_id = r.id and m.bank_line_id = any(${lineIds}::uuid[]) and m.source_changed and m.prev_source_id is not null`;
+  }
   await tx`update costs c set source_id = case when m.source_changed then m.prev_source_id else c.source_id end,
       amount_cents = coalesce(m.prev_amount_cents, c.amount_cents), note = coalesce(m.prev_note, c.note)
     from bank_matches m where m.kind = 'cost' and m.record_id = c.id and m.bank_line_id = any(${lineIds}::uuid[])
@@ -606,14 +636,21 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = parse(z.object({ id: uuid }), req.params);
     const { items } = parse(z.object({ items: z.array(z.object({ kind: z.enum(KINDS), id: uuid })).min(1).max(50) }), req.body);
     const line = await loadLine(sql, id);
+    const of = (k: Kind) => items.filter((i) => i.kind === k).map((i) => i.id);
+    // Money out is positive here: costs, wages and bill payments; a payment received or a journal
+    // into this account counts the other way.
     const sums = await sql<{ t: number; dates: string[] }[]>`
       select coalesce(sum(x.amount), 0)::bigint as t, array_agg(x.date::text) as dates from (
-        select amount_cents as amount, date from costs where id = any(${items.filter((i) => i.kind === 'cost').map((i) => i.id)}::uuid[])
-        union all select -amount_cents, date from receipts where id = any(${items.filter((i) => i.kind === 'receipt').map((i) => i.id)}::uuid[])
-        union all select amount_cents, date from wage_payments where id = any(${items.filter((i) => i.kind === 'wage_payment').map((i) => i.id)}::uuid[])
+        select amount_cents as amount, date from costs where id = any(${of('cost')}::uuid[])
+        union all select -amount_cents, date from receipts where id = any(${of('receipt')}::uuid[])
+        union all select amount_cents, date from wage_payments where id = any(${of('wage_payment')}::uuid[])
+        union all select amount_cents, date from bill_payments where id = any(${of('bill_payment')}::uuid[])
+        union all select sum(jl.credit_cents - jl.debit_cents), j.date from journals j join journal_lines jl on jl.journal_id = j.id
+          join payment_sources ps on ps.id = ${line.sourceId} and ps.account_id = jl.account_id
+          where j.id = any(${of('journal')}::uuid[]) group by j.id, j.date
       ) x`;
-    const total = sums[0]!.t;
-    if (items.some((i) => i.kind !== 'journal') && Math.abs(total + line.amountCents) > HAND_ROUNDING_CENTS) {
+    const total = Number(sums[0]!.t);
+    if (Math.abs(total + line.amountCents) > HAND_ROUNDING_CENTS) {
       throw badRequest(`Those add up to R${(Math.abs(total) / 100).toFixed(2)}, not the statement’s R${(Math.abs(line.amountCents) / 100).toFixed(2)}`);
     }
     await assertCanChange(sql, (sums[0]!.dates ?? []).filter(Boolean));
@@ -642,15 +679,16 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
       const costs = await sql`
         select c.id, c.date::text, c.amount_cents, c.description, c.supplier, s.name as source_name, p.name as project_name
         from costs c left join payment_sources s on s.id = c.source_id left join projects p on p.id = c.project_id
-        where c.date between (${line.date}::date - 14) and (${line.date}::date + 5)
+        where c.date between (${line.date}::date - 14) and (${line.date}::date + 5) and c.amount_cents > 0
           and not exists (select 1 from bank_matches m where m.kind = 'cost' and m.record_id = c.id)
+          and not exists (select 1 from payment_sources rs where rs.id = c.source_id and rs.role is not null)
         order by abs(c.date - ${line.date}::date), c.date, c.created_at limit 300`;
       const wages = await sql`
         select wp.id, wp.date::text, wp.amount_cents, w.name as worker_name from wage_payments wp join workers w on w.id = wp.worker_id
         where wp.date between (${line.date}::date - 7) and (${line.date}::date + 3)
           and not exists (select 1 from bank_matches m where m.kind = 'wage_payment' and m.record_id = wp.id)
         order by wp.date`;
-      return { costs, wages, invoices: [] };
+      return { costs, wages, invoices: [], others: await otherCandidates(line) };
     }
     const invoices = await sql`
       select d.id, d.number, d.issue_date::text, c.name as client_name, (d.total_cents - coalesce(r.paid, 0))::bigint as balance_cents
@@ -658,8 +696,44 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
       left join lateral (select sum(amount_cents) as paid from receipts where invoice_id = d.id) r on true
       where d.kind = 'invoice' and d.status = 'issued' and d.written_off_on is null and d.total_cents - coalesce(r.paid, 0) > 0
       order by d.issue_date desc`;
-    return { costs: [], wages: [], invoices };
+    return { costs: [], wages: [], invoices, others: await otherCandidates(line) };
   });
+
+  /**
+   * What else in the books could be this line: payments recorded on bills and invoices, refunds,
+   * and journals on this account (the other side of a transfer, net pay, SARS) not yet ticked off
+   * on this account's statement. Money out is positive.
+   */
+  async function otherCandidates(line: LineRow) {
+    const out = line.amountCents < 0;
+    const rows = await sql<{ kind: Kind; id: string; date: string; amountCents: number; label: string }[]>`
+      select * from (
+        select 'bill_payment' as kind, bp.id, bp.date::text, bp.amount_cents, 'Paid bill: ' || c.description || coalesce(' – ' || nullif(c.supplier, ''), '') as label
+        from bill_payments bp join costs c on c.id = bp.cost_id
+        where ${out} and bp.date between (${line.date}::date - 14) and (${line.date}::date + 5)
+          and not exists (select 1 from bank_matches m where m.kind = 'bill_payment' and m.record_id = bp.id)
+        union all
+        select 'receipt', r.id, r.date::text, -r.amount_cents, 'Payment recorded for invoice ' || d.number || coalesce(' (' || cl.name || ')', '')
+        from receipts r join documents d on d.id = r.invoice_id left join clients cl on cl.id = d.client_id
+        where not ${out} and r.method <> 'credit' and r.date between (${line.date}::date - 14) and (${line.date}::date + 5)
+          and not exists (select 1 from bank_matches m where m.kind = 'receipt' and m.record_id = r.id)
+        union all
+        select 'cost', c.id, c.date::text, c.amount_cents, 'Refund: ' || c.description || coalesce(' – ' || nullif(c.supplier, ''), '')
+        from costs c
+        where not ${out} and c.amount_cents < 0 and c.date between (${line.date}::date - 14) and (${line.date}::date + 5)
+          and not exists (select 1 from bank_matches m where m.kind = 'cost' and m.record_id = c.id)
+        union all
+        select 'journal', j.id, j.date::text, sum(jl.credit_cents - jl.debit_cents)::bigint, j.description
+        from journals j join journal_lines jl on jl.journal_id = j.id
+        join payment_sources ps on ps.id = ${line.sourceId} and ps.account_id = jl.account_id
+        where j.date between (${line.date}::date - 14) and (${line.date}::date + 7)
+          and not exists (select 1 from bank_matches m where m.kind = 'journal' and m.record_id = j.id and m.source_id = ${line.sourceId})
+        group by j.id, j.date, j.description
+      ) x
+      where x.amount_cents <> 0 and sign(x.amount_cents) = ${out ? 1 : -1}
+      order by abs(x.date::date - ${line.date}::date) limit 100`;
+    return rows.map((r) => ({ ...r, amountCents: Math.abs(Number(r.amountCents)) }));
+  }
 
   // ---------------------------------------------------------------- new records from the statement
   /** Debit orders, bank fees and the like that were never captured: costs straight from the lines. */
@@ -773,6 +847,19 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
     const amt = Math.abs(line.amountCents);
     const out = line.amountCents < 0;
     const text = description || (out ? `Transfer to ${there.name}` : `Transfer from ${there.name}`);
+    // The other account's statement may already have posted this transfer: tick it off against
+    // that journal rather than moving the money a second time.
+    const [already] = await sql<{ id: string }[]>`
+      select j.id from journals j
+      join journal_lines a on a.journal_id = j.id and a.account_id = ${here!.accountId} and a.debit_cents = ${out ? 0 : amt} and a.credit_cents = ${out ? amt : 0}
+      join journal_lines b on b.journal_id = j.id and b.account_id = ${there.accountId} and b.debit_cents = ${out ? amt : 0} and b.credit_cents = ${out ? 0 : amt}
+      where j.date between (${line.date}::date - 7) and (${line.date}::date + 7)
+        and not exists (select 1 from bank_matches m where m.kind = 'journal' and m.record_id = j.id and m.source_id = ${line.sourceId})
+      order by abs(j.date - ${line.date}::date) limit 1`;
+    if (already) {
+      await sql.begin(async (tx) => link(tx, line, [{ kind: 'journal', id: already.id }]));
+      return { ok: true, matched: already.id };
+    }
     await sql.begin(async (tx) => {
       const [j] = await tx<{ id: string }[]>`insert into journals (date, description, reference, kind, created_by) values (${line.date}, ${text}, ${line.description.slice(0, 100)}, 'manual', ${user.id}) returning id`;
       await tx`insert into journal_lines (journal_id, account_id, debit_cents, credit_cents, memo) values

@@ -582,6 +582,8 @@ interface Candidates {
   costs: { id: string; date: string; amountCents: number; description: string; supplier: string; sourceName: string | null; projectName: string | null }[];
   wages: { id: string; date: string; amountCents: number; workerName: string }[];
   invoices: { id: string; number: string; issueDate: string; clientName: string | null; balanceCents: number }[];
+  /** Payments on bills and invoices, refunds and journals on this account already in the books. */
+  others?: { kind: 'bill_payment' | 'receipt' | 'cost' | 'journal'; id: string; date: string; amountCents: number; label: string }[];
 }
 
 function MatchDrawer({ line, onClose, onDone }: { line: Line; onClose: () => void; onDone: () => void }) {
@@ -590,7 +592,10 @@ function MatchDrawer({ line, onClose, onDone }: { line: Line; onClose: () => voi
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const target = Math.abs(line.amountCents);
-  const items = data ? [...data.costs.map((c) => ({ key: `cost:${c.id}`, amount: c.amountCents })), ...data.wages.map((w) => ({ key: `wage_payment:${w.id}`, amount: w.amountCents }))] : [];
+  const others = data?.others ?? [];
+  const items = data
+    ? [...data.costs.map((c) => ({ key: `cost:${c.id}`, amount: c.amountCents })), ...data.wages.map((w) => ({ key: `wage_payment:${w.id}`, amount: w.amountCents })), ...others.map((o) => ({ key: `${o.kind}:${o.id}`, amount: o.amountCents }))]
+    : [];
   const sum = items.filter((i) => picked.has(i.key)).reduce((s, i) => s + i.amount, 0);
   const toggle = (k: string) =>
     setPicked((p) => {
@@ -612,13 +617,13 @@ function MatchDrawer({ line, onClose, onDone }: { line: Line; onClose: () => voi
     }
   };
   return (
-    <Drawer title={line.amountCents < 0 ? 'Which costs are these?' : 'Which invoice does this pay?'} sub={`${formatDate(line.date)} · ${line.description} · ${formatZar(line.amountCents)}`} onClose={onClose} wide>
+    <Drawer title={line.amountCents < 0 ? 'What did this pay for?' : 'What is this money for?'} sub={`${formatDate(line.date)} · ${line.description} · ${formatZar(line.amountCents)}`} onClose={onClose} wide>
       <ErrorBox error={error} />
       {!data ? (
         <Loading />
       ) : line.amountCents < 0 ? (
         <div className="stack">
-          <p className="small">Tick the costs (from the two weeks around the date) that this payment covers. They must add up to {formatZar(target)}.</p>
+          <p className="small">Tick what this payment covers (costs, wages, bill payments and journals from the two weeks around the date). They must add up to {formatZar(target)}.</p>
           <ul className="list">
             {data.costs.map((c) => (
               <li key={c.id}>
@@ -648,7 +653,19 @@ function MatchDrawer({ line, onClose, onDone }: { line: Line; onClose: () => voi
                 </label>
               </li>
             ))}
-            {!data.costs.length && !data.wages.length && <li className="panel-pad small muted">Nothing unmatched near this date. Add it as a cost instead.</li>}
+            {others.map((o) => (
+              <li key={`${o.kind}:${o.id}`}>
+                <label className="list-row">
+                  <input type="checkbox" checked={picked.has(`${o.kind}:${o.id}`)} onChange={() => toggle(`${o.kind}:${o.id}`)} />
+                  <span className="grow small">
+                    {o.label}
+                    <div className="xs muted">{formatDate(o.date)}</div>
+                  </span>
+                  <Money cents={o.amountCents} />
+                </label>
+              </li>
+            ))}
+            {!data.costs.length && !data.wages.length && !others.length && <li className="panel-pad small muted">Nothing unmatched near this date. Add it as a cost instead.</li>}
           </ul>
           <div className="sticky-bar panel panel-pad row">
             <span className="grow small">
@@ -667,6 +684,18 @@ function MatchDrawer({ line, onClose, onDone }: { line: Line; onClose: () => voi
         </div>
       ) : (
         <ul className="list">
+          {others.map((o) => (
+            <li key={`${o.kind}:${o.id}`}>
+              <button className="list-row" disabled={busy} onClick={() => void save({ items: [{ kind: o.kind, id: o.id }] }, `/api/bank/lines/${line.id}/match`)}>
+                <span className="grow small">
+                  {o.label}
+                  <div className="xs muted">{formatDate(o.date)} · already in the books</div>
+                </span>
+                <Money cents={o.amountCents} />
+                {o.amountCents === target && <span className="chip ok">exact</span>}
+              </button>
+            </li>
+          ))}
           {data.invoices.map((i) => (
             <li key={i.id}>
               <button className="list-row" disabled={busy} onClick={() => void save({ invoiceId: i.id }, `/api/bank/lines/${line.id}/receipt`)}>
@@ -680,7 +709,7 @@ function MatchDrawer({ line, onClose, onDone }: { line: Line; onClose: () => voi
               </button>
             </li>
           ))}
-          {!data.invoices.length && <li className="panel-pad small muted">No invoices are owing.</li>}
+          {!data.invoices.length && !others.length && <li className="panel-pad small muted">No invoices are owing.</li>}
         </ul>
       )}
     </Drawer>

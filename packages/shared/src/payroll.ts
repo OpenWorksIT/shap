@@ -13,6 +13,7 @@
  * SDL: 1% of payroll, for employers whose payroll is over R500 000 a year.
  * Dividends tax: https://www.sars.gov.za/types-of-tax/dividends-tax/ (20% since 22 February 2017)
  */
+import { businessDayOnOrBefore } from './dates.js';
 import { individualTax, type AgeBand } from './tax.js';
 
 export const UIF_RATE = 0.01;
@@ -45,8 +46,14 @@ export function medicalCredit(members: number, yearEnd: string): number {
 export interface PayInput {
   /** The month's regular pay (salary), cents. */
   salaryCents: number;
-  /** Once-off taxable pay this month: bonus, overtime, commission. */
+  /** Overtime this month: regular pay, taxed with the salary as if earned all year. */
+  overtimeCents?: number;
+  /** Commission this month: regular pay like overtime, but not counted for UIF (UIC Act s1). */
+  commissionCents?: number;
+  /** Once-off pay this month (a bonus, an annual payment): taxed as the tax it adds to the year. */
   extraCents?: number;
+  /** Once-off pay already paid earlier in the same tax year (so a second bonus is taxed on top of the first). */
+  extraBeforeCents?: number;
   /** Paid on this date (decides the tax year). */
   payDate: string;
   age?: AgeBand;
@@ -71,40 +78,49 @@ export function payLine(p: PayInput): PayResult {
   const yearEnd = taxYearEnd(p.payDate);
   const age = p.age ?? 'under65';
   const salary = Math.max(0, Math.round(p.salaryCents));
+  const overtime = Math.max(0, Math.round(p.overtimeCents ?? 0));
+  const commission = Math.max(0, Math.round(p.commissionCents ?? 0));
   const extra = Math.max(0, Math.round(p.extraCents ?? 0));
-  const gross = salary + extra;
-  const yearly = individualTax(salary * 12, yearEnd, age);
-  const regular = yearly / 12;
-  const onceOff = extra ? individualTax(salary * 12 + extra, yearEnd, age) - yearly : 0;
+  const before = Math.max(0, Math.round(p.extraBeforeCents ?? 0));
+  const gross = salary + overtime + commission + extra;
+  // SARS's tables method: the month's regular pay as a year's, the year's tax back to a month.
+  const annual = (salary + overtime + commission) * 12;
+  const regular = individualTax(annual, yearEnd, age) / 12;
+  // An annual payment: the tax it adds to the year, on top of the year's earlier ones.
+  const onceOff = extra ? individualTax(annual + before + extra, yearEnd, age) - individualTax(annual + before, yearEnd, age) : 0;
   const paye = Math.max(0, Math.round(regular + onceOff - medicalCredit(p.medicalMembers ?? 0, yearEnd)));
-  const uifBase = Math.min(gross, UIF_CEILING_CENTS);
+  const uifBase = Math.min(gross - commission, UIF_CEILING_CENTS);
   const uifEach = p.uif === false ? 0 : Math.round(uifBase * UIF_RATE);
   const sdl = p.sdl ? Math.round(gross * SDL_RATE) : 0;
   return { grossCents: gross, payeCents: paye, uifEmployeeCents: uifEach, uifEmployerCents: uifEach, sdlCents: sdl, netCents: gross - paye - uifEach };
 }
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
-/** Weekends move a SARS due date back to the Friday before (public holidays aren't counted). */
-function backOverWeekend(d: Date): Date {
-  const day = d.getUTCDay();
-  if (day === 6) d.setUTCDate(d.getUTCDate() - 1);
-  if (day === 0) d.setUTCDate(d.getUTCDate() - 2);
-  return d;
-}
 
-/** PAYE, UIF and SDL for a month (EMP201) are due by the 7th of the next month. */
+/** PAYE, UIF and SDL for a month (EMP201) are due by the 7th of the next month (earlier if that's a weekend or public holiday). */
 export function emp201Due(period: string): string {
   const [y, m] = period.split('-').map(Number) as [number, number];
-  return iso(backOverWeekend(new Date(Date.UTC(y, m, 7))));
+  return businessDayOnOrBefore(iso(new Date(Date.UTC(y, m, 7))));
 }
 
-/** Dividends tax is due by the last day of the month after the dividend was paid. */
+/** Dividends tax is due by the last day of the month after the dividend was paid (earlier if that isn't a business day). */
 export function dwtDue(paidOn: string): string {
   const [y, m] = paidOn.split('-').map(Number) as [number, number];
-  return iso(backOverWeekend(new Date(Date.UTC(y, m + 1, 0))));
+  return businessDayOnOrBefore(iso(new Date(Date.UTC(y, m + 1, 0))));
 }
 
 /** Dividends tax on a dividend, cents (none when the shareholder is a South African company). */
 export function dividendTax(grossCents: number, exempt = false): number {
   return exempt ? 0 : Math.round((grossCents * DWT_RATE_BP) / 10_000);
+}
+
+/**
+ * A micro business on turnover tax pays no dividends tax on the first R200 000 of dividends it
+ * pays in a year of assessment, all shareholders together (s64F(1)(h)); the rest is taxed as usual.
+ * SARS, Tax Guide for Micro Businesses, 3.8.1.
+ */
+export const MICRO_DIVIDEND_EXEMPT_CENTS = 20_000_000;
+export function microDividendTax(grossCents: number, paidEarlierThisYearCents: number, exempt = false): number {
+  const room = Math.max(0, MICRO_DIVIDEND_EXEMPT_CENTS - Math.max(0, paidEarlierThisYearCents));
+  return dividendTax(Math.max(0, grossCents - room), exempt);
 }
