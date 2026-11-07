@@ -12,6 +12,7 @@ import type { FastifyInstance } from 'fastify';
 import { addMonths, monthEnd } from '@shap/shared';
 import { z } from 'zod';
 import { requireRole, userOrThrow } from '../auth.js';
+import { checkInUsage } from './feedback.js';
 import { shareMarketRates } from './market.js';
 import type { Ctx } from '../context.js';
 import type { Db, Sql } from '../db/index.js';
@@ -301,6 +302,8 @@ export function startMonthlyTimer(ctx: Ctx, log: { info: (o: object, m: string) 
       .catch((err) => log.error({ err }, 'monthly invoices failed'));
     // The real books only (never the demo company's).
     void shareMarketRates(ctx, ctx.dbs.real, { warn: (o, m) => log.info(o, m) }).catch((err) => log.error({ err }, 'market rates failed'));
+    // This Shap's anonymous usage note, when it changed or monthly (only if the owner agreed).
+    void checkInUsage(ctx, ctx.dbs.real, { warn: (o, m) => log.info(o, m) }).catch((err) => log.error({ err }, 'usage note failed'));
   };
   const first = setTimeout(tick, 60_000);
   const every = setInterval(tick, 30 * 60_000);

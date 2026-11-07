@@ -6,8 +6,7 @@ import type { Ctx } from '../context.js';
 import { pgCode, PG, type Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
 import { applyBusinessType, getSettings } from '../lib/books.js';
-import { FEATURE_KEYS, featureOn } from '@shap/shared';
-import { reportUsage } from './feedback.js';
+import { checkInUsage } from './feedback.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 import { cleanImage } from '../lib/images.js';
@@ -122,7 +121,8 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     });
     await audit(sql, { userId: user.id, action: 'update', entity: 'settings', ip: req.ip });
     const saved = await getSettings(sql);
-    if (saved.usageConsent) void reportUsage(ctx, { ...saved, features: FEATURE_KEYS.filter((k) => featureOn(saved.features, k)) }, req.log);
+    // The usage note goes out if the answers changed (it remembers what it last sent).
+    if (saved.usageConsent) void checkInUsage(ctx, sql, req.log).catch(() => undefined);
     return saved;
   });
 

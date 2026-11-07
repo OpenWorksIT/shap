@@ -3,6 +3,15 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.16.1 (7 November 2026)
+
+- **The anonymous usage note** (only if you said yes to it) is now also sent after an update and
+  about once a month while Shap is used, so OpenWorks can tell how many people still use Shap and
+  how many have taken each update. It still holds no names, clients or figures: just the app,
+  version, kind of business and which features are on. Switch it off any time in Settings.
+- For OpenWorks’ own collector: each usage note remembers when that install was first heard from,
+  and when it last updated and from which version.
+
 ## 1.16.0 (6 November 2026)
 
 A full review of the figures, the tax rules and the security, with what it found put right.

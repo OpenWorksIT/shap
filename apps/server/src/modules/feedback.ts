@@ -23,9 +23,11 @@ import { appendFile, mkdir, readdir, readFile, rename, rm, writeFile } from 'nod
 import { join, resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { BUSINESS_TYPES, type BusinessType, entity } from '@shap/shared';
+import { BUSINESS_TYPES, type BusinessType, entity, FEATURE_KEYS, featureOn } from '@shap/shared';
 import { requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
+import type { Db } from '../db/index.js';
+import { getSettings } from '../lib/books.js';
 import { badRequest, HttpError, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 import { addressKey } from './market.js';
@@ -88,7 +90,15 @@ const usageInput = z.object({
   vatRegistered: z.boolean().default(false),
   tone: z.enum(['casual', 'formal']).default('casual'),
 });
-export type UsageNote = Omit<z.infer<typeof usageInput>, 'installId'>;
+export type UsageNote = Omit<z.infer<typeof usageInput>, 'installId'> & {
+  /** When this note came in. */
+  at: string;
+  /** When the install was first heard from. */
+  firstAt?: string;
+  /** When it last came in on a new version, and what it was on before. */
+  updatedAt?: string;
+  previousVersion?: string;
+};
 /** A usage note's file name: a keyed hash of the install id, so the id itself isn't kept. */
 const usageFile = (ctx: Ctx, installId: string) => ctx.secrets.hash(`usage|${installId}`).slice(0, 32);
 
@@ -121,14 +131,44 @@ function decodeImage(dataUrl: string): { bytes: Buffer; ext: 'jpg' | 'png' } {
 const stamp = (d: Date) => d.toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
 
 /** Sends to OpenWorks' collector, quietly: feedback and usage notes are never worth an error. */
-async function forward(url: string, path: 'feedback' | 'usage', body: unknown, log: { warn: (o: object, m: string) => void }) {
-  if (!url || url === 'off') return;
+async function forward(url: string, path: 'feedback' | 'usage', body: unknown, log: { warn: (o: object, m: string) => void }): Promise<boolean> {
+  if (!url || url === 'off') return false;
   try {
     const r = await fetch(`${url.replace(/\/$/, '')}/${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(8000) });
     if (!r.ok) log.warn({ status: r.status, path }, 'collector refused');
+    return r.ok;
   } catch (err) {
     log.warn({ err: (err as Error).message, path }, 'collector unreachable');
+    return false;
   }
+}
+
+/**
+ * Files an install's usage note (the latest replaces the one before), keeping when the install
+ * was first heard from and when it last changed version: so it's known how many people are still
+ * using it, and how many took each update.
+ */
+async function fileUsage(ctx: Ctx, installId: string, note: Omit<UsageNote, 'at' | 'firstAt' | 'updatedAt' | 'previousVersion'>) {
+  const dir = join(resolve(ctx.config.FEEDBACK_DIR), 'usage');
+  await mkdir(dir, { recursive: true, mode: 0o750 });
+  const file = join(dir, `${usageFile(ctx, installId)}.json`);
+  const now = new Date().toISOString();
+  let before: Partial<UsageNote> = {};
+  try {
+    before = JSON.parse(await readFile(file, 'utf8')) as Partial<UsageNote>;
+  } catch {
+    /* first time */
+  }
+  const updated = Boolean(before.version && note.version && before.version !== note.version);
+  const kept: UsageNote = {
+    ...note,
+    at: now,
+    firstAt: before.firstAt ?? before.at ?? now,
+    updatedAt: updated ? now : before.updatedAt,
+    previousVersion: updated ? before.version : before.previousVersion,
+  };
+  await writeFile(`${file}.tmp`, JSON.stringify(kept), { mode: 0o640 });
+  await rename(`${file}.tmp`, file);
 }
 
 export function registerFeedbackRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -234,10 +274,9 @@ export function registerFeedbackRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (outside.usage >= USAGE_PER_DAY) throw tooMany();
       const input = parse(usageInput, req.body);
       outside.usage++;
-      await mkdir(usageDir, { recursive: true, mode: 0o750 });
       // One note per install (the latest), filed under a keyed hash of its id rather than the id itself.
       const { installId, ...note } = input;
-      await writeFile(join(usageDir, `${usageFile(ctx, installId)}.json`), JSON.stringify({ ...note, at: new Date().toISOString() }), { mode: 0o640 });
+      await fileUsage(ctx, installId, note);
       reply.code(201);
       return { ok: true };
     });
@@ -383,13 +422,31 @@ export function registerFeedbackRoutes(app: FastifyInstance, ctx: Ctx): void {
 }
 
 /** This Shap's own anonymous note, when its owner agreed (sent to OpenWorks, or kept if it is OpenWorks'). */
-export async function reportUsage(ctx: Ctx, s: { usageConsent: boolean; installId: string; businessType: BusinessType; industry: string; features: string[]; vatRegistered: boolean; tone: 'casual' | 'formal' }, log: { warn: (o: object, m: string) => void }) {
-  if (!s.usageConsent) return;
+export async function reportUsage(ctx: Ctx, s: { usageConsent: boolean; installId: string; businessType: BusinessType; industry: string; features: string[]; vatRegistered: boolean; tone: 'casual' | 'formal' }, log: { warn: (o: object, m: string) => void }): Promise<boolean> {
+  if (!s.usageConsent) return false;
   const note = { app: 'shap' as const, version: appVersion(), installId: s.installId, platform: 'server', businessType: s.businessType, industry: s.industry, features: s.features, vatRegistered: s.vatRegistered, tone: s.tone };
+  const { installId, ...kept } = note;
   if (ctx.config.COLLECT) {
-    const dir = join(resolve(ctx.config.FEEDBACK_DIR), 'usage');
-    await mkdir(dir, { recursive: true, mode: 0o750 });
-    const { installId, ...kept } = note;
-    await writeFile(join(dir, `${usageFile(ctx, installId)}.json`), JSON.stringify({ ...kept, at: new Date().toISOString() }), { mode: 0o640 });
-  } else await forward(ctx.config.COLLECTOR_URL, 'usage', note, log);
+    await fileUsage(ctx, installId, kept);
+    return true;
+  }
+  return forward(ctx.config.COLLECTOR_URL, 'usage', note, log);
+}
+
+/** How often a Shap that's in use says so, even when nothing about it changed. */
+export const USAGE_CHECK_IN_DAYS = 30;
+
+/**
+ * Sends this Shap's note when something in it changed (an update counts) or a month has passed
+ * since the last one, and only with the owner's agreement. Checked with the other half-hourly jobs.
+ */
+export async function checkInUsage(ctx: Ctx, db: Db, log: { warn: (o: object, m: string) => void }) {
+  const s = await getSettings(db);
+  if (!s.usageConsent || !s.setupDone) return;
+  const note = { usageConsent: true, installId: s.installId, businessType: s.businessType, industry: s.industry, features: FEATURE_KEYS.filter((k) => featureOn(s.features, k)), vatRegistered: s.vatRegistered, tone: s.tone };
+  const key = JSON.stringify({ ...note, version: appVersion() });
+  const [last] = await db<{ usageSent: string; usageSentAt: Date | null }[]>`select usage_sent, usage_sent_at from settings where id`;
+  const due = !last?.usageSentAt || Date.now() - new Date(last.usageSentAt).getTime() > USAGE_CHECK_IN_DAYS * 86_400_000;
+  if (last?.usageSent === key && !due) return;
+  if (await reportUsage(ctx, note, log)) await db`update settings set usage_sent = ${key}, usage_sent_at = now() where id`;
 }

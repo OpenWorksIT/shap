@@ -58,6 +58,41 @@ describe('feedback and the collector', () => {
     expect(u.byFeature.find((x: { name: string }) => x.name === 'quotes').n).toBe(1);
   });
 
+  it('remembers when an install was first heard from and when it updated', async () => {
+    const { readdirSync, readFileSync } = await import('node:fs');
+    const dir = join(env.ctx.config.FEEDBACK_DIR, 'usage');
+    const note = { app: 'pocket', version: '1.0.0', installId: '6d1e2f3a-4b5c-4d6e-8f70-81a2b3c4d5e6', platform: 'android', businessType: 'sole_prop', industry: 'it', features: [], vatRegistered: false, tone: 'casual' };
+    const read = () => readdirSync(dir).map((f) => JSON.parse(readFileSync(join(dir, f), 'utf8'))).find((n) => n.industry === 'it');
+    await env.app.inject({ method: 'POST', url: '/collect/usage', payload: note });
+    const first = read();
+    expect(first.firstAt).toBe(first.at);
+    expect(first.updatedAt).toBeUndefined();
+    await new Promise((r) => setTimeout(r, 20));
+    await env.app.inject({ method: 'POST', url: '/collect/usage', payload: { ...note, version: '1.0.1' } });
+    const after = read();
+    expect(after).toMatchObject({ version: '1.0.1', previousVersion: '1.0.0', firstAt: first.firstAt });
+    expect(after.updatedAt).toBe(after.at);
+    // A monthly check-in on the same version keeps the update as it was.
+    await new Promise((r) => setTimeout(r, 20));
+    await env.app.inject({ method: 'POST', url: '/collect/usage', payload: { ...note, version: '1.0.1' } });
+    expect(read()).toMatchObject({ updatedAt: after.updatedAt, previousVersion: '1.0.0' });
+  });
+
+  it('sends this Shap’s own note only when it changed or a month has passed', async () => {
+    const { checkInUsage } = await import('../src/modules/feedback.js');
+    const at = async () => (await env.sql<{ t: Date | null }[]>`select usage_sent_at as t from settings where id`)[0]!.t;
+    await env.sql`update settings set setup_done = true, usage_consent = true where id`;
+    await checkInUsage(env.ctx, env.sql, { warn: () => {} });
+    const sent = await at();
+    expect(sent).toBeTruthy();
+    await checkInUsage(env.ctx, env.sql, { warn: () => {} });
+    expect((await at())!.getTime()).toBe(sent!.getTime());
+    // A month on, it checks in again.
+    await env.sql`update settings set usage_sent_at = now() - interval '31 days' where id`;
+    await checkInUsage(env.ctx, env.sql, { warn: () => {} });
+    expect((await at())!.getTime()).toBeGreaterThan(sent!.getTime());
+  });
+
   it('takes ideas, and forgets reports and usage notes after a year', async () => {
     const r = await env.app.inject({ method: 'POST', url: '/collect/feedback', payload: { ...report({ kind: 'idea', message: 'Please add tattoo artists' }), app: 'pocket', version: '0.6.0', platform: 'android' } });
     expect(r.statusCode).toBe(201);
