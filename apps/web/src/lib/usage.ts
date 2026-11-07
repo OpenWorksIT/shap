@@ -40,7 +40,15 @@ async function post(path: string, body: unknown): Promise<void> {
   }
 }
 
-/** The anonymous usage note, sent when the answers change (and only with consent). */
+/** How often a phone that's in use says so, even when nothing about it changed. */
+const CHECK_IN_DAYS = 30;
+const SENT_AT = 'shap.usageSentAt';
+
+/**
+ * The anonymous usage note, only with consent: sent when the answers change (an update of the
+ * app counts, as the version is in it), and otherwise once a month while the app is used, so
+ * OpenWorks knows how many people still use Shap Pocket and how many took each update.
+ */
 export async function reportUsage(s: Pick<Settings, 'businessType' | 'industry' | 'features' | 'vatRegistered' | 'tone' | 'usageConsent' | 'installId'>) {
   if (!s.usageConsent) return;
   const body = {
@@ -55,10 +63,12 @@ export async function reportUsage(s: Pick<Settings, 'businessType' | 'industry' 
     tone: s.tone,
   };
   const key = JSON.stringify(body);
-  if (store.get(SENT) === key) return;
+  const last = Number(store.get(SENT_AT) ?? 0);
+  if (store.get(SENT) === key && Date.now() - last < CHECK_IN_DAYS * 86_400_000) return;
   try {
     await post('usage', body);
     store.set(SENT, key);
+    store.set(SENT_AT, String(Date.now()));
   } catch {
     /* next time */
   }

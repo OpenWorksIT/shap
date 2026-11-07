@@ -1,6 +1,6 @@
 import { paysOutProfit } from '@shap/shared';
 import { lazy, Suspense, useEffect } from 'react';
-import { shareMarket } from './lib/usage';
+import { reportUsage, shareMarket } from './lib/usage';
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { listenForReminder } from './lib/backup';
 import { FeedbackButton } from './components/Feedback';
@@ -69,6 +69,14 @@ function Books() {
     const t = setTimeout(() => void shareMarket(), 15_000);
     return () => clearTimeout(t);
   }, [settings.setupDone, settings.marketConsent, settings.marketNoticeSeen]);
+  // The anonymous usage note (with consent): after an update, or once a month while it's used.
+  useEffect(() => {
+    if (!settings.setupDone || !settings.usageConsent) return;
+    const t = setTimeout(() => void reportUsage(settings), 20_000);
+    return () => clearTimeout(t);
+    // Once per opening (and when consent changes), not on every settings change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.setupDone, settings.usageConsent]);
   if (!settings.setupDone) return <WelcomePage />;
   return (
     <Shell>

@@ -195,7 +195,7 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
             </div>
             <div className="panel panel-pad stack" style={{ gap: 8 }}>
               <strong className="small">Can Shap let OpenWorks know, anonymously, what kind of business uses it?</strong>
-              <span className="xs muted">Only the kind of business and which parts of Shap you switch on, so it can be made better for people like you. Never your name, clients or figures.</span>
+              <span className="xs muted">Only the kind of business and which parts of Shap you switch on, sent after an update and about once a month, so it can be made better for people like you. Never your name, clients or figures.</span>
               <div className="row">
                 <button type="button" className={`btn small ${consent === true ? 'primary' : ''}`} onClick={() => setConsent(true)}>
                   Yes, that’s fine

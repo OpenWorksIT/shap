@@ -244,7 +244,7 @@ function Sections() {
           <input type="checkbox" checked={prefs.usageConsent} onChange={(e) => void pref('usageConsent', e.target.checked)} />
           <span>
             Let OpenWorks know, anonymously, what kind of business uses Shap
-            <div className="xs muted">Only the kind of business and which parts are switched on. Never names, clients or figures.</div>
+            <div className="xs muted">Only the kind of business and which parts are switched on, after an update and about once a month. Never names, clients or figures.</div>
           </span>
         </label>
         <label className="check">

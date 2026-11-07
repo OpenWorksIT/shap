@@ -2,6 +2,14 @@
 
 What changed in each version of Shap Pocket, newest first.
 
+## 1.0.1 (7 November 2026)
+
+- **The anonymous usage note** (only if you said yes to it) is now also sent after an update and
+  about once a month while the app is used, so OpenWorks can tell how many people still use Shap
+  Pocket and how many have taken each update. It still holds no names, clients or figures: just
+  the app, version, kind of business and which features are on. Switch it off any time in
+  Settings.
+
 ## 1.0.0 (6 November 2026)
 
 The first full release.
