@@ -30,8 +30,7 @@ import {
   type AccountType,
   type CategoryKind,
   type Role,
-  type SourceKind,
-} from '@shap/shared';
+  type SourceKind, PAYMENT_DAYS, QUOTE_VALID_DAYS, dayLabel, withPaymentTerm, withQuoteValidity } from '@shap/shared';
 import { PageHead } from '../components/Shell';
 import { Drawer, ErrorBox, Field, Icon, Loading, MoneyInput, Tabs, useToast } from '../components/ui';
 import { api, ApiError, apiUrl } from '../lib/api';
@@ -44,6 +43,7 @@ import { Partners } from '../components/Partners';
 import { FeedbackInbox } from './FeedbackInbox';
 import { AuditLog } from '../components/AuditLog';
 import { ClipsSetting } from '../components/HowItWorks';
+import { TermPicks } from '../components/TermPicks';
 import { LogoPlacer } from '../components/LogoPlacer';
 import { LogoField } from '../components/BusinessForm';
 import { FEATURES, FEATURE_GROUPS, FEATURE_KEYS, featureOn, INDUSTRIES, TURNOVER_TAX_LIMIT_CENTS } from '@shap/shared';
@@ -266,8 +266,32 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
           <section className="panel panel-pad stack">
             <h3>Terms</h3>
             <div className="form-grid">
-              <Field label="Invoices due after (days)">{(p) => <input {...p} className="input" type="number" min={0} value={f.paymentDays} onChange={(e) => set('paymentDays', Number(e.target.value))} />}</Field>
-              <Field label="Quotes valid for (days)">{(p) => <input {...p} className="input" type="number" min={0} value={f.quoteValidDays} onChange={(e) => set('quoteValidDays', Number(e.target.value))} />}</Field>
+              <Field label="Invoices due after (days)" hint="A tap also changes the wording in your invoice terms">
+                {(p) => (
+                  <>
+                    <input {...p} className="input" type="number" min={0} value={f.paymentDays} onChange={(e) => set('paymentDays', Number(e.target.value))} />
+                    <TermPicks
+                      label="Invoices due after"
+                      options={PAYMENT_DAYS.map((n) => ({ value: n as number, label: dayLabel(n) }))}
+                      value={f.paymentDays}
+                      onPick={(n) => (set('paymentDays', n), set('invoiceTerms', withPaymentTerm(f.invoiceTerms, n)))}
+                    />
+                  </>
+                )}
+              </Field>
+              <Field label="Quotes valid for (days)" hint="A tap also changes the wording in your quote terms">
+                {(p) => (
+                  <>
+                    <input {...p} className="input" type="number" min={0} value={f.quoteValidDays} onChange={(e) => set('quoteValidDays', Number(e.target.value))} />
+                    <TermPicks
+                      label="Quotes valid for"
+                      options={QUOTE_VALID_DAYS.map((n) => ({ value: n as number, label: dayLabel(n) }))}
+                      value={f.quoteValidDays}
+                      onPick={(n) => (set('quoteValidDays', n), set('quoteTerms', withQuoteValidity(f.quoteTerms, n)))}
+                    />
+                  </>
+                )}
+              </Field>
               <Field label="Mark-up on job costs (%)" hint="Used by “Charge job costs” and quotes from a parts plan">
                 {(p) => <input {...p} className="input" type="number" min={0} step={1} value={f.markupBp / 100} onChange={(e) => set('markupBp', Math.round(Number(e.target.value) * 100))} />}
               </Field>

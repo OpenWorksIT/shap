@@ -4,11 +4,12 @@
  */
 import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BUSINESS_TYPES, ENTITIES, entity, extrasFor, featuresFor, INDUSTRIES, paysOutProfit, payoutWord, payeRefProblem, regNumberProblem, sdlRefFor, setupCautions, TERMS_VERSION, TURNOVER_TAX_LIMIT_CENTS, formatZar, uifRefProblem, vatNumberProblem, vatThresholds, WORKFLOWS, type EmployerAnswer, type IndustryKey, type SetupExtras, type Workflow } from '@shap/shared';
+import { BUSINESS_TYPES, ENTITIES, entity, extrasFor, featuresFor, INDUSTRIES, paysOutProfit, payoutWord, payeRefProblem, regNumberProblem, sdlRefFor, setupCautions, TERMS_VERSION, TURNOVER_TAX_LIMIT_CENTS, formatZar, uifRefProblem, vatNumberProblem, vatThresholds, WORKFLOWS, type EmployerAnswer, type IndustryKey, type SetupExtras, type Workflow, PAYMENT_DAYS, dayLabel, withPaymentTerm } from '@shap/shared';
 import { TermsReview } from '../components/Terms';
 import { LogoField } from '../components/BusinessForm';
 import { Logo } from '../components/Logo';
 import { Field, Icon, MoneyInput } from '../components/ui';
+import { TermPicks } from '../components/TermPicks';
 import { api, ApiError } from '../lib/api';
 import { useAuthed } from '../lib/session';
 import type { Settings } from '../lib/types';
@@ -335,7 +336,19 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
               {(p) => <input {...p} className="input" value={f.payshapId} onChange={(e) => set('payshapId', e.target.value)} placeholder="e.g. 082 123 4567" />}
             </Field>
             <div className="form-grid">
-              <Field label="Invoices due after (days)">{(p) => <input {...p} className="input" type="number" min={0} value={f.paymentDays} onChange={(e) => set('paymentDays', Number(e.target.value))} />}</Field>
+              <Field label="Invoices due after (days)">
+                {(p) => (
+                  <>
+                    <input {...p} className="input" type="number" min={0} value={f.paymentDays} onChange={(e) => set('paymentDays', Number(e.target.value))} />
+                    <TermPicks
+                      label="Invoices due after"
+                      options={PAYMENT_DAYS.map((n) => ({ value: n as number, label: dayLabel(n) }))}
+                      value={f.paymentDays}
+                      onPick={(n) => (set('paymentDays', n), set('invoiceTerms', withPaymentTerm(f.invoiceTerms, n)))}
+                    />
+                  </>
+                )}
+              </Field>
               {kind.regLabel && (
                 <Field label={kind.regLabel} hint={kind.regHint} error={regProblem ?? undefined}>
                   {(p) => <input {...p} className="input" value={f.regNumber} onChange={(e) => set('regNumber', e.target.value)} placeholder={kind.regPlaceholder} />}

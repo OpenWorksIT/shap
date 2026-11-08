@@ -3,6 +3,16 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.20.0 (9 November 2026)
+
+- **One tap for payment terms.** On an invoice: due on receipt, in 7, 14 or 30 days, or at month
+  end; on a quote: valid for 7, 14, 30 or 60 days. A tap sets the date and changes the wording in
+  the terms to match (“Payment due within 30 days”). Changing the invoice date keeps the term.
+  Settings (and setup) have the same choices for the usual terms.
+- **Calmer how-it-works clips.** Re-recorded slower, a few steps each, with a caption above the
+  screen saying what each step is.
+- “1 cost”, not “1 costs”.
+
 ## 1.19.0 (9 November 2026)
 
 - **Issued tax invoices are fixed.** Once a VAT vendor's invoice is issued, its items and
