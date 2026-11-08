@@ -2,6 +2,16 @@
 
 What changed in each version of Shap Pocket, newest first.
 
+## 1.3.0 (9 November 2026)
+
+- **Issued tax invoices are fixed.** Once a VAT vendor's invoice is issued, its items and
+  prices, the client, the date, the number and the trading name can't change: SARS allows one
+  tax invoice per supply. Correct one with a credit note, and a new invoice for anything extra.
+  The due date, notes, terms and payment link can still change. Invoices from a business that
+  isn't registered for VAT stay open to change, as before.
+- **Clips full screen.** Tap a how-it-works clip to watch it over the whole screen. It plays once
+  and goes small again by itself; tap anywhere to close it sooner.
+
 ## 1.2.0 (9 November 2026)
 
 VAT the way the accountant asked for it, and short clips that show how each screen works.

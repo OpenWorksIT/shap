@@ -2369,12 +2369,94 @@ button.list-row {
   max-width: 760px;
 }
 .how-video {
+  display: block;
   width: 100%;
   aspect-ratio: 390 / 844;
   object-fit: contain;
   border-radius: var(--r-sm);
   background: var(--sunken);
   border: 1px solid var(--rule);
+}
+/* The small clip is a button: tap it to watch it over the whole screen. */
+.how-video-btn {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: var(--r-sm);
+  cursor: zoom-in;
+}
+.how-video-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.how-expand {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 55%);
+  color: #fff;
+  pointer-events: none;
+}
+.clip-full {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  /* Room at the top for the close button, clear of the clip. */
+  padding: calc(max(10px, env(safe-area-inset-top)) + 54px) 12px max(12px, env(safe-area-inset-bottom));
+  background: rgb(10 14 17 / 94%);
+  cursor: zoom-out;
+  animation: clip-full-in 160ms ease-out;
+}
+.clip-full-video {
+  /* As big as the screen allows, the shape of a phone screen. */
+  width: min(calc(100vw - 24px), calc((100vh - 130px) * 390 / 844));
+  width: min(calc(100vw - 24px), calc((100dvh - 130px) * 390 / 844));
+  aspect-ratio: 390 / 844;
+  object-fit: contain;
+  border-radius: var(--r-sm);
+  background: #000;
+}
+.clip-full-hint {
+  color: #fff;
+  opacity: 0.8;
+  font-size: var(--fs-xs);
+}
+.clip-full-close {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  right: 10px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 14%);
+  color: #fff;
+  cursor: pointer;
+}
+@keyframes clip-full-in {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .clip-full {
+    animation: none;
+  }
 }
 @media (max-width: 560px) {
   .how-it-works {

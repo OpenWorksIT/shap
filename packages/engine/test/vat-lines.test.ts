@@ -269,6 +269,64 @@ describe('what the review found', () => {
   });
 });
 
+describe('an issued tax invoice is fixed', () => {
+  let env: TestEnv;
+  let me: Awaited<ReturnType<typeof login>>;
+  let client: { id: string };
+  let other: { id: string };
+  beforeAll(async () => {
+    env = await setup();
+    me = await login(env.app);
+    client = await me.post('/api/clients', { name: 'Fictional Hardware CC', address: '7 Invented Avenue, Komani' });
+    other = await me.post('/api/clients', { name: 'Fictional Other CC', address: '8 Invented Avenue, Komani' });
+  });
+  afterAll(() => env.close());
+  const issued = async () => {
+    const inv = await me.post('/api/documents', { kind: 'invoice', clientId: client.id, issueDate: '2026-11-05', lines: [{ category: 'labour', description: 'Geyser install', qty: 1, unitPriceCents: 300_000 }] });
+    await me.post(`/api/documents/${inv.id}/issue`);
+    return { id: inv.id as string, ...(await me.get(`/api/documents/${inv.id}`)) };
+  };
+  const put = (id: string, body: Record<string, unknown>) => me.call({ method: 'PUT', url: `/api/documents/${id}`, payload: body });
+
+  it('lets a business that isn’t a VAT vendor change an issued invoice as it likes', async () => {
+    const { id, doc, lines } = await issued();
+    expect(doc.vatRateBp).toBe(0);
+    const r = await put(id, { ...doc, lines: [{ ...lines[0], unitPriceCents: 350_000 }] });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().doc.totalCents).toBe(350_000);
+  });
+
+  it('keeps what a VAT vendor’s issued invoice charges, to whom, when and under which number', async () => {
+    const { settings } = await me.get('/api/reference');
+    await me.post('/api/settings', { ...settings, vatRegistered: true, vatNumber: '4740101508' }, 'PUT');
+    const { id, doc, lines } = await issued();
+    expect(doc).toMatchObject({ vatRateBp: 1500, totalCents: 345_000 });
+    for (const [change, what] of [
+      [{ lines: [{ ...lines[0], unitPriceCents: 350_000 }] }, /items and prices/],
+      [{ lines: [...lines, { category: 'materials', description: 'Valve', qty: 1, unitPriceCents: 10_000 }] }, /items and prices/],
+      [{ lines: [{ ...lines[0], vatCode: 'zero' }] }, /items and prices/],
+      [{ clientId: other.id }, /the client/],
+      [{ issueDate: '2026-11-06' }, /the date/],
+      [{ number: 'INV-9999' }, /the number/],
+      [{ pricesIncludeVat: true }, /whether prices include VAT/],
+    ] as const) {
+      const r = await put(id, { ...{ ...doc, lines }, ...change });
+      expect(r.statusCode).toBe(400);
+      expect(r.json().error).toMatch(what);
+      expect(r.json().error).toMatch(/credit note/);
+    }
+    // What isn't on the tax invoice's face as a charge can still change.
+    const ok = await put(id, { ...doc, lines: [{ ...lines[0], category: 'other' }], notes: 'Thanks for the business', terms: 'Pay within 7 days', dueDate: '2026-11-30' });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().doc).toMatchObject({ notes: 'Thanks for the business', dueDate: '2026-11-30', totalCents: 345_000 });
+    expect(await ledgerTotal(env.sql)).toBe(0);
+    // A draft is free to change until it's issued.
+    const draft = await me.post('/api/documents', { kind: 'invoice', clientId: client.id, issueDate: '2026-11-05', lines: [{ category: 'labour', description: 'Quote me', qty: 1, unitPriceCents: 1_000 }] });
+    const d2 = await me.get(`/api/documents/${draft.id}`);
+    expect((await put(draft.id, { ...d2.doc, lines: [{ ...d2.lines[0], unitPriceCents: 2_000 }], clientId: other.id })).statusCode).toBe(200);
+  });
+});
+
 describe('invoices from before VAT per line', () => {
   let env: TestEnv;
   afterAll(() => env.close());

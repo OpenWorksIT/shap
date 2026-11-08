@@ -241,6 +241,45 @@ export async function assertTaxDocument(db: Db, id: string): Promise<void> {
 }
 
 /**
+ * An issued tax invoice (one that charged VAT) is fixed: what it charges, to whom, when, under
+ * which number and trading name. The VAT Act allows one tax invoice per supply (s20(1)), and a
+ * correction is a credit note (s21), with a new invoice for anything extra. Its notes, terms,
+ * due date, deposit, payment link, job and the kind of each item (for the books) can still
+ * change. An invoice without VAT (from a business that isn't a VAT vendor) stays open to change.
+ */
+async function assertTaxInvoiceUnchanged(db: Db, id: string, input: DocInput): Promise<void> {
+  const [d] = await db<{ number: string; issueDate: string; clientId: string | null; brandId: string | null; projectId: string | null; pricesIncludeVat: boolean }[]>`
+    select number, issue_date::text, client_id, brand_id, project_id, prices_include_vat from documents where id = ${id}`;
+  if (!d) return;
+  const lines = await db<{ description: string; qty: number; unit: string; unitPriceCents: number; vatCode: string }[]>`
+    select description, qty, unit, unit_price_cents, vat_code from document_lines where document_id = ${id} order by sort`;
+  let clientId = input.clientId ?? null;
+  if (!clientId && input.projectId) clientId = (await db<{ clientId: string | null }[]>`select client_id from projects where id = ${input.projectId}`)[0]?.clientId ?? null;
+  const brandId = input.brandId ?? (await defaultBrand(db, input.projectId ?? null, clientId));
+  const next = input.lines ?? [];
+  const sameLines =
+    next.length === lines.length &&
+    next.every((l, i) => {
+      const o = lines[i]!;
+      return l.description === o.description && Number(l.qty ?? 1) === Number(o.qty) && String(l.unit ?? '') === String(o.unit ?? '') && Number(l.unitPriceCents) === Number(o.unitPriceCents) && (l.vatCode ?? 'standard') === o.vatCode;
+    });
+  const changed = [
+    !sameLines && 'its items and prices',
+    input.pricesIncludeVat !== undefined && input.pricesIncludeVat !== Boolean(d.pricesIncludeVat) && 'whether prices include VAT',
+    clientId !== d.clientId && 'the client',
+    input.issueDate !== d.issueDate && 'the date',
+    Boolean(input.number?.trim()) && input.number!.trim() !== d.number && 'the number',
+    brandId !== d.brandId && 'the trading name',
+  ].filter(Boolean) as string[];
+  if (changed.length)
+    throw new HttpError(
+      400,
+      `This tax invoice is issued, so ${changed.join(', ').replace(/, ([^,]*)$/, ' and $1')} can’t change (SARS allows one tax invoice per supply). To correct it, issue a credit note, and a new invoice for anything extra.`,
+      'tax_invoice_issued',
+    );
+}
+
+/**
  * A draft invoice charges VAT as the business stands when it's issued: one drafted before
  * registering for VAT gets VAT once registered (and the other way round), at the rate on its date.
  */
@@ -334,12 +373,9 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (old.kind === 'invoice' && old.status === 'issued') await assertOpen(sql, old.issueDate, input.issueDate);
     const settings = await getSettings(sql);
     const vatRate = old.status === 'draft' && old.kind !== 'credit_note' ? (settings.vatRegistered ? vatRateOn(input.issueDate) : 0) : old.vatRateBp;
-    // A credit note is priced the way its invoice was. An issued invoice keeps the way its prices
-    // were typed: switching would change what it charged (correct it with a credit note instead).
-    // Left out, it stays as it was.
+    // A credit note is priced the way its invoice was. Left out, how prices were typed stays as it was.
     const was = Boolean((old as { pricesIncludeVat?: boolean }).pricesIncludeVat);
-    if (old.kind === 'invoice' && old.status !== 'draft' && input.pricesIncludeVat !== undefined && input.pricesIncludeVat !== was)
-      throw badRequest('An issued invoice keeps the way its prices were entered (including or excluding VAT). To change it, credit it and issue a new one.');
+    if (old.kind === 'invoice' && old.status === 'issued' && Number(old.vatRateBp) > 0) await assertTaxInvoiceUnchanged(sql, id, input);
     const inclusive =
       old.kind === 'credit_note'
         ? Boolean((await sql<{ inc: boolean }[]>`select i.prices_include_vat as inc from documents d join documents i on i.id = d.credited_invoice_id where d.id = ${id}`)[0]?.inc)

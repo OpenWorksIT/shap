@@ -16,6 +16,7 @@ const paths: Record<string, ReactNode> = {
   more: <><circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" /></>,
   plus: <path d="M12 5v14M5 12h14" />,
   close: <path d="M6 6l12 12M18 6L6 18" />,
+  expand: <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />,
   chevronLeft: <path d="M15 5l-7 7 7 7" />,
   chevronRight: <path d="M9 5l7 7-7 7" />,
   chevronDown: <path d="M5 9l7 7 7-7" />,
@@ -160,6 +161,7 @@ export function MoneyInput({
   placeholder?: string;
   allowNegative?: boolean;
   autoFocus?: boolean;
+  disabled?: boolean;
   'aria-invalid'?: boolean;
   'aria-describedby'?: string;
 }) {
