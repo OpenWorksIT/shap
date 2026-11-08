@@ -5,7 +5,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { clientVatNumberProblem, documentTotals, idNumberProblem, vatRateOn } from '@shap/shared';
+import { clientVatNumberProblem, documentTotals, idNumberProblem, tidyRegNumber, vatRateOn } from '@shap/shared';
 import type { Mail } from '../src/lib/mailer.js';
 import { monthRates } from '../src/modules/market.js';
 import { runMonthly } from '../src/modules/monthly.js';
@@ -420,6 +420,16 @@ describe('reference numbers people really have', () => {
     expect(clientVatNumberProblem('4740101508')).toBeNull();
     expect(clientVatNumberProblem('4740101509')).toMatch(/doesn’t add up/);
     expect(clientVatNumberProblem('474010150')).toMatch(/country code/);
+  });
+
+  it('tidies a registration number as typed, quickly whatever is typed', () => {
+    expect(tidyRegNumber(' 2024 / 733128 /07 ')).toBe('2024/733128/07');
+    expect(tidyRegNumber('2024 733128 07')).toBe('2024/733128/07');
+    expect(tidyRegNumber('ck 1998/012345/23')).toBe('1998/012345/23');
+    // A long run of spaces (CodeQL: a backtracking pattern) takes no time.
+    const t = performance.now();
+    tidyRegNumber(`1${' '.repeat(100_000)}x`);
+    expect(performance.now() - t).toBeLessThan(200);
   });
 
   it('takes a passport number of digits only, but not an ID number a digit short', () => {

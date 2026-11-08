@@ -14,18 +14,14 @@ import type { Ctx } from '../context.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
+import rootPackage from '../../../../package.json';
 
-/** The running version, from the root package.json (in the image, or the repo when developing). */
+/**
+ * The running version: the root package.json's, built into the server (the build inlines it),
+ * so it's always the version of the code that runs, and never read from a file at run time.
+ */
 export function appVersion(): string {
-  for (const p of [join(process.cwd(), 'package.json'), join(process.cwd(), '../../package.json')]) {
-    try {
-      const pkg = JSON.parse(readFileSync(p, 'utf8')) as { name?: string; version?: string };
-      if (pkg.name === 'shap' && pkg.version) return pkg.version;
-    } catch {
-      /* try the next */
-    }
-  }
-  return '0.0.0';
+  return (rootPackage as { version?: string }).version ?? '0.0.0';
 }
 
 const BACKUP_NAME = /^[a-z0-9_]+-(daily|manual|pre-update)-\d{4}-\d{2}-\d{2}_\d{4}\.dump$/;

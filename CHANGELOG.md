@@ -3,6 +3,16 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.21.1 (9 November 2026)
+
+Fixes from the first code scanning (CodeQL) of Shap.
+
+- Download links on the Accounts screen encode the dates and account they carry, so a typed value
+  can only ever be a value.
+- Tidying a company registration number no longer uses a pattern that slows down on a long run
+  of spaces.
+- The version is built into the server instead of being read from a file while it runs.
+
 ## 1.21.0 (9 November 2026)
 
 Shap now audits itself: every update, every server and your books (docs/AUDIT.md).

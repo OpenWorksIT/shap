@@ -88,3 +88,17 @@ Run it by hand any time: `sudo /opt/shap/deploy/vps/audit-server.sh`.
   Zod sees them: accepted until Zod 4 (planned).
 - Shap Pocket has no Content Security Policy (a browser-enforced list of where the app may connect):
   to add, tested on a phone.
+
+### Code scanning (CodeQL), first run
+
+- The Accounts screen's download links carried the period's dates unencoded (flagged as text
+  that could become HTML): encoded now.
+- A pattern tidying registration numbers could backtrack on a long run of spaces: replaced.
+- "File data sent out": the version number, read from package.json at run time and sent with
+  feedback, market rates and the tests' requests. Built in at build time now.
+- Shap Pocket: its engine's router let a query parameter called `__proto__` reach the query
+  object's prototype; its database worker would load the empty books from any address the page
+  gave it, and didn't check where a message came from. All three fixed.
+- Test code, test tools and the clip recorder are left out of the scan (they read files and call
+  a local test server on purpose).
+

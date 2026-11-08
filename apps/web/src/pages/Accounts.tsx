@@ -13,6 +13,9 @@ import { ProvisionalTax, YearEnd } from './YearEnd';
 import { ExportStudio } from '../components/ExportStudio';
 import { TurnoverTax, Vat201 } from '../components/TaxForms';
 
+/** A typed value in a download's address: encoded, so it can only ever be a value. */
+const enc = (v: string | null | undefined) => encodeURIComponent(String(v ?? ''));
+
 type Tab = 'income' | 'balance' | 'trial' | 'ledger' | 'journals' | 'assets' | 'bank' | 'files' | 'checks' | 'yearend' | 'tax' | 'vat201' | 'export';
 
 export default function AccountsPage() {
@@ -113,7 +116,7 @@ function IncomeStatement() {
   const { fy, today } = usePeriods();
   const [range, setRange] = useState({ from: fy.start, to: today });
   const [view, setView] = useState<'total' | 'month'>('total');
-  const qs = `from=${range.from}&to=${range.to}${view === 'month' ? '&by=month' : ''}`;
+  const qs = `from=${enc(range.from)}&to=${enc(range.to)}${view === 'month' ? '&by=month' : ''}`;
   const { data, error } = useApi<IncomeStatementData>(`/api/reports/income-statement?${qs}`);
   const cols = view === 'month' ? (data?.months ?? []) : [];
   const amountCells = (t: Totals, strong = false) => (
@@ -435,7 +438,7 @@ function Ledger() {
     n.set(k, v);
     setParams(n, { replace: true });
   };
-  const qs = `account=${account}&from=${from}&to=${to}`;
+  const qs = `account=${enc(account)}&from=${enc(from)}&to=${enc(to)}`;
   const { data, error } = useApi<LedgerData>(account ? `/api/reports/ledger?${qs}` : null);
   return (
     <div className="stack">
@@ -1099,13 +1102,13 @@ function BalanceChecks() {
 function Exports() {
   const { fy, today } = usePeriods();
   const [range, setRange] = useState({ from: fy.start, to: today });
-  const qs = `from=${range.from}&to=${range.to}`;
+  const qs = `from=${enc(range.from)}&to=${enc(range.to)}`;
   const items: [string, string, ReactNode][] = useMemo(
     () => [
       ['General ledger', `/api/export/ledger?${qs}`, 'Every posting, for your accountant or another package'],
-      ['Trial balance', `/api/reports/trial-balance?date=${range.to}&format=csv`, `At ${formatDate(range.to)}`],
+      ['Trial balance', `/api/reports/trial-balance?date=${enc(range.to)}&format=csv`, `At ${formatDate(range.to)}`],
       ['Income statement by month', `/api/reports/income-statement?${qs}&by=month&format=csv`, 'The Trade Statement view'],
-      ['Balance sheet', `/api/reports/balance-sheet?date=${range.to}&format=csv`, `At ${formatDate(range.to)}`],
+      ['Balance sheet', `/api/reports/balance-sheet?date=${enc(range.to)}&format=csv`, `At ${formatDate(range.to)}`],
       ['Invoices', `/api/export/invoices?${qs}`, 'With amounts paid and owing'],
       ['Payments received', `/api/export/receipts?${qs}`, ''],
       ['Costs', `/api/export/costs?${qs}`, 'With type, job and how it was paid'],

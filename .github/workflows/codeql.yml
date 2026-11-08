@@ -29,6 +29,14 @@ jobs:
           languages: javascript-typescript
           build-mode: none
           queries: security-extended
+          # The app's own code: not its tests, test tools and recording scripts, which read files
+          # and call a local test server on purpose.
+          config: |
+            paths-ignore:
+              - '**/test/**'
+              - '**/*.test.ts'
+              - deploy/test
+              - scripts
       - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           category: /language:javascript-typescript
