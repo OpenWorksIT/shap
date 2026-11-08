@@ -72,16 +72,18 @@ jobs:
           node-version: 22
           cache: npm
       - name: the server's Docker image, as servers build it
-        run: docker build --build-arg GIT_SHA="${GITHUB_SHA::7}" -t shap-app:ci .
+        run: |
+          docker build --build-arg GIT_SHA="${GITHUB_SHA::7}" -t shap-app:ci .
+          echo "SECRETS_KEY=$(head -c 32 /dev/urandom | base64)" >> "$GITHUB_ENV"
       - name: the demo company
         run: |
           psql -h localhost -U postgres -c 'create database shap_pen'
-          docker run --rm --network host -e DATABASE_URL -e NODE_ENV=production shap-app:ci node apps/server/dist/db/seed.js --i-know-this-is-demo-data
+          docker run --rm --network host -e DATABASE_URL -e SECRETS_KEY -e NODE_ENV=production shap-app:ci node apps/server/dist/db/seed.js --i-know-this-is-demo-data
       - name: start the server as production runs it (no way out to the internet)
         run: |
           docker run -d --name shap --network host --read-only --tmpfs /tmp --tmpfs /data/feedback \
             --security-opt no-new-privileges:true --cap-drop ALL \
-            -e DATABASE_URL -e NODE_ENV=production -e PORT=8080 -e SECRETS_KEY="$(head -c 32 /dev/urandom | base64)" \
+            -e DATABASE_URL -e SECRETS_KEY -e NODE_ENV=production -e PORT=8080 \
             -e COOKIE_SECURE=true -e TRUST_PROXY=true -e MFA_REQUIRED=false -e DEMO_ENABLED=false \
             -e COLLECTOR_URL=off -e NOTICE_URL= -e CTL_DIR=/tmp/ctl -e REQUEST_DIR=/tmp/ctl-in \
             shap-app:ci
@@ -90,7 +92,7 @@ jobs:
       - name: penetration test
         run: EXPECT_SECURE_COOKIE=true node deploy/test/pentest.mjs --url http://localhost:8080 --password demo-shap-1 | tee pentest.txt
       - name: the books audit on the demo company
-        run: docker run --rm --network host -e DATABASE_URL -e NODE_ENV=production shap-app:ci node apps/server/dist/audit/cli.js
+        run: docker run --rm --network host -e DATABASE_URL -e SECRETS_KEY -e NODE_ENV=production shap-app:ci node apps/server/dist/audit/cli.js
       - name: no errors in the server's log, nothing personal in it
         run: |
           docker logs shap > server.log 2>&1
