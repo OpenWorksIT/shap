@@ -16,3 +16,4 @@ export * from './terms.js';
 export * from './notice.js';
 export * from './vat.js';
 export * from './paymentTerms.js';
+export * from './trail.js';

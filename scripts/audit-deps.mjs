@@ -18,7 +18,17 @@ try {
 } catch (err) {
   out = err.stdout; // npm audit exits 1 when it finds anything
 }
-const report = JSON.parse(out);
+// A check that couldn't run (no registry, an npm error) fails: it isn't a clean result.
+let report = null;
+try {
+  report = JSON.parse(out || 'null');
+} catch {
+  /* not a report */
+}
+if (!report || report.error || typeof report.metadata?.vulnerabilities !== 'object') {
+  console.error(`Couldn't check the dependencies: ${report?.error?.summary || report?.error?.code || 'npm audit gave no report (is the registry reachable?)'}`);
+  process.exit(2);
+}
 const accepted = existsSync('.github/accepted-advisories.json') ? JSON.parse(readFileSync('.github/accepted-advisories.json', 'utf8')).accepted ?? [] : [];
 const today = new Date().toISOString().slice(0, 10);
 const advisories = new Map();

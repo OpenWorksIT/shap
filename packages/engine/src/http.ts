@@ -207,8 +207,11 @@ function errorReply(err: unknown, reply: Reply, log: Logger) {
     return;
   }
   // A value the database can't take (a date like 2026-99-99, a number out of range, a malformed
-  // id): the request is wrong, said plainly, without the database's words.
-  if (/^22/.test(String(e.code ?? ''))) {
+  // id): the request is wrong, said plainly, without the database's words, and noted by its code
+  // (no values), so one the app should have caught still shows. Division by zero is the app's own
+  // mistake: an error, below.
+  if (/^22/.test(String(e.code ?? '')) && e.code !== '22012') {
+    log.warn('a value the database refused', e.code);
     reply.code(400).send({ error: 'Something in that request isn’t valid (a date, number or id out of range).', code: 'invalid_value' });
     return;
   }

@@ -28,6 +28,23 @@ export async function taxFigures(db: Db, businessType: string, fy: { start: stri
   return { partners: partners.map((p) => ({ name: p.name, shareBp: p.shareBp })), distributedCents: Number(d!.t) };
 }
 
+/**
+ * Notes Shap's own figure for each account of an agreed year as it's agreed (the books audit,
+ * audit/books.ts). Shap keeps the agreed figures by adjusting each account to them at the year
+ * end, so anything dated in the year that's added or changed later shows as Shap's own figure
+ * moving away from this.
+ */
+export async function noteShapFigures(db: Db, fyEnd: string) {
+  await freshTotals(db);
+  await db`
+    update year_end_figures f set shap_cents = coalesce((
+      select sum(l.amount_cents) from ledger_totals l join accounts a on a.id = l.account_id
+      where l.account_id = f.account_id and l.date <= f.fy_end and not (l.source = 'year_end' and l.date = f.fy_end)
+        and (not (a.type in ('income', 'cost_of_sales', 'expense') or coalesce(a.system_key, '') = 'dividends')
+             or l.date >= (date_trunc('month', f.fy_end) - interval '11 months')::date)), 0)
+    where f.fy_end = ${fyEnd}::date`;
+}
+
 export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
   const readers = { preHandler: requireRole('owner', 'accountant') };
@@ -117,6 +134,7 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
         from accounts a
         where coalesce(a.system_key, '') not in ('retained_earnings', 'suspense')
           and not exists (select 1 from year_end_figures f where f.fy_end = ${input.fyEnd} and f.account_id = a.id)`;
+      await noteShapFigures(tx, input.fyEnd);
       if (input.lock) await tx`update settings set lock_date = greatest(coalesce(lock_date, ${input.fyEnd}::date), ${input.fyEnd}::date) where id`;
       await audit(tx, { userId: user.id, action: 'agree_year_end', entity: 'year_end', entityId: input.fyEnd, ip: req.ip, details: { figures: input.figures.length } });
     });

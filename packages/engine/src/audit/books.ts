@@ -1,15 +1,19 @@
 /**
  * The books audit: what an accountant would check before trusting the figures, run against the
- * books as they are. Read-only. Each finding is OK, WARN (worth a look) or FAIL (the figures can't
+ * books as they are. It changes nothing in the books (it brings the report totals up to date
+ * first, as any report does). Each finding is OK, WARN (worth a look) or FAIL (the figures can't
  * be trusted until it's put right), in the same shape as Steady's and Shap's server audits, so
  * one screen shows them all.
  *
  * It checks that:
  * - every posting balances, document by document, and the quick totals agree with the ledger;
  * - the trial balance and the balance sheet balance (today and at each recent year end);
- * - the debtors, creditors, VAT and payroll accounts agree with the documents behind them
- *   (open invoices, open bills, each VAT201, each EMP201);
- * - agreed years still show the figures they were agreed at;
+ * - the debtors, creditors and payroll accounts agree to the cent with the records behind them
+ *   (open invoices, unpaid bills, final pay runs less EMP201 payments), and the VAT account moved
+ *   by what Shap's VAT201 for each period says (both come from the same documents: this catches
+ *   postings gone astray, not a return filed with other figures, which Shap doesn't keep);
+ * - agreed years still show the figures they were agreed at, and nothing dated in them has been
+ *   added or changed since (which would show as more in suspense for that year);
  * - documents add up, tax invoices carry what SARS requires, numbers don't go missing unexplained;
  * - the safeguards in the database itself are in place (the audit log can't be changed, journals
  *   must balance).
@@ -18,10 +22,12 @@
  * audit (deploy/vps/audit-server.sh) and by the tests, which also break the books on purpose to
  * see each check catch it (test/books-audit.test.ts).
  */
-import { financialYear, formatZar, vatPeriod } from '@shap/shared';
+import { financialYear, formatZar, vatIncluded, vatPeriod, vatRateOn } from '@shap/shared';
 import type { Ctx } from '../context.js';
 
 type Db = Ctx['sql'];
+/** Journals typed in, not made by the app from a pay run, a SARS payment, a dividend or a profit share. */
+const BY_HAND = ['manual', 'opening', 'import', 'adjustment'];
 import { freshTotals, getSettings, today } from '../lib/books.js';
 import { FULL_TAX_INVOICE_CENTS } from '../modules/documents.js';
 import { balanceSheet, trialBalance } from '../modules/reports.js';
@@ -60,12 +66,12 @@ export async function auditBooks(db: Db, on = today()): Promise<AuditItem[]> {
   if (!lopsided.length) ok('each document, cost, payment and journal balances on its own');
   else fail(`${lopsided.length === 20 ? '20 or more' : lopsided.length} entries don't balance on their own: ${few(lopsided.map((l) => `${l.source} ${String(l.sourceId).slice(0, 8)} (${rand(n(l.total))})`))}`);
 
+  // The quick totals are the ledger (year-end adjustments included) added up by account, day and
+  // kind of posting: compared both ways, so a total missing from either side shows.
   const [cache] = await db<{ off: number }[]>`
-    select count(*)::int as off from (
-      select account_id, sum(amount_cents) as t from ledger_detail group by account_id
-      except
-      select account_id, sum(amount_cents) as t from ledger_totals group by account_id
-    ) x`;
+    with l as (select account_id, date, source, sum(amount_cents)::bigint as t from ledger group by 1, 2, 3 having sum(amount_cents) <> 0),
+         c as (select account_id, date, source, sum(amount_cents)::bigint as t from ledger_totals group by 1, 2, 3 having sum(amount_cents) <> 0)
+    select count(distinct account_id)::int as off from ((select * from l except select * from c) union all (select * from c except select * from l)) x`;
   if (n(cache!.off) === 0) ok('the quick totals agree with the ledger');
   else fail(`the quick totals behind the reports disagree with the ledger on ${n(cache!.off)} accounts`);
 
@@ -88,10 +94,17 @@ export async function auditBooks(db: Db, on = today()): Promise<AuditItem[]> {
     const [r] = await db<{ t: number }[]>`select coalesce(sum(l.amount_cents), 0)::bigint as t from ledger_totals l join accounts a on a.id = l.account_id where a.system_key = ${key} and l.date <= ${to}::date`;
     return n(r!.t);
   };
-  const journaled = async (keys: string[]) => {
-    const [r] = await db<{ n: number }[]>`select count(*)::int as n from journal_lines j join accounts a on a.id = j.account_id where a.system_key = any(${keys})`;
-    return n(r!.n) > 0;
+  // What the app's own records posted to these accounts: the ledger without the accountant's
+  // year-end adjustments, and without journals made by hand (an opening balance, a correction),
+  // which have no document behind them. What's left has to agree with the documents to the cent.
+  const posted = async (keys: string[]) => {
+    const [r] = await db<{ t: number }[]>`select coalesce(sum(l.amount_cents), 0)::bigint as t from ledger_totals l join accounts a on a.id = l.account_id where a.system_key = any(${keys}) and l.source <> 'year_end'`;
+    const [j] = await db<{ t: number }[]>`
+      select coalesce(sum(jl.debit_cents - jl.credit_cents), 0)::bigint as t from journal_lines jl join journals j on j.id = jl.journal_id join accounts a on a.id = jl.account_id
+      where a.system_key = any(${keys}) and j.kind = any(${BY_HAND})`;
+    return { app: n(r!.t) - n(j!.t), byHand: n(j!.t) };
   };
+  const besides = (byHand: number) => (byHand ? `; journals by hand add ${byHand < 0 ? '−' : ''}${rand(byHand)} to the account` : '');
   const suspense = await balance('suspense');
   if (suspense === 0) ok('nothing is waiting in suspense');
   else warn(`${rand(suspense)} is in suspense: money not yet put where it belongs (or a change to an agreed year)`);
@@ -102,19 +115,22 @@ export async function auditBooks(db: Db, on = today()): Promise<AuditItem[]> {
     select (coalesce(sum(d.total_cents), 0) - coalesce(sum(d.written_off_cents), 0)
             - coalesce((select sum(r.amount_cents) from receipts r join documents i on i.id = r.invoice_id where i.kind = 'invoice' and i.status = 'issued'), 0))::bigint as expected
     from documents d where d.kind = 'invoice' and d.status = 'issued'`;
-  const debtors = await balance('receivables');
-  if (debtors === n(deb!.expected)) ok(`the debtors account agrees with the open invoices (${rand(debtors)})`);
-  else (await journaled(['receivables']) ? warn : fail)(`the debtors account (${rand(debtors)}) and the open invoices (${rand(n(deb!.expected))}) differ by ${rand(debtors - n(deb!.expected))}`);
+  const debtors = await posted(['receivables']);
+  if (debtors.app === n(deb!.expected)) ok(`the debtors account agrees with the open invoices (${rand(debtors.app)}${besides(debtors.byHand)})`);
+  else fail(`the debtors account (${rand(debtors.app)}, not counting journals by hand or year-end adjustments) and the open invoices (${rand(n(deb!.expected))}) differ by ${rand(debtors.app - n(deb!.expected))}`);
 
   const [cred] = await db<{ owing: number }[]>`
     select coalesce(sum(c.amount_cents - coalesce((select sum(p.amount_cents) from bill_payments p where p.cost_id = c.id), 0)), 0)::bigint as owing
     from costs c join payment_sources s on s.id = c.source_id and s.role = 'bills'`;
-  const creditors = -(await balance('payables'));
-  if (creditors === n(cred!.owing)) ok(`the creditors account agrees with the unpaid bills (${rand(creditors)})`);
-  else (await journaled(['payables']) ? warn : fail)(`the creditors account (${rand(creditors)}) and the unpaid bills (${rand(n(cred!.owing))}) differ by ${rand(creditors - n(cred!.owing))}`);
+  const payables = await posted(['payables']);
+  const creditors = -payables.app;
+  if (creditors === n(cred!.owing)) ok(`the creditors account agrees with the unpaid bills (${rand(creditors)}${besides(-payables.byHand)})`);
+  else fail(`the creditors account (${rand(creditors)}, not counting journals by hand or year-end adjustments) and the unpaid bills (${rand(n(cred!.owing))}) differ by ${rand(creditors - n(cred!.owing))}`);
 
   // Each VAT period of the last year: the VAT account's movement from documents, costs and assets
-  // is exactly what the VAT201 for the period says is payable (or refundable).
+  // is exactly what Shap's VAT201 for the period says is payable (or refundable). Both are worked
+  // out from the same documents, by different code: a posting that went astray shows here; a
+  // return filed with other figures doesn't (Shap doesn't keep what was filed).
   const [anyVat] = await db<{ n: number }[]>`select count(*)::int as n from ledger_totals l join accounts a on a.id = l.account_id where a.system_key = 'vat'`;
   if (settings.vatRegistered || n(anyVat!.n) > 0) {
     const periods = new Map<string, { start: string; end: string }>();
@@ -134,7 +150,7 @@ export async function auditBooks(db: Db, on = today()): Promise<AuditItem[]> {
       // The VAT account is a liability (credit negative): output VAT less input VAT is its movement, negated.
       if (-n(mv!.t) !== f.field20) off.push(`${p.start} to ${p.end} (VAT201 ${rand(f.field20)}, books ${rand(-n(mv!.t))})`);
     }
-    if (!off.length) ok(`each VAT201 of the last year agrees with the VAT account (${periods.size} periods)`);
+    if (!off.length) ok(`the VAT account moved by what Shap's VAT201 shows for each period of the last year (${periods.size} periods)`);
     else fail(`the VAT201 and the VAT account disagree for ${few(off, 3)}`);
   } else ok('not registered for VAT: no VAT201s to check');
 
@@ -142,26 +158,45 @@ export async function auditBooks(db: Db, on = today()): Promise<AuditItem[]> {
     select coalesce(sum(l.paye_cents + l.uif_employee_cents + l.uif_employer_cents + l.sdl_cents), 0)::bigint
            - coalesce((select sum(amount_cents) from sars_payments where kind = 'emp201'), 0)::bigint as owed
     from pay_runs r join pay_lines l on l.run_id = r.id where r.status = 'final'`;
-  const owedSars = -((await balance('paye_payable')) + (await balance('uif_payable')) + (await balance('sdl_payable')));
-  if (owedSars === n(sars[0]!.owed)) ok(`PAYE, UIF and SDL owed agree with the EMP201s (${rand(owedSars)})`);
-  else (await journaled(['paye_payable', 'uif_payable', 'sdl_payable']) ? warn : fail)(`PAYE, UIF and SDL owed in the books (${rand(owedSars)}) and on the EMP201s (${rand(n(sars[0]!.owed))}) differ by ${rand(owedSars - n(sars[0]!.owed))}`);
+  // Pay runs and EMP201 payments post as the app's own journals (payroll, sars): counted.
+  const payroll = await posted(['paye_payable', 'uif_payable', 'sdl_payable']);
+  const owedSars = -payroll.app;
+  if (owedSars === n(sars[0]!.owed)) ok(`PAYE, UIF and SDL owed agree with the pay runs less the EMP201 payments (${rand(owedSars)}${besides(-payroll.byHand)})`);
+  else fail(`PAYE, UIF and SDL owed in the books (${rand(owedSars)}, not counting journals by hand or year-end adjustments) and by the pay runs less the EMP201 payments (${rand(n(sars[0]!.owed))}) differ by ${rand(owedSars - n(sars[0]!.owed))}`);
 
   // ---------------------------------------------------------------- agreed years
   section = 'Agreed years';
-  const years = await db<{ fyEnd: string }[]>`select fy_end::text as fy_end from year_ends order by fy_end`;
+  // Shap keeps an agreed year's figures by adjusting each account to them at the year end, so
+  // something dated in the year that's added or changed afterwards doesn't move them: it shows as
+  // Shap's own figure (without that adjustment) differing from what it was when the year was agreed.
+  const years = await db<{ fyEnd: string; agreedAt: string }[]>`select fy_end::text as fy_end, created_at::text as agreed_at from year_ends order by fy_end`;
   if (!years.length) ok('no year agreed with the accountant yet');
   for (const y of years) {
-    const fy = financialYear(y.fyEnd, settings.fyEndMonth);
-    const moved = await db<{ name: string; target: number; now: number }[]>`
-      select a.name, f.amount_cents as target,
-        coalesce((select sum(l.amount_cents) from ledger_totals l
-          where l.account_id = a.id and l.date <= ${y.fyEnd}::date
-            and (a.type not in ('income', 'cost_of_sales', 'expense') and coalesce(a.system_key, '') <> 'dividends' or l.date >= ${fy.start}::date)), 0)::bigint as now
-      from year_end_figures f join accounts a on a.id = f.account_id
-      where f.fy_end = ${y.fyEnd} and coalesce(a.system_key, '') not in ('retained_earnings', 'suspense')`;
-    const changed = moved.filter((m) => n(m.now) !== n(m.target));
-    if (!changed.length) ok(`the year to ${y.fyEnd} still shows the figures it was agreed at`);
-    else fail(`the year to ${y.fyEnd} has moved since it was agreed: ${few(changed.map((c) => `${c.name} (${rand(n(c.now) - n(c.target))})`), 4)}`);
+    // The year it was agreed for: the twelve months to its end (as the ledger takes it), even if
+    // the year end in Settings has changed since. Each agreed account, and any account opened
+    // after the year was agreed (so not among its figures) with something in that year.
+    const figures = await db<{ name: string; target: number | null; shap: number | null; now: number; own: number }[]>`
+      select a.name, f.amount_cents as target, f.shap_cents as shap,
+        coalesce(sum(l.amount_cents), 0)::bigint as now,
+        coalesce(sum(l.amount_cents) filter (where not (l.source = 'year_end' and l.date = ${y.fyEnd}::date)), 0)::bigint as own
+      from accounts a
+      left join year_end_figures f on f.account_id = a.id and f.fy_end = ${y.fyEnd}::date
+      left join ledger_totals l on l.account_id = a.id and l.date <= ${y.fyEnd}::date
+        and (not (a.type in ('income', 'cost_of_sales', 'expense') or coalesce(a.system_key, '') = 'dividends')
+             or l.date >= (date_trunc('month', ${y.fyEnd}::date) - interval '11 months')::date)
+      where coalesce(a.system_key, '') not in ('retained_earnings', 'suspense')
+        and (f.account_id is not null or a.created_at > ${y.agreedAt}::timestamptz)
+      group by a.id, a.code, a.name, f.amount_cents, f.shap_cents
+      order by a.code`;
+    const moved = figures.filter((m) => m.target != null && n(m.now) !== n(m.target));
+    const late = figures.filter((m) => (m.target == null ? n(m.own) !== 0 : m.shap != null && n(m.own) !== n(m.shap)));
+    const closed = !!settings.lockDate && String(settings.lockDate).slice(0, 10) >= y.fyEnd;
+    if (moved.length) fail(`the year to ${y.fyEnd} no longer shows the figures it was agreed at: ${few(moved.map((c) => `${c.name} (${rand(n(c.now) - n(c.target))})`), 4)}`);
+    else if (late.length)
+      (closed ? fail : warn)(
+        `something dated in the year to ${y.fyEnd} was added or changed after it was agreed${closed ? ', though the year is closed' : ''}: ${few(late.map((c) => `${c.name} (${rand(n(c.own) - n(c.shap))}${c.target == null ? ', an account opened since' : ''})`), 4)}. Shap still shows the agreed figures (it adjusts each agreed account back to them at the year end)${closed ? '' : ': tell your accountant, or date it in the next year'}`,
+      );
+    else ok(`the year to ${y.fyEnd} still shows the figures it was agreed at, with nothing added or changed in it since`);
   }
   const lastEnd = financialYear(`${Number(fyNow.end.slice(0, 4)) - 1}${fyNow.end.slice(4)}`, settings.fyEndMonth).end;
   const monthsSince = (Date.parse(on) - Date.parse(lastEnd)) / (30.4 * 86_400_000);
@@ -186,8 +221,9 @@ export async function auditBooks(db: Db, on = today()): Promise<AuditItem[]> {
     from documents d left join clients c on c.id = d.client_id
     where d.kind = 'invoice' and d.status = 'issued' and d.vat_rate_bp > 0`;
   if (tax.length) {
-    if (!settings.vatNumber.trim()) fail('tax invoices have been issued, but there is no VAT number in Settings → Company to show on them');
-    if (!settings.address.trim()) warn('tax invoices have been issued, but there is no business address in Settings → Company');
+    // (Once deregistered, the VAT number and address shown on new documents no longer matter here.)
+    if (settings.vatRegistered && !settings.vatNumber.trim()) fail('tax invoices have been issued, but there is no VAT number in Settings → Company to show on them');
+    if (settings.vatRegistered && !settings.address.trim()) warn('tax invoices have been issued, but there is no business address in Settings → Company');
     const short = tax.filter((t) => (Math.abs(n(t.total)) > FULL_TAX_INVOICE_CENTS || t.zero) && (!t.clientName?.trim() || !t.clientAddress?.trim()));
     if (!short.length) ok(`every full tax invoice names the client and their address (${tax.length} tax invoices)`);
     else warn(`${short.length} tax invoices over R5 000 (or with zero-rated items) don't show the client's name and address now: ${few(short.map((s) => s.number))}`);
@@ -229,9 +265,14 @@ export async function auditBooks(db: Db, on = today()): Promise<AuditItem[]> {
   if (!n(slips!.n)) ok('every cost that claims VAT has its slip attached');
   else warn(`${n(slips!.n)} costs claim ${rand(n(slips!.vat))} VAT without a slip attached: SARS can ask for the supplier's tax invoice for each (keep them five years)`);
 
-  const tooMuch = await db<{ description: string }[]>`select description from costs where vat_cents > 0 and vat_cents * 115 > amount_cents * 15 + 115 limit 10`;
+  // The rule a cost is saved by (modules/costs.ts): at most the VAT the amount includes at the
+  // rate on its date, rounded, and a cent more for a supplier's rounding. (Over 12% of the amount
+  // is checked closely: no rate Shap knows puts more than 13.05% in a VAT-inclusive amount.)
+  const heavy = await db<{ description: string; date: string; amount: number; vat: number }[]>`
+    select description, date::text as date, amount_cents as amount, vat_cents as vat from costs where vat_cents <> 0 and abs(vat_cents) * 100 > abs(amount_cents) * 12`;
+  const tooMuch = heavy.filter((c) => Math.abs(n(c.vat)) > vatIncluded(Math.abs(n(c.amount)), vatRateOn(c.date)) + 1);
   if (!tooMuch.length) ok('no cost claims more VAT than its amount can hold');
-  else fail(`${tooMuch.length} costs claim more VAT than 15/115 of what was paid: ${few(tooMuch.map((t) => t.description))}`);
+  else fail(`${tooMuch.length} costs claim more VAT than what was paid includes: ${few(tooMuch.map((t) => t.description))}`);
 
   const taxYearStart = Number(on.slice(5, 7)) >= 3 ? `${on.slice(0, 4)}-03-01` : `${Number(on.slice(0, 4)) - 1}-03-01`;
   const unnumbered = await db<{ name: string }[]>`

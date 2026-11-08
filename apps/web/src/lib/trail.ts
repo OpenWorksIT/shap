@@ -5,6 +5,8 @@
  * label (or only "in a list", for a row's button, which can carry a name), and edits only which
  * field changed.
  */
+import { redactText, scrubPath } from '@shap/shared';
+
 export interface TrailEntry {
   t: number; // ms since epoch
   kind: 'nav' | 'click' | 'edit' | 'api' | 'error' | 'console';
@@ -15,9 +17,9 @@ const MAX = 60;
 const entries: TrailEntry[] = [];
 let started = false;
 
-const ID_RE = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
-/** Strip IDs and query strings from paths, so the trail shows the shape of the route, not who. */
-export const scrubPath = (p: string) => p.replace(ID_RE, ':id').replace(/\?.*$/, (q) => (/[?&](t|token)=/.test(q) ? '?…' : q.replace(/=[^&]*/g, '=…')));
+// IDs and query values out of paths; addresses and long numbers out of text (shared: the server
+// applies them again to every trail it gets).
+export { scrubPath };
 
 export function record(kind: TrailEntry['kind'], detail: string) {
   // Error messages can quote what was typed: blank addresses and numbers in those too.
@@ -29,8 +31,7 @@ export function getTrail(): TrailEntry[] {
   return entries.slice();
 }
 
-/** Email addresses and phone or ID numbers out of anything recorded. */
-const redact = (s: string) => s.replace(/[^\s@]+@[^\s@]+/g, '…@…').replace(/\+?\d[\d\s-]{6,}\d/g, '…');
+const redact = redactText;
 const short = (s: string | null | undefined, n = 40) => (s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
 
 function describe(el: Element): string | null {

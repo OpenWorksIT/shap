@@ -7,6 +7,7 @@ import { Buffer } from 'buffer';
 
 import { PGlite } from '@electric-sql/pglite';
 import { buildApp, createDb, migrate, setPdfFonts, type App, type Migration } from '@shap/engine';
+import { ownTemplate } from './template';
 import regularUrl from '@fontsource/atkinson-hyperlegible-next/files/atkinson-hyperlegible-next-latin-400-normal.woff?url';
 import boldUrl from '@fontsource/atkinson-hyperlegible-next/files/atkinson-hyperlegible-next-latin-700-normal.woff?url';
 
@@ -111,18 +112,6 @@ function jsonReady(v: unknown): unknown {
   return v;
 }
 
-/**
- * The empty books' address, as the page gives it: only ever the file next to the app (same origin,
- * fresh-books.tar.gz), never anywhere else.
- */
-function ownTemplate(url: string): string | null {
-  try {
-    const u = new URL(url, self.location.href);
-    return u.origin === self.location.origin && u.pathname.endsWith('/fresh-books.tar.gz') ? u.href : null;
-  } catch {
-    return null;
-  }
-}
 
 self.onmessage = async (e: MessageEvent<EngineRequest>) => {
   // Only the app's own page can talk to its worker; a message from anywhere else is ignored.
@@ -131,7 +120,7 @@ self.onmessage = async (e: MessageEvent<EngineRequest>) => {
   if (!m || typeof m !== 'object' || typeof (m as { op?: unknown }).op !== 'string') return;
   const reply = (r: { ok: true; result: unknown } | { ok: false; error: string }, transfer: Transferable[] = []) => (self as unknown as Worker).postMessage({ id: m.id, ...r }, transfer);
   try {
-    if (m.op === 'status' && m.template) templateUrl = ownTemplate(m.template);
+    if (m.op === 'status' && m.template) templateUrl = ownTemplate(m.template, self.location.href);
     await ready();
     if (m.op === 'call') {
       const r = await app!.handle(m.method, m.url, m.body);
