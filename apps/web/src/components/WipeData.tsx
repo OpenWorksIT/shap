@@ -5,7 +5,7 @@
  */
 import { useState } from 'react';
 import { erase } from '../pocket/engine';
-import { backUp, scheduleBackupReminder } from '../lib/backup';
+import { backUp } from '../lib/backup';
 import { device, isNative } from '../lib/native';
 import { useAuthed } from '../lib/session';
 import { phoneHasLock, unlock } from './AppLock';
@@ -58,7 +58,6 @@ function WipeSteps({ onClose }: { onClose: () => void }) {
     setBusy(true);
     try {
       await erase();
-      await scheduleBackupReminder(false);
       try {
         localStorage.clear();
         sessionStorage.clear();

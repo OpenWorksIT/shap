@@ -1,8 +1,8 @@
-import { paysOutProfit } from '@shap/shared';
+import { paysOutProfit, TERMS_VERSION } from '@shap/shared';
+import { TermsGate } from './components/Terms';
 import { lazy, Suspense, useEffect } from 'react';
 import { reportUsage, shareMarket } from './lib/usage';
-import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
-import { listenForReminder } from './lib/backup';
+import { Navigate, Route, Routes } from 'react-router-dom';
 import { FeedbackButton } from './components/Feedback';
 import { Shell } from './components/Shell';
 import { Loading } from './components/ui';
@@ -61,8 +61,6 @@ function Opened() {
 function Books() {
   const { settings, has } = useAuthed();
   const pays = has('payroll') || (paysOutProfit(settings.businessType) && has('dividends'));
-  const navigate = useNavigate();
-  useEffect(() => void listenForReminder(navigate), [navigate]);
   // Last month's anonymous prices, once, a little after opening (never in the way of the first screens).
   useEffect(() => {
     if (!settings.setupDone || !settings.marketConsent || !settings.marketNoticeSeen) return;
@@ -78,6 +76,8 @@ function Books() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.setupDone, settings.usageConsent]);
   if (!settings.setupDone) return <WelcomePage />;
+  // The terms of use, accepted at the end of setup: again whenever the published terms change.
+  if (settings.termsVersion !== TERMS_VERSION) return <TermsGate />;
   return (
     <Shell>
       <FeedbackButton />

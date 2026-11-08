@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { BUSINESS_TYPES } from './entities.js';
+import { compact, idNumberProblem, taxNumberProblem, vatNumberProblem } from './ids.js';
 import {
   ACCOUNT_TYPES,
   ASSET_CATEGORIES,
@@ -22,6 +23,15 @@ const cents = z.number().int().min(-1_000_000_000_00).max(1_000_000_000_00);
 const positiveCents = z.number().int().min(0).max(1_000_000_000_00);
 const text = (max = 200) => z.string().trim().max(max);
 const optionalUuid = uuid.nullable().optional();
+/** A reference number: tidied (spaces out), then checked for its shape (ids.ts). */
+const refNumber = (problem: (v: string) => string | null, max = 30) =>
+  text(max)
+    .default('')
+    .transform((v) => compact(v))
+    .superRefine((v, ctx) => {
+      const p = problem(v);
+      if (p) ctx.addIssue({ code: 'custom', message: p });
+    });
 
 export const loginInput = z.object({
   email: z.string().trim().toLowerCase().email('Enter your email address'),
@@ -63,8 +73,18 @@ export const settingsInput = z.object({
   marketConsent: z.boolean().optional(),
   /** The owner has been told about sharing market rates (left unchanged when not sent). */
   marketNoticeSeen: z.boolean().optional(),
-  /** Registered for the Skills Development Levy (payroll over R500 000 a year). */
+  /** Registered for the Skills Development Levy (payroll expected over R500 000 in the next 12 months). */
   sdl: z.boolean().default(false),
+  /** The business's income tax reference number (on the IRP6, ITR14 or ITR12, and the EMP501). */
+  taxNumber: text(20).default(''),
+  /** Registered with SARS as an employer (PAYE), and the reference (7…). */
+  payeRegistered: z.boolean().nullable().optional(),
+  payeRef: text(20).default(''),
+  /** Registered for UIF, and the employer reference (1234567/8, or SARS's U…). */
+  uifRegistered: z.boolean().nullable().optional(),
+  uifRef: text(20).default(''),
+  /** The version of the terms of use the owner accepted (terms.ts). Left unchanged when not sent. */
+  termsVersion: text(20).optional(),
   /** The usual card payment link (Yoco, SnapScan…), printed on invoices. */
   payLink: z.string().trim().max(500).refine((v) => !v || /^https:\/\//.test(v), 'A payment link starts with https://').default(''),
   setupDone: z.boolean().optional(),
@@ -110,7 +130,8 @@ export const clientInput = z.object({
   email: z.string().trim().max(150).default(''),
   phone: text(40).default(''),
   address: text(400).default(''),
-  vatNumber: text(30).default(''),
+  /** Needed on a full tax invoice (over R5 000) when the client is a VAT vendor. */
+  vatNumber: refNumber(vatNumberProblem),
   notes: text(2000).default(''),
   active: z.boolean().default(true),
   brandId: optionalUuid,
@@ -415,8 +436,10 @@ export const taxEstimateInput = z.object({
 // ---------------------------------------------------------------- payroll and dividends
 export const employeeInput = z.object({
   name: text(120).min(1, 'Give the employee’s name'),
-  idNumber: text(20).default(''),
-  taxNumber: text(20).default(''),
+  /** The 13-digit ID number (or a passport number): needed on the IRP5. */
+  idNumber: refNumber(idNumberProblem, 20),
+  /** The employee's income tax number: SARS enforces it on the EMP501. */
+  taxNumber: refNumber(taxNumberProblem, 20),
   isDirector: z.boolean().default(false),
   salaryCents: positiveCents,
   ageBand: z.enum(['under65', '65to74', '75plus']).default('under65'),

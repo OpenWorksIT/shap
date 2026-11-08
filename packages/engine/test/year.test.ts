@@ -29,9 +29,9 @@ describe('a year in the books, reconciled', () => {
     me = await login(env.app, 'owner@example.co.za');
     const r = await ref(env.sql);
     const { settings, sources } = await me.get('/api/reference');
-    await me.post('/api/settings', { ...settings, vatRegistered: true, vatNumber: '4000000000', vatCategory: 'B', sdl: true, features: { ...settings.features, bills: true, payroll: true, dividends: true } }, 'PUT');
+    await me.post('/api/settings', { ...settings, vatRegistered: true, vatNumber: '4000000002', vatCategory: 'B', sdl: true, features: { ...settings.features, bills: true, payroll: true, dividends: true } }, 'PUT');
     ids = { bank: await r.src('Business bank'), bills: sources.find((s: { role: string | null }) => s.role === 'bills').id };
-    const client = await me.post('/api/clients', { name: 'Fictional Holdings (Pty) Ltd' });
+    const client = await me.post('/api/clients', { name: 'Fictional Holdings (Pty) Ltd', address: '1 Example Road, Gqeberha, 6001' });
 
     // The owner lends the company R50 000 to start.
     await me.post('/api/journals', {
@@ -235,7 +235,7 @@ describe('bad debts written off before the VAT fix', () => {
     try {
       const me = await login(env.app, 'owner@example.co.za');
       const { settings } = await me.get('/api/reference');
-      await me.post('/api/settings', { ...settings, vatRegistered: true, vatNumber: '4000000000' }, 'PUT');
+      await me.post('/api/settings', { ...settings, vatRegistered: true, vatNumber: '4000000002' }, 'PUT');
       const writeOff = async (issueDate: string, date: string) => {
         const d = await me.post('/api/documents', { kind: 'invoice', issueDate, lines: [{ category: 'labour', description: 'Work', qty: 1, unitPriceCents: 100_000 }] });
         await me.post(`/api/documents/${d.id}/issue`);

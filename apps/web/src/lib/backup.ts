@@ -34,7 +34,6 @@ export async function backUp(businessName: string): Promise<'shared' | 'cancelle
     } catch {
       /* fine */
     }
-    void scheduleBackupReminder();
   }
   return r;
 }
@@ -67,12 +66,10 @@ export async function restoreFrom(file: File) {
   await restore(file);
 }
 
-/* ---------- where backups go, and the weekly reminder ---------- */
+/* ---------- where backups go ---------- */
 
 export type BackupPlace = 'google' | 'onedrive' | 'dropbox' | 'icloud' | 'proton' | 'email';
 const PLACE = 'shap.backupPlace';
-const REMIND = 'shap.backupRemind';
-const REMINDER_ID = 4201;
 
 export const BACKUP_PLACES: { key: BackupPlace; label: string; ios?: boolean; android?: boolean }[] = [
   { key: 'google', label: 'Google Drive' },
@@ -121,44 +118,4 @@ const store = (k: string, v?: string | null) => {
 
 export const backupPlace = () => store(PLACE) as BackupPlace | null;
 export const setBackupPlace = (p: BackupPlace | null) => void store(PLACE, p);
-export const remindOn = () => store(REMIND) !== 'off';
 
-/**
- * The reminder is a single phone notification a week after the last backup (or tomorrow
- * evening if there's never been one). Each backup moves it on a week, so nobody who backs up
- * gets nagged. Only on the phone apps; the web version has the reminder on Home.
- */
-export async function scheduleBackupReminder(on = remindOn()) {
-  store(REMIND, on ? 'on' : 'off');
-  if (!isNative()) return;
-  try {
-    const { LocalNotifications } = await import('@capacitor/local-notifications');
-    await LocalNotifications.cancel({ notifications: [{ id: REMINDER_ID }] });
-    if (!on) return;
-    const perm = await LocalNotifications.checkPermissions();
-    if (perm.display !== 'granted' && (await LocalNotifications.requestPermissions()).display !== 'granted') return;
-    const last = lastBackup();
-    const at = new Date(last ? last.getTime() + 7 * 86_400_000 : Date.now() + 86_400_000);
-    at.setHours(18, 0, 0, 0);
-    if (at.getTime() < Date.now() + 60_000) at.setTime(Date.now() + 3_600_000);
-    await LocalNotifications.schedule({
-      notifications: [{ id: REMINDER_ID, title: 'Time to back up your books', body: 'Your books live only on this phone. One tap saves a copy to your cloud drive.', schedule: { at, allowWhileIdle: false }, extra: { open: '/backup' } }],
-    });
-  } catch {
-    /* no notifications on this phone: the reminder on Home still works */
-  }
-}
-
-/** A tap on the reminder opens the Backup screen. */
-export async function listenForReminder(go: (path: string) => void) {
-  if (!isNative()) return;
-  try {
-    const { LocalNotifications } = await import('@capacitor/local-notifications');
-    await LocalNotifications.addListener('localNotificationActionPerformed', (a) => {
-      const to = (a.notification.extra as { open?: string } | undefined)?.open;
-      if (to) go(to);
-    });
-  } catch {
-    /* fine */
-  }
-}

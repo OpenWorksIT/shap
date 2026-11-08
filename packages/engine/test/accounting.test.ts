@@ -20,7 +20,7 @@ describe('the bank and what’s already in the books', () => {
     me = await login(env.app, 'owner@example.co.za');
     r = await ref(env.sql);
     const { settings, sources } = await me.get('/api/reference');
-    await me.post('/api/settings', { ...settings, vatRegistered: true, vatNumber: '4000000000', features: { ...settings.features, bills: true } }, 'PUT');
+    await me.post('/api/settings', { ...settings, vatRegistered: true, vatNumber: '4000000002', features: { ...settings.features, bills: true } }, 'PUT');
     bank = await r.src('Business bank');
     cash = await r.src('Cash');
     bills = (await me.get('/api/reference')).sources.find((s: { role: string | null }) => s.role === 'bills').id;
@@ -95,7 +95,7 @@ describe('guards on costs, bills and assets', () => {
     me = await login(env.app, 'owner@example.co.za');
     r = await ref(env.sql);
     const { settings } = await me.get('/api/reference');
-    await me.post('/api/settings', { ...settings, vatRegistered: true, vatNumber: '4000000000', features: { ...settings.features, bills: true } }, 'PUT');
+    await me.post('/api/settings', { ...settings, vatRegistered: true, vatNumber: '4000000002', features: { ...settings.features, bills: true } }, 'PUT');
   });
   afterAll(() => env.close());
 

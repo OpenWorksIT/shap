@@ -4,8 +4,8 @@
  *
  * What's shared is deliberately small. Once a month, for last month's issued invoices, only the
  * lines that are one of the standard items of the business's trade (the ones Shap offers, like
- * "Tiling" per m² for a builder), and for each such item only one number: the business's middle
- * (median) unit price, excluding VAT. Never a description someone typed, a client, an invoice,
+ * "Tiling" per m² for a builder), and for each such item only one number: the business's average
+ * unit price, excluding VAT. Never a description someone typed, a client, an invoice,
  * a total, how many lines there were, or the business's name. The collector checks every item
  * against the same standard list, so nothing else can get in.
  *
@@ -22,7 +22,7 @@ export interface MarketRate {
   /** The standard item, exactly as Shap names it for the trade. */
   item: string;
   unit: string;
-  /** The business's median unit price for it that month, excluding VAT. */
+  /** The business's average unit price for it that month, excluding VAT. */
   cents: number;
 }
 
@@ -58,13 +58,9 @@ export function isMarketItem(industry: string, item: string, unit: string): bool
   return Boolean(found && found.item === item && found.unit === unit);
 }
 
-const median = (xs: number[]) => {
-  const s = [...xs].sort((a, b) => a - b);
-  const m = Math.floor(s.length / 2);
-  return s.length % 2 ? s[m]! : Math.round((s[m - 1]! + s[m]!) / 2);
-};
+const average = (xs: number[]) => Math.round(xs.reduce((t, x) => t + x, 0) / xs.length);
 
-/** One month's share: the median unit price of each standard item on the given invoice lines. */
+/** One month's share: the average unit price of each standard item on the given invoice lines. */
 export function marketRates(industry: string, lines: { description: string; unit: string; unitPriceCents: number; qty: number }[]): MarketRate[] {
   const items = marketItems(industry);
   const prices = new Map<string, number[]>();
@@ -75,7 +71,7 @@ export function marketRates(industry: string, lines: { description: string; unit
     prices.set(key, [...(prices.get(key) ?? []), l.unitPriceCents]);
   }
   return [...prices.entries()]
-    .map(([key, ps]) => ({ ...items.get(key)!, cents: median(ps) }))
+    .map(([key, ps]) => ({ ...items.get(key)!, cents: average(ps) }))
     .sort((a, b) => a.item.localeCompare(b.item));
 }
 

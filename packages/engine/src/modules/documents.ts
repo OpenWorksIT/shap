@@ -197,6 +197,30 @@ export async function markShared(db: Db, id: string): Promise<string | null> {
   return d.kind;
 }
 
+/** A full tax invoice (over R5 000) names the recipient and their address: VAT Act s20(4)(c). */
+export const FULL_TAX_INVOICE_CENTS = 5_000_00;
+
+/**
+ * What a tax invoice or credit note must carry before it's issued: the recipient's name and
+ * address on a full tax invoice (over R5 000, s20(4)), and on a credit note the reason and the
+ * invoice it credits (s21(3)). The business's VAT number is checked when VAT is switched on.
+ */
+export async function assertTaxDocument(db: Db, id: string): Promise<void> {
+  const [d] = await db<{ kind: string; totalCents: number; creditReason: string; creditedInvoiceId: string | null; clientName: string | null; clientAddress: string | null }[]>`
+    select d.kind, d.total_cents, d.credit_reason, d.credited_invoice_id, c.name as client_name, c.address as client_address
+    from documents d left join clients c on c.id = d.client_id where d.id = ${id}`;
+  if (!d) return;
+  const s = await getSettings(db);
+  if (d.kind === 'credit_note') {
+    if (!d.creditedInvoiceId) throw badRequest('A credit note says which invoice it credits');
+    if (!String(d.creditReason ?? '').trim()) throw badRequest('Say briefly why the credit note is issued (SARS requires the reason on it)');
+  }
+  if (s.vatRegistered && (d.kind === 'invoice' || d.kind === 'credit_note') && Math.abs(Number(d.totalCents)) > FULL_TAX_INVOICE_CENTS) {
+    if (!d.clientName?.trim() || !d.clientAddress?.trim())
+      throw badRequest(`A tax ${d.kind === 'invoice' ? 'invoice' : 'credit note'} over R5 000 must show the client’s name and address (and their VAT number if they’re registered). Add them to the client first.`);
+  }
+}
+
 export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
 
@@ -281,11 +305,17 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
         const [p] = await tx<{ clientId: string | null }[]>`select client_id from projects where id = ${input.projectId}`;
         clientId = p?.clientId ?? null;
       }
+      // A credit note is always to the client of the invoice it credits.
+      if (old.kind === 'credit_note') {
+        const [inv] = await tx<{ clientId: string | null }[]>`select i.client_id from documents d join documents i on i.id = d.credited_invoice_id where d.id = ${id}`;
+        clientId = inv?.clientId ?? clientId;
+      }
       try {
         await tx`
           update documents set number = ${number}, project_id = ${input.projectId ?? null}, client_id = ${clientId},
             issue_date = ${input.issueDate}, due_date = ${input.dueDate ?? null}, title = ${input.title}, notes = ${input.notes},
             terms = ${input.terms}, vat_rate_bp = ${vatRate}, updated_at = now(),
+            credit_reason = case when kind = 'credit_note' then ${input.creditReason} else credit_reason end,
             deposit_bp = ${input.depositBp}, deposit_cents = ${input.depositCents}, deposit_show_balance = ${input.depositShowBalance}, pay_link = ${input.payLink ?? ''},
             brand_id = ${input.brandId ?? (await defaultBrand(tx, input.projectId ?? null, clientId))}
           where id = ${id}`;
@@ -313,7 +343,8 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (doc.status !== 'draft') throw badRequest(`This ${what} has already been issued`);
     await assertOpen(sql, doc.issueDate);
     const [lines] = await sql<{ n: number }[]>`select count(*) as n from document_lines where document_id = ${id}`;
-    if (!lines!.n) throw badRequest('Add at least one line first');
+    if (!lines!.n) throw badRequest('Add at least one item first');
+    await assertTaxDocument(sql, id);
     if (doc.kind === 'credit_note') {
       // It settles that much of the invoice: never more than what's still owed on it.
       const [inv] = await sql<{ status: string; totalCents: number; paid: number; writtenOffCents: number }[]>`
@@ -390,14 +421,16 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.delete('/api/documents/:id', { preHandler: requireRole('owner') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
-    const [doc] = await sql<{ kind: string; status: string }[]>`select kind, status from documents where id = ${id}`;
+    const [doc] = await sql<{ kind: string; status: string; number: string; issueDate: string; totalCents: number; clientName: string | null; proforma: boolean }[]>`
+      select d.kind, d.status, d.number, d.issue_date, d.total_cents, d.proforma, c.name as client_name from documents d left join clients c on c.id = d.client_id where d.id = ${id}`;
     if (!doc) throw notFound('Document');
     if ((doc.kind === 'invoice' || doc.kind === 'credit_note') && doc.status !== 'draft')
       throw badRequest(`Issued ${doc.kind === 'invoice' ? 'invoices' : 'credit notes'} can’t be deleted. Void it instead, so the number stays accounted for.`);
     await sql.begin(async (tx) => {
       await tx`update documents set source_quote_id = null where source_quote_id = ${id}`;
       await tx`delete from documents where id = ${id}`;
-      await audit(tx, { userId: user.id, action: 'delete', entity: doc.kind, entityId: id, ip: req.ip });
+      // What it was stays in the audit log (SARS expects records kept for five years).
+      await audit(tx, { userId: user.id, action: 'delete', entity: doc.kind, entityId: id, ip: req.ip, details: { number: doc.number, status: doc.status, issueDate: doc.issueDate, totalCents: Number(doc.totalCents), client: doc.clientName, proforma: doc.proforma } });
     });
     return { ok: true };
   });

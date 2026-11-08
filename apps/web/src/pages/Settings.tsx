@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ACCOUNT_TYPE_LABELS, ACCOUNT_TYPES, CATEGORY_KIND_LABELS, CATEGORY_KINDS, BUSINESS_TYPES, ENTITIES, entity, formatDate, paysOutProfit, formatZar, monthLabel, passwordProblem, ROLE_HINTS, ROLE_LABELS, SHAP_LINE, ROLES, SOURCE_KIND_LABELS, SOURCE_KINDS, type AccountType, type CategoryKind, type Role, type SourceKind } from '@shap/shared';
+import { ACCOUNT_TYPE_LABELS, ACCOUNT_TYPES, CATEGORY_KIND_LABELS, CATEGORY_KINDS, BUSINESS_TYPES, ENTITIES, entity, formatDate, paysOutProfit, payeRefProblem, payoutWord, uifRefProblem, formatZar, monthLabel, passwordProblem, ROLE_HINTS, ROLE_LABELS, SHAP_LINE, ROLES, SOURCE_KIND_LABELS, SOURCE_KINDS, type AccountType, type CategoryKind, type Role, type SourceKind } from '@shap/shared';
 import { PageHead } from '../components/Shell';
 import { Drawer, ErrorBox, Field, Icon, Loading, MoneyInput, Tabs, useToast } from '../components/ui';
 import { api, ApiError, APP_VERSION } from '../lib/api';
@@ -11,15 +11,16 @@ import type { Brand, Settings } from '../lib/types';
 import { BusinessFields, LogoField } from '../components/BusinessForm';
 import { Partners } from '../components/Partners';
 import { ApiImage } from '../components/Files';
-import { FEATURES, FEATURE_GROUPS, FEATURE_KEYS, featureOn, INDUSTRIES, TURNOVER_TAX_LIMIT_CENTS } from '@shap/shared';
+import { FEATURES, FEATURE_GROUPS, FEATURE_KEYS, featureOn, INDUSTRIES, TERMS_URL, TURNOVER_TAX_LIMIT_CENTS } from '@shap/shared';
 import { WipeData } from '../components/WipeData';
-import { device } from '../lib/native';
+import { device, isNative } from '../lib/native';
 import { reportUsage } from '../lib/usage';
 import { setTone, type Tone } from '../lib/words';
 import { SupportShap } from '../components/Support';
 import { MarketWhat } from '../components/MarketShare';
+import { AuditLog } from '../components/AuditLog';
 
-type Tab = 'business' | 'invoicing' | 'sections' | 'lists';
+type Tab = 'business' | 'invoicing' | 'sections' | 'lists' | 'audit';
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 export default function SettingsPage() {
@@ -38,6 +39,7 @@ export default function SettingsPage() {
             { value: 'invoicing', label: 'Invoicing & tax' },
             { value: 'sections', label: 'What you use' },
             { value: 'lists', label: 'Lists' },
+            { value: 'audit', label: 'Audit log' },
           ]}
         />
       </div>
@@ -60,12 +62,14 @@ export default function SettingsPage() {
       {tab === 'invoicing' && <SettingsForm section="invoicing" />}
       {tab === 'sections' && <Sections />}
       {tab === 'lists' && <Lists />}
+      {tab === 'audit' && <AuditLog />}
       <About />
     </div>
   );
 }
 
 function About() {
+  const { settings } = useAuthed();
   return (
     <section className="panel panel-pad stack narrow-wide">
       <h3>About Shap Pocket</h3>
@@ -75,7 +79,15 @@ function About() {
       <p className="small">
         Source code: <a href="https://github.com/OpenWorksIT/shap-pocket" target="_blank" rel="noreferrer">github.com/OpenWorksIT/shap-pocket</a>
       </p>
-      <p className="xs muted">Tax figures follow SARS’s published tables but aren’t tax advice: check with your accountant or SARS.</p>
+      <p className="xs muted">
+        Keep Shap Pocket up to date ({isNative() ? 'from the Play Store or App Store' : 'by reopening this page when it says there’s a new version'}): updates carry security fixes and each year’s changes to tax tables, VAT, payroll
+        and accounting rules, and need an internet connection. Updating, and keeping backups somewhere other than this {device()}, are your responsibility: OpenWorks never has a copy of your books
+        and can’t recover them.
+      </p>
+      <p className="xs muted">
+        Shap Pocket is a record-keeping tool, not an accountant, and its tax figures aren’t tax advice: use it to capture and collate your records for your accountant, and check figures before you
+        file. <a href={TERMS_URL} target="_blank" rel="noreferrer">Terms of use</a> (accepted {settings.termsAcceptedAt ? formatDate(settings.termsAcceptedAt.slice(0, 10)) : 'in setup'}).
+      </p>
     </section>
   );
 }
@@ -87,7 +99,7 @@ async function saveSettings(settings: Settings, changes: Partial<Settings>) {
 }
 
 function BusinessSettings() {
-  const { settings, refreshReference } = useAuthed();
+  const { settings, refreshReference, has } = useAuthed();
   const toast = useToast();
   const [f, setF] = useState<Settings>({ ...settings });
   const [logoId, setLogoId] = useState(settings.logoId);
@@ -116,6 +128,38 @@ function BusinessSettings() {
       <section className="panel panel-pad stack">
         <h3>Your business</h3>
         <BusinessFields f={f} set={set as never} />
+        {has('payroll') && (
+          <div className="stack" style={{ gap: 8 }}>
+            <strong className="small">As an employer</strong>
+            <div className="form-grid">
+              <label className="check">
+                <input type="checkbox" checked={Boolean(f.payeRegistered)} onChange={(e) => set('payeRegistered', e.target.checked)} />
+                <span>Registered for PAYE with SARS</span>
+              </label>
+              {f.payeRegistered && (
+                <Field label="PAYE reference" hint="10 digits starting with 7 (SDL and SARS’s UIF number are the same digits with L and U)" error={f.payeRef !== settings.payeRef ? (payeRefProblem(f.payeRef) ?? undefined) : undefined}>
+                  {(p) => <input {...p} className="input" inputMode="numeric" value={f.payeRef} onChange={(e) => set('payeRef', e.target.value)} />}
+                </Field>
+              )}
+              <label className="check">
+                <input type="checkbox" checked={Boolean(f.uifRegistered)} onChange={(e) => set('uifRegistered', e.target.checked)} />
+                <span>Registered for UIF</span>
+              </label>
+              {f.uifRegistered && (
+                <Field label="UIF reference" hint="1234567/8 from the Department of Employment and Labour, or SARS’s U-number" error={f.uifRef !== settings.uifRef ? (uifRefProblem(f.uifRef) ?? undefined) : undefined}>
+                  {(p) => <input {...p} className="input" value={f.uifRef} onChange={(e) => set('uifRef', e.target.value)} />}
+                </Field>
+              )}
+            </div>
+            {(!f.payeRegistered || !f.uifRegistered) && (
+              <p className="xs banner">
+                {!f.payeRegistered && 'Paying employees without a PAYE registration: an employer must register within 21 business days of becoming one, unless no employee earns enough to pay tax. '}
+                {!f.uifRegistered && 'UIF covers anyone working 24 hours a month or more for you. '}
+                Shap works out the deductions; registering, declaring and paying are your responsibility.
+              </p>
+            )}
+          </div>
+        )}
       </section>
       <section className="panel panel-pad stack">
         <h3>Logo</h3>
@@ -178,10 +222,10 @@ function Sections() {
               {g.keys.filter((k) => k !== 'dividends' || paysOutProfit(settings.businessType)).map((k) => (
                 <li key={k} className="list-row">
                   <label className="check grow">
-                    <input type="checkbox" checked={on[k]} onChange={(e) => void toggle(k, e.target.checked)} />
+                    <input type="checkbox" checked={on[k] || (k === 'dividends' && entity(settings.businessType).dividendsTax)} disabled={k === 'dividends' && entity(settings.businessType).dividendsTax} onChange={(e) => void toggle(k, e.target.checked)} />
                     <span>
                       {FEATURES[k].label}
-                      <div className="xs muted">{FEATURES[k].hint}</div>
+                      <div className="xs muted">{k === 'dividends' && entity(settings.businessType).dividendsTax ? `Always on for ${entity(settings.businessType).the}: every ${payoutWord(settings.businessType)} paid is declared to SARS on the DTR01 by the end of the next month.` : FEATURES[k].hint}</div>
                     </span>
                   </label>
                 </li>
@@ -192,7 +236,7 @@ function Sections() {
                     <input type="checkbox" checked={prefs.sdl} onChange={(e) => void pref('sdl', e.target.checked)} />
                     <span>
                       Registered for the Skills Development Levy
-                      <div className="xs muted">When your payroll is over R500 000 a year: 1% of salaries, paid by you.</div>
+                      <div className="xs muted">Once your payroll is expected to pass R500 000 over the next 12 months: 1% of salaries, paid by you.</div>
                     </span>
                   </label>
                 </li>
@@ -856,17 +900,24 @@ function BrandDrawer({ brand, onClose }: { brand: Brand | null; onClose: () => v
 
 /** Not registered for VAT: how close the last 12 months are to the point where you must. */
 function VatThreshold() {
-  const { data } = useApi<{ last12Cents: number; pace12Cents: number; compulsoryCents: number; voluntaryCents: number; state: 'over' | 'near' | 'voluntary' | null }>('/api/vat/threshold');
+  const { data } = useApi<{ last12Cents: number; peak12Cents: number; peakTo: string; pace12Cents: number; compulsoryCents: number; voluntaryCents: number; state: 'over' | 'near' | 'voluntary' | null }>('/api/vat/threshold');
   if (!data) return null;
-  const pct = Math.min(100, Math.round((data.last12Cents / data.compulsoryCents) * 100));
+  const pct = Math.min(100, Math.round((data.peak12Cents / data.compulsoryCents) * 100));
+  const earlier = data.peak12Cents !== data.last12Cents;
   return (
     <div className={`banner small${data.state === 'over' || data.state === 'near' ? ' alert' : ''}`}>
-      <strong>{formatZar(data.last12Cents)}</strong> of income in the last 12 months ({pct}% of the {formatZar(data.compulsoryCents)} at which VAT registration is
-      compulsory).{' '}
+      <strong>{formatZar(data.last12Cents)}</strong> of income in the last 12 months
+      {earlier && (
+        <>
+          {' '}
+          (and <strong>{formatZar(data.peak12Cents)}</strong> in the 12 months to {formatDate(data.peakTo)}, the highest run)
+        </>
+      )}
+      : {pct}% of the {formatZar(data.compulsoryCents)} at which VAT registration is compulsory. Any 12 months in a row count, not only a tax year.{' '}
       {data.state === 'over'
         ? 'That’s over the line: you must register with SARS within 21 days of passing it.'
         : data.state === 'near'
-          ? `Getting close${data.pace12Cents > data.compulsoryCents ? `: the last three months are running at ${formatZar(data.pace12Cents)} a year` : ''}. Talk to your accountant about registering before you pass it.`
+          ? `Getting close${data.pace12Cents > data.compulsoryCents ? `: the last three months are running at ${formatZar(data.pace12Cents)} over 12 months` : ''}. Talk to your accountant about registering before you pass it.`
           : data.state === 'voluntary'
             ? `You may register voluntarily (from ${formatZar(data.voluntaryCents)}), but you don’t have to yet.`
             : 'Nothing to do yet.'}{' '}

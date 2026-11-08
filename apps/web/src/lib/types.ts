@@ -38,6 +38,13 @@ export interface Settings {
   marketNoticeSeen: boolean;
   installId?: string;
   sdl: boolean;
+  taxNumber: string;
+  payeRegistered: boolean | null;
+  payeRef: string;
+  uifRegistered: boolean | null;
+  uifRef: string;
+  termsVersion: string;
+  termsAcceptedAt: string | null;
   payLink: string;
   setupDone: boolean;
   logoLayout: { zoom?: number; x?: number; y?: number };

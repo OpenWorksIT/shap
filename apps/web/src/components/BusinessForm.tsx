@@ -3,7 +3,7 @@
  * and logo. Used by the first-run questions and by Settings.
  */
 import { useState } from 'react';
-import { BUSINESS_TYPES, ENTITIES, entity } from '@shap/shared';
+import { BUSINESS_TYPES, ENTITIES, entity, regNumberProblem, taxNumberProblem, vatNumberProblem } from '@shap/shared';
 import { api, ApiError } from '../lib/api';
 import { cleanPngLogo, shrinkImage } from '../lib/files';
 import { pickFile } from '../lib/native';
@@ -13,13 +13,13 @@ import { Field, Icon, useToast } from './ui';
 
 export type BusinessFields = Pick<
   Settings,
-  'companyName' | 'tradingName' | 'businessType' | 'regNumber' | 'vatRegistered' | 'vatNumber' | 'address' | 'phone' | 'email' | 'website' | 'bankDetails' | 'accent' | 'logoLayout'
+  'companyName' | 'tradingName' | 'businessType' | 'regNumber' | 'vatRegistered' | 'vatNumber' | 'taxNumber' | 'address' | 'phone' | 'email' | 'website' | 'bankDetails' | 'accent' | 'logoLayout'
 >;
 
 export function BusinessFields({ f, set, compact = false }: { f: BusinessFields; set: <K extends keyof BusinessFields>(k: K, v: BusinessFields[K]) => void; compact?: boolean }) {
-  const text = (k: 'companyName' | 'tradingName' | 'regNumber' | 'vatNumber' | 'phone' | 'email' | 'website', label: string, hint?: string, type = 'text', required = false) => (
-    <Field label={label} hint={hint}>
-      {(p) => <input {...p} className="input" type={type} value={f[k]} onChange={(e) => set(k, e.target.value)} required={required} />}
+  const text = (k: 'companyName' | 'tradingName' | 'regNumber' | 'vatNumber' | 'taxNumber' | 'phone' | 'email' | 'website', label: string, hint?: string, type = 'text', required = false, error?: string | null, placeholder?: string) => (
+    <Field label={label} hint={hint} error={error ?? undefined}>
+      {(p) => <input {...p} className="input" type={type} value={f[k] ?? ''} onChange={(e) => set(k, e.target.value)} required={required} placeholder={placeholder} />}
     </Field>
   );
   const kind = entity(f.businessType);
@@ -40,16 +40,19 @@ export function BusinessFields({ f, set, compact = false }: { f: BusinessFields;
       <div className="form-grid">
         {text('companyName', registered ? 'Registered name' : 'Business name', kind.example, 'text', true)}
         {text('tradingName', 'Trading as (optional)', 'Only if quotes should show a different name')}
-        {kind.regLabel && text('regNumber', kind.regLabel)}
+        {kind.regLabel && text('regNumber', kind.regLabel, kind.regHint, 'text', false, regNumberProblem(f.regNumber, f.businessType), kind.regPlaceholder)}
       </div>
       <label className="check">
         <input type="checkbox" checked={f.vatRegistered} onChange={(e) => set('vatRegistered', e.target.checked)} />
         <span>
           Registered for VAT
-          <div className="xs muted">Invoices add VAT and say “Tax invoice”. Not registered? Shap warns you if you get near the point where you must.</div>
+          <div className="xs muted">Invoices add VAT and say “Tax invoice”. Not registered? Shap watches your income over any 12 months in a row and warns you as it nears the point where you must.</div>
         </span>
       </label>
-      {f.vatRegistered && <div className="form-grid">{text('vatNumber', 'VAT number')}</div>}
+      <div className="form-grid">
+        {f.vatRegistered && text('vatNumber', 'VAT number', '10 digits starting with 4, on your VAT registration letter', 'text', false, f.vatNumber.trim() ? vatNumberProblem(f.vatNumber) : 'Needed while registered for VAT')}
+        {!compact && text('taxNumber', 'Income tax number', 'The business’s own, 10 digits (for a sole proprietor, yours)', 'text', false, taxNumberProblem(f.taxNumber ?? ''))}
+      </div>
       <div className="form-grid">
         {text('phone', 'Phone', undefined, 'tel')}
         {text('email', 'Email', undefined, 'email')}

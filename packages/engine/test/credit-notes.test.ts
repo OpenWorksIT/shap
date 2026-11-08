@@ -10,7 +10,7 @@ describe('credit notes and pro-formas', () => {
     env = await setup();
     me = await login(env.app);
     const { settings } = await me.get('/api/reference');
-    await me.post('/api/settings', { ...settings, vatRegistered: true, vatNumber: '4000000000' }, 'PUT');
+    await me.post('/api/settings', { ...settings, vatRegistered: true, vatNumber: '4000000002' }, 'PUT');
     const client = await me.post('/api/clients', { name: 'Mrs Dlamini' });
     invoice = await me.post('/api/documents', {
       kind: 'invoice', clientId: client.id, issueDate: '2026-10-01',

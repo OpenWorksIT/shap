@@ -2,6 +2,39 @@
 
 What changed in each version of Shap Pocket, newest first.
 
+## 1.1.0 (9 November 2026)
+
+The accountant's review.
+
+- **Terms of use.** Setup now ends with the terms of use: the few points that matter (Shap is a
+  record-keeping tool, not an accountant; what you file and pay, your backups and your updates
+  are yours to look after), said back with what your own answers mean. Books set up before this
+  are asked once to accept them. The version and the date are kept in your books and audit log.
+- **Tax invoices as the VAT Act lays them out.** A VAT vendor's invoice always says “Tax invoice”
+  (zero-rated too), and shows the total excluding VAT, the VAT and the total including VAT. A tax
+  invoice over R5 000 can't be issued without the client's name and address, and a credit note
+  without its reason (now kept when the draft is edited).
+- **Numbers in the right shape.** VAT numbers, income tax numbers, PAYE and UIF references, ID
+  numbers and company registration numbers are checked as they're typed (and called by their
+  full names). Switching VAT on needs a VAT number.
+- **Employers.** Setup asks whether you're registered for PAYE, UIF and SDL, with what to do if
+  not. The new EMP501 reconciliation (Payroll → SARS) checks the interim and annual periods'
+  EMP201s against payments and each employee's IRP5 or IT3(a), with SARS's source codes.
+- **The VAT line in any 12 months in a row**, not just the last 12: Shap shows when your income
+  first crossed it.
+- **Dividends always on** for a company, Inc., CC or co-op: every dividend is declared to SARS.
+- **Preview a PDF** on screen before sending it, with its own zoom.
+- **Audit log** in Settings: every change, sign-in and export, with a spreadsheet download. It's
+  in every backup. Deleting a quote, invoice, credit note or cost first says what SARS expects
+  about keeping records, and what was deleted stays in the log.
+- **Notices from OpenWorks**: a short message across the top of the app for the rare news
+  everyone must hear, such as a needed update or, one day, support ending (see SUNSET.md).
+- “Lines” are now **Items and services**. Anonymous prices share the **average** price, not the
+  middle one. Setup says plainly that stock (inventory) tracking isn't there yet.
+- **No more notification permission.** The weekly backup reminder was a phone notification; it's
+  gone, and the app no longer asks to send notifications. Home still reminds you when a backup is
+  due.
+
 ## 1.0.1 (7 November 2026)
 
 - **The anonymous usage note** (only if you said yes to it) is now also sent after an update and

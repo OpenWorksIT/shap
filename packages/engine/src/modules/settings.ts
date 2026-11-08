@@ -1,5 +1,5 @@
 import type { App as FastifyInstance } from '../http.js';
-import { accountInput, attachmentInput, brandInput, categoryInput, entity, industryProfile, settingsInput, sourceInput, userInput, workTypeInput } from '@shap/shared';
+import { accountInput, attachmentInput, brandInput, categoryInput, entity, industryProfile, settingsInput, settingsNumberProblem, sourceInput, TERMS_URL, tidyNumbers, userInput, workTypeInput } from '@shap/shared';
 import { z } from 'zod';
 import { requireRole, seesMoney, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -100,14 +100,23 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     // (TT01 FAQ). The 2026 Budget proposed dropping this; until the law changes, it stays.
     if (input.turnoverTax && input.fyEndMonth !== 2) throw badRequest('Turnover tax needs the year to end in February: change the financial year end first (SARS’s rule for companies on turnover tax).');
     const before = await getSettings(sql);
+    // VAT, registration, tax and employer numbers: the right shape, and a VAT number to be registered for VAT.
+    const numberProblem = settingsNumberProblem(input, before);
+    if (numberProblem) throw badRequest(numberProblem.message);
+    Object.assign(input, tidyNumbers(input));
+    // A company's (or CC's) dividends are declared to SARS: the dividends section is always on for them.
+    if (entity(input.businessType).dividendsTax) input.features = { ...input.features, dividends: true };
+    // Accepting the terms: when, and in the audit log (below).
+    const accepted = input.termsVersion && input.termsVersion !== before.termsVersion ? input.termsVersion : null;
     await sql.begin(async (tx) => {
-      const row: Record<string, unknown> = { ...input, features: tx.json(input.features), logoLayout: tx.json(input.logoLayout), lockDate: input.lockDate, updatedAt: new Date() };
+      const row: Record<string, unknown> = { ...input, ...(accepted ? { termsAcceptedAt: new Date() } : {}), features: tx.json(input.features), logoLayout: tx.json(input.logoLayout), lockDate: input.lockDate, updatedAt: new Date() };
       for (const k of Object.keys(row)) if (row[k] === undefined) delete row[k];
       await tx`update settings set ${tx(row as never)} where id`;
       await applyBusinessType(tx, input.businessType);
       if (input.industry && input.industry !== before.industry) await applyIndustry(tx, input.industry);
     });
     await audit(sql, { userId: user.id, action: 'update', entity: 'settings', ip: req.ip });
+    if (accepted) await audit(sql, { userId: user.id, action: 'accept_terms', entity: 'settings', ip: req.ip, details: { version: accepted, url: TERMS_URL } });
     return getSettings(sql);
   });
 
@@ -258,8 +267,47 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
   simpleList('categories', 'cost_categories', categoryInput);
   simpleList('work-types', 'work_types', workTypeInput);
 
-  app.get('/api/audit', { preHandler: requireRole('owner', 'accountant') }, async () => {
-    return sql`select a.at, a.action, a.entity, a.entity_id, a.details, u.name as user_name
-               from audit_log a left join users u on u.id = a.user_id order by a.id desc limit 300`;
+  /**
+   * The audit log: who did what, when (it can't be changed or deleted, and it's in every backup).
+   * Newest first, a page at a time (`before` an id), optionally for one kind of record or one person.
+   */
+  const auditQuery = z.object({
+    before: z.coerce.number().int().positive().optional(),
+    limit: z.coerce.number().int().min(1).max(500).default(100),
+    entity: z.string().max(40).regex(/^[a-z_]*$/).optional(),
+    userId: z.string().uuid().optional(),
+    from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  });
+  const auditRows = (q: Omit<z.infer<typeof auditQuery>, 'limit'>, limit: number) => sql<{ id: number; at: string; action: string; entity: string; entityId: string | null; details: Record<string, unknown>; userName: string | null; actor: string }[]>`
+    select a.id, a.at, a.action, a.entity, a.entity_id, a.details, a.actor, u.name as user_name
+    from audit_log a left join users u on u.id = a.user_id
+    where true
+      ${q.before ? sql`and a.id < ${q.before}` : sql``}
+      ${q.entity ? sql`and a.entity = ${q.entity}` : sql``}
+      ${q.userId ? sql`and a.user_id = ${q.userId}` : sql``}
+      ${q.from ? sql`and a.at >= (${q.from} || ' 00:00+02')::timestamptz` : sql``}
+      ${q.to ? sql`and a.at < ((${q.to}::date + 1)::text || ' 00:00+02')::timestamptz` : sql``}
+    order by a.id desc limit ${limit}`;
+  app.get('/api/audit', { preHandler: requireRole('owner', 'accountant') }, async (req) => {
+    const q = parse(auditQuery, req.query);
+    const rows = await auditRows(q, q.limit + 1);
+    const entities = await sql<{ entity: string }[]>`select distinct entity from audit_log order by 1`;
+    return { items: rows.slice(0, q.limit), more: rows.length > q.limit, entities: entities.map((e) => e.entity) };
+  });
+  app.get('/api/audit.csv', { preHandler: requireRole('owner', 'accountant') }, async (req, reply) => {
+    const q = parse(auditQuery.omit({ before: true, limit: true }), req.query);
+    const rows = await auditRows(q, 100_000);
+    const cell = (v: unknown) => {
+      const t = String(v ?? '');
+      // No cell may start a formula in a spreadsheet.
+      const safe = /^[=+\-@\t\r]/.test(t) ? `'${t}` : t;
+      return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+    };
+    const lines = [['When', 'Who', 'Action', 'Record', 'Record id', 'Details'].join(',')];
+    for (const r of rows) lines.push([new Date(r.at).toISOString(), r.userName ?? r.actor, r.action, r.entity, r.entityId ?? '', JSON.stringify(r.details ?? {})].map(cell).join(','));
+    await audit(sql, { userId: userOrThrow(req).id, action: 'export', entity: 'audit_log', ip: req.ip });
+    reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', 'attachment; filename="shap-audit-log.csv"');
+    return `${lines.join('\r\n')}\r\n`;
   });
 }

@@ -35,7 +35,7 @@ const fileSchema = z.object({
   categories: z.array(z.object({ name: z.string().min(1), kind: z.enum(['materials', 'demo', 'overhead', 'asset', 'personal']), account: z.string(), active: z.boolean().default(true) })).default([]),
   workTypes: z.array(z.object({ name: z.string().min(1), active: z.boolean().default(true) })).default([]),
   clients: z
-    .array(clientInput.omit({ brandId: true, code: true }).extend({ code: z.string().trim().max(30).nullable().default(null), brand: z.string().max(80).nullable().default(null) }))
+    .array(clientInput.omit({ brandId: true, code: true }).extend({ code: z.string().trim().max(30).nullable().default(null), vatNumber: z.string().trim().max(30).default(''), brand: z.string().max(80).nullable().default(null) }))
     .default([]),
   /** Jobs to link to a client or trading name, by job name (applied when the jobs exist). */
   jobs: z.array(z.object({ name: z.string(), client: z.string().nullable().default(null), brand: z.string().nullable().default(null) })).default([]),

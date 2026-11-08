@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { DeleteRecord } from '../components/DeleteRecord';
+import { PdfPreview } from '../components/PdfPreview';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   addDays,
@@ -116,6 +118,8 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [drawer, setDrawer] = useState<null | 'pay' | 'charge' | 'writeoff' | 'client' | 'time'>(null);
+  const [preview, setPreview] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const profile = useMemo(() => industryProfile(settings.industry), [settings.industry]);
   const L = (c: LineCategory) => lineLabel(settings.industry, c);
   const usual = useApi<UsualLine[]>(isOwner && editable ? '/api/documents/usual-lines' : null);
@@ -246,9 +250,11 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
     });
 
   const from = settings.tradingName || settings.companyName;
+  const loadPdf = useCallback(async () => (await apiBlob(`/api/documents/${doc!.id}/pdf`)).blob, [doc?.id, doc?.updatedAt]);
   /** The PDF to the share sheet (WhatsApp, Gmail, Outlook…), with a short note for the message. */
   const share = () =>
     run(async () => {
+  const loadPdf = useCallback(async () => (await apiBlob(`/api/documents/${doc!.id}/pdf`)).blob, [doc?.id, doc?.updatedAt]);
       if (dirty) await save();
       const { blob, filename } = await apiBlob(`/api/documents/${doc!.id}/pdf`);
       const what = `${kind === 'invoice' ? (settings.vatRegistered ? 'tax invoice' : 'invoice') : credit ? 'credit note' : proforma ? 'pro-forma invoice' : 'quote'} ${doc!.number}`;
@@ -297,9 +303,18 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                 <Icon name="share" size={18} />
                 Send
               </button>
-              <button className="btn quiet" onClick={() => void view()} disabled={busy}>
+              <button
+                className="btn quiet"
+                onClick={() =>
+                  void run(async () => {
+                    if (dirty) await save();
+                    setPreview(true);
+                  })
+                }
+                disabled={busy}
+              >
                 <Icon name="print" size={18} />
-                View
+                Preview
               </button>
             </>
           )
@@ -397,7 +412,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
 
           <section className="panel">
             <div className="panel-head spread">
-              <strong>Lines</strong>
+              <strong>Items and services</strong>
               <span className="row wrap" style={{ gap: 6 }}>
                 {editable && !credit && has('timeTracker') && (
                   <button type="button" className="btn small" onClick={() => setDrawer('time')}>
@@ -415,7 +430,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
             <div className="lines">
               {d.lines.map((l, i) => (
                 <div key={l.key} className="line">
-                  <select className="select line-cat" value={l.category} onChange={(e) => updLine(l.key, { category: e.target.value as LineCategory })} aria-label="Line type" disabled={!editable}>
+                  <select className="select line-cat" value={l.category} onChange={(e) => updLine(l.key, { category: e.target.value as LineCategory })} aria-label="Kind of item" disabled={!editable}>
                     {LINE_CATEGORIES.filter((c) => LINE_CATEGORIES_OFFERED.includes(c) || c === l.category).map((c) => (
                       <option key={c} value={c}>
                         {L(c)}
@@ -437,7 +452,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                         <button type="button" className="btn quiet small" onClick={() => moveLine(l.key, -1)} disabled={i === 0} aria-label="Move up">
                           ↑
                         </button>
-                        <button type="button" className="btn quiet small" onClick={() => set('lines', d.lines.filter((x) => x.key !== l.key))} aria-label="Remove line">
+                        <button type="button" className="btn quiet small" onClick={() => set('lines', d.lines.filter((x) => x.key !== l.key))} aria-label="Remove item">
                           <Icon name="trash" size={16} />
                         </button>
                       </span>
@@ -445,7 +460,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                   </div>
                 </div>
               ))}
-              {!d.lines.length && <p className="small muted panel-pad">No lines yet.</p>}
+              {!d.lines.length && <p className="small muted panel-pad">Nothing on it yet: add what you’re charging for below.</p>}
             </div>
             <datalist id="unit-list">
               {profile.units.map((u) => (
@@ -696,13 +711,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                     </button>
                   )}
                   {(doc.kind === 'quote' || doc.status === 'draft') && (
-                    <button type="button" className="btn quiet small danger" onClick={() => {
-                      if (confirm(`Delete ${label.toLowerCase()} ${doc.number}?`)) void run(async () => {
-                        await api(`/api/documents/${doc.id}`, { method: 'DELETE' });
-                        toast('Deleted');
-                        navigate(`/documents?kind=${listKind}`);
-                      });
-                    }}>
+                    <button type="button" className="btn quiet small danger" onClick={() => setDeleting(true)}>
                       <Icon name="trash" size={16} />
                       Delete
                     </button>
@@ -810,6 +819,39 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
             set('lines', [...d.lines, ...lines.map(draftLine)]);
             setDrawer(null);
           }}
+        />
+      )}
+      {preview && doc && (
+        <PdfPreview
+          title={`${label} ${doc.number}`}
+          load={loadPdf}
+          onClose={() => setPreview(false)}
+          actions={
+            <>
+              <button className="btn primary small" onClick={() => (setPreview(false), void share())} disabled={busy}>
+                <Icon name="share" size={16} />
+                Send
+              </button>
+              <button className="btn quiet small" onClick={() => void view()} disabled={busy}>
+                Open in another app
+              </button>
+            </>
+          }
+        />
+      )}
+      {deleting && doc && (
+        <DeleteRecord
+          what={`${label.toLowerCase()} ${doc.number}`}
+          sent={doc.status !== 'draft' || Boolean((doc as { sharedAt?: string | null }).sharedAt)}
+          creditInstead={doc.kind === 'invoice' && has('creditNotes')}
+          onClose={() => setDeleting(false)}
+          onDelete={() =>
+            void run(async () => {
+              await api(`/api/documents/${doc.id}`, { method: 'DELETE' });
+              toast('Deleted');
+              navigate(`/documents?kind=${listKind}`);
+            })
+          }
         />
       )}
     </div>

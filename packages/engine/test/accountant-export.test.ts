@@ -16,7 +16,7 @@ describe('accountant export', () => {
     env = await setup();
     me = await login(env.app);
     const { settings } = await me.get('/api/reference');
-    await me.post('/api/settings', { ...settings, vatRegistered: true, vatNumber: '4000000000', features: { ...settings.features, timeTracker: true } }, 'PUT');
+    await me.post('/api/settings', { ...settings, vatRegistered: true, vatNumber: '4000000002', features: { ...settings.features, timeTracker: true } }, 'PUT');
     const r = await ref(env.sql);
     const client = await me.post('/api/clients', { name: '=Evil Client', email: 'pay@example.co.za', phone: '082 000 0000' });
     const inv = await me.post('/api/documents', {

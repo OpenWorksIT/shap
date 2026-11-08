@@ -51,7 +51,8 @@ TestFlight needs an iPhone to install on; review and release don't.
     a random install number): Play "App activity → Other actions"; Apple "Usage Data → Product
     Interaction". Optional, not linked to identity, not for tracking.
   - No ads, no advertising ID, no account.
-- **Notifications** (Android 13+ asks): only the weekly backup reminder, scheduled on the phone.
+- **Notifications**: none (from 1.1.0). The backup reminder is on Home, inside the app, and the
+  manifest removes POST_NOTIFICATIONS and SCHEDULE_EXACT_ALARM.
 - **Donations**: the "Buy us a coffee" link is hidden in the store apps (Google Play allows
   donation links only for registered non-profits; Apple wants in-app purchase for tips). The
   apps still invite ideas through the feedback button.

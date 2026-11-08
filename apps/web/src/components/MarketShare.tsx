@@ -12,7 +12,7 @@ import { useToast } from './ui';
 export function MarketWhat() {
   return (
     <span className="xs muted">
-      Once a month, the middle price you charged last month for each of your trade’s standard items (like “Tiling”, per m²), from issued invoices. Never your name, your
+      Once a month, the average price you charged last month for each of your trade’s standard items (like “Tiling”, per m²), from issued invoices. Never your name, your
       clients, the invoices, anything you typed, or totals. It’s added into national totals as it arrives and only the totals are kept, to show one day what work
       typically costs in South Africa. Never for advertising or marketing.
     </span>

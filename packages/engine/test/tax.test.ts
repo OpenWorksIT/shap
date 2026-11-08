@@ -137,8 +137,10 @@ describe('a sole proprietor in the app', () => {
     });
     await owner.post(`/api/documents/${more.id}/issue`);
     expect((await vatStatus(env.sql, '2026-11-01')).state).toBe('over');
-    // A year on, those invoices fall out of the window.
-    expect((await vatStatus(env.sql, '2027-11-01')).state).toBe(null);
+    // Any 12 months in a row count: a year on, the 12 months to October 2026 were still over the line.
+    expect(await vatStatus(env.sql, '2027-11-01')).toMatchObject({ state: 'over', last12Cents: 0, peak12Cents: 240_000_000, peakTo: '2026-10-31' });
+    // Only once it's more than two years back does Shap stop pointing at it.
+    expect((await vatStatus(env.sql, '2029-11-01')).state).toBe(null);
     await env.sql`update settings set vat_registered = true`;
     expect(await vatStatus(env.sql, '2026-11-01')).toMatchObject({ registered: true, state: null });
   });

@@ -4,7 +4,7 @@ import { formatDate } from '@shap/shared';
 import { lockEnabled, phoneHasLock, setLock } from '../components/AppLock';
 import { PageHead } from '../components/Shell';
 import { Icon, useToast } from '../components/ui';
-import { BACKUP_PLACES, backUp, backupPlace, lastBackup, placeSteps, remindOn, restoreFrom, scheduleBackupReminder, setBackupPlace, type BackupPlace } from '../lib/backup';
+import { BACKUP_PLACES, backUp, backupPlace, lastBackup, placeSteps, restoreFrom, setBackupPlace, type BackupPlace } from '../lib/backup';
 import { device, isNative, pickFile, platform } from '../lib/native';
 import { useAuthed } from '../lib/session';
 
@@ -16,7 +16,6 @@ export default function BackupPage() {
   const [lock, setLockState] = useState<boolean | null>(null);
   const [canLock, setCanLock] = useState(false);
   const [place, setPlace] = useState<BackupPlace | null>(backupPlace());
-  const [remind, setRemind] = useState(remindOn());
   const os = platform();
   const name = settings.tradingName || settings.companyName;
 
@@ -118,22 +117,7 @@ export default function BackupPage() {
               : ''}{' '}
           Still back up here at least once a week: it’s a file you control, and it moves your books to a new phone, iPhone or Android.
         </p>}
-        {isNative() && (
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={remind}
-              onChange={(e) => {
-                setRemind(e.target.checked);
-                void scheduleBackupReminder(e.target.checked);
-              }}
-            />
-            <span>
-              Remind me a week after each backup
-              <div className="xs muted">One notification, only when a backup is due.</div>
-            </span>
-          </label>
-        )}
+
       </section>
 
       <section className="panel panel-pad stack">
