@@ -187,5 +187,5 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
-      - name: move stable forward (never back: an older run finishing late is refused)
+      - name: 'move stable forward (never back: an older run finishing late is refused)'
         run: git push origin "${GITHUB_SHA}:refs/heads/stable"
