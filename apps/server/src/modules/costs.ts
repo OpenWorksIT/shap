@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { assignSourceInput, costInput, vatIncluded } from '@shap/shared';
+import { assignSourceInput, costInput, PURCHASE_VAT, vatIncluded, vatRateOn, type PurchaseVatCode } from '@shap/shared';
 import { z } from 'zod';
 import { requireRole, seesMoney, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -16,13 +16,14 @@ const idParam = z.object({ id: z.string().uuid() });
  * personal spending, the same sign as the amount, and no more than the VAT a VAT-inclusive
  * amount can hold (a cent's rounding allowed).
  */
-async function claimableVat(db: Db, input: { amountCents: number; vatCents: number; categoryId: string }): Promise<number> {
+async function claimableVat(db: Db, input: { date: string; amountCents: number; vatCents: number; categoryId: string; vatCode?: PurchaseVatCode }): Promise<number> {
   const settings = await getSettings(db);
-  if (!settings.vatRegistered || !input.vatCents) return 0;
+  // Zero-rated, exempt, no VAT on the slip, or VAT that can't be claimed (entertainment, a car): none claimed.
+  if (!settings.vatRegistered || !input.vatCents || !PURCHASE_VAT[input.vatCode ?? 'standard'].claim) return 0;
   const [cat] = await db<{ kind: string }[]>`select kind from cost_categories where id = ${input.categoryId}`;
   if (cat?.kind === 'personal') return 0;
   if (Math.sign(input.vatCents) !== Math.sign(input.amountCents)) throw badRequest('The VAT has to go the same way as the amount (both negative on a refund).');
-  const most = vatIncluded(Math.abs(input.amountCents), settings.vatRateBp) + 1;
+  const most = vatIncluded(Math.abs(input.amountCents), vatRateOn(input.date)) + 1;
   if (Math.abs(input.vatCents) > most) throw badRequest(`That’s more VAT than R${(Math.abs(input.amountCents) / 100).toFixed(2)} can include (at most R${(most / 100).toFixed(2)}).`);
   return input.vatCents;
 }
@@ -39,7 +40,7 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
       const [src] = await sql<{ role: string | null }[]>`select role from payment_sources where id = ${input.sourceId}`;
       if (!src || src.role) throw badRequest('Choose a normal account it was paid from, or leave it for the owner to set');
     }
-    return { ...input, vatCents: 0, billNumber: '', dueDate: null };
+    return { ...input, vatCents: 0, vatCode: input.vatCode === 'standard' ? 'no_vat' : input.vatCode, billNumber: '', dueDate: null };
   };
 
   app.get('/api/costs', { preHandler: requireRole('owner', 'accountant') }, async (req) => {

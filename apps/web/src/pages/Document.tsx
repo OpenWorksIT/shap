@@ -12,7 +12,11 @@ import {
   PAYMENT_METHOD_LABELS,
   PAYMENT_METHODS,
   todayIso,
-  vatOn,
+  documentTotals,
+  SALE_VAT,
+  SALE_VAT_CODES,
+  vatRateOn,
+  type SaleVatCode,
   type LineCategory,
   type PaymentMethod,
 } from '@shap/shared';
@@ -41,6 +45,7 @@ interface Draft {
   terms: string;
   number: string;
   lines: DraftLine[];
+  pricesIncludeVat: boolean;
   depositMode: 'none' | 'percent' | 'amount';
   depositPercent: string;
   depositCents: number | null;
@@ -96,6 +101,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
     terms: doc?.terms ?? (credit ? '' : billLike ? settings.invoiceTerms : settings.quoteTerms),
     number: doc?.number ?? '',
     lines: (detail?.lines ?? []).map(draftLine),
+    pricesIncludeVat: Boolean(doc?.pricesIncludeVat),
     depositMode: doc?.depositBp ? 'percent' : doc?.depositCents ? 'amount' : 'none',
     depositPercent: doc?.depositBp ? String(doc.depositBp / 100) : '50',
     depositCents: doc?.depositCents ?? null,
@@ -136,10 +142,13 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
     setD((x) => ({ ...x, clientId: x.clientId ?? p.clientId, brandId: x.brandId ?? p.brandId, title: x.title || p.name }));
   }, [project.data]);
 
-  const vatRate = doc ? doc.vatRateBp : settings.vatRegistered ? settings.vatRateBp : 0;
-  const subtotal = d.lines.reduce((s, l) => s + lineTotal(toQty(l.qty), l.unitPriceCents ?? 0), 0);
-  const vat = vatOn(subtotal, vatRate);
-  const total = subtotal + vat;
+  // A draft takes the standard rate for its date (as the server does); an issued one keeps its own.
+  const vatRate = doc && doc.status !== 'draft' ? doc.vatRateBp : settings.vatRegistered ? vatRateOn(d.issueDate || todayIso()) : 0;
+  const vendor = vatRate > 0;
+  const sums = documentTotals(d.lines.map((l) => ({ qty: toQty(l.qty), unitPriceCents: l.unitPriceCents ?? 0, vatCode: l.vatCode ?? 'standard' })), vatRate, vendor && d.pricesIncludeVat);
+  const subtotal = sums.subtotalCents;
+  const vat = sums.vatCents;
+  const total = sums.totalCents;
   const paid = doc?.paidCents ?? 0;
   const writtenOff = doc?.writtenOffOn ? doc.writtenOffCents : 0;
   const deposit = Math.min(
@@ -179,7 +188,8 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
     notes: d.notes,
     terms: d.terms,
     number: d.number || undefined,
-    lines: d.lines.filter((l) => l.description.trim() || l.unitPriceCents).map((l) => ({ category: l.category, description: l.description.trim() || L(l.category), qty: toQty(l.qty), unit: l.unit, unitPriceCents: l.unitPriceCents ?? 0 })),
+    lines: d.lines.filter((l) => l.description.trim() || l.unitPriceCents).map((l) => ({ category: l.category, description: l.description.trim() || L(l.category), qty: toQty(l.qty), unit: l.unit, unitPriceCents: l.unitPriceCents ?? 0, vatCode: l.vatCode ?? 'standard' })),
+    pricesIncludeVat: vendor && d.pricesIncludeVat,
     depositBp: d.depositMode === 'percent' && toQty(d.depositPercent) > 0 ? Math.min(10000, Math.round(toQty(d.depositPercent) * 100)) : null,
     depositCents: d.depositMode === 'amount' && d.depositCents ? d.depositCents : null,
     depositShowBalance: d.depositShowBalance,
@@ -409,6 +419,30 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                 )}
               </span>
             </div>
+            {vendor && (
+              <div className="panel-pad stack" style={{ gap: 6, paddingBottom: 0 }}>
+                <Segmented
+                  label="Prices"
+                  value={d.pricesIncludeVat ? 'incl' : 'excl'}
+                  onChange={(v) => !credit && editable && set('pricesIncludeVat', v === 'incl')}
+                  options={[
+                    { value: 'excl', label: 'Excluding VAT' },
+                    { value: 'incl', label: 'Including VAT' },
+                  ]}
+                />
+                <details className="xs muted">
+                  <summary>The VAT on each item: what the choices mean</summary>
+                  <ul className="vat-help">
+                    {SALE_VAT_CODES.map((c) => (
+                      <li key={c}>
+                        <strong>{c === 'standard' ? `${vatRate / 100}%, standard rate` : SALE_VAT[c].label}</strong> (VAT201 field {SALE_VAT[c].field}): {SALE_VAT[c].hint}
+                      </li>
+                    ))}
+                  </ul>
+                  <p>Including VAT: the total is exactly what you typed, and the VAT is worked out from it (15/115). Ask your accountant if you’re not sure how an item is taxed.</p>
+                </details>
+              </div>
+            )}
             <div className="lines">
               {d.lines.map((l, i) => (
                 <div key={l.key} className="line">
@@ -420,12 +454,21 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                     ))}
                   </select>
                   <textarea className="textarea line-desc" rows={1} value={l.description} onChange={(e) => updLine(l.key, { description: e.target.value })} placeholder={i === 0 ? `e.g. ${profile.items[0]?.d ?? 'What you did'}` : 'Description'} aria-label="Description" disabled={!editable} />
-                  <div className="line-nums">
+                  <div className={`line-nums${vendor ? ' has-vat' : ''}`}>
                     <input className="input line-qty" inputMode="decimal" value={l.qty} onChange={(e) => updLine(l.key, { qty: e.target.value.replace(/[^\d.,]/g, '') })} placeholder="1" aria-label="Quantity" disabled={!editable} />
                     <input className="input line-unit" value={l.unit} onChange={(e) => updLine(l.key, { unit: e.target.value })} list="unit-list" placeholder="unit" aria-label="Unit" disabled={!editable} />
                     <div className="line-price">
-                      <MoneyInput value={l.unitPriceCents} onChange={(c) => updLine(l.key, { unitPriceCents: c })} placeholder="Price" allowNegative aria-label="Unit price" />
+                      <MoneyInput value={l.unitPriceCents} onChange={(c) => updLine(l.key, { unitPriceCents: c })} placeholder={vendor ? (d.pricesIncludeVat ? 'Price incl.' : 'Price excl.') : 'Price'} allowNegative aria-label={vendor ? `Unit price ${d.pricesIncludeVat ? 'including' : 'excluding'} VAT` : 'Unit price'} />
                     </div>
+                    {vendor && (
+                      <select className="select line-vat" value={l.vatCode ?? 'standard'} onChange={(e) => updLine(l.key, { vatCode: e.target.value as SaleVatCode })} aria-label="VAT on this item" disabled={!editable || credit}>
+                        {SALE_VAT_CODES.map((c) => (
+                          <option key={c} value={c}>
+                            {c === 'standard' ? `${vatRate / 100}%` : SALE_VAT[c].short}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                     <span className="line-total">
                       <Money cents={lineTotal(toQty(l.qty), l.unitPriceCents ?? 0)} />
                     </span>
@@ -488,21 +531,35 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                   </div>
                 ))}
               <div>
-                <dt>Subtotal</dt>
+                <dt>{vendor ? 'Total excl. VAT' : 'Subtotal'}</dt>
                 <dd>
                   <Money cents={subtotal} />
                 </dd>
               </div>
-              {vatRate > 0 && (
+              {vendor &&
+                (['zero', 'export', 'exempt'] as const).map(
+                  (c) =>
+                    sums.byCode[c] !== 0 && (
+                      <div key={c} className="sub">
+                        <dt>of which {c === 'zero' ? 'zero-rated' : c === 'export' ? 'exported' : 'exempt'}</dt>
+                        <dd>
+                          <Money cents={sums.byCode[c]} />
+                        </dd>
+                      </div>
+                    ),
+                )}
+              {vendor && (
                 <div>
-                  <dt>VAT {vatRate / 100}%</dt>
+                  <dt>
+                    VAT {vatRate / 100}%{d.pricesIncludeVat ? ' (included)' : ''}
+                  </dt>
                   <dd>
                     <Money cents={vat} />
                   </dd>
                 </div>
               )}
               <div className="grand">
-                <dt>Total</dt>
+                <dt>{vendor ? 'Total incl. VAT' : 'Total'}</dt>
                 <dd>
                   <Money cents={total} />
                 </dd>

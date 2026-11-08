@@ -1,5 +1,5 @@
 import PDFDocument from 'pdfkit';
-import { featureOn, formatDate, formatZar, lineLabel, SHAP_LINE, SHAP_URL, type LineCategory, regPrefix } from '@shap/shared';
+import { featureOn, formatDate, formatZar, lineLabel, lineTotal, SALE_VAT, SHAP_LINE, SHAP_URL, type LineCategory, type SaleVatCode, regPrefix } from '@shap/shared';
 import type { SettingsRow } from '../lib/books.js';
 import { cleanImageCached } from '../lib/images.js';
 
@@ -44,6 +44,8 @@ export interface PdfDocument {
     terms: string;
     payLink?: string;
     vatRateBp: number;
+    /** Prices typed including VAT. */
+    pricesIncludeVat: boolean;
     subtotalCents: number;
     vatCents: number;
     totalCents: number;
@@ -73,7 +75,7 @@ export interface PdfDocument {
     writtenOffCents: number;
     writtenOffReason: string;
   };
-  lines: { id: string; category: LineCategory; description: string; qty: number; unit: string; unitPriceCents: number; lineTotalCents: number }[];
+  lines: { id: string; category: LineCategory; description: string; qty: number; unit: string; unitPriceCents: number; lineTotalCents: number; vatCode: SaleVatCode }[];
   settings: SettingsRow;
   brand: BrandRow | null;
   logo: Buffer | null;
@@ -275,13 +277,19 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   }
 
   // ---- lines
-  const cols = { desc: L + 10, qty: R - 250, unit: R - 182, amount: R - 92 };
+  // A VAT document has a VAT column (each line's kind of supply), and says whether its prices
+  // include VAT or not.
+  const incl = vatShown && doc.pricesIncludeVat;
+  const priceWord = vatShown ? (incl ? 'INCL.' : 'EXCL.') : '';
+  const cols = vatShown ? { desc: L + 10, qty: R - 300, unit: R - 236, vat: R - 150, amount: R - 92 } : { desc: L + 10, qty: R - 250, unit: R - 182, vat: 0, amount: R - 92 };
+  const vatLabel = (c: SaleVatCode) => (c === 'standard' ? `${(doc.vatRateBp / 100).toFixed(doc.vatRateBp % 100 ? 1 : 0)}%` : SALE_VAT[c].short);
   const tableHeader = () => {
     pdf.font(bold).fontSize(8).fillColor(MUTED);
     pdf.text('DESCRIPTION', cols.desc, y, { characterSpacing: 0.6 });
     pdf.text('QTY', cols.qty, y, { width: 55, align: 'right', characterSpacing: 0.6 });
-    pdf.text(vatShown ? 'PRICE EXCL.' : 'UNIT PRICE', cols.unit, y, { width: 80, align: 'right', characterSpacing: 0.6 });
-    pdf.text(vatShown ? 'AMOUNT EXCL.' : 'AMOUNT', cols.amount, y, { width: 82, align: 'right', characterSpacing: 0.6 });
+    pdf.text(vatShown ? `PRICE ${priceWord}` : 'UNIT PRICE', cols.unit, y, { width: 80, align: 'right', characterSpacing: 0.6 });
+    if (vatShown) pdf.text('VAT', cols.vat, y, { width: 50, align: 'right', characterSpacing: 0.6 });
+    pdf.text(vatShown ? `AMOUNT ${priceWord}` : 'AMOUNT', cols.amount, y, { width: 82, align: 'right', characterSpacing: 0.6 });
     y += 13;
     pdf.moveTo(L, y).lineTo(R, y).lineWidth(1.2).strokeColor(accent).stroke();
     y += 6;
@@ -314,7 +322,9 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
       pdf.fillColor(INK).text(l.description, cols.desc, y + 6, { width: descW });
       pdf.text(`${qtyText(l.qty)}${l.unit ? ` ${l.unit}` : ''}`, cols.qty, y + 6, { width: 55, align: 'right' });
       pdf.text(formatZar(l.unitPriceCents), cols.unit, y + 6, { width: 80, align: 'right' });
-      pdf.font(bold).text(formatZar(l.lineTotalCents), cols.amount, y + 6, { width: 82, align: 'right' });
+      if (vatShown) pdf.fillColor(MUTED).text(vatLabel(l.vatCode ?? 'standard'), cols.vat, y + 6, { width: 50, align: 'right' }).fillColor(INK);
+      // As typed: including VAT on a VAT-inclusive document, else excluding it.
+      pdf.font(bold).text(formatZar(incl ? lineTotal(Number(l.qty), Number(l.unitPriceCents)) : l.lineTotalCents), cols.amount, y + 6, { width: 82, align: 'right' });
       y += h;
     }
   }
@@ -323,10 +333,16 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
 
   // ---- totals (right) and payment details (left), side by side
   const totals: [string, number][] = [];
-  if (grouped) for (const cat of categories) totals.push([lineLabel(settings.industry, cat), lines.filter((l) => l.category === cat).reduce((s, l) => s + l.lineTotalCents, 0)]);
+  if (grouped) for (const cat of categories) totals.push([lineLabel(settings.industry, cat), lines.filter((l) => l.category === cat).reduce((s, l) => s + (incl ? lineTotal(Number(l.qty), Number(l.unitPriceCents)) : l.lineTotalCents), 0)]);
   // A tax invoice shows the value of the supply, the VAT and the total (s20(4)(g)); a credit note the reduction and its VAT (s21(3)).
   totals.push([vatShown ? 'Total excl. VAT' : 'Subtotal', doc.subtotalCents]);
-  if (vatShown) totals.push([`VAT ${(doc.vatRateBp / 100).toFixed(doc.vatRateBp % 100 ? 1 : 0)}%`, doc.vatCents]);
+  // What wasn't standard-rated, so the VAT can be checked (s20(4)(g)): zero-rated, exports, exempt.
+  if (vatShown)
+    for (const c of ['zero', 'export', 'exempt'] as const) {
+      const v = lines.filter((l) => (l.vatCode ?? 'standard') === c).reduce((t, l) => t + Number(l.lineTotalCents), 0);
+      if (v) totals.push([`  of which ${c === 'zero' ? 'zero-rated' : c === 'export' ? 'exported (0%)' : 'exempt'}`, v]);
+    }
+  if (vatShown) totals.push([`VAT ${(doc.vatRateBp / 100).toFixed(doc.vatRateBp % 100 ? 1 : 0)}%${incl ? ' (included)' : ''}`, doc.vatCents]);
   // A deposit is a request for part of the total up front. On an invoice it's what's due until it's in.
   const deposit = Math.min(doc.depositDueCents ?? 0, doc.totalCents);
   const depositLabel = `Deposit${doc.depositBp ? ` (${(doc.depositBp / 100).toFixed(doc.depositBp % 100 ? 1 : 0)}%)` : ''}`;

@@ -10,6 +10,8 @@ import {
   entity,
   formatDate,
   paysOutProfit,
+  todayIso,
+  vatRateOn,
   payeRefProblem,
   payoutWord,
   regNumberProblem,
@@ -349,7 +351,11 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
               </span>
             </label>}
             <div className="form-grid">
-              {f.vatRegistered && <Field label="VAT rate (%)">{(p) => <input {...p} className="input" type="number" step="0.5" value={f.vatRateBp / 100} onChange={(e) => set('vatRateBp', Math.round(Number(e.target.value) * 100))} />}</Field>}
+              {f.vatRegistered && (
+                <Field label="Standard VAT rate" hint="SARS’s rate on each document’s own date (14% before April 2018). Zero-rated and exempt items are chosen on each line.">
+                  {(p) => <input {...p} className="input" value={`${vatRateOn(todayIso()) / 100}%`} readOnly />}
+                </Field>
+              )}
               <Field label="Financial year ends in" hint={kind.febYearEnd ? `February: SARS’s tax year for ${kind.taxedAs === 'trust' ? 'trusts' : 'individuals'}` : undefined}>
                 {(p) => (
                   <select {...p} className="select" value={f.fyEndMonth} onChange={(e) => set('fyEndMonth', Number(e.target.value))} disabled={kind.febYearEnd}>

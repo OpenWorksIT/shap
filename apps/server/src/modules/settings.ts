@@ -1,11 +1,11 @@
 import type { FastifyInstance } from 'fastify';
-import { accountInput, attachmentInput, brandInput, categoryInput, entity, industryProfile, settingsInput, settingsNumberProblem, sourceInput, TERMS_URL, tidyNumbers, userInput, workTypeInput } from '@shap/shared';
+import { accountInput, attachmentInput, brandInput, categoryInput, entity, industryProfile, settingsInput, settingsNumberProblem, sourceInput, TERMS_URL, tidyNumbers, userInput, vatRateOn, workTypeInput } from '@shap/shared';
 import { z } from 'zod';
 import { checkNewPassword, confirmPassword, createUser, endOtherSessions, hashPassword, requireRole, seesMoney, sessionToken, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { pgCode, PG, type Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
-import { applyBusinessType, getSettings } from '../lib/books.js';
+import { applyBusinessType, getSettings, today } from '../lib/books.js';
 import { checkInUsage } from './feedback.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
@@ -116,6 +116,8 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     const numberProblem = settingsNumberProblem(input, before);
     if (numberProblem) throw badRequest(numberProblem.message);
     Object.assign(input, tidyNumbers(input));
+    // The standard VAT rate is SARS's (vat.ts), not a setting: kept in step for anything that reads it.
+    input.vatRateBp = vatRateOn(today());
     // A company's (or CC's) dividends are declared to SARS: the dividends section is always on for them.
     if (entity(input.businessType).dividendsTax) input.features = { ...input.features, dividends: true };
     // Accepting the terms: when, and in the audit log (below).

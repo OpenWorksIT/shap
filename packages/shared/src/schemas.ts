@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { BUSINESS_TYPES } from './entities.js';
 import { compact, idNumberProblem, taxNumberProblem, vatNumberProblem } from './ids.js';
+import { PURCHASE_VAT_CODES, SALE_VAT_CODES } from './vat.js';
 import {
   ACCOUNT_TYPES,
   ASSET_CATEGORIES,
@@ -217,6 +218,8 @@ export const costInput = z.object({
   description: text(200).min(1, 'What was it?'),
   amountCents: cents.refine((v) => v !== 0, 'Enter the amount'),
   vatCents: cents.default(0),
+  /** What VAT was on it (vat.ts): only standard-rated VAT is claimed. */
+  vatCode: z.enum(PURCHASE_VAT_CODES).default('standard'),
   supplier: text(120).default(''),
   categoryId: uuid,
   /** null = not captured yet: you'll say later which account or card paid it. */
@@ -252,6 +255,8 @@ export const documentLineInput = z.object({
   qty: z.number().min(-1_000_000).max(1_000_000).default(1),
   unit: text(20).default(''),
   unitPriceCents: cents,
+  /** What kind of supply the line is (vat.ts): standard-rated unless said otherwise. */
+  vatCode: z.enum(SALE_VAT_CODES).default('standard'),
 });
 
 export const documentInput = z.object({
@@ -267,6 +272,8 @@ export const documentInput = z.object({
   notes: text(4000).default(''),
   terms: text(4000).default(''),
   lines: z.array(documentLineInput).max(300).default([]),
+  /** Prices typed including VAT (the total is then exactly what was typed), or excluding it. */
+  pricesIncludeVat: z.boolean().default(false),
   number: text(30).optional(),
   /** Deposit asked for up front: a percentage (basis points) or a fixed amount, not both. */
   depositBp: z.number().int().min(1).max(10000).nullable().default(null),
