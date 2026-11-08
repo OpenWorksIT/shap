@@ -19,6 +19,7 @@ import { setTone, type Tone } from '../lib/words';
 import { SupportShap } from '../components/Support';
 import { MarketWhat } from '../components/MarketShare';
 import { AuditLog } from '../components/AuditLog';
+import { ClipsSetting } from '../components/HowItWorks';
 
 type Tab = 'business' | 'invoicing' | 'sections' | 'lists' | 'audit';
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -301,6 +302,7 @@ function Sections() {
           </span>
         </label>
       </section>
+      <ClipsSetting />
       <SupportShap />
     </div>
   );

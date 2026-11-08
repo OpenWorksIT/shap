@@ -37,7 +37,7 @@ const pwa: PluginOption = VitePWA({
   },
   workbox: {
     // Everything the app needs to open with no internet, the database engine included.
-    globPatterns: ['**/*.{js,css,html,wasm,data,gz,svg,png,woff2}'],
+    globPatterns: ['**/*.{js,css,html,wasm,data,gz,svg,png,woff2,mp4}'],
     maximumFileSizeToCacheInBytes: 24 * 1024 * 1024,
     navigateFallback: 'index.html',
     cleanupOutdatedCaches: true,

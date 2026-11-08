@@ -39,6 +39,8 @@ function migrated(): Promise<PGlite> {
       await sql`insert into brands (name, sort) values ('Test Builders (Pty) Ltd', 1)`;
       await sql`update settings set default_brand_id = (select id from brands limit 1)`;
       await sql`update accounts set type = 'liability', name = 'Owner’s loan account' where system_key = 'owner_loan'`;
+      // A tax invoice shows the business's address (fictional).
+      await sql`update settings set address = '1 Test Street, Fictional Town, 0001'`;
     }
     return pg;
   })());

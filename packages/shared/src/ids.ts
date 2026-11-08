@@ -37,6 +37,18 @@ export function vatNumberProblem(v: string): string | null {
   return null;
 }
 
+/**
+ * A client's VAT number: a South African one (checked as above), or a client abroad's, which
+ * starts with their country code (GB123456789, DE123456789) and isn't checked further.
+ */
+export function clientVatNumberProblem(v: string): string | null {
+  const s = compact(v);
+  if (!s) return null;
+  if (/^[A-Z]{2}[A-Z0-9]{2,13}$/.test(s)) return null;
+  if (/^\d{10}$/.test(s)) return vatNumberProblem(s);
+  return 'A South African VAT number is 10 digits starting with 4. For a client abroad, start with their country code (for example GB123456789)';
+}
+
 /** An income tax reference number: 10 digits starting with 0, 1, 2, 3 or 9. */
 export function taxNumberProblem(v: string): string | null {
   const s = compact(v);
@@ -119,7 +131,10 @@ export function idNumberProblem(v: string): string | null {
   const s = compact(v);
   if (!s) return null;
   if (!/^\d+$/.test(s)) return /^[A-Z0-9]{6,20}$/.test(s) ? null : 'Use the 13-digit ID number, or a passport number (letters and digits)';
-  if (s.length !== 13) return 'A South African ID number is 13 digits';
+  // A passport number can be digits only (SARS takes any of 6 or more characters); one of 11 to
+  // 14 digits is far more likely an ID number with a digit missing or extra.
+  if (s.length >= 6 && s.length <= 10) return null;
+  if (s.length !== 13) return s.length < 6 ? 'Use the 13-digit ID number, or a passport number (6 or more characters)' : 'A South African ID number is 13 digits';
   const mm = Number(s.slice(2, 4));
   const dd = Number(s.slice(4, 6));
   if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return 'The first six digits of an ID number are the date of birth (YYMMDD)';

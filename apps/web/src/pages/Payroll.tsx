@@ -738,7 +738,7 @@ interface Emp501Data {
   taxYear: number;
   from: string;
   to: string;
-  window: { opens: string; closes: string };
+  window: { opens: string; closes: string; approx?: boolean };
   employer: { name: string; payeRef: string; sdlRef: string; uifRef: string; taxNumber: string; problems: string[] };
   months: { period: string; payeCents: number; uifCents: number; sdlCents: number; paidCents: number; totalCents: number }[];
   declared: { paye: number; uif: number; sdl: number; paid: number; total: number };
@@ -789,7 +789,7 @@ function Emp501() {
         {data && (
           <>
             <p className="small">
-              {formatDate(data.from)} to {formatDate(data.to)}. File between {formatDate(data.window.opens)} and {formatDate(data.window.closes)}.
+              {formatDate(data.from)} to {formatDate(data.to)}. File between {formatDate(data.window.opens)} and {formatDate(data.window.closes)}{data.window.approx ? ' (the usual dates: SARS announces each season’s, so check eFiling)' : ''}.
             </p>
             {data.employer.problems.map((p) => (
               <div key={p} className="banner alert small">

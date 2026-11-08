@@ -1,4 +1,5 @@
 import { Notices } from './Notices';
+import { ScreenClip } from './HowItWorks';
 import { paysOutProfit } from '@shap/shared';
 import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
@@ -69,6 +70,7 @@ export function Shell({ children }: { children: ReactNode }) {
 
       <main className="main" id="main">
         <Notices />
+        <ScreenClip />
         {children}
       </main>
 

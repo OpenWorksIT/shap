@@ -179,10 +179,11 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   // A pro-forma asks to be paid like an invoice, but it isn't one (no tax invoice until the work's invoiced).
   const isInvoice = doc.kind === 'invoice';
   const asksPayment = isInvoice || isProforma;
-  // A VAT vendor's invoice is a tax invoice even when everything on it is zero-rated (VAT Act s20(4)(a)).
-  const vendor = settings.vatRegistered;
-  const heading = isCredit ? 'Credit note' : isInvoice ? (vendor ? 'Tax invoice' : 'Invoice') : isProforma ? 'Pro-forma invoice' : 'Quotation';
-  const vatShown = vendor || doc.vatRateBp > 0;
+  // Its own VAT rate says whether the business was a VAT vendor for it (not whether it is today):
+  // a vendor's invoice is a tax invoice even when everything on it is zero-rated (VAT Act s20(4)(a)),
+  // and one from before registering still reprints as a plain invoice.
+  const vatShown = doc.vatRateBp > 0;
+  const heading = isCredit ? 'Credit note' : isInvoice ? (vatShown ? 'Tax invoice' : 'Invoice') : isProforma ? 'Pro-forma invoice' : 'Quotation';
   const balance = doc.totalCents - (isInvoice ? doc.paidCents : 0);
   const label = (text: string, x: number, at: number, opts: PDFKit.Mixins.TextOptions = {}) =>
     pdf.font(bold).fontSize(7.5).fillColor(MUTED).text(text.toUpperCase(), x, at, { characterSpacing: 0.9, ...opts });
@@ -247,7 +248,7 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   const fromLines = [
     legal !== tradingName ? legal : '',
     settings.regNumber ? `${regPrefix(settings.businessType)} ${settings.regNumber}` : '',
-    settings.vatRegistered && settings.vatNumber ? `VAT no. ${settings.vatNumber}` : '',
+    vatShown && settings.vatNumber ? `VAT no. ${settings.vatNumber}` : '',
     contact.address,
     [contact.phone, contact.email].filter(Boolean).join('  ·  '),
     contact.website,
@@ -441,7 +442,7 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
     pdf.page.margins.bottom = 0;
     const fy = pdf.page.height - (settings.watermark ? 46 : 40);
     pdf.rect(0, pdf.page.height - 6, W, 6).fill(accent);
-    const foot = [legal, settings.regNumber ? `${regPrefix(settings.businessType)} ${settings.regNumber}` : '', settings.vatRegistered && settings.vatNumber ? `VAT ${settings.vatNumber}` : ''].filter(Boolean).join('  ·  ');
+    const foot = [legal, settings.regNumber ? `${regPrefix(settings.businessType)} ${settings.regNumber}` : '', vatShown && settings.vatNumber ? `VAT ${settings.vatNumber}` : ''].filter(Boolean).join('  ·  ');
     pdf.font(regular).fontSize(7.5).fillColor(MUTED).text(foot, L, fy, { width: contentW - 80, lineBreak: false });
     pdf.text(`Page ${i - range.start + 1} of ${range.count}`, R - 80, fy, { width: 80, align: 'right', lineBreak: false });
     if (settings.watermark) shapFooter(pdf, L, fy + 14, contentW, regular);

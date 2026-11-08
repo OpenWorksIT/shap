@@ -72,19 +72,18 @@ export function documentTotals(lines: TotalsLine[], rateBp: number, pricesInclud
   const amounts = lines.map((l) => roundCents(l.qty * l.unitPriceCents));
   const standard = lines.map((l) => rateBp > 0 && (l.vatCode ?? 'standard') === 'standard');
   const stdAmount = amounts.reduce((t, a, i) => t + (standard[i] ? a : 0), 0);
-  const vatCents = rateBp > 0 ? roundCents(pricesIncludeVat ? (stdAmount * rateBp) / (10000 + rateBp) : (stdAmount * rateBp) / 10000) : 0;
-  // Each standard line's share of the VAT, so the shares add up to it exactly.
-  const lineVat = amounts.map(() => 0);
-  if (stdAmount !== 0) {
-    let running = 0;
-    let shared = 0;
+  const vatOn = (a: number) => (rateBp > 0 ? (pricesIncludeVat ? (a * rateBp) / (10000 + rateBp) : (a * rateBp) / 10000) : 0);
+  const vatCents = roundCents(vatOn(stdAmount));
+  // Each standard line's own VAT (so a discount line takes its own share back), with the cent or
+  // two of rounding put on the biggest line, so the shares add up to the VAT exactly.
+  const lineVat = amounts.map((a, i) => (standard[i] ? roundCents(vatOn(a)) : 0));
+  const left = vatCents - lineVat.reduce((t, v) => t + v, 0);
+  if (left !== 0) {
+    let big = -1;
     amounts.forEach((a, i) => {
-      if (!standard[i]) return;
-      running += a;
-      const upTo = roundCents((vatCents * running) / stdAmount);
-      lineVat[i] = upTo - shared;
-      shared = upTo;
+      if (standard[i] && (big < 0 || Math.abs(a) > Math.abs(amounts[big]!))) big = i;
     });
+    if (big >= 0) lineVat[big] = lineVat[big]! + left;
   }
   const net = amounts.map((a, i) => (pricesIncludeVat ? a - lineVat[i]! : a));
   const subtotalCents = net.reduce((t, n) => t + n, 0);

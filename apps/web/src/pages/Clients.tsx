@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { formatDate, formatPercent, vatNumberProblem } from '@shap/shared';
+import { clientVatNumberProblem, formatDate, formatPercent } from '@shap/shared';
 import { BrandSelect, useHasBrands } from '../components/Pickers';
 import { PageHead } from '../components/Shell';
 import { DocChip, Drawer, Empty, ErrorBox, Field, Icon, Kpi, Loading, Money, ProjectChip, useToast } from '../components/ui';
@@ -227,7 +227,7 @@ export function ClientDrawer({ client, onClose, onSaved }: { client?: ClientRow;
         </div>
         <Field label="Email (invoices go here)">{(p) => <input {...p} className="input" type="email" value={f.email} onChange={(e) => set('email', e.target.value)} />}</Field>
         <Field label="Address">{(p) => <textarea {...p} className="textarea" rows={3} value={f.address} onChange={(e) => set('address', e.target.value)} />}</Field>
-        <Field label="VAT number" hint="If they’re registered for VAT: needed on a tax invoice over R5 000" error={vatNumberProblem(f.vatNumber) ?? undefined}>
+        <Field label="VAT number" hint="If they’re registered for VAT: it goes on a full tax invoice. A client abroad: start with their country code (GB…)" error={clientVatNumberProblem(f.vatNumber) ?? undefined}>
           {(p) => <input {...p} className="input" inputMode="numeric" value={f.vatNumber} onChange={(e) => set('vatNumber', e.target.value)} />}
         </Field>
         {hasBrands && (

@@ -116,7 +116,7 @@ export async function createDocument(tx: Db, user: AuthUser | null, kind: DocKin
     kind === 'credit_note' ? null : (input.dueDate ?? (kind === 'invoice' || proforma ? addDays(input.issueDate, settings.paymentDays) : addDays(input.issueDate, settings.quoteValidDays)));
   // The standard rate on the document's own date (vat.ts), for a VAT vendor.
   let vatRate = settings.vatRegistered ? vatRateOn(input.issueDate) : 0;
-  let inclusive = input.pricesIncludeVat;
+  let inclusive = input.pricesIncludeVat ?? false;
   if (kind === 'credit_note') {
     const [inv] = await tx<{ kind: string; status: string; clientId: string | null; vatRateBp: number; pricesIncludeVat: boolean }[]>`
       select kind, status, client_id, vat_rate_bp, prices_include_vat from documents where id = ${input.creditedInvoiceId ?? null}`;
@@ -201,24 +201,60 @@ export async function markShared(db: Db, id: string): Promise<string | null> {
 export const FULL_TAX_INVOICE_CENTS = 5_000_00;
 
 /**
- * What a tax invoice or credit note must carry before it's issued: the recipient's name and
- * address on a full tax invoice (over R5 000, s20(4)), and on a credit note the reason and the
- * invoice it credits (s21(3)). The business's VAT number is checked when VAT is switched on.
+ * What a tax invoice or credit note must carry before it's issued (VAT Act s20(4) and (5),
+ * s21(3)): https://www.acts.co.za/value-added-tax-act-1991/20__tax_invoices
+ * - Every tax invoice and credit note: the business's name, address and VAT number.
+ * - A full tax invoice: the client's name and address too (and their VAT number if they're
+ *   registered). It's needed over R5 000, and always when anything on it is zero-rated or
+ *   exported: the short (abridged) form can't be used for zero-rated supplies (s20(5) proviso).
+ * - A credit note: the reason and the invoice it credits, and the client's details whenever
+ *   the invoice it credits needed them (s21(3)(c)).
  */
 export async function assertTaxDocument(db: Db, id: string): Promise<void> {
-  const [d] = await db<{ kind: string; totalCents: number; creditReason: string; creditedInvoiceId: string | null; clientName: string | null; clientAddress: string | null }[]>`
-    select d.kind, d.total_cents, d.credit_reason, d.credited_invoice_id, c.name as client_name, c.address as client_address
-    from documents d left join clients c on c.id = d.client_id where d.id = ${id}`;
+  const [d] = await db<{ kind: string; vatRateBp: number; totalCents: number; creditReason: string; creditedInvoiceId: string | null; clientName: string | null; clientAddress: string | null; brandAddress: string | null }[]>`
+    select d.kind, d.vat_rate_bp, d.total_cents, d.credit_reason, d.credited_invoice_id, c.name as client_name, c.address as client_address, b.address as brand_address
+    from documents d left join clients c on c.id = d.client_id left join brands b on b.id = d.brand_id where d.id = ${id}`;
   if (!d) return;
   const s = await getSettings(db);
   if (d.kind === 'credit_note') {
     if (!d.creditedInvoiceId) throw badRequest('A credit note says which invoice it credits');
     if (!String(d.creditReason ?? '').trim()) throw badRequest('Say briefly why the credit note is issued (SARS requires the reason on it)');
   }
-  if (s.vatRegistered && (d.kind === 'invoice' || d.kind === 'credit_note') && Math.abs(Number(d.totalCents)) > FULL_TAX_INVOICE_CENTS) {
-    if (!d.clientName?.trim() || !d.clientAddress?.trim())
-      throw badRequest(`A tax ${d.kind === 'invoice' ? 'invoice' : 'credit note'} over R5 000 must show the client’s name and address (and their VAT number if they’re registered). Add them to the client first.`);
+  if (!(d.kind === 'invoice' || d.kind === 'credit_note') || !(Number(d.vatRateBp) > 0)) return;
+  const what = d.kind === 'invoice' ? 'tax invoice' : 'credit note';
+  if (!s.vatNumber.trim()) throw badRequest(`A ${what} must show your VAT number. Add it in Settings → Company first.`);
+  if (!(d.brandAddress?.trim() || s.address.trim())) throw badRequest(`A ${what} must show your business address. Add it in Settings → Company first.`);
+  // Whether the full form is needed: for a credit note, whether the invoice it credits needed it.
+  const basis = d.kind === 'credit_note' ? d.creditedInvoiceId! : id;
+  const [f] = await db<{ totalCents: number; zeroRated: boolean }[]>`
+    select d.total_cents, exists (select 1 from document_lines l where l.document_id = d.id and l.vat_code in ('zero', 'export')) as zero_rated
+    from documents d where d.id = ${basis}`;
+  const full = Math.abs(Number(f?.totalCents ?? d.totalCents)) > FULL_TAX_INVOICE_CENTS || Boolean(f?.zeroRated);
+  if (full && (!d.clientName?.trim() || !d.clientAddress?.trim())) {
+    const why = Math.abs(Number(f?.totalCents ?? d.totalCents)) > FULL_TAX_INVOICE_CENTS ? 'over R5 000' : 'with zero-rated or exported items';
+    throw badRequest(
+      d.kind === 'invoice'
+        ? `A tax invoice ${why} must show the client’s name and address (and their VAT number if they’re registered). Add them to the client first.`
+        : `This credit note must show the client’s name and address, as the invoice it credits did (a tax invoice ${why}). Add them to the client first.`,
+    );
   }
+}
+
+/**
+ * A draft invoice charges VAT as the business stands when it's issued: one drafted before
+ * registering for VAT gets VAT once registered (and the other way round), at the rate on its date.
+ */
+export async function refreshDraftVat(db: Db, id: string): Promise<void> {
+  const [d] = await db<{ kind: string; status: string; issueDate: string; vatRateBp: number; pricesIncludeVat: boolean }[]>`
+    select kind, status, issue_date::text, vat_rate_bp, prices_include_vat from documents where id = ${id}`;
+  if (!d || d.kind !== 'invoice' || d.status !== 'draft') return;
+  const s = await getSettings(db);
+  const rate = s.vatRegistered ? vatRateOn(d.issueDate) : 0;
+  if (rate === Number(d.vatRateBp)) return;
+  const lines = await db<{ category: string; description: string; qty: number; unit: string; unitPriceCents: number; vatCode: 'standard' | 'zero' | 'export' | 'exempt' }[]>`
+    select category, description, qty, unit, unit_price_cents, vat_code from document_lines where document_id = ${id} order by sort`;
+  await db`update documents set vat_rate_bp = ${rate} where id = ${id}`;
+  await writeLines(db, id, lines.map((l) => ({ ...l, qty: Number(l.qty), unitPriceCents: Number(l.unitPriceCents) })) as NonNullable<DocInput['lines']>, rate, d.pricesIncludeVat);
 }
 
 export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -298,8 +334,18 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (old.kind === 'invoice' && old.status === 'issued') await assertOpen(sql, old.issueDate, input.issueDate);
     const settings = await getSettings(sql);
     const vatRate = old.status === 'draft' && old.kind !== 'credit_note' ? (settings.vatRegistered ? vatRateOn(input.issueDate) : 0) : old.vatRateBp;
-    // A credit note is priced the way its invoice was.
-    const inclusive = old.kind === 'credit_note' ? Boolean((await sql<{ inc: boolean }[]>`select i.prices_include_vat as inc from documents d join documents i on i.id = d.credited_invoice_id where d.id = ${id}`)[0]?.inc) : input.pricesIncludeVat;
+    // A credit note is priced the way its invoice was. An issued invoice keeps the way its prices
+    // were typed: switching would change what it charged (correct it with a credit note instead).
+    // Left out, it stays as it was.
+    const was = Boolean((old as { pricesIncludeVat?: boolean }).pricesIncludeVat);
+    if (old.kind === 'invoice' && old.status !== 'draft' && input.pricesIncludeVat !== undefined && input.pricesIncludeVat !== was)
+      throw badRequest('An issued invoice keeps the way its prices were entered (including or excluding VAT). To change it, credit it and issue a new one.');
+    const inclusive =
+      old.kind === 'credit_note'
+        ? Boolean((await sql<{ inc: boolean }[]>`select i.prices_include_vat as inc from documents d join documents i on i.id = d.credited_invoice_id where d.id = ${id}`)[0]?.inc)
+        : old.status === 'draft'
+          ? (input.pricesIncludeVat ?? was)
+          : was;
     const number = input.number?.trim() || old.number;
     await sql.begin(async (tx) => {
       let clientId = input.clientId ?? null;
@@ -346,6 +392,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     await assertOpen(sql, doc.issueDate);
     const [lines] = await sql<{ n: number }[]>`select count(*) as n from document_lines where document_id = ${id}`;
     if (!lines!.n) throw badRequest('Add at least one item first');
+    await refreshDraftVat(sql, id);
     await assertTaxDocument(sql, id);
     if (doc.kind === 'credit_note') {
       // It settles that much of the invoice: never more than what's still owed on it.
@@ -596,6 +643,8 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.get('/api/documents/:id/pdf', { preHandler: requireRole('owner', 'accountant') }, async (req, reply) => {
     const { id } = parse(idParam, req.params);
+    // A draft invoice shows the VAT it will be issued with.
+    await refreshDraftVat(sql, id);
     const { pdf, filename } = await pdfFor(id);
     reply.header('content-type', 'application/pdf');
     reply.header('content-disposition', `${q(req).download ? 'attachment' : 'inline'}; filename="${filename}"`);

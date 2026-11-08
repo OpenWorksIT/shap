@@ -15,15 +15,42 @@ exception when duplicate_object then null; end $$;
 -- Costs from before: VAT claimed means standard-rated; none means no VAT was claimed on it.
 update costs set vat_code = 'no_vat' where vat_cents = 0 and vat_code = 'standard';
 
+-- Invoices a VAT vendor issued at 0% before this (the only way to zero-rate one then): their
+-- lines become zero-rated at the standard rate of their date, so they keep counting as zero-rated
+-- supplies (VAT201 field 2) and reprint as tax invoices. Nothing they charged changes. Those from
+-- before the business's first invoice with VAT were issued before it registered: they stay at 0%
+-- and aren't on any VAT return. Credit notes follow the invoice they credit.
+do $$
+declare first_vat date;
+begin
+  if (select vat_registered from settings where id) then
+    select min(issue_date) into first_vat from documents where kind = 'invoice' and status <> 'draft' and vat_rate_bp > 0;
+    if first_vat is not null then
+      update document_lines l set vat_code = 'zero' from documents d
+        where l.document_id = d.id and d.kind = 'invoice' and d.status <> 'draft' and d.vat_rate_bp = 0 and d.issue_date >= first_vat;
+      update documents set vat_rate_bp = case when issue_date >= '2018-04-01' then 1500 else 1400 end
+        where kind = 'invoice' and status <> 'draft' and vat_rate_bp = 0 and issue_date >= first_vat;
+      update document_lines l set vat_code = 'zero' from documents c join documents i on i.id = c.credited_invoice_id
+        where l.document_id = c.id and c.kind = 'credit_note' and c.vat_rate_bp = 0 and i.vat_rate_bp > 0;
+      update documents c set vat_rate_bp = i.vat_rate_bp from documents i
+        where i.id = c.credited_invoice_id and c.kind = 'credit_note' and c.vat_rate_bp = 0 and i.vat_rate_bp > 0;
+    end if;
+  end if;
+end $$;
+
 -- The VAT inside a written-off amount (claimed back, VAT201 field 17): at the invoice's rate when
--- every line was standard-rated (as before), and in proportion to the invoice's VAT when it mixed
--- standard-rated with zero-rated or exempt lines.
+-- every line was standard-rated (as before). When it mixed standard-rated with zero-rated or
+-- exempt lines, in proportion to the VAT still in the debt: the invoice's VAT and total less the
+-- credit notes issued against it (a credit note can take back only the standard-rated part).
 create or replace function bad_debt_vat(p_id uuid, p_written_off bigint, p_rate integer, p_vat bigint, p_total bigint) returns bigint
 language sql stable as $$
   select case
     when p_rate = 0 or p_written_off = 0 then 0::bigint
-    when exists (select 1 from document_lines l where l.document_id = p_id and l.vat_code <> 'standard')
-      then case when p_total = 0 then 0::bigint else round(p_written_off * p_vat::numeric / p_total)::bigint end
+    when exists (select 1 from document_lines l where l.document_id = p_id and l.vat_code <> 'standard') then (
+      select case when p_total - cn.total <= 0 or p_vat - cn.vat <= 0 then 0::bigint
+                  else least(round(p_written_off * (p_vat - cn.vat)::numeric / (p_total - cn.total)), p_vat - cn.vat)::bigint end
+      from (select coalesce(sum(c.vat_cents), 0) as vat, coalesce(sum(c.total_cents), 0) as total
+              from documents c where c.credited_invoice_id = p_id and c.kind = 'credit_note' and c.status = 'issued') cn)
     else round(p_written_off * p_rate::numeric / (10000 + p_rate))::bigint
   end
 $$;
