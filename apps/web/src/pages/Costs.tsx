@@ -110,7 +110,7 @@ export default function CostsPage() {
     <div className="stack-lg">
       <PageHead
         title="Costs"
-        sub={data ? `${rows.length} costs · ${formatZar(total)}` : undefined}
+        sub={data ? `${rows.length} ${rows.length === 1 ? 'cost' : 'costs'} · ${formatZar(total)}` : undefined}
         actions={
           <>
             <button className="btn" onClick={() => setParam('kind', 'recurring')}>

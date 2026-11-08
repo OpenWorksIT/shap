@@ -6,6 +6,7 @@ import { PageHead } from '../components/Shell';
 import { DocChip, Empty, ErrorBox, Icon, Kpi, Loading, Money, ProjectChip, useToast } from '../components/ui';
 import { stopClock, useMinuteTick, type Running } from '../components/TimeTracker';
 import { ApiError } from '../lib/api';
+import { finishUpdate, startUpdate, storeName, useAppUpdate } from '../lib/appUpdate';
 import { sendReminder, type Remindable } from '../lib/reminders';
 import { hoursLabel, minutesSince } from '../lib/time';
 import { useApi } from '../lib/hooks';
@@ -58,6 +59,7 @@ function OwnerHome() {
   const { settings, isOwner, has } = useAuthed();
   const { data, error, reload } = useApi<Dashboard>('/api/dashboard');
   const toast = useToast();
+  const update = useAppUpdate();
   useMinuteTick();
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   if (!data) return <Loading />;
@@ -67,6 +69,37 @@ function OwnerHome() {
   const billsLate = (data.billsDue ?? []).filter((b) => (b.dueDate ?? b.date) < data.today);
   const billsOwing = (data.billsDue ?? []).reduce((s, b) => s + Number(b.owingCents), 0);
   const needs = [
+    // A newer version from the store, until it's installed (lib/appUpdate.ts).
+    update.state !== 'none' && (
+      <div key="update" className="attention">
+        <Icon name="download" size={18} />
+        <span className="grow">
+          {update.state === 'ready' ? (
+            <>
+              <strong>The update is downloaded.</strong> Restart Shap Pocket to finish: it takes a few seconds.
+            </>
+          ) : update.state === 'downloading' ? (
+            <>
+              <strong>Downloading the update{update.pct != null ? ` (${update.pct}%)` : ''}…</strong> Carry on: it’s ready when it’s done.
+            </>
+          ) : (
+            <>
+              <strong>A newer Shap Pocket is on {storeName()}.</strong> Updates carry tax, VAT and security fixes: keep it up to date.
+            </>
+          )}
+        </span>
+        {update.state === 'ready' && (
+          <button type="button" className="btn small primary" onClick={() => void finishUpdate()}>
+            Restart
+          </button>
+        )}
+        {update.state === 'available' && (
+          <button type="button" className="btn small primary" onClick={() => void startUpdate()}>
+            Update
+          </button>
+        )}
+      </div>
+    ),
     data.timer && (
       <div key="timer" className="attention">
         <Icon name="clock" size={18} />

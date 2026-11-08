@@ -63,7 +63,7 @@ export const clipUrl = (k: ClipKey, ext: 'webm' | 'mp4') => `${import.meta.env.B
 function Sources({ clip, onFail }: { clip: ClipKey; onFail: () => void }) {
   return (
     <>
-      <source src={clipUrl(clip, 'mp4')} type='video/mp4; codecs="avc1.64001E"' />
+      <source src={clipUrl(clip, 'mp4')} type='video/mp4; codecs="avc1.64001F"' />
       <source src={clipUrl(clip, 'webm')} type='video/webm; codecs="vp9"' onError={onFail} />
     </>
   );
@@ -208,9 +208,14 @@ export function ClipsSetting() {
   );
 }
 
+/** In Shap Pocket's phone app (Capacitor), not a browser. */
+const phoneApp = () => Boolean((window as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.());
+
 /** Which clip a screen has (the list pages only, not each record). */
 export function clipFor(pathname: string, search: string): ClipKey | null {
   const kind = new URLSearchParams(search).get('kind');
+  // The backup clip is recorded from the computer version of the screen, which differs on a phone.
+  if (pathname === '/backup' && phoneApp()) return null;
   const map: Record<string, ClipKey> = { '/': 'home', '/clients': 'clients', '/costs': 'costs', '/jobs': 'jobs', '/payroll': 'payroll', '/accounts': 'accounts', '/settings': 'settings', '/backup': 'backup' };
   if (pathname === '/documents') return kind === 'quote' ? 'quotes' : 'invoices';
   return map[pathname] ?? null;

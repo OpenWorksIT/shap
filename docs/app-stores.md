@@ -53,6 +53,11 @@ TestFlight needs an iPhone to install on; review and release don't.
   - No ads, no advertising ID, no account.
 - **Notifications**: none (from 1.1.0). The backup reminder is on Home, inside the app, and the
   manifest removes POST_NOTIFICATIONS and SCHEDULE_EXACT_ALARM.
+- **Updates** (from 1.4.0): the app asks Google Play whether a newer version is out (the Play
+  in-app updates API, through `@capawesome/capacitor-app-update`), shows Play's own update sheet
+  at most every three days, and keeps a reminder on Home until it's installed. It works only for
+  installs from Play (internal testing tracks included), adds no permission and sends nothing to
+  OpenWorks. On iPhone, Update opens the App Store.
 - **Donations**: the "Buy us a coffee" link is hidden in the store apps (Google Play allows
   donation links only for registered non-profits; Apple wants in-app purchase for tips). The
   apps still invite ideas through the feedback button.

@@ -2,6 +2,20 @@
 
 What changed in each version of Shap Pocket, newest first.
 
+## 1.4.0 (9 November 2026)
+
+- **Updates from Google Play, inside the app.** Shap Pocket asks Google Play whether there's a
+  newer version. Play's own update sheet offers it (at most every three days), it downloads while
+  you work, and Restart installs it. Until then, Home keeps a reminder with an Update button.
+- The backup clip shows only in the computer version (the phone's backup screen is different).
+- **One tap for payment terms.** On an invoice: due on receipt, in 7, 14 or 30 days, or at month
+  end; on a quote: valid for 7, 14, 30 or 60 days. A tap sets the date and changes the wording in
+  the terms to match (“Payment due within 30 days”). Changing the invoice date keeps the term.
+  Settings (and setup) have the same choices for the usual terms.
+- **Calmer how-it-works clips.** Re-recorded slower, a few steps each, with a caption above the
+  screen saying what each step is.
+- “1 cost”, not “1 costs”.
+
 ## 1.3.0 (9 November 2026)
 
 - **Issued tax invoices are fixed.** Once a VAT vendor's invoice is issued, its items and

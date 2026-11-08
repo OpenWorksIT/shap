@@ -20,11 +20,11 @@ import {
   vatRateOn,
   type SaleVatCode,
   type LineCategory,
-  type PaymentMethod,
-} from '@shap/shared';
+  type PaymentMethod, PAYMENT_TERMS, QUOTE_VALID_DAYS, dueFor, termOf, withPaymentTerm, withQuoteValidity, dayLabel, type PaymentTerm } from '@shap/shared';
 import { BrandSelect, ProjectSelect, useHasBrands } from '../components/Pickers';
 import { ClientDrawer } from './Clients';
 import { PageHead } from '../components/Shell';
+import { TermPicks } from '../components/TermPicks';
 import { DocChip, Drawer, ErrorBox, Field, Icon, Loading, Money, MoneyInput, Segmented, useToast } from '../components/ui';
 import { api, ApiError, apiBlob } from '../lib/api';
 import { openFile, shareFile } from '../lib/native';
@@ -136,6 +136,20 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
   const L = (c: LineCategory) => lineLabel(settings.industry, c);
   const usual = useApi<UsualLine[]>(isOwner && editable ? '/api/documents/usual-lines' : null);
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => (setD((x) => ({ ...x, [k]: v })), setDirty(true));
+  // Payment terms (or how long a quote is valid): one tap sets the date and the wording. A new
+  // invoice date keeps the same term.
+  const termChoices: readonly PaymentTerm[] = billLike ? PAYMENT_TERMS.map((t) => t.term) : QUOTE_VALID_DAYS;
+  const term = credit ? null : termOf(d.issueDate, d.dueDate, termChoices);
+  const pickTerm = (t: PaymentTerm) => (
+    setD((x) => ({ ...x, dueDate: dueFor(x.issueDate, t), terms: billLike ? withPaymentTerm(x.terms, t) : typeof t === 'number' ? withQuoteValidity(x.terms, t) : x.terms })), setDirty(true)
+  );
+  const moveIssueDate = (v: string) => (
+    setD((x) => {
+      const kept = credit || !v ? null : termOf(x.issueDate, x.dueDate, termChoices);
+      return { ...x, issueDate: v, dueDate: kept != null ? dueFor(v, kept) : x.dueDate };
+    }),
+    setDirty(true)
+  );
 
   // A new document for a job: take the job's client and name.
   const project = useApi<{ project: ProjectRow; summary: ProjectRow }>(d.projectId && isOwner ? `/api/projects/${d.projectId}` : null);
@@ -400,8 +414,23 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
               )}
             </div>
             <div className="form-grid">
-              <Field label={`${label} date`}>{(p) => <input {...p} className="input" type="date" value={d.issueDate} onChange={(e) => set('issueDate', e.target.value)} disabled={!itemsEditable} />}</Field>
-              {!credit && <Field label={billLike ? 'Due' : 'Valid until'}>{(p) => <input {...p} className="input" type="date" value={d.dueDate ?? ''} onChange={(e) => set('dueDate', e.target.value || null)} disabled={!editable} />}</Field>}
+              <Field label={`${label} date`}>{(p) => <input {...p} className="input" type="date" value={d.issueDate} onChange={(e) => moveIssueDate(e.target.value)} disabled={!itemsEditable} />}</Field>
+              {!credit && (
+                <Field label={billLike ? 'Due' : 'Valid until'}>
+                  {(p) => (
+                    <>
+                      <input {...p} className="input" type="date" value={d.dueDate ?? ''} onChange={(e) => set('dueDate', e.target.value || null)} disabled={!editable} />
+                      <TermPicks
+                        label={billLike ? 'Payment terms' : 'Valid for'}
+                        options={billLike ? PAYMENT_TERMS.map((t) => ({ value: t.term, label: t.label })) : QUOTE_VALID_DAYS.map((n) => ({ value: n as PaymentTerm, label: dayLabel(n) }))}
+                        value={term}
+                        onPick={pickTerm}
+                        disabled={!editable}
+                      />
+                    </>
+                  )}
+                </Field>
+              )}
               <Field label="Number" hint={doc ? undefined : 'Leave blank for the next number'}>
                 {(p) => (
                   <input
