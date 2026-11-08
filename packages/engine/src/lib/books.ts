@@ -147,3 +147,28 @@ export async function applyBusinessType(db: Db, type: BusinessType) {
   // against their current account), not one shared owner's: the shared one is put away.
   if (type === 'partnership') await db`update cost_categories set active = false where name = 'Personal (owner)' and kind = 'personal'`;
 }
+
+/**
+ * Notes Shap's own figures for each account of an agreed year as it's agreed (the books audit,
+ * audit/books.ts): what was posted to it within the year, without any year-end adjustment. Shap
+ * keeps the agreed figures by adjusting each account to them at the year end, so something dated
+ * in the year that's added or changed later shows as this moving. Agreeing or removing another
+ * year changes only adjustments, so it doesn't.
+ */
+export async function noteShapFigures(db: Db, fyEnd: string) {
+  await freshTotals(db);
+  await db`
+    update year_end_figures f set shap_cents = coalesce((
+      select sum(l.amount_cents) from ledger_totals l
+      where l.account_id = f.account_id and l.source <> 'year_end'
+        and l.date between (date_trunc('month', f.fy_end) - interval '11 months')::date and f.fy_end), 0)
+    where f.fy_end = ${fyEnd}::date`;
+}
+
+/**
+ * The same for every agreed year: after bringing history in (a tracker import, moving in from
+ * another package), which is where the books start from, not a change made after agreeing.
+ */
+export async function noteAllShapFigures(db: Db) {
+  for (const y of await db<{ fyEnd: string }[]>`select fy_end::text as fy_end from year_ends`) await noteShapFigures(db, y.fyEnd);
+}

@@ -12,6 +12,8 @@ the books check (the same as Shap's 1.21.1).
   agreed, and old tax invoices after deregistering for VAT all come out clean. Debtors, creditors
   and PAYE now agree to the cent or say so (journals you typed in are counted apart and shown),
   and an agreed year says if anything dated in it was added or changed after it was agreed.
+- Splitting a cost never gives a part more VAT than its own amount can hold.
+- The empty books load from the app's own file on iPhone too (its address reads differently there).
 - Bug reports' steps are cleared of addresses and numbers by shared code (the same Shap uses).
 - The app's build and publishing steps use GitHub's actions pinned to exact versions.
 

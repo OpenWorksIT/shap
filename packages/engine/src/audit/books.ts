@@ -13,7 +13,7 @@
  *   by what Shap's VAT201 for each period says (both come from the same documents: this catches
  *   postings gone astray, not a return filed with other figures, which Shap doesn't keep);
  * - agreed years still show the figures they were agreed at, and nothing dated in them has been
- *   added or changed since (which would show as more in suspense for that year);
+ *   added or changed since (Shap's own figures for the year, noted when it was agreed, unchanged);
  * - documents add up, tax invoices carry what SARS requires, numbers don't go missing unexplained;
  * - the safeguards in the database itself are in place (the audit log can't be changed, journals
  *   must balance).
@@ -168,7 +168,8 @@ export async function auditBooks(db: Db, on = today()): Promise<AuditItem[]> {
   section = 'Agreed years';
   // Shap keeps an agreed year's figures by adjusting each account to them at the year end, so
   // something dated in the year that's added or changed afterwards doesn't move them: it shows as
-  // Shap's own figure (without that adjustment) differing from what it was when the year was agreed.
+  // Shap's own figure (what was posted to the account within the year, without any year-end
+  // adjustment) differing from what it was when the year was agreed (lib/books.ts noteShapFigures).
   const years = await db<{ fyEnd: string; agreedAt: string }[]>`select fy_end::text as fy_end, created_at::text as agreed_at from year_ends order by fy_end`;
   if (!years.length) ok('no year agreed with the accountant yet');
   for (const y of years) {
@@ -178,7 +179,7 @@ export async function auditBooks(db: Db, on = today()): Promise<AuditItem[]> {
     const figures = await db<{ name: string; target: number | null; shap: number | null; now: number; own: number }[]>`
       select a.name, f.amount_cents as target, f.shap_cents as shap,
         coalesce(sum(l.amount_cents), 0)::bigint as now,
-        coalesce(sum(l.amount_cents) filter (where not (l.source = 'year_end' and l.date = ${y.fyEnd}::date)), 0)::bigint as own
+        coalesce(sum(l.amount_cents) filter (where l.source <> 'year_end' and l.date >= (date_trunc('month', ${y.fyEnd}::date) - interval '11 months')::date), 0)::bigint as own
       from accounts a
       left join year_end_figures f on f.account_id = a.id and f.fy_end = ${y.fyEnd}::date
       left join ledger_totals l on l.account_id = a.id and l.date <= ${y.fyEnd}::date

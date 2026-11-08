@@ -323,6 +323,20 @@ describe('the books audit on books an accountant has agreed', () => {
     expect((await line(/the year to 2026-02-28/))!.level).toBe('ok');
   });
 
+  it('isn’t moved by agreeing an earlier year afterwards, or removing it, even when the later year is closed', async () => {
+    expect((await line(/the year to 2026-02-28/))!.level).toBe('ok');
+    await env.sql`update settings set lock_date = '2026-02-28'`;
+    // The year before, agreed for the first time: the accountant has creditors of R30 (Shap had none).
+    await me.post('/api/year-ends', { fyEnd: '2025-02-28', lock: false, note: 'The year before (made up)', figures: [{ accountId: await r.acc('payables'), amountCents: 3_000 }] }, 'PUT');
+    expect((await line(/the year to 2026-02-28/))!.level).toBe('ok');
+    expect((await line(/the year to 2025-02-28/))!.level).toBe('ok');
+    expect(await fails()).toEqual([]);
+    await env.sql`update settings set lock_date = null`;
+    await me.call({ method: 'DELETE', url: '/api/year-ends/2025-02-28' });
+    expect((await line(/the year to 2026-02-28/))!.level).toBe('ok');
+    expect(await fails()).toEqual([]);
+  });
+
   it('doesn’t ask a business that has deregistered for VAT for a VAT number', async () => {
     const { settings } = await me.get('/api/reference');
     const inv = await me.post('/api/documents', { kind: 'invoice', clientId: (await env.sql<{ id: string }[]>`select id from clients limit 1`)[0]!.id, issueDate: '2026-03-10', lines: [{ category: 'labour', description: 'Work', qty: 1, unitPriceCents: 10_000 }] });
@@ -331,5 +345,41 @@ describe('the books audit on books an accountant has agreed', () => {
     expect(await fails()).toEqual([]);
     expect((await audit()).some((i) => /VAT number/.test(i.text))).toBe(false);
     await expectCleanAudit(env.sql, AT);
+  });
+});
+
+/**
+ * History brought in after a year was agreed (moving in from another package with an opening
+ * date in it, an order the app allows): that's where the books start from, not a change made
+ * after agreeing.
+ */
+describe('the books audit after history is brought into an agreed year', () => {
+  const TB = `Trial Balance
+Fictional Electrical (Pty) Ltd
+As at 28 February 2026
+
+Account Code,Account,Debit,Credit
+1000,FNB Business Cheque,"25,000.00",
+2300,Loan from Director,,"10,000.00"
+3100,Retained Earnings,,"5,000.00"
+4000,Sales,,"30,000.00"
+5000,Purchases,"20,000.00",
+`;
+  let env: TestEnv;
+  beforeAll(async () => {
+    env = await setup();
+  });
+  afterAll(() => env.close());
+
+  it('is clean when the opening balances come in after the year was agreed and closed', async () => {
+    const me = await login(env.app);
+    await me.post('/api/year-ends', { fyEnd: '2026-02-28', lock: true, note: 'Agreed (made up)', figures: [] }, 'PUT');
+    const bank = await (await ref(env.sql)).src('Business bank');
+    const files = [{ name: 'Trial balance.csv', text: TB }];
+    const p = await me.post('/api/move-in/preview', { files });
+    await me.post('/api/move-in', { files, options: { receiptSourceId: bank, openingDate: '2026-02-28', tbAccounts: p.tb.lines.map((l: { suggestion: string }) => l.suggestion), lockOpening: true } });
+    const items = await auditBooks(env.sql, '2026-06-30');
+    expect(items.find((i) => /the year to 2026-02-28/.test(i.text))).toMatchObject({ level: 'ok' });
+    expect(items.filter((i) => i.section === 'Agreed years' && i.level !== 'ok')).toEqual([]);
   });
 });
