@@ -32,6 +32,8 @@ export async function setup(opts: { demo?: boolean; env?: Record<string, string>
     // Set up as a company that's been using Shap: the letterhead as its first trading name,
     // casual workers and trading names switched on.
     await sql`update settings set setup_done = true, features = ${sql.json({ brands: true, workers: true })}`;
+    // A tax invoice shows the business's address (fictional).
+    await sql`update settings set address = '1 Test Street, Fictional Town, 0001'`;
     await sql`insert into brands (name, sort) select company_name, 1 from settings`;
     await sql`update settings set default_brand_id = (select id from brands limit 1)`;
   }

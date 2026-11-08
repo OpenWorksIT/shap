@@ -43,6 +43,7 @@ import { SystemSettings } from './System';
 import { Partners } from '../components/Partners';
 import { FeedbackInbox } from './FeedbackInbox';
 import { AuditLog } from '../components/AuditLog';
+import { ClipsSetting } from '../components/HowItWorks';
 import { LogoPlacer } from '../components/LogoPlacer';
 import { LogoField } from '../components/BusinessForm';
 import { FEATURES, FEATURE_GROUPS, FEATURE_KEYS, featureOn, INDUSTRIES, TURNOVER_TAX_LIMIT_CENTS } from '@shap/shared';
@@ -1458,6 +1459,7 @@ function Sections() {
           </span>
         </label>
       </section>
+      <ClipsSetting />
       <SupportShap />
     </div>
   );

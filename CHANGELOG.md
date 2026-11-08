@@ -5,8 +5,11 @@ entries newer than the version you're running before you update.
 
 ## 1.18.0 (9 November 2026)
 
-VAT the way the accountant asked for it.
+VAT the way the accountant asked for it, and short clips that show how each screen works.
 
+- **How-it-works clips.** The first time each main screen opens, a few seconds of it being used,
+  with what it's for. Put one away and it stays away. Settings → What you use switches them off,
+  or shows them all again.
 - **VAT per item.** Each item on a quote, invoice or credit note says what kind of supply it is:
   standard rate (15%), zero-rated, exported or exempt, with a short explanation of each from SARS's
   rules. The VAT is worked out on the standard-rated items only, and the VAT201 puts each kind in
@@ -19,8 +22,27 @@ VAT the way the accountant asked for it.
   car). Only standard-rated VAT is claimed.
 - **The VAT rate by date:** SARS's standard rate on each document's own date (14% before
   April 2018), instead of a setting.
+- **Tax invoices, tightened** (from an independent review of this release):
+  - A tax invoice or credit note needs your VAT number and business address before it's issued.
+  - One with zero-rated or exported items always shows the client's name and address (the short
+    form isn't allowed for zero-rated supplies), and a credit note needs them whenever the invoice
+    it credits did.
+  - A draft made before you registered for VAT charges VAT when it's issued after, and a PDF says
+    “Tax invoice” by the invoice's own VAT, not today's registration.
+  - An issued invoice keeps how its prices were typed (including or excluding VAT).
+  - Monthly invoices keep each item's VAT and how prices were typed. One that can't go out as a
+    tax invoice isn't sent, and Home says why.
+  - Invoices a VAT vendor issued at 0% before this version count as zero-rated. Invoices from
+    before registering, and credit notes on them, aren't on the VAT201.
 - A bad debt on an invoice that mixed standard-rated with zero-rated or exempt items claims back
-  only the VAT that was in it. The accountant's export gives each line its own tax type.
+  only the VAT still in it, allowing for credit notes. The accountant's export gives each line its
+  own tax type.
+- **The VAT registration line** is held against the line of its day: 12 months that passed
+  R1 million before 1 April 2026 meant registering then, though today's line is R2.3 million.
+- **Numbers people really have:** a client abroad's VAT number (starting with their country code),
+  and passport numbers of digits only. A number from before the checks that isn't being changed
+  doesn't stop an edit. The EMP501 shows SARS's UIF reference (U and nine digits), and marks the
+  filing dates as the usual ones (SARS announces each season's).
 
 ## 1.17.0 (9 November 2026)
 

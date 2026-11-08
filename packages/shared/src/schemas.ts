@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { BUSINESS_TYPES } from './entities.js';
-import { compact, idNumberProblem, taxNumberProblem, vatNumberProblem } from './ids.js';
+import { clientVatNumberProblem, compact, idNumberProblem, taxNumberProblem } from './ids.js';
 import { PURCHASE_VAT_CODES, SALE_VAT_CODES } from './vat.js';
 import {
   ACCOUNT_TYPES,
@@ -33,6 +33,11 @@ const refNumber = (problem: (v: string) => string | null, max = 30) =>
       const p = problem(v);
       if (p) ctx.addIssue({ code: 'custom', message: p });
     });
+/**
+ * A number already on file that isn't being changed: kept as it is, so an old record that
+ * predates the checks can still be edited (the screen shows what's wrong with it).
+ */
+export const keptNumber = (max = 30) => text(max).default('').transform((v) => compact(v));
 
 export const loginInput = z.object({
   email: z.string().trim().toLowerCase().email('Enter your email address'),
@@ -131,8 +136,8 @@ export const clientInput = z.object({
   email: z.string().trim().max(150).default(''),
   phone: text(40).default(''),
   address: text(400).default(''),
-  /** Needed on a full tax invoice (over R5 000) when the client is a VAT vendor. */
-  vatNumber: refNumber(vatNumberProblem),
+  /** Needed on a full tax invoice (over R5 000) when the client is a VAT vendor. A client abroad's starts with their country code. */
+  vatNumber: refNumber(clientVatNumberProblem),
   notes: text(2000).default(''),
   active: z.boolean().default(true),
   brandId: optionalUuid,
@@ -273,7 +278,8 @@ export const documentInput = z.object({
   terms: text(4000).default(''),
   lines: z.array(documentLineInput).max(300).default([]),
   /** Prices typed including VAT (the total is then exactly what was typed), or excluding it. */
-  pricesIncludeVat: z.boolean().default(false),
+  /** Prices typed including VAT. Left out when changing a document: it stays as it was. */
+  pricesIncludeVat: z.boolean().optional(),
   number: text(30).optional(),
   /** Deposit asked for up front: a percentage (basis points) or a fixed amount, not both. */
   depositBp: z.number().int().min(1).max(10000).nullable().default(null),

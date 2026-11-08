@@ -532,6 +532,12 @@ button.link {
   color: var(--ink);
   box-shadow: 0 1px 2px rgb(0 0 0 / 12%);
 }
+.segmented[aria-disabled] button {
+  cursor: default;
+}
+.segmented[aria-disabled] button:not(.on) {
+  opacity: 0.55;
+}
 .tabs {
   display: flex;
   gap: 4px;
@@ -2323,4 +2329,30 @@ button.list-row {
   text-align: center;
   max-width: 900px;
   margin: 0 auto 12px;
+}
+
+/* ---------------------------------------------------------------- how-it-works clips */
+.how-it-works {
+  display: grid;
+  grid-template-columns: minmax(0, 170px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+  padding: 12px;
+  margin-bottom: 16px;
+  max-width: 760px;
+}
+.how-video {
+  width: 100%;
+  aspect-ratio: 390 / 844;
+  object-fit: contain;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  border: 1px solid var(--rule);
+}
+@media (max-width: 560px) {
+  .how-it-works {
+    grid-template-columns: 116px minmax(0, 1fr);
+    gap: 12px;
+    align-items: start;
+  }
 }

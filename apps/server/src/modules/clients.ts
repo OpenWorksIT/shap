@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { clientInput } from '@shap/shared';
+import { clientInput, compact, keptNumber } from '@shap/shared';
 import { z } from 'zod';
 import { requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -84,7 +84,10 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.put('/api/clients/:id', { preHandler: requireRole('owner') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
-    const input = parse(clientInput, req.body);
+    // A VAT number already on file that isn't being changed is kept as it is.
+    const [was] = await sql<{ vatNumber: string }[]>`select vat_number from clients where id = ${id}`;
+    const same = was && compact(String((req.body as { vatNumber?: unknown } | null)?.vatNumber ?? '')) === compact(was.vatNumber ?? '');
+    const input = parse(same ? clientInput.extend({ vatNumber: keptNumber() }) : clientInput, req.body);
     try {
       const [row] = await sql`update clients set ${sql({ ...input, code: input.code || null })} where id = ${id} returning *`;
       if (!row) throw notFound('Client');

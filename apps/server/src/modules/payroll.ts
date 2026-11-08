@@ -13,7 +13,7 @@
  *     SDL owed                             Cr SDL
  *     the bank (or wherever it's paid from) Cr net pay
  */
-import { compact, payeRefProblem, taxNumberProblem, idNumberProblem, sdlRefFor, dividendInput, dividendTax, financialYear, microDividendTax, dwtDue, emp201Due, employeeInput, payLine, payLineInput, payRunInput, sarsPaymentInput, taxYearEnd, type AgeBand, entity, paysOutProfit, payoutWord } from '@shap/shared';
+import { compact, keptNumber, uifSarsRefFor, payeRefProblem, taxNumberProblem, idNumberProblem, sdlRefFor, dividendInput, dividendTax, financialYear, microDividendTax, dwtDue, emp201Due, employeeInput, payLine, payLineInput, payRunInput, sarsPaymentInput, taxYearEnd, type AgeBand, entity, paysOutProfit, payoutWord } from '@shap/shared';
 import PDFDocument from 'pdfkit';
 import { z } from 'zod';
 import { requireRole, userOrThrow } from '../auth.js';
@@ -165,6 +165,16 @@ export async function payrollAttention(db: Db, on = today()) {
  * they're captured and submitted on e@syFile Employer or eFiling.
  * https://www.sars.gov.za/latest-news/employer-interim-declarations-emp501-21-september-to-october-2026/
  */
+/**
+ * The UIF reference on the EMP501 is the one SARS uses (code 2024: U and the PAYE reference's
+ * last nine digits), not the Department of Labour's 1234567/8 number.
+ */
+export function uifForEmp501(payeRef: string, uifRef: string): string {
+  const typed = String(uifRef ?? '').replace(/\s+/g, '').toUpperCase();
+  if (/^U\d{9}$/.test(typed)) return typed;
+  return uifSarsRefFor(payeRef) || '';
+}
+
 export async function emp501(db: Db, taxYear: number, kind: 'interim' | 'annual') {
   const from = `${taxYear - 1}-03-01`;
   const to = kind === 'interim' ? `${taxYear - 1}-08-31` : `${taxYear}-02-${new Date(Date.UTC(taxYear, 2, 0)).getUTCDate()}`;
@@ -212,14 +222,16 @@ export async function emp501(db: Db, taxYear: number, kind: 'interim' | 'annual'
     !s.payeRef ? 'No PAYE reference in Settings → Company' : payeRefProblem(s.payeRef),
     !s.taxNumber ? 'No income tax number for the business in Settings → Company' : taxNumberProblem(s.taxNumber),
   ].filter(Boolean) as string[];
-  const window = kind === 'interim' ? { opens: `${taxYear - 1}-09-21`, closes: `${taxYear - 1}-10-31` } : { opens: `${taxYear}-04-01`, closes: `${taxYear}-05-31` };
+  // SARS announces each filing season's dates (the interim one has opened on 21 or 22 September):
+  // these are the usual ones, and the screen says to check.
+  const window = kind === 'interim' ? { opens: `${taxYear - 1}-09-21`, closes: `${taxYear - 1}-10-31`, approx: true } : { opens: `${taxYear}-04-01`, closes: `${taxYear}-05-31`, approx: true };
   return {
     kind,
     taxYear,
     from,
     to,
     window,
-    employer: { name: s.companyName, payeRef: compact(s.payeRef), sdlRef: s.sdl ? sdlRefFor(s.payeRef) : '', uifRef: s.uifRef, taxNumber: s.taxNumber, problems: employer },
+    employer: { name: s.companyName, payeRef: compact(s.payeRef), sdlRef: s.sdl ? sdlRefFor(s.payeRef) : '', uifRef: uifForEmp501(s.payeRef, s.uifRef), taxNumber: s.taxNumber, problems: employer },
     months: months.map((m) => ({ ...m, totalCents: n(m.payeCents) + n(m.uifCents) + n(m.sdlCents), dueOn: emp201Due(m.period) })),
     declared: { ...declared, total: declared.paye + declared.uif + declared.sdl },
     certified,
@@ -248,7 +260,12 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.put('/api/employees/:id', owner, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
-    const input = parse(employeeInput, req.body);
+    // ID and tax numbers already on file that aren't being changed are kept as they are (the
+    // EMP501 lists what's wrong with them).
+    const [was] = await sql<{ idNumber: string; taxNumber: string }[]>`select id_number, tax_number from employees where id = ${id}`;
+    const body = (req.body ?? {}) as { idNumber?: unknown; taxNumber?: unknown };
+    const kept = (k: 'idNumber' | 'taxNumber') => Boolean(was) && compact(String(body[k] ?? '')) === compact(was![k] ?? '');
+    const input = parse(employeeInput.extend({ ...(kept('idNumber') ? { idNumber: keptNumber(20) } : {}), ...(kept('taxNumber') ? { taxNumber: keptNumber(20) } : {}) }), req.body);
     const r = await sql`update employees set ${sql(input as never)} where id = ${id}`;
     if (!r.count) throw notFound('Employee');
     // Draft pay runs pick up the change.

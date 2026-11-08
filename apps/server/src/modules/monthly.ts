@@ -21,7 +21,7 @@ import { assertOpen, today } from '../lib/books.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import type { Mailer } from '../lib/mailer.js';
 import { parse } from '../lib/validate.js';
-import { createDocument, emailDocument, loadDocument, syncProjectStatus } from './documents.js';
+import { assertTaxDocument, createDocument, emailDocument, loadDocument, syncProjectStatus } from './documents.js';
 
 const ym = (iso: string) => iso.slice(0, 7);
 const nextMonth = (m: string) => ym(addMonths(`${m}-01`, 1));
@@ -100,10 +100,18 @@ async function makeInvoice(db: Sql, s: Schedule, month: string): Promise<string 
         depositBp: null,
         depositCents: null,
         depositShowBalance: true,
-        lines: lines.map((l) => ({ category: l.category, description: forMonth(l.description, month), qty: l.qty, unit: l.unit, unitPriceCents: l.unitPriceCents })),
+        // Each line's VAT, and prices including or excluding VAT, as on the one it copies.
+        pricesIncludeVat: Boolean(doc.pricesIncludeVat),
+        lines: lines.map((l) => ({ category: l.category, description: forMonth(l.description, month), qty: l.qty, unit: l.unit, unitPriceCents: l.unitPriceCents, vatCode: l.vatCode ?? 'standard' })),
       },
-      { status: s.mode === 'send' ? 'issued' : 'draft' },
+      { status: 'draft' },
     );
+    // Sent straight out: issued only once it carries what a tax invoice must (else nothing is
+    // made this month, and Home says why).
+    if (s.mode === 'send') {
+      await assertTaxDocument(tx, created.id);
+      await tx`update documents set status = 'issued', updated_at = now() where id = ${created.id}`;
+    }
     await tx`update documents set monthly_id = ${s.id}, monthly_period = ${month} where id = ${created.id}`;
     await syncProjectStatus(tx, doc.projectId);
     await audit(tx, { actor: 'system', action: 'monthly_invoice', entity: 'invoice', entityId: created.id, details: { number: created.number, month, mode: s.mode } });

@@ -178,9 +178,10 @@ export type VatWatchState = 'over' | 'near' | 'voluntary' | null;
 /**
  * Where an unregistered business stands: over the line (must register), getting near it
  * (80% of the way, or on pace to pass it in a year), past the voluntary line, or nowhere near.
+ * `lineOn`: the date whose line the 12 months are held against (when they ended).
  */
-export function vatWatch(last12Cents: number, pace12Cents: number, on: string): { state: VatWatchState; compulsoryCents: number; voluntaryCents: number } {
-  const t = vatThresholds(on);
+export function vatWatch(last12Cents: number, pace12Cents: number, on: string, lineOn = on): { state: VatWatchState; compulsoryCents: number; voluntaryCents: number } {
+  const t = vatThresholds(lineOn);
   const state: VatWatchState =
     last12Cents > t.compulsoryCents ? 'over' : last12Cents >= t.compulsoryCents * 0.8 || pace12Cents > t.compulsoryCents ? 'near' : last12Cents >= t.voluntaryCents ? 'voluntary' : null;
   return { state, compulsoryCents: t.compulsoryCents, voluntaryCents: t.voluntaryCents };

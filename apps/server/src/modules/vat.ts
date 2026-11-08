@@ -1,5 +1,5 @@
 /** Is a business that isn't registered for VAT getting near the point where it must? */
-import { addMonths, monthEnd, monthStart, vatWatch } from '@shap/shared';
+import { addMonths, monthEnd, monthStart, vatThresholds, vatWatch } from '@shap/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireRole } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -13,7 +13,7 @@ import { getSettings, today, freshTotals } from '../lib/books.js';
  *
  * The line is crossed when supplies in ANY 12 months in a row pass it, not a financial or
  * calendar year (VAT Act s23). So besides the 12 months to today, every 12-month run ending on
- * a month end in the last two years is checked, and the highest counts.
+ * a month end in the last two years is checked.
  */
 export async function vatStatus(db: Db, on = today()) {
   const settings = await getSettings(db);
@@ -35,25 +35,27 @@ export async function vatStatus(db: Db, on = today()) {
     group by 1`;
   const byMonth = new Map(months.map((m) => [m.month, Number(m.cents)]));
   const last12Cents = Number(r!.last12);
-  // The highest 12 months in a row ending on a month end in the last two years (the earliest, if
-  // several tie: that's when the line was crossed), or the 12 months to today if higher still.
-  let peak12Cents = 0;
-  let peakTo = on;
+  // Each 12 months in a row ending on a month end in the last two years, and the 12 months to
+  // today. Each is held against the line in force when it ended (R1 million before 1 April
+  // 2026, R2.3 million from then): a run that passed the line of its day meant registering
+  // then, even if today's line is higher. The earliest such run is when the line was crossed.
+  // If none passed its line, the highest run counts, against today's line.
+  const runs: { to: string; cents: number }[] = [];
   for (let back = 24; back >= 1; back--) {
     const end = monthEnd(addMonths(on, -back));
     let t = 0;
     for (let k = 0; k < 12; k++) t += byMonth.get(addMonths(end, -k).slice(0, 7)) ?? 0;
-    if (t > peak12Cents) {
-      peak12Cents = t;
-      peakTo = end;
-    }
+    runs.push({ to: end, cents: t });
   }
-  if (last12Cents > peak12Cents || peak12Cents === 0) {
-    peak12Cents = last12Cents;
-    peakTo = on;
-  }
+  runs.push({ to: on, cents: last12Cents });
+  const crossed = runs.find((x) => x.cents > vatThresholds(x.to).compulsoryCents);
+  // The earliest of equal highs; the 12 months to today when there's nothing at all.
+  const highest = runs.reduce((a, x) => (x.cents > a.cents ? x : a));
+  const peak = crossed ?? (highest.cents > 0 ? highest : runs[runs.length - 1]!);
+  const peak12Cents = peak.cents;
+  const peakTo = peak.to;
   const pace12Cents = Number(r!.last3) * 4;
-  const w = vatWatch(peak12Cents, pace12Cents, on);
+  const w = vatWatch(peak12Cents, pace12Cents, on, crossed ? crossed.to : on);
   return { registered: settings.vatRegistered, last12Cents, peak12Cents, peakTo, pace12Cents, ...w, state: settings.vatRegistered ? null : w.state };
 }
 

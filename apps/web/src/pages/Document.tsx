@@ -85,6 +85,8 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
   const credit = kind === 'credit_note';
   // Issued credit notes are fixed (void and make a new one); everything else stays editable.
   const editable = isOwner && doc?.status !== 'void' && !(credit && doc?.status === 'issued');
+  // Prices including or excluding VAT: a credit note follows its invoice; an issued invoice keeps its own.
+  const basisFixed = !editable || credit || (doc?.kind === 'invoice' && doc.status !== 'draft');
   const billLike = kind === 'invoice' || proforma;
   const label = kind === 'invoice' ? 'Invoice' : credit ? 'Credit note' : proforma ? 'Pro-forma' : 'Quote';
   const listKind = credit ? 'credit_note' : kind;
@@ -424,12 +426,16 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                 <Segmented
                   label="Prices"
                   value={d.pricesIncludeVat ? 'incl' : 'excl'}
-                  onChange={(v) => !credit && editable && set('pricesIncludeVat', v === 'incl')}
+                  disabled={basisFixed}
+                  onChange={(v) => !basisFixed && set('pricesIncludeVat', v === 'incl')}
                   options={[
                     { value: 'excl', label: 'Excluding VAT' },
                     { value: 'incl', label: 'Including VAT' },
                   ]}
                 />
+                {basisFixed && editable && (
+                  <span className="xs muted">{credit ? 'Priced the way its invoice was.' : 'Fixed once the invoice is issued: switching would change what it charged. Credit it and issue a new one instead.'}</span>
+                )}
                 <details className="xs muted">
                   <summary>The VAT on each item: what the choices mean</summary>
                   <ul className="vat-help">
