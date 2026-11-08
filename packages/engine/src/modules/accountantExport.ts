@@ -95,7 +95,18 @@ async function journal(db: Db, q: Query) {
   };
 }
 
-const salesTaxType = (rateBp: number, registered: boolean) => (rateBp > 0 ? 'Standard Rate Sales' : registered ? 'Zero Rated Sales' : 'No VAT');
+const salesTaxType = (rateBp: number, registered: boolean, code = 'standard') =>
+  rateBp > 0
+    ? ({ standard: 'Standard Rate Sales', zero: 'Zero Rated Sales', export: 'Zero Rated Sales (Exports)', exempt: 'Exempt Sales' } as Record<string, string>)[code] ?? 'Standard Rate Sales'
+    : registered
+      ? 'Zero Rated Sales'
+      : 'No VAT';
+const purchaseTaxType = (vatCents: number, registered: boolean, code = 'standard') =>
+  !registered
+    ? 'No VAT'
+    : vatCents !== 0
+      ? 'Standard Rate Purchases'
+      : (({ zero: 'Zero Rated Purchases', exempt: 'Exempt Purchases', not_claimable: 'No VAT (not claimable)' } as Record<string, string>)[code] ?? 'No VAT (or zero rated)');
 
 async function invoiceLines(db: Db, s: SettingsRow, q: Query) {
   const rows = await db<{
@@ -114,10 +125,12 @@ async function invoiceLines(db: Db, s: SettingsRow, q: Query) {
     unitPriceCents: number;
     lineTotalCents: number;
     vatRateBp: number;
+    vatCode: string;
+    pricesIncludeVat: boolean;
     code: string | null;
   }[]>`
     select d.number, d.kind, d.issue_date, d.due_date, c.name as client, c.email as client_email, c.vat_number as client_vat, p.name as job,
-      l.sort, l.description, l.qty, l.unit, l.unit_price_cents, l.line_total_cents, d.vat_rate_bp, a.code
+      l.sort, l.description, l.qty, l.unit, l.unit_price_cents, l.line_total_cents, d.vat_rate_bp, l.vat_code, d.prices_include_vat, a.code
     from documents d join document_lines l on l.document_id = d.id
     left join clients c on c.id = d.client_id left join projects p on p.id = d.project_id
     left join accounts a on a.system_key = 'revenue_' || l.category
@@ -142,11 +155,12 @@ async function invoiceLines(db: Db, s: SettingsRow, q: Query) {
       description: r.description,
       quantity: sign * Number(r.qty),
       unit: r.unit,
-      unitPrice: Number(r.unitPriceCents),
+      // Excluding VAT throughout (a price typed including VAT is taken from the line's total).
+      unitPrice: r.pricesIncludeVat && Number(r.qty) ? Math.round(Number(r.lineTotalCents) / Number(r.qty)) : Number(r.unitPriceCents),
       lineTotal: total,
-      vatRate: r.vatRateBp / 100,
-      vat: Math.round((total * r.vatRateBp) / 10000),
-      taxType: salesTaxType(r.vatRateBp, s.vatRegistered),
+      vatRate: r.vatCode === 'standard' ? r.vatRateBp / 100 : 0,
+      vat: r.vatCode === 'standard' ? Math.round((total * r.vatRateBp) / 10000) : 0,
+      taxType: salesTaxType(r.vatRateBp, s.vatRegistered, r.vatCode),
       accountCode: r.code ?? '',
     };
   });
@@ -237,7 +251,7 @@ async function costs(db: Db, s: SettingsRow, q: Query) {
     job: string | null;
     receiptId: string | null;
   }[]>`
-    select c.date, c.supplier, c.description, c.bill_number, c.due_date, k.name as category, a.code, a.name as account_name, c.amount_cents, c.vat_cents,
+    select c.date, c.supplier, c.description, c.bill_number, c.due_date, k.name as category, a.code, a.name as account_name, c.amount_cents, c.vat_cents, c.vat_code,
       s.name as source, sa.code as source_code, p.name as job, c.receipt_id
     from costs c join cost_categories k on k.id = c.category_id join accounts a on a.id = k.account_id
     left join payment_sources s on s.id = c.source_id left join accounts sa on sa.id = s.account_id left join projects p on p.id = c.project_id
@@ -256,7 +270,7 @@ async function costs(db: Db, s: SettingsRow, q: Query) {
       excl: Number(r.amountCents) - Number(r.vatCents),
       vat: Number(r.vatCents),
       amount: Number(r.amountCents),
-      taxType: Number(r.vatCents) !== 0 ? 'Standard Rate Purchases' : s.vatRegistered ? 'No VAT (or zero rated)' : 'No VAT',
+      taxType: purchaseTaxType(Number(r.vatCents), s.vatRegistered, (r as { vatCode?: string }).vatCode),
       paidFrom: r.source ?? 'Not captured yet',
       paidFromCode: r.sourceCode ?? '',
       job: r.job ?? '',

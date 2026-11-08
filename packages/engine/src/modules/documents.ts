@@ -1,5 +1,5 @@
 import type { App as FastifyInstance } from '../http.js';
-import { addDays, documentInput, featureOn, lineTotal, quoteStatusInput, receiptInput, writeOffInput, type DocKind } from '@shap/shared';
+import { addDays, documentInput, documentTotals, featureOn, quoteStatusInput, receiptInput, vatRateOn, writeOffInput, type DocKind } from '@shap/shared';
 import { z } from 'zod';
 import { requireRole, userOrThrow, type AuthUser } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -77,20 +77,17 @@ async function nextNumber(db: Db, kind: DocKind, proforma = false): Promise<stri
   return number;
 }
 
-async function writeLines(db: Db, documentId: string, lines: NonNullable<DocInput['lines']>, vatRateBp: number) {
+async function writeLines(db: Db, documentId: string, lines: NonNullable<DocInput['lines']>, vatRateBp: number, pricesIncludeVat = false) {
   await db`delete from document_lines where document_id = ${documentId}`;
-  let subtotal = 0;
+  // Each line keeps its price as typed; its total is excluding VAT, which is what the books post.
+  const t = documentTotals(lines.map((l) => ({ qty: l.qty ?? 1, unitPriceCents: l.unitPriceCents, vatCode: l.vatCode })), vatRateBp, pricesIncludeVat);
   let sort = 0;
-  for (const l of lines) {
-    const qty = l.qty ?? 1;
-    const total = lineTotal(qty, l.unitPriceCents);
-    subtotal += total;
+  for (const [i, l] of lines.entries()) {
     await db`
-      insert into document_lines (document_id, sort, category, description, qty, unit, unit_price_cents, line_total_cents)
-      values (${documentId}, ${sort++}, ${l.category ?? 'labour'}, ${l.description}, ${qty}, ${l.unit ?? ''}, ${l.unitPriceCents}, ${total})`;
+      insert into document_lines (document_id, sort, category, description, qty, unit, unit_price_cents, line_total_cents, vat_code)
+      values (${documentId}, ${sort++}, ${l.category ?? 'labour'}, ${l.description}, ${l.qty ?? 1}, ${l.unit ?? ''}, ${l.unitPriceCents}, ${t.lines[i]!.netCents}, ${l.vatCode ?? 'standard'})`;
   }
-  const vat = Math.round((subtotal * vatRateBp) / 10000);
-  await db`update documents set subtotal_cents = ${subtotal}, vat_cents = ${vat}, total_cents = ${subtotal + vat}, updated_at = now() where id = ${documentId}`;
+  await db`update documents set subtotal_cents = ${t.subtotalCents}, vat_cents = ${t.vatCents}, total_cents = ${t.totalCents}, prices_include_vat = ${pricesIncludeVat}, updated_at = now() where id = ${documentId}`;
 }
 
 /** The trading name a document goes out under: the job's, else the client's, else the company default. */
@@ -117,14 +114,17 @@ export async function createDocument(tx: Db, user: AuthUser | null, kind: DocKin
   const number = input.number?.trim() || (await nextNumber(tx, kind, proforma));
   const due =
     kind === 'credit_note' ? null : (input.dueDate ?? (kind === 'invoice' || proforma ? addDays(input.issueDate, settings.paymentDays) : addDays(input.issueDate, settings.quoteValidDays)));
-  let vatRate = settings.vatRegistered ? settings.vatRateBp : 0;
+  // The standard rate on the document's own date (vat.ts), for a VAT vendor.
+  let vatRate = settings.vatRegistered ? vatRateOn(input.issueDate) : 0;
+  let inclusive = input.pricesIncludeVat;
   if (kind === 'credit_note') {
-    const [inv] = await tx<{ kind: string; status: string; clientId: string | null; vatRateBp: number }[]>`
-      select kind, status, client_id, vat_rate_bp from documents where id = ${input.creditedInvoiceId ?? null}`;
+    const [inv] = await tx<{ kind: string; status: string; clientId: string | null; vatRateBp: number; pricesIncludeVat: boolean }[]>`
+      select kind, status, client_id, vat_rate_bp, prices_include_vat from documents where id = ${input.creditedInvoiceId ?? null}`;
     if (!inv || inv.kind !== 'invoice' || inv.status !== 'issued') throw badRequest('A credit note is made from an issued invoice');
     clientId = inv.clientId;
-    // The VAT goes back at the rate the invoice charged.
+    // The VAT goes back at the rate the invoice charged, priced the way it was.
     vatRate = inv.vatRateBp;
+    inclusive = inv.pricesIncludeVat;
   }
   let row: { id: string; number: string } | undefined;
   try {
@@ -140,7 +140,7 @@ export async function createDocument(tx: Db, user: AuthUser | null, kind: DocKin
     if (pgCode(err) === PG.uniqueViolation) throw conflict(`There is already ${kind === 'invoice' ? 'an invoice' : kind === 'credit_note' ? 'a credit note' : 'a quote'} numbered ${number}`);
     throw err;
   }
-  await writeLines(tx, row!.id, input.lines ?? [], vatRate);
+  await writeLines(tx, row!.id, input.lines ?? [], vatRate, inclusive);
   return row!;
 }
 
@@ -297,7 +297,9 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (old.kind === 'credit_note' && old.status !== 'draft') throw badRequest('An issued credit note can’t be changed. Void it and make a new one.');
     if (old.kind === 'invoice' && old.status === 'issued') await assertOpen(sql, old.issueDate, input.issueDate);
     const settings = await getSettings(sql);
-    const vatRate = old.status === 'draft' && old.kind !== 'credit_note' ? (settings.vatRegistered ? settings.vatRateBp : 0) : old.vatRateBp;
+    const vatRate = old.status === 'draft' && old.kind !== 'credit_note' ? (settings.vatRegistered ? vatRateOn(input.issueDate) : 0) : old.vatRateBp;
+    // A credit note is priced the way its invoice was.
+    const inclusive = old.kind === 'credit_note' ? Boolean((await sql<{ inc: boolean }[]>`select i.prices_include_vat as inc from documents d join documents i on i.id = d.credited_invoice_id where d.id = ${id}`)[0]?.inc) : input.pricesIncludeVat;
     const number = input.number?.trim() || old.number;
     await sql.begin(async (tx) => {
       let clientId = input.clientId ?? null;
@@ -323,7 +325,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
         if (pgCode(err) === PG.uniqueViolation) throw conflict(`Number ${number} is already used`);
         throw err;
       }
-      await writeLines(tx, id, input.lines, vatRate);
+      await writeLines(tx, id, input.lines, vatRate, inclusive);
       // A written-off invoice that changes: what's written off is still whatever wasn't paid.
       await tx`update documents d set written_off_cents = greatest(d.total_cents - coalesce((select sum(amount_cents) from receipts where invoice_id = d.id), 0), 0)
         where d.id = ${id} and d.written_off_on is not null`;
@@ -453,7 +455,8 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
         depositBp: doc.depositBp,
         depositCents: doc.depositCents,
         depositShowBalance: doc.depositShowBalance,
-        lines: lines.map((l) => ({ category: l.category, description: l.description, qty: l.qty, unit: l.unit, unitPriceCents: l.unitPriceCents })),
+        lines: lines.map((l) => ({ category: l.category, description: l.description, qty: l.qty, unit: l.unit, unitPriceCents: l.unitPriceCents, vatCode: l.vatCode })),
+        pricesIncludeVat: doc.pricesIncludeVat,
       });
       await tx`update documents set source_quote_id = ${id} where id = ${inv.id}`;
       await tx`update documents set status = 'accepted', updated_at = now() where id = ${id} and status <> 'accepted'`;
@@ -479,7 +482,8 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
         title: doc.title,
         creditedInvoiceId: id,
         creditReason: '',
-        lines: lines.map((l) => ({ category: l.category, description: l.description, qty: l.qty, unit: l.unit, unitPriceCents: l.unitPriceCents })),
+        lines: lines.map((l) => ({ category: l.category, description: l.description, qty: l.qty, unit: l.unit, unitPriceCents: l.unitPriceCents, vatCode: l.vatCode })),
+        pricesIncludeVat: doc.pricesIncludeVat,
       }),
     );
     await audit(sql, { userId: user.id, action: 'create', entity: 'credit_note', entityId: created.id, ip: req.ip, details: { invoiceId: id } });
@@ -510,7 +514,8 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
         depositBp: doc.depositBp,
         depositCents: doc.depositCents,
         depositShowBalance: doc.depositShowBalance,
-        lines: lines.map((l) => ({ category: l.category, description: l.description, qty: l.qty, unit: l.unit, unitPriceCents: l.unitPriceCents })),
+        lines: lines.map((l) => ({ category: l.category, description: l.description, qty: l.qty, unit: l.unit, unitPriceCents: l.unitPriceCents, vatCode: l.vatCode })),
+        pricesIncludeVat: doc.pricesIncludeVat,
       }),
     );
   });

@@ -16,12 +16,24 @@ type Db = Ctx['sql'];
 
 /** The VAT201 boxes for a period (invoice basis: invoices and costs by their dates). */
 export async function vat201(db: Db, start: string, end: string) {
-  const [out] = await db<{ std: number; stdVat: number; zero: number }[]>`
+  // Each line by its kind of supply: standard-rated (field 1, with its VAT: field 4), zero-rated
+  // (2), exported (2A), exempt or not a supply (3). A document without VAT (issued before the
+  // business registered) counts as zero-rated, as before. Credit notes count against them.
+  const [out] = await db<{ std: number; stdVat: number; zero: number; exported: number; exempt: number }[]>`
     select
-      coalesce(sum(case when d.vat_rate_bp > 0 then (case d.kind when 'credit_note' then -1 else 1 end) * d.total_cents end), 0)::bigint as std,
-      coalesce(sum(case when d.vat_rate_bp > 0 then (case d.kind when 'credit_note' then -1 else 1 end) * d.vat_cents end), 0)::bigint as std_vat,
-      coalesce(sum(case when d.vat_rate_bp = 0 then (case d.kind when 'credit_note' then -1 else 1 end) * d.total_cents end), 0)::bigint as zero
+      coalesce(sum(case when d.vat_rate_bp > 0 then sign * (l.std + d.vat_cents) end), 0)::bigint as std,
+      coalesce(sum(case when d.vat_rate_bp > 0 then sign * d.vat_cents end), 0)::bigint as std_vat,
+      coalesce(sum(sign * case when d.vat_rate_bp > 0 then l.zero else d.total_cents end), 0)::bigint as zero,
+      coalesce(sum(case when d.vat_rate_bp > 0 then sign * l.exported end), 0)::bigint as exported,
+      coalesce(sum(case when d.vat_rate_bp > 0 then sign * l.exempt end), 0)::bigint as exempt
     from documents d
+    cross join lateral (select case d.kind when 'credit_note' then -1 else 1 end as sign) k
+    cross join lateral (
+      select coalesce(sum(x.line_total_cents) filter (where x.vat_code = 'standard'), 0) as std,
+             coalesce(sum(x.line_total_cents) filter (where x.vat_code = 'zero'), 0) as zero,
+             coalesce(sum(x.line_total_cents) filter (where x.vat_code = 'export'), 0) as exported,
+             coalesce(sum(x.line_total_cents) filter (where x.vat_code = 'exempt'), 0) as exempt
+      from document_lines x where x.document_id = d.id) l
     where d.kind in ('invoice', 'credit_note') and d.status = 'issued' and d.issue_date between ${start}::date and ${end}::date`;
   // Input VAT: capital goods (field 14) are the costs of the asset type or on the asset register,
   // and assets bought straight from an account; everything else is field 15.
@@ -37,14 +49,14 @@ export async function vat201(db: Db, start: string, end: string) {
     from assets where disposal_vat_cents <> 0 and disposed_on between ${start}::date and ${end}::date`;
   // Bad debts written off: the VAT in what was written off can be claimed back.
   const [bad] = await db<{ vat: number }[]>`
-    select coalesce(sum(round(d.written_off_cents * d.vat_rate_bp::numeric / (10000 + d.vat_rate_bp))), 0)::bigint as vat
+    select coalesce(sum(bad_debt_vat(d.id, d.written_off_cents, d.vat_rate_bp, d.vat_cents, d.total_cents)), 0)::bigint as vat
     from documents d where d.kind = 'invoice' and d.vat_rate_bp > 0 and d.written_off_on between ${start}::date and ${end}::date`;
   const f = {
     field1: Number(out!.std),
     field1A: Number(sold!.incl),
     field2: Number(out!.zero),
-    field2A: 0,
-    field3: 0,
+    field2A: Number(out!.exported),
+    field3: Number(out!.exempt),
     field4: Number(out!.stdVat),
     field4A: Number(sold!.vat),
     field14: Number(inp!.capital),

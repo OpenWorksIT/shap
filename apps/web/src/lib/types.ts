@@ -1,4 +1,4 @@
-import type { AccountType, CategoryKind, LineCategory, ProjectStatus, Role, SourceKind, WorkerKind, BusinessType } from '@shap/shared';
+import type { SaleVatCode, AccountType, CategoryKind, LineCategory, ProjectStatus, Role, SourceKind, WorkerKind, BusinessType } from '@shap/shared';
 
 export interface User {
   id: string;
@@ -245,6 +245,7 @@ export interface PlannedItem {
 
 export interface DocRow {
   id: string;
+  pricesIncludeVat?: boolean;
   kind: 'quote' | 'invoice' | 'credit_note';
   number: string;
   status: string;
@@ -278,6 +279,7 @@ export interface DocLine {
   unit: string;
   unitPriceCents: number;
   lineTotalCents?: number;
+  vatCode?: SaleVatCode;
 }
 
 export interface DocDetail {

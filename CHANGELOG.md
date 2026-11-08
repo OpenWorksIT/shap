@@ -2,6 +2,25 @@
 
 What changed in each version of Shap Pocket, newest first.
 
+## 1.2.0 (9 November 2026)
+
+VAT the way the accountant asked for it.
+
+- **VAT per item.** Each item on a quote, invoice or credit note says what kind of supply it is:
+  standard rate (15%), zero-rated, exported or exempt, with a short explanation of each from SARS's
+  rules. The VAT is worked out on the standard-rated items only, and the VAT201 puts each kind in
+  its own field (1, 2, 2A and 3). A credit note keeps its invoice's choices.
+- **Prices including or excluding VAT.** Type prices either way; including VAT, the total is
+  exactly what you typed and the VAT is worked out from it. The PDF says which, shows the VAT on
+  each item, and lists what was zero-rated or exempt.
+- **Costs and bills say what VAT was on them:** standard (claim it), zero-rated, exempt, a
+  supplier who isn't VAT registered, or VAT that can't be claimed (entertainment, a passenger
+  car). Only standard-rated VAT is claimed.
+- **The VAT rate by date:** SARS's standard rate on each document's own date (14% before
+  April 2018), instead of a setting.
+- A bad debt on an invoice that mixed standard-rated with zero-rated or exempt items claims back
+  only the VAT that was in it. The accountant's export gives each line its own tax type.
+
 ## 1.1.0 (9 November 2026)
 
 The accountant's review.

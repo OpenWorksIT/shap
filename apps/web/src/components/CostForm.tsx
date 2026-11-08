@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { DeleteWarning } from './DeleteRecord';
-import { formatDate, formatZar, industryProfile, todayIso, vatIncluded } from '@shap/shared';
+import { formatDate, formatZar, industryProfile, PURCHASE_VAT, PURCHASE_VAT_CODES, todayIso, vatIncluded, vatRateOn, type PurchaseVatCode } from '@shap/shared';
 import { api, ApiError } from '../lib/api';
 import { FileButton } from './Files';
 import { compressSlip } from '../lib/files';
@@ -16,6 +16,7 @@ export interface CostDraft {
   description: string;
   amountCents: number | null;
   vatCents: number;
+  vatCode?: PurchaseVatCode;
   supplier: string;
   categoryId: string;
   sourceId: string | null;
@@ -34,6 +35,7 @@ export function costDraftFrom(c: CostRow): CostDraft {
     description: c.description,
     amountCents: c.amountCents,
     vatCents: c.vatCents,
+    vatCode: (c as { vatCode?: PurchaseVatCode }).vatCode ?? (c.vatCents ? 'standard' : 'no_vat'),
     supplier: c.supplier,
     categoryId: c.categoryId,
     sourceId: c.sourceId,
@@ -59,6 +61,7 @@ export function CostForm({ initial, projectId, plannedItem, onSaved, onDeleted }
     description: plannedItem?.description ?? '',
     amountCents: plannedItem ? plannedItem.totalCents : null,
     vatCents: 0,
+    vatCode: 'standard',
     supplier: plannedItem?.supplier ?? '',
     categoryId: (plannedItem?.category === 'demo' ? cats.find((c) => c.kind === 'demo') : cats.find((c) => c.kind === 'materials'))?.id ?? cats[0]?.id ?? '',
     sourceId: settings.defaultCostSourceId ?? sources[0]?.id ?? '',
@@ -81,9 +84,14 @@ export function CostForm({ initial, projectId, plannedItem, onSaved, onDeleted }
   const planned = useApi<{ planned: PlannedItem[] }>(f.projectId && isOwner ? `/api/projects/${f.projectId}` : null);
   const openPlanned = useMemo(() => (planned.data?.planned ?? []).filter((p) => !p.costId || p.id === f.plannedItemId), [planned.data, f.plannedItemId]);
 
+  // Only standard-rated VAT is claimed; worked out at the rate on the slip's date.
+  const claimable = PURCHASE_VAT[f.vatCode ?? 'standard'].claim;
+  const rateBp = vatRateOn(f.date || todayIso());
   useEffect(() => {
-    if (settings.vatRegistered && vatAuto) set('vatCents', f.amountCents ? vatIncluded(f.amountCents, settings.vatRateBp) : 0);
-  }, [f.amountCents, vatAuto, settings.vatRegistered, settings.vatRateBp]);
+    if (!settings.vatRegistered) return;
+    if (!claimable) set('vatCents', 0);
+    else if (vatAuto) set('vatCents', f.amountCents ? vatIncluded(f.amountCents, rateBp) : 0);
+  }, [f.amountCents, vatAuto, settings.vatRegistered, rateBp, claimable]);
 
   const photo = async (file: File | undefined) => {
     if (!file) return;
@@ -207,10 +215,25 @@ export function CostForm({ initial, projectId, plannedItem, onSaved, onDeleted }
           )}
         </Field>
       </div>
-      {settings.vatRegistered && (
-        <Field label="VAT you can claim" hint={<label className="check xs"><input type="checkbox" checked={vatAuto} onChange={(e) => setVatAuto(e.target.checked)} />Work it out ({settings.vatRateBp / 100}% included)</label>}>
-          {(p) => <MoneyInput {...p} value={f.vatCents} onChange={(c) => (setVatAuto(false), set('vatCents', c ?? 0))} />}
-        </Field>
+      {settings.vatRegistered && isOwner && (
+        <div className="form-grid">
+          <Field label="VAT on it" hint={PURCHASE_VAT[f.vatCode ?? 'standard'].hint}>
+            {(p) => (
+              <select {...p} className="select" value={f.vatCode ?? 'standard'} onChange={(e) => set('vatCode', e.target.value as PurchaseVatCode)}>
+                {PURCHASE_VAT_CODES.map((c) => (
+                  <option key={c} value={c}>
+                    {PURCHASE_VAT[c].label}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
+          {claimable && (
+            <Field label="VAT you can claim" hint={<label className="check xs"><input type="checkbox" checked={vatAuto} onChange={(e) => setVatAuto(e.target.checked)} />Work it out ({rateBp / 100}% included)</label>}>
+              {(p) => <MoneyInput {...p} value={f.vatCents} onChange={(c) => (setVatAuto(false), set('vatCents', c ?? 0))} />}
+            </Field>
+          )}
+        </div>
       )}
       <div className="field">
         <span className="label">Slip</span>

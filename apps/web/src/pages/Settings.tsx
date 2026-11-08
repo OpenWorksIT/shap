@@ -11,7 +11,7 @@ import type { Brand, Settings } from '../lib/types';
 import { BusinessFields, LogoField } from '../components/BusinessForm';
 import { Partners } from '../components/Partners';
 import { ApiImage } from '../components/Files';
-import { FEATURES, FEATURE_GROUPS, FEATURE_KEYS, featureOn, INDUSTRIES, TERMS_URL, TURNOVER_TAX_LIMIT_CENTS } from '@shap/shared';
+import { FEATURES, FEATURE_GROUPS, FEATURE_KEYS, featureOn, INDUSTRIES, TERMS_URL, todayIso, TURNOVER_TAX_LIMIT_CENTS, vatRateOn } from '@shap/shared';
 import { WipeData } from '../components/WipeData';
 import { device, isNative } from '../lib/native';
 import { reportUsage } from '../lib/usage';
@@ -501,7 +501,11 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
               </span>
             </label>}
             <div className="form-grid">
-              {f.vatRegistered && <Field label="VAT rate (%)">{(p) => <input {...p} className="input" type="number" step="0.5" value={f.vatRateBp / 100} onChange={(e) => set('vatRateBp', Math.round(Number(e.target.value) * 100))} />}</Field>}
+              {f.vatRegistered && (
+                <Field label="Standard VAT rate" hint="SARS’s rate on each document’s own date (14% before April 2018). Zero-rated and exempt items are chosen on each line.">
+                  {(p) => <input {...p} className="input" value={`${vatRateOn(todayIso()) / 100}%`} readOnly />}
+                </Field>
+              )}
               <Field label="Financial year ends in" hint={kind.febYearEnd ? `February: SARS’s tax year for ${kind.taxedAs === 'trust' ? 'trusts' : 'individuals'}` : undefined}>
                 {(p) => (
                   <select {...p} className="select" value={f.fyEndMonth} onChange={(e) => set('fyEndMonth', Number(e.target.value))} disabled={kind.febYearEnd}>

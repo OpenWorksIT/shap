@@ -18,7 +18,8 @@ export async function monthRates(db: Db, industry: string, month: string): Promi
   if (!marketItems(industry).size) return [];
   const { from, to } = monthRange(month);
   const lines = await db<{ description: string; unit: string; unitPriceCents: number; qty: number }[]>`
-    select l.description, l.unit, l.unit_price_cents, l.qty
+    -- Excluding VAT: a price typed including VAT is taken from the line's total excluding it.
+    select l.description, l.unit, case when d.prices_include_vat and l.qty <> 0 then round(l.line_total_cents / l.qty) else l.unit_price_cents end as unit_price_cents, l.qty
     from document_lines l join documents d on d.id = l.document_id
     where d.kind = 'invoice' and d.status = 'issued' and d.issue_date between ${from}::date and ${to}::date`;
   return marketRates(industry, lines.map((l) => ({ ...l, qty: Number(l.qty), unitPriceCents: Number(l.unitPriceCents) })));
