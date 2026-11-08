@@ -20,7 +20,7 @@
     "create-owner": "npm -w @shap/server run create-owner --"
   },
   "devDependencies": {
-    "concurrently": "^9.1.0",
+    "concurrently": "^10.0.6",
     "typescript": "^5.7.0"
   },
   "engines": {
