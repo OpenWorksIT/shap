@@ -1,9 +1,11 @@
 /**
  * The first time a screen opens: a few seconds of it being used (recorded from the app itself,
- * scripts/clips), so it's clear what the screen is for and how to work it. Put away, it stays
- * away; Settings can switch them all off, or show them all again. Remembered on this device.
+ * scripts/clips), so it's clear what the screen is for and how to work it. Tap the clip and it
+ * plays once over the whole screen, then goes small again. Put away, it stays away; Settings can
+ * switch them all off, or show them all again. Remembered on this device.
  */
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useLocation } from 'react-router-dom';
 import { Icon } from './ui';
 
@@ -54,9 +56,64 @@ export const showClipsAgain = () => write(SEEN, null);
 
 export const clipUrl = (k: ClipKey, ext: 'webm' | 'mp4') => `${import.meta.env.BASE_URL}clips/${k}.${ext}`;
 
+/**
+ * MP4 (H.264, the smaller file) where it plays: Chrome, Safari, iPhones, Android. WebM (VP9) for
+ * browsers without H.264, such as Chromium and some Linux browsers. Neither: `onFail`.
+ */
+function Sources({ clip, onFail }: { clip: ClipKey; onFail: () => void }) {
+  return (
+    <>
+      <source src={clipUrl(clip, 'mp4')} type='video/mp4; codecs="avc1.64001E"' />
+      <source src={clipUrl(clip, 'webm')} type='video/webm; codecs="vp9"' onError={onFail} />
+    </>
+  );
+}
+
+/**
+ * The clip over the whole screen: it plays once from the start and closes by itself when it
+ * ends. Tapping anywhere, the close button or Escape closes it sooner. (An overlay rather than
+ * the browser's full-screen mode, which the phone app's web view doesn't keep open.)
+ */
+function FullClip({ clip, onClose }: { clip: ClipKey; onClose: () => void }) {
+  const c = CLIPS[clip];
+  const closeBtn = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const before = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const key = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', key);
+    closeBtn.current?.focus({ preventScroll: true });
+    return () => {
+      document.body.style.overflow = before;
+      window.removeEventListener('keydown', key);
+    };
+  }, [onClose]);
+  return createPortal(
+    <div className="clip-full" role="dialog" aria-modal="true" aria-label={`How it works: ${c.title}`} onClick={onClose}>
+      <video className="clip-full-video" autoPlay muted playsInline onEnded={onClose} aria-label={`A short clip of ${c.title.toLowerCase()} being used`}>
+        <Sources clip={clip} onFail={onClose} />
+      </video>
+      <span className="clip-full-hint">{c.title} · tap to close</span>
+      <button ref={closeBtn} type="button" className="clip-full-close" onClick={onClose} aria-label="Close the clip">
+        <Icon name="close" size={22} />
+      </button>
+    </div>,
+    document.body,
+  );
+}
+
 export function HowItWorks({ clip }: { clip: ClipKey }) {
   const [hidden, setHidden] = useState(() => !clipsOn() || seen().includes(clip));
   const [failed, setFailed] = useState(false);
+  const [big, setBig] = useState(false);
+  const small = useRef<HTMLVideoElement>(null);
+  // The small one rests while the big one plays, and carries on looping after.
+  const close = useCallback(() => {
+    setBig(false);
+    small.current?.play().catch(() => undefined);
+  }, []);
   if (hidden || failed) return null;
   const done = () => {
     write(SEEN, JSON.stringify([...new Set([...seen(), clip])]));
@@ -65,18 +122,30 @@ export function HowItWorks({ clip }: { clip: ClipKey }) {
   const c = CLIPS[clip];
   return (
     <section className="panel how-it-works" aria-label={`How it works: ${c.title}`}>
-      {/* MP4 (H.264, the smaller file) where it plays: Chrome, Safari, iPhones, Android. WebM
-          (VP9) for browsers without H.264, such as Chromium and some Linux browsers. Neither: no card. */}
-      <video className="how-video" autoPlay muted loop playsInline preload="metadata" aria-label={`A short clip of ${c.title.toLowerCase()} being used`}>
-        <source src={clipUrl(clip, 'mp4')} type='video/mp4; codecs="avc1.64001E"' />
-        <source src={clipUrl(clip, 'webm')} type='video/webm; codecs="vp9"' onError={() => setFailed(true)} />
-      </video>
+      <button
+        type="button"
+        className="how-video-btn"
+        onClick={() => {
+          small.current?.pause();
+          setBig(true);
+        }}
+        aria-label={`Watch the clip of ${c.title.toLowerCase()} full screen`}
+      >
+        <video ref={small} className="how-video" autoPlay muted loop playsInline preload="metadata" aria-hidden="true">
+          <Sources clip={clip} onFail={() => setFailed(true)} />
+        </video>
+        <span className="how-expand" aria-hidden="true">
+          <Icon name="expand" size={16} />
+        </span>
+      </button>
+      {big && <FullClip clip={clip} onClose={close} />}
       <div className="how-text stack" style={{ gap: 6 }}>
         <span className="xs muted">How it works</span>
         <strong>{c.title}</strong>
         <p className="small" style={{ margin: 0 }}>
           {c.text}
         </p>
+        <span className="xs muted">Tap the clip to watch it full screen.</span>
         <div className="row wrap" style={{ marginTop: 4 }}>
           <button type="button" className="btn primary small" onClick={done}>
             <Icon name="check" size={16} />

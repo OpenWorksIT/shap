@@ -85,8 +85,12 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
   const credit = kind === 'credit_note';
   // Issued credit notes are fixed (void and make a new one); everything else stays editable.
   const editable = isOwner && doc?.status !== 'void' && !(credit && doc?.status === 'issued');
-  // Prices including or excluding VAT: a credit note follows its invoice; an issued invoice keeps its own.
-  const basisFixed = !editable || credit || (doc?.kind === 'invoice' && doc.status !== 'draft');
+  // An issued tax invoice (one that charged VAT) is fixed: what it charges, to whom, when and under
+  // which number. Corrections go through a credit note. Invoices without VAT stay open to change.
+  const taxLocked = doc?.kind === 'invoice' && doc.status === 'issued' && doc.vatRateBp > 0;
+  const itemsEditable = editable && !taxLocked;
+  // Prices including or excluding VAT: a credit note follows its invoice; an issued tax invoice keeps its own.
+  const basisFixed = !editable || credit || taxLocked;
   const billLike = kind === 'invoice' || proforma;
   const label = kind === 'invoice' ? 'Invoice' : credit ? 'Credit note' : proforma ? 'Pro-forma' : 'Quote';
   const listKind = credit ? 'credit_note' : kind;
@@ -325,7 +329,14 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
       />
 
       {doc?.status === 'void' && <div className="banner alert">Voided: {doc.voidReason}</div>}
-      {doc?.kind === 'invoice' && doc.status === 'issued' && editable && (
+      {taxLocked && editable && (
+        <div className="banner small">
+          This tax invoice is issued, so what it charges is fixed: its items and prices, the client, the date and the number (SARS allows one tax invoice per supply).{' '}
+          {has('creditNotes') ? 'To correct it, issue a credit note, and a new invoice for anything extra.' : 'To correct it, switch on credit notes in Settings → What you use and issue one, with a new invoice for anything extra.'} The due
+          date, notes and terms can still change.
+        </div>
+      )}
+      {doc?.kind === 'invoice' && doc.status === 'issued' && editable && !taxLocked && (
         <div className="banner small">
           Issued invoices can still be changed. The books update for the invoice date; send the client the new PDF.
           {has('creditNotes') ? ' Once the client has it, a credit note is the tidy way to take something off.' : ''}
@@ -349,7 +360,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                   <ProjectSelect
                     {...p}
                     value={d.projectId}
-                    onChange={(v) => (set('projectId', v), v && (set('clientId', null), set('brandId', null)))}
+                    onChange={(v) => (set('projectId', v), v && !taxLocked && (set('clientId', null), set('brandId', null)))}
                     emptyLabel="Not for a job"
                     createLabel={editable ? `New job from this ${kind}` : undefined}
                     onCreate={editable ? () => void createJob() : undefined}
@@ -363,10 +374,10 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                     className="select"
                     value={d.clientId ?? ''}
                     onChange={(e) => (e.target.value === '+new' ? setDrawer('client') : set('clientId', e.target.value || null))}
-                    disabled={!editable || credit}
+                    disabled={!itemsEditable || credit}
                   >
                     <option value="">{project.data?.project.clientName ? `From the job (${project.data.project.clientName})` : 'No name yet (add it later)'}</option>
-                    {editable && <option value="+new">+ New client…</option>}
+                    {itemsEditable && <option value="+new">+ New client…</option>}
                     {(clients.data ?? []).map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.name}
@@ -376,11 +387,11 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                 )}
               </Field>
               {hasBrands && (
-                <Field label="Trading as">{(p) => <BrandSelect {...p} value={d.brandId} onChange={(v) => set('brandId', v)} emptyLabel="The usual for this job or client" disabled={!editable} />}</Field>
+                <Field label="Trading as">{(p) => <BrandSelect {...p} value={d.brandId} onChange={(v) => set('brandId', v)} emptyLabel="The usual for this job or client" disabled={!itemsEditable} />}</Field>
               )}
             </div>
             <div className="form-grid">
-              <Field label={`${label} date`}>{(p) => <input {...p} className="input" type="date" value={d.issueDate} onChange={(e) => set('issueDate', e.target.value)} disabled={!editable} />}</Field>
+              <Field label={`${label} date`}>{(p) => <input {...p} className="input" type="date" value={d.issueDate} onChange={(e) => set('issueDate', e.target.value)} disabled={!itemsEditable} />}</Field>
               {!credit && <Field label={billLike ? 'Due' : 'Valid until'}>{(p) => <input {...p} className="input" type="date" value={d.dueDate ?? ''} onChange={(e) => set('dueDate', e.target.value || null)} disabled={!editable} />}</Field>}
               <Field label="Number" hint={doc ? undefined : 'Leave blank for the next number'}>
                 {(p) => <input {...p} className="input" value={d.number} onChange={(e) => set('number', e.target.value)} placeholder={
@@ -391,7 +402,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                           : proforma
                             ? `${settings.proformaPrefix}${String(settings.proformaNext).padStart(settings.quotePad, '0')}`
                             : `${settings.quotePrefix}${String(settings.quoteNext).padStart(settings.quotePad, '0')}`
-                    } disabled={!editable} />}
+                    } disabled={!itemsEditable} />}
               </Field>
             </div>
             {credit && (
@@ -408,13 +419,13 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
             <div className="panel-head spread">
               <strong>Items and services</strong>
               <span className="row wrap" style={{ gap: 6 }}>
-                {editable && !credit && has('timeTracker') && (
+                {itemsEditable && !credit && has('timeTracker') && (
                   <button type="button" className="btn small" onClick={() => setDrawer('time')}>
                     <Icon name="clock" size={14} />
                     Add time…
                   </button>
                 )}
-                {editable && !credit && d.projectId && (
+                {itemsEditable && !credit && d.projectId && (
                   <button type="button" className="btn small" onClick={() => setDrawer('charge')}>
                     Charge job costs…
                   </button>
@@ -433,9 +444,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                     { value: 'incl', label: 'Including VAT' },
                   ]}
                 />
-                {basisFixed && editable && (
-                  <span className="xs muted">{credit ? 'Priced the way its invoice was.' : 'Fixed once the invoice is issued: switching would change what it charged. Credit it and issue a new one instead.'}</span>
-                )}
+                {basisFixed && editable && credit && <span className="xs muted">Priced the way its invoice was.</span>}
                 <details className="xs muted">
                   <summary>The VAT on each item: what the choices mean</summary>
                   <ul className="vat-help">
@@ -459,15 +468,15 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                       </option>
                     ))}
                   </select>
-                  <textarea className="textarea line-desc" rows={1} value={l.description} onChange={(e) => updLine(l.key, { description: e.target.value })} placeholder={i === 0 ? `e.g. ${profile.items[0]?.d ?? 'What you did'}` : 'Description'} aria-label="Description" disabled={!editable} />
+                  <textarea className="textarea line-desc" rows={1} value={l.description} onChange={(e) => updLine(l.key, { description: e.target.value })} placeholder={i === 0 ? `e.g. ${profile.items[0]?.d ?? 'What you did'}` : 'Description'} aria-label="Description" disabled={!itemsEditable} />
                   <div className={`line-nums${vendor ? ' has-vat' : ''}`}>
-                    <input className="input line-qty" inputMode="decimal" value={l.qty} onChange={(e) => updLine(l.key, { qty: e.target.value.replace(/[^\d.,]/g, '') })} placeholder="1" aria-label="Quantity" disabled={!editable} />
-                    <input className="input line-unit" value={l.unit} onChange={(e) => updLine(l.key, { unit: e.target.value })} list="unit-list" placeholder="unit" aria-label="Unit" disabled={!editable} />
+                    <input className="input line-qty" inputMode="decimal" value={l.qty} onChange={(e) => updLine(l.key, { qty: e.target.value.replace(/[^\d.,]/g, '') })} placeholder="1" aria-label="Quantity" disabled={!itemsEditable} />
+                    <input className="input line-unit" value={l.unit} onChange={(e) => updLine(l.key, { unit: e.target.value })} list="unit-list" placeholder="unit" aria-label="Unit" disabled={!itemsEditable} />
                     <div className="line-price">
-                      <MoneyInput value={l.unitPriceCents} onChange={(c) => updLine(l.key, { unitPriceCents: c })} placeholder={vendor ? (d.pricesIncludeVat ? 'Price incl.' : 'Price excl.') : 'Price'} allowNegative aria-label={vendor ? `Unit price ${d.pricesIncludeVat ? 'including' : 'excluding'} VAT` : 'Unit price'} />
+                      <MoneyInput value={l.unitPriceCents} onChange={(c) => updLine(l.key, { unitPriceCents: c })} placeholder={vendor ? (d.pricesIncludeVat ? 'Price incl.' : 'Price excl.') : 'Price'} allowNegative aria-label={vendor ? `Unit price ${d.pricesIncludeVat ? 'including' : 'excluding'} VAT` : 'Unit price'} disabled={!itemsEditable} />
                     </div>
                     {vendor && (
-                      <select className="select line-vat" value={l.vatCode ?? 'standard'} onChange={(e) => updLine(l.key, { vatCode: e.target.value as SaleVatCode })} aria-label="VAT on this item" disabled={!editable || credit}>
+                      <select className="select line-vat" value={l.vatCode ?? 'standard'} onChange={(e) => updLine(l.key, { vatCode: e.target.value as SaleVatCode })} aria-label="VAT on this item" disabled={!itemsEditable || credit}>
                         {SALE_VAT_CODES.map((c) => (
                           <option key={c} value={c}>
                             {c === 'standard' ? `${vatRate / 100}%` : SALE_VAT[c].short}
@@ -478,7 +487,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                     <span className="line-total">
                       <Money cents={lineTotal(toQty(l.qty), l.unitPriceCents ?? 0)} />
                     </span>
-                    {editable && (
+                    {itemsEditable && (
                       <span className="line-tools">
                         <button type="button" className="btn quiet small" onClick={() => moveLine(l.key, -1)} disabled={i === 0} aria-label="Move up">
                           ↑
@@ -498,7 +507,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                 <option key={u} value={u} />
               ))}
             </datalist>
-            {editable && (
+            {itemsEditable && (
               <div className="panel-pad stack">
                 <div className="row wrap">
                   {offered.map((c) => (
