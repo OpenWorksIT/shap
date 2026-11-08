@@ -5,6 +5,10 @@
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { auditBooks } from '../src/audit/books.js';
+import { buildDemoTracker } from '../src/db/demo-tracker.js';
+import { exportCompanyFile, restoreCompanyFile } from '../src/modules/company-file.js';
+import { applyTracker } from '../src/modules/import/apply.js';
+import { readTracker } from '../src/modules/import/tracker.js';
 import { expectCleanAudit, login, ref, setup, type TestEnv } from './helpers.js';
 
 const ON = '2027-02-28';
@@ -327,6 +331,20 @@ describe('the books audit on books an accountant has agreed', () => {
     expect((await line(/the year to 2026-02-28/))!.level).toBe('ok');
   });
 
+  it('isn’t moved by agreeing an earlier year afterwards, or removing it, even when the later year is closed', async () => {
+    expect((await line(/the year to 2026-02-28/))!.level).toBe('ok');
+    await env.sql`update settings set lock_date = '2026-02-28'`;
+    // The year before, agreed for the first time: the accountant has creditors of R30 (Shap had none).
+    await me.post('/api/year-ends', { fyEnd: '2025-02-28', lock: false, note: 'The year before (made up)', figures: [{ accountId: await r.acc('payables'), amountCents: 3_000 }] }, 'PUT');
+    expect((await line(/the year to 2026-02-28/))!.level).toBe('ok');
+    expect((await line(/the year to 2025-02-28/))!.level).toBe('ok');
+    expect(await fails()).toEqual([]);
+    await env.sql`update settings set lock_date = null`;
+    await me.call({ method: 'DELETE', url: '/api/year-ends/2025-02-28' });
+    expect((await line(/the year to 2026-02-28/))!.level).toBe('ok');
+    expect(await fails()).toEqual([]);
+  });
+
   it('doesn’t ask a business that has deregistered for VAT for a VAT number', async () => {
     const { settings } = await me.get('/api/reference');
     const inv = await me.post('/api/documents', { kind: 'invoice', clientId: (await env.sql<{ id: string }[]>`select id from clients limit 1`)[0]!.id, issueDate: '2026-03-10', lines: [{ category: 'labour', description: 'Work', qty: 1, unitPriceCents: 10_000 }] });
@@ -336,4 +354,69 @@ describe('the books audit on books an accountant has agreed', () => {
     expect((await audit()).some((i) => /VAT number/.test(i.text))).toBe(false);
     await expectCleanAudit(env.sql, AT);
   });
+});
+
+/**
+ * History brought in after a year was agreed (the company file first, then the tracker, an order
+ * the app allows): that's where the books start from, not a change made after agreeing.
+ */
+describe('the books audit after history is brought into an agreed year', () => {
+  const AT = '2026-06-30';
+  const TB = `Trial Balance
+Fictional Electrical (Pty) Ltd
+As at 28 February 2026
+
+Account Code,Account,Debit,Credit
+1000,FNB Business Cheque,"25,000.00",
+2300,Loan from Director,,"10,000.00"
+3100,Retained Earnings,,"5,000.00"
+4000,Sales,,"30,000.00"
+5000,Purchases,"20,000.00",
+`;
+  it('is clean when the opening balances come in after the year was agreed and closed (moving in)', async () => {
+    const env = await setup();
+    try {
+      const me = await login(env.app, 'owner@example.co.za');
+      await me.post('/api/year-ends', { fyEnd: '2026-02-28', lock: true, note: 'Agreed (made up)', figures: [] }, 'PUT');
+      const bank = await (await ref(env.sql)).src('Business bank');
+      const files = [{ name: 'Trial balance.csv', text: TB }];
+      const p = await me.post('/api/move-in/preview', { files });
+      await me.post('/api/move-in', { files, options: { receiptSourceId: bank, openingDate: '2026-02-28', tbAccounts: p.tb.lines.map((l: { suggestion: string }) => l.suggestion), lockOpening: true } });
+      const items = await auditBooks(env.sql, '2026-06-30');
+      expect(items.find((i) => /the year to 2026-02-28/.test(i.text))).toMatchObject({ level: 'ok' });
+      expect(items.filter((i) => i.section === 'Agreed years' && i.level !== 'ok')).toEqual([]);
+    } finally {
+      await env.close();
+    }
+  });
+
+  it('is clean when the tracker comes in after the company file that agreed and closed the year', async () => {
+    const plan = await readTracker((await buildDemoTracker(AT)).buffer);
+    // The company file from books where the tracker came first and the year was then agreed.
+    const first = await setup();
+    await applyTracker(first.sql, plan, { agreeTrialBalance: true });
+    const me = await login(first.app, 'owner@example.co.za');
+    await me.post('/api/year-ends', { fyEnd: '2026-02-28', lock: true, note: 'Agreed (made up)', figures: [] }, 'PUT');
+    const file = await exportCompanyFile(first.sql);
+    expect(file.yearEnds?.length).toBe(1);
+    await first.close();
+
+    // New books: the company file (agrees and closes the year), then the tracker.
+    const env = await setup();
+    try {
+      await env.sql.begin((tx) => restoreCompanyFile(tx as never, file));
+      await applyTracker(env.sql, plan, { agreeTrialBalance: true });
+      const items = await auditBooks(env.sql, AT);
+      expect(items.find((i) => /the year to 2026-02-28/.test(i.text))).toMatchObject({ level: 'ok' });
+      expect(items.filter((i) => i.section === 'Agreed years' && i.level !== 'ok')).toEqual([]);
+      // And something dated in it afterwards still shows (closed, so it's wrong).
+      await env.sql`insert into journals (date, description, kind) values ('2025-09-01', 'Behind the lock (made up)', 'manual')`;
+      const [j] = await env.sql<{ id: string }[]>`select id from journals where description = 'Behind the lock (made up)'`;
+      await env.sql`insert into journal_lines (journal_id, account_id, debit_cents, credit_cents) values (${j!.id}, (select id from accounts where system_key = 'bank'), 500, 0), (${j!.id}, (select id from accounts where system_key = 'suspense'), 0, 500)`;
+      await env.sql`update books_version set changed = changed + 1`;
+      expect((await auditBooks(env.sql, AT)).find((i) => /the year to 2026-02-28/.test(i.text))).toMatchObject({ level: 'fail' });
+    } finally {
+      await env.close();
+    }
+  }, 60_000);
 });

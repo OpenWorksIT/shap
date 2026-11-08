@@ -43,7 +43,8 @@ and read its secrets (`.env` and each company's) and backups, the containers, ba
 sound, not readable by others, copied off the server), each site as Caddy serves it
 (certificate, HTTPS, headers) and whether it's found by its public name, two-step sign-in, a
 waiting update or a failed check for one. Anything it can't check is a WARN saying so, never an
-OK. It holds nothing of any company's books, so every company on the server may see it.
+OK. It holds nothing of any company's books. The main company's owner sees it (it names every
+company's site on the server); extra companies' apps aren't given it.
 
 The updater (`ctl/shap-ctl.sh`) takes only `stable`. If it can't fetch it (no network, GitHub
 down, the branch gone), nothing is updated and Settings says why; it never falls back to `main`.
@@ -69,9 +70,11 @@ brings the report totals up to date first, as any report does). It checks that:
   what was filed;
 - agreed years still show what they were agreed at (the year as it was agreed, even if the year
   end in Settings changed since), and nothing dated in them was added or changed afterwards:
-  Shap's own figure for each account is kept when the year is agreed and compared (worth a look
-  while the year is open; wrong once it's closed). For years agreed before 1.21.1, from that
-  update on. Old years not yet agreed are flagged;
+  what was posted to each account within the year is noted when the year is agreed and compared
+  (worth a look while the year is open; wrong once it's closed). Agreeing or removing another
+  year doesn't count, and nor does history brought in afterwards (a tracker import, moving in):
+  that's where the books start. For years agreed before 1.21.1, from that update on. Old years
+  not yet agreed are flagged;
 - documents add up; while registered for VAT, tax invoices carry what SARS requires; credit notes
   say why; no invoice number went missing without a deletion in the audit log;
 - VAT claimed has its slip; no cost claims more VAT than it can hold (the rule a cost is saved by:
@@ -144,6 +147,10 @@ brings the report totals up to date first, as any report does). It checks that:
   no update check yet), didn't look at folders or each company's `.env`, and checked sites by
   their public name only (a provider that doesn't loop back made a good site look broken).
 - Shap Pocket's app and web workflows used actions by version tag: now pinned to commits.
+- The reviewer then checked the fixes. Three more, all fixed with tests: agreeing an earlier year
+  after a later one, or bringing history in after a year was agreed, made the later year look
+  changed (each year is now compared by what was posted within it); and splitting a cost could
+  give one part a cent more VAT than the app allows on a cost (each part is now kept within it).
 
 ### Code scanning (CodeQL), first run
 

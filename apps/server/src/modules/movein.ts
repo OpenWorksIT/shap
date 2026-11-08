@@ -21,7 +21,7 @@ import { requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
-import { freshTotals, getSettings } from '../lib/books.js';
+import { freshTotals, getSettings, noteAllShapFigures } from '../lib/books.js';
 import { badRequest } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 import { parseCsv } from './clients.js';
@@ -909,6 +909,8 @@ export async function applyPlan(tx: Db, plan: Plan, o: ApplyOptions, userId: str
     if (o.lockOpening) await tx`update settings set lock_date = greatest(coalesce(lock_date, ${o.openingDate}::date), ${o.openingDate}::date) where id`;
     counts.opening = true;
   }
+  // History brought in, possibly into an agreed year: the books start from here.
+  await noteAllShapFigures(tx);
   return counts;
 }
 

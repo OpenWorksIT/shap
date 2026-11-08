@@ -5,7 +5,7 @@ import { requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
-import { assertOpen, getSettings, isIsoDate, q, today, freshTotals } from '../lib/books.js';
+import { assertOpen, getSettings, isIsoDate, q, today, freshTotals, noteShapFigures } from '../lib/books.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 
@@ -26,23 +26,6 @@ export async function taxFigures(db: Db, businessType: string, fy: { start: stri
   const partners = kind === 'partners' ? await db<{ name: string; shareBp: number }[]>`select name, share_bp from partners where active order by created_at` : [];
   const [d] = kind === 'trust' ? await db<{ t: number }[]>`select coalesce(sum(gross_cents), 0)::bigint as t from dividends where conduit and declared_on between ${fy.start}::date and ${fy.end}::date` : [{ t: 0 }];
   return { partners: partners.map((p) => ({ name: p.name, shareBp: p.shareBp })), distributedCents: Number(d!.t) };
-}
-
-/**
- * Notes Shap's own figure for each account of an agreed year as it's agreed (the books audit,
- * audit/books.ts). Shap keeps the agreed figures by adjusting each account to them at the year
- * end, so anything dated in the year that's added or changed later shows as Shap's own figure
- * moving away from this.
- */
-export async function noteShapFigures(db: Db, fyEnd: string) {
-  await freshTotals(db);
-  await db`
-    update year_end_figures f set shap_cents = coalesce((
-      select sum(l.amount_cents) from ledger_totals l join accounts a on a.id = l.account_id
-      where l.account_id = f.account_id and l.date <= f.fy_end and not (l.source = 'year_end' and l.date = f.fy_end)
-        and (not (a.type in ('income', 'cost_of_sales', 'expense') or coalesce(a.system_key, '') = 'dividends')
-             or l.date >= (date_trunc('month', f.fy_end) - interval '11 months')::date)), 0)
-    where f.fy_end = ${fyEnd}::date`;
 }
 
 export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {

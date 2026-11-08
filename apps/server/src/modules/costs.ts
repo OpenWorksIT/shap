@@ -28,6 +28,35 @@ async function claimableVat(db: Db, input: { date: string; amountCents: number; 
   return input.vatCents;
 }
 
+/**
+ * A cost's VAT shared over the parts it's split into: in proportion, the first parts taking the
+ * rounding, and no part more than its own amount can hold (the rule a cost is saved by: the VAT
+ * it includes at the rate, rounded, and a cent for a supplier's rounding). What a part can't hold
+ * goes to a part with room. Same sign as the amounts (a refund's VAT is negative).
+ */
+export function splitVat(vatCents: number, amountCents: number, partCents: number[], rateBp: number): number[] {
+  if (!vatCents) return partCents.map(() => 0);
+  const sign = Math.sign(vatCents);
+  const whole = Math.abs(vatCents);
+  const most = partCents.map((p) => vatIncluded(Math.abs(p), rateBp) + 1);
+  // In proportion, each within what it can hold (and not below nothing)...
+  const v = partCents.map((p, i) => Math.min(most[i]!, Math.max(0, Math.round((whole * Math.abs(p)) / Math.abs(amountCents)))));
+  // ...then what's left over (the rounding, or what a part couldn't hold) on the first parts with room.
+  let left = whole - v.reduce((t, x) => t + x, 0);
+  for (let i = 0; i < v.length && left > 0; i++) {
+    const take = Math.min(most[i]! - v[i]!, left);
+    v[i]! += take;
+    left -= take;
+  }
+  for (let i = 0; i < v.length && left < 0; i++) {
+    const give = Math.min(v[i]!, -left);
+    v[i]! -= give;
+    left += give;
+  }
+  if (left) v[0]! += left; // (only if the cost held more VAT than all its parts can: not saved like that)
+  return v.map((x) => x * sign);
+}
+
 export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
 
@@ -181,9 +210,7 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
       const [found] = await sql<{ n: number }[]>`select count(*)::int as n from payment_sources where id = any(${sourceIds}::uuid[])`;
       if (found!.n !== sourceIds.length) throw badRequest('Choose where each part was paid from');
     }
-    // VAT in proportion; the first part takes the rounding.
-    const vats = parts.map((p) => Math.round((c.vatCents * p.amountCents) / c.amountCents));
-    vats[0]! += c.vatCents - vats.reduce((t, v) => t + v, 0);
+    const vats = splitVat(c.vatCents, c.amountCents, parts.map((p) => p.amountCents), vatRateOn(c.date));
     const note = `Split from R${(c.amountCents / 100).toFixed(2)}, paid ${parts.length} ways`;
     const ids = await sql.begin(async (tx) => {
       await tx`update costs set amount_cents = ${parts[0]!.amountCents}, vat_cents = ${vats[0]!}, source_id = ${parts[0]!.sourceId},

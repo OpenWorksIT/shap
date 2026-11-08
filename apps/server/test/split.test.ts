@@ -1,5 +1,7 @@
 /** One purchase paid two ways: split the cost, one part per payment. */
+import { vatIncluded, vatRateOn } from '@shap/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { splitVat } from '../src/modules/costs.js';
 import { balance, ledgerTotal, login, ref, setup, type TestEnv } from './helpers.js';
 
 describe('splitting a cost', () => {
@@ -54,5 +56,45 @@ describe('splitting a cost', () => {
     await owner.post(`/api/bank/lines/${line.id}/match`, { items: [{ kind: 'cost', id: c.id }] });
     const r = await owner.call({ method: 'POST', url: `/api/costs/${c.id}/split`, payload: { parts: [{ amountCents: 3000, sourceId: cash }, { amountCents: 3900, sourceId: bank }] } });
     expect(r.json().error).toMatch(/Unmatch it there first/);
+  });
+});
+
+/** The review of 1.21: a part never gets more VAT than its own amount can hold. */
+describe('sharing a cost’s VAT over its parts', () => {
+  const fits = (vat: number, amount: number, rate: number) => Math.abs(vat) <= vatIncluded(Math.abs(amount), rate) + 1;
+
+  it('keeps each part within what it can hold (R1 024.00 with VAT R133.58, split R189.15 and R834.85)', () => {
+    // In proportion the second part would get R108.91; it can hold R108.90.
+    const v = splitVat(13_358, 102_400, [18_915, 83_485], 1500);
+    expect(v.reduce((t, x) => t + x, 0)).toBe(13_358);
+    expect(fits(v[0]!, 18_915, 1500) && fits(v[1]!, 83_485, 1500)).toBe(true);
+    expect(v).toEqual([2_468, 10_890]);
+    // A refund the same way round.
+    expect(splitVat(-13_358, -102_400, [-18_915, -83_485], 1500)).toEqual([-2_468, -10_890]);
+    expect(splitVat(0, 102_400, [18_915, 83_485], 1500)).toEqual([0, 0]);
+  });
+
+  it('never leaves a part over the limit, for any cost the app accepts split any way', () => {
+    // A made-up spread of amounts, VAT at the most the app allows (and just under), and splits.
+    let seed = 42;
+    const rnd = (n: number) => ((seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648) % n);
+    let tried = 0;
+    for (let k = 0; k < 4_000; k++) {
+      const amount = 200 + rnd(5_000_000);
+      const rate = k % 5 === 0 ? vatRateOn('2018-01-01') : vatRateOn('2026-01-01');
+      const vat = vatIncluded(amount, rate) + 1 - rnd(3);
+      const n = 2 + rnd(3);
+      const cuts = Array.from({ length: n - 1 }, () => 1 + rnd(amount - 1)).sort((a, b) => a - b);
+      const parts = [...cuts, amount].map((c, i, all) => c - (i ? all[i - 1]! : 0)).filter((p) => p > 0);
+      if (parts.reduce((t, p) => t + p, 0) !== amount || parts.length < 2) continue;
+      const v = splitVat(vat, amount, parts, rate);
+      tried++;
+      expect(v.reduce((t, x) => t + x, 0)).toBe(vat);
+      for (let i = 0; i < parts.length; i++) {
+        expect(v[i]!).toBeGreaterThanOrEqual(0);
+        expect(fits(v[i]!, parts[i]!, rate)).toBe(true);
+      }
+    }
+    expect(tried).toBeGreaterThan(3_000);
   });
 });

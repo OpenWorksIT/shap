@@ -13,6 +13,7 @@ Fixes from the first code scanning (CodeQL) of Shap, and from an independent rev
   and old tax invoices after deregistering for VAT all come out clean. Debtors, creditors and
   PAYE now agree to the cent or say so (journals you typed in are counted apart and shown), and
   an agreed year says if anything dated in it was added or changed after it was agreed.
+- Splitting a cost never gives a part more VAT than its own amount can hold.
 - **Updates** come only from the version that passed every test: if your server can't reach it,
   nothing is updated and Settings says why.
 - **Every update's tests** can now fail where before some couldn't, the penetration test checks

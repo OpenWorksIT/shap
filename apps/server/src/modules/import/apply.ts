@@ -1,6 +1,7 @@
 import { addDays, formatDate } from '@shap/shared';
 import type { Sql, Tx } from '../../db/index.js';
 import { audit } from '../../lib/audit.js';
+import { noteAllShapFigures } from '../../lib/books.js';
 import { badRequest } from '../../lib/errors.js';
 import { projectSummarySql } from '../projects.js';
 import type { TrackerPlan } from './tracker.js';
@@ -339,6 +340,8 @@ export async function applyTracker(sql: Sql, plan: TrackerPlan, opts: ImportOpti
         jobDifferences.push({ name: p.name, field: 'parts', sheetCents: p.sheetPartsCents, shapCents: s.actualMaterialsCents });
     }
 
+    // History brought in, possibly into an agreed year: the books start from here.
+    await noteAllShapFigures(tx);
     await audit(tx, { userId: opts.userId ?? null, actor: 'import', action: 'import_tracker', entity: 'company', details: { counts, replace: Boolean(opts.replace) } });
     return { counts, jobsChecked, jobDifferences, warnings, checks, agreement, sourceMapping: mapping };
   });

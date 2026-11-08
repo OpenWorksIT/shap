@@ -14,11 +14,10 @@ import { confirmPassword, requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Tx } from '../db/index.js';
 import { audit } from '../lib/audit.js';
-import { applyBusinessType, getSettings } from '../lib/books.js';
+import { applyBusinessType, getSettings, noteShapFigures } from '../lib/books.js';
 import { badRequest } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 import { cleanImage } from '../lib/images.js';
-import { noteShapFigures } from './yearend.js';
 
 const FORMAT = 'shap-company/1';
 
