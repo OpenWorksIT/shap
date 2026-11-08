@@ -4,7 +4,7 @@
  *   npm run db:seed -- --i-know-this-is-demo-data [--reset]
  * Refuses to touch a database that already has people signing in, unless --reset.
  */
-import { addDays } from '@shap/shared';
+import { addDays, TERMS_VERSION } from '@shap/shared';
 import { createUser } from '../auth.js';
 import { loadConfig } from '../config.js';
 import { today } from '../lib/books.js';
@@ -32,7 +32,8 @@ export async function seed(sql: Sql, opts: { reset?: boolean; password?: string 
   for (const u of DEMO_USERS) await createUser(sql, { ...u, password });
   await sql`update settings set company_name = 'Demo Builders (Pty) Ltd', trading_name = 'Demo Builders', reg_number = '2024/000000/07',
     address = ${'12 Example Street\nGqeberha 6001'}, phone = '041 000 0000', email = 'accounts@example.co.za',
-    bank_details = ${'Example Bank · Business cheque account\nAccount 000 000 0000 · Branch 250655'} where id`;
+    bank_details = ${'Example Bank · Business cheque account\nAccount 000 000 0000 · Branch 250655'},
+    terms_version = ${TERMS_VERSION}, terms_accepted_at = now() where id`;
   // Two trading names for one company: the building side and a fictional electrical side.
   await sql`update brands set name = 'Demo Builders', legal_line = 'Demo Builders (Pty) Ltd', email = 'accounts@example.co.za', phone = '041 000 0000',
     address = ${'12 Example Street\nGqeberha 6001'}, bank_details = ${'Example Bank · Business cheque account\nAccount 000 000 0000 · Branch 250655'}, accent = '#1f5f8b'

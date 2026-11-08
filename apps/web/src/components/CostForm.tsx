@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { DeleteWarning } from './DeleteRecord';
 import { formatDate, formatZar, industryProfile, todayIso, vatIncluded } from '@shap/shared';
 import { api, ApiError, apiUrl } from '../lib/api';
 import { compressSlip } from '../lib/files';
@@ -119,8 +120,10 @@ export function CostForm({ initial, projectId, plannedItem, onSaved, onDeleted }
     }
   };
 
+  const [asking, setAsking] = useState(false);
   const del = async () => {
-    if (!f.id || !confirm('Delete this cost?')) return;
+    if (!f.id) return;
+    setAsking(false);
     try {
       await api(`/api/costs/${f.id}`, { method: 'DELETE' });
       toast('Cost deleted');
@@ -234,12 +237,13 @@ export function CostForm({ initial, projectId, plannedItem, onSaved, onDeleted }
         <button className="btn primary big grow" disabled={busy || uploading}>
           {busy ? 'Saving…' : f.id ? 'Save cost' : 'Add cost'}
         </button>
-        {f.id && isOwner && (
-          <button type="button" className="btn danger" onClick={() => void del()}>
+        {f.id && isOwner && !asking && (
+          <button type="button" className="btn danger" onClick={() => setAsking(true)}>
             Delete
           </button>
         )}
       </div>
+      {asking && <DeleteWarning what="this cost" onClose={() => setAsking(false)} onDelete={() => void del()} />}
     </form>
   );
 }

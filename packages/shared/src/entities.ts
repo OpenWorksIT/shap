@@ -64,6 +64,9 @@ export interface EntityRules {
   ownerMoney: string;
   /** What the registration number is called on documents, or null when there isn't one. */
   regLabel: string | null;
+  /** Where the number comes from and how it ends, and an example (setup and Settings). */
+  regHint?: string;
+  regPlaceholder?: string;
   accounts: EntityAccounts;
 }
 
@@ -127,7 +130,9 @@ export const ENTITIES: Record<BusinessType, EntityRules> = {
     owner: { one: 'shareholder', many: 'shareholders' },
     example: 'e.g. Sparky Electrical (Pty) Ltd',
     ownerMoney: 'Money between you and the company goes on your loan account. The company can pay you a salary, and dividends out of its profit.',
-    regLabel: 'Registration number',
+    regLabel: 'Company registration number',
+    regHint: 'From CIPC: the year, six digits, and 07 for a (Pty) Ltd',
+    regPlaceholder: '2024/123456/07',
     accounts: STANDARD,
   },
   inc: {
@@ -145,7 +150,9 @@ export const ENTITIES: Record<BusinessType, EntityRules> = {
     owner: { one: 'shareholder', many: 'shareholders' },
     example: 'e.g. Mokoena Attorneys Inc.',
     ownerMoney: 'Money between directors and the company goes on their loan accounts. The company can pay directors a salary, and dividends out of its profit.',
-    regLabel: 'Registration number',
+    regLabel: 'Company registration number',
+    regHint: 'From CIPC: the year, six digits, and 21 for an Inc.',
+    regPlaceholder: '2010/123456/21',
     accounts: { ...STANDARD, director_salary: 'Directors’ remuneration' },
   },
   cc: {
@@ -162,7 +169,9 @@ export const ENTITIES: Record<BusinessType, EntityRules> = {
     owner: { one: 'member', many: 'members' },
     example: 'e.g. Sparky Electrical CC',
     ownerMoney: 'Money between members and the CC goes on their loan accounts. The CC can pay members a salary, and distributions out of its profit (with dividends tax).',
-    regLabel: 'CK number',
+    regLabel: 'CC registration number',
+    regHint: 'From CIPC (the CK number): the year, six digits, and 23',
+    regPlaceholder: '1999/012345/23',
     accounts: {
       share_capital: 'Members’ contributions',
       retained_earnings: 'Retained income',
@@ -187,6 +196,8 @@ export const ENTITIES: Record<BusinessType, EntityRules> = {
     example: 'e.g. Sparky Trading Trust',
     ownerMoney: 'The trust gives income to beneficiaries as distributions (no dividends tax: a beneficiary living in South Africa is taxed on this year’s income they’re given; for one abroad, the trust pays). Money lent to the trust goes on loan accounts, and trustees can be paid fees.',
     regLabel: 'Master’s reference (IT number)',
+    regHint: 'On the Master’s letter of authority',
+    regPlaceholder: 'IT 1234/2015',
     accounts: {
       share_capital: 'Trust capital',
       retained_earnings: 'Accumulated profit',
@@ -210,7 +221,9 @@ export const ENTITIES: Record<BusinessType, EntityRules> = {
     owner: { one: 'member', many: 'members' },
     example: 'e.g. Ubuntu Builders NPC',
     ownerMoney: 'A non-profit company can’t pay out its profits: everything goes back into its purpose. Directors can be paid for work they do.',
-    regLabel: 'Registration number',
+    regLabel: 'Company registration number',
+    regHint: 'From CIPC: the year, six digits, and 08 for a non-profit company',
+    regPlaceholder: '2015/123456/08',
     accounts: {
       ...STANDARD,
       share_capital: 'Funds contributed',
@@ -233,7 +246,9 @@ export const ENTITIES: Record<BusinessType, EntityRules> = {
     owner: { one: 'member', many: 'members' },
     example: 'e.g. Sparky Builders Co-operative Ltd',
     ownerMoney: 'Money between members and the co-op goes on their loan accounts. Profit paid to members is a dividend.',
-    regLabel: 'Registration number',
+    regLabel: 'Co-operative registration number',
+    regHint: 'From CIPC: the year, six digits, and 24, 25 or 26',
+    regPlaceholder: '2012/123456/24',
     accounts: {
       share_capital: 'Members’ shares',
       retained_earnings: 'Reserves',
@@ -251,7 +266,7 @@ export const entity = (t: string): EntityRules => ENTITIES[(BUSINESS_TYPES as re
 export const equityHeading = (t: string) => ({ partnership: 'Partners’ funds', cc: 'Members’ interest', trust: 'Trust capital and reserves', npc: 'Funds', coop: 'Members’ funds' } as Record<string, string>)[t] ?? 'Equity';
 
 /** The registration number as it's printed: "Reg. no. 2019/123456/07", "CK 1998/012345/23", "IT 1234/2015". */
-export const regPrefix = (t: string) => ({ cc: 'CK', trust: 'Master’s ref.' } as Record<string, string>)[t] ?? 'Reg. no.';
+export const regPrefix = (t: string) => ({ cc: 'CC registration no.', trust: 'Master’s ref.', coop: 'Co-operative registration no.' } as Record<string, string>)[t] ?? 'Company registration no.';
 
 /** Pays owners out of profit (a dividend or a distribution) rather than drawings. */
 export const paysOutProfit = (t: string) => ['dividends', 'member_distributions', 'beneficiary_distributions'].includes(entity(t).payout);

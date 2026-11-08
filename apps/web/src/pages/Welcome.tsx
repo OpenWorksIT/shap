@@ -4,7 +4,8 @@
  */
 import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BUSINESS_TYPES, ENTITIES, entity, extrasFor, featuresFor, INDUSTRIES, paysOutProfit, payoutWord, TURNOVER_TAX_LIMIT_CENTS, formatZar, WORKFLOWS, type IndustryKey, type SetupExtras, type Workflow } from '@shap/shared';
+import { BUSINESS_TYPES, ENTITIES, entity, extrasFor, featuresFor, INDUSTRIES, paysOutProfit, payoutWord, payeRefProblem, regNumberProblem, sdlRefFor, setupCautions, TERMS_VERSION, TURNOVER_TAX_LIMIT_CENTS, formatZar, uifRefProblem, vatNumberProblem, vatThresholds, WORKFLOWS, type EmployerAnswer, type IndustryKey, type SetupExtras, type Workflow } from '@shap/shared';
+import { TermsReview } from '../components/Terms';
 import { LogoField } from '../components/BusinessForm';
 import { Logo } from '../components/Logo';
 import { Field, Icon, MoneyInput } from '../components/ui';
@@ -14,7 +15,7 @@ import type { Settings } from '../lib/types';
 import { MarketWhat } from '../components/MarketShare';
 import { setTone } from '../lib/words';
 
-const STEPS = ['hello', 'structure', 'industry', 'people', 'workflow', 'extras', 'logo', 'details', 'tone'] as const;
+const STEPS = ['hello', 'structure', 'industry', 'people', 'workflow', 'extras', 'logo', 'details', 'tone', 'terms'] as const;
 type Step = (typeof STEPS)[number];
 
 export default function WelcomePage({ canRestore = true }: { canRestore?: boolean }) {
@@ -30,6 +31,11 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
   const [employees, setEmployees] = useState<boolean | null>(null);
   const [casual, setCasual] = useState<boolean | null>(null);
   const [dividends, setDividends] = useState<boolean | null>(null);
+  // With employees: registered with SARS for PAYE, for UIF, and paying SDL?
+  const [paye, setPaye] = useState<EmployerAnswer | null>(null);
+  const [uif, setUif] = useState<EmployerAnswer | null>(null);
+  const [sdl, setSdl] = useState<EmployerAnswer | null>(null);
+  const [accepted, setAccepted] = useState(false);
   const [workflow, setWorkflow] = useState<Workflow>('quote_job_invoice');
   const [extras, setExtras] = useState<SetupExtras>(() => extrasFor(settings.industry || ''));
   const [movingIn, setMovingIn] = useState<boolean | null>(null);
@@ -40,6 +46,13 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
   const kind = entity(f.businessType);
   // Pays its owners out of profit (dividends, or a CC's or trust's distributions).
   const paysOut = paysOutProfit(f.businessType);
+  // A company (Inc., CC, co-op) declares its dividends to SARS: the section is always on for it.
+  const dividendsAlways = kind.dividendsTax;
+  const vatProblem = f.vatRegistered ? (f.vatNumber.trim() ? vatNumberProblem(f.vatNumber) : 'Add your VAT number') : null;
+  const regProblem = regNumberProblem(f.regNumber, f.businessType);
+  const payeProblem = paye === 'yes' ? (f.payeRef.trim() ? payeRefProblem(f.payeRef) : 'Add your PAYE reference') : null;
+  const uifProblem = uif === 'yes' ? uifRefProblem(f.uifRef) : null;
+  const compulsory = formatZar(vatThresholds(new Date().toISOString().slice(0, 10)).compulsoryCents, { cents: false });
   const common = f.businessType === 'sole_prop' || f.businessType === 'company';
   const go = (s: Step) => (setError(''), setStep(s), window.scrollTo(0, 0));
   const next = () => go(STEPS[STEPS.indexOf(step) + 1]!);
@@ -51,10 +64,13 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
     setError('');
     const features = {
       ...f.features,
-      ...featuresFor({ workflow, employees: Boolean(employees), casual: Boolean(casual), company: paysOut, dividends: dividends ?? false, extras, payshap: Boolean(f.payshapId.trim()) }),
+      ...featuresFor({ workflow, employees: Boolean(employees), casual: Boolean(casual), company: paysOut, dividends: dividendsAlways || (dividends ?? false), extras, payshap: Boolean(f.payshapId.trim()) }),
     };
     try {
-      const { logoId: _l, ...rest } = { ...f, features, industry, usageConsent: Boolean(consent), marketConsent: market, marketNoticeSeen: true, setupDone: true, fyEndMonth: kind.febYearEnd ? 2 : f.fyEndMonth, turnoverTax: kind.turnoverTax && f.turnoverTax } as Settings & { logoId: string | null };
+      const employer = employees
+        ? { payeRegistered: paye === 'yes', payeRef: paye === 'yes' ? f.payeRef : '', uifRegistered: uif === 'yes', uifRef: uif === 'yes' ? f.uifRef : '', sdl: sdl === 'yes' }
+        : { payeRegistered: null, payeRef: '', uifRegistered: null, uifRef: '', sdl: false };
+      const { logoId: _l, termsAcceptedAt: _t, ...rest } = { ...f, ...employer, features, industry, usageConsent: Boolean(consent), marketConsent: market, marketNoticeSeen: true, setupDone: true, termsVersion: TERMS_VERSION, fyEndMonth: kind.febYearEnd ? 2 : f.fyEndMonth, turnoverTax: kind.turnoverTax && f.turnoverTax } as Settings & { logoId: string | null };
       await api('/api/settings', { method: 'PUT', body: rest });
       setTone(f.tone);
       // Moving from another package: straight to the screen that brings the books across.
@@ -141,9 +157,25 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
               <input type="checkbox" checked={f.vatRegistered} onChange={(e) => set('vatRegistered', e.target.checked)} />
               <span>
                 Registered for VAT
-                <div className="xs muted">Not yet? Shap warns you when you get near the point where you must (R2.3 million a year).</div>
+                <div className="xs muted">Not yet? Shap watches your income over any 12 months in a row and warns you as it nears {compulsory}, the point where registering is compulsory.</div>
               </span>
             </label>
+            {f.vatRegistered && (
+              <div className="form-grid">
+                <Field label="VAT number" hint="10 digits starting with 4, on your VAT registration letter" error={f.vatNumber.trim() ? (vatProblem ?? undefined) : undefined}>
+                  {(p) => <input {...p} className="input" inputMode="numeric" value={f.vatNumber} onChange={(e) => set('vatNumber', e.target.value)} placeholder="4123456789" />}
+                </Field>
+                <Field label="You file VAT" hint="On your VAT registration letter">
+                  {(p) => (
+                    <select {...p} className="select" value={f.vatCategory} onChange={(e) => set('vatCategory', e.target.value as Settings['vatCategory'])}>
+                      <option value="B">Every two months (Feb, Apr, Jun…)</option>
+                      <option value="A">Every two months (Jan, Mar, May…)</option>
+                      <option value="C">Every month</option>
+                    </select>
+                  )}
+                </Field>
+              </div>
+            )}
             {kind.turnoverTax && <label className="check">
               <input type="checkbox" checked={f.turnoverTax} onChange={(e) => set('turnoverTax', e.target.checked)} />
               <span>
@@ -151,7 +183,8 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
                 <div className="xs muted">SARS’s simpler tax for micro businesses (turnover up to {formatZar(TURNOVER_TAX_LIMIT_CENTS, { cents: false })} a year). Only if you registered for it: not sure? Leave it off.</div>
               </span>
             </label>}
-            {nav(Boolean(f.companyName.trim()))}
+            {f.vatRegistered && vatProblem && <p className="xs muted">To charge VAT, Shap needs your VAT number: it goes on every tax invoice. Not registered yet? Untick “Registered for VAT” for now.</p>}
+            {nav(Boolean(f.companyName.trim()) && !vatProblem)}
           </Q>
         )}
 
@@ -201,8 +234,43 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
         {step === 'people' && (
           <Q title="Who works with you?" sub="Switch on only what you need.">
             <YesNo q="Do you have employees on a monthly salary?" hint="Payroll: payslips, PAYE, UIF and SDL worked out for you." value={employees} onChange={setEmployees} />
+            {employees && (
+              <div className="panel panel-pad stack" style={{ gap: 12 }}>
+                <strong className="small">As an employer, are you registered for…</strong>
+                <Answer q="PAYE (employees’ tax), with SARS" value={paye} onChange={setPaye} />
+                {paye === 'yes' && (
+                  <Field label="PAYE reference" hint="10 digits starting with 7, on your EMP201" error={f.payeRef.trim() ? (payeProblem ?? undefined) : undefined}>
+                    {(p) => <input {...p} className="input" inputMode="numeric" value={f.payeRef} onChange={(e) => set('payeRef', e.target.value)} placeholder="7123456789" />}
+                  </Field>
+                )}
+                {paye && paye !== 'yes' && (
+                  <p className="xs banner">
+                    An employer must register for PAYE within 21 business days of becoming one, unless no employee earns enough to pay tax. Shap works out the PAYE on each payslip; registering, declaring (EMP201) and paying SARS stay with you.
+                  </p>
+                )}
+                <Answer q="UIF (Unemployment Insurance Fund)" value={uif} onChange={setUif} />
+                {uif === 'yes' && (
+                  <Field label="UIF reference (optional)" hint="From the Department of Employment and Labour (1234567/8), or SARS’s U-number" error={uifProblem ?? undefined}>
+                    {(p) => <input {...p} className="input" value={f.uifRef} onChange={(e) => set('uifRef', e.target.value)} placeholder="1234567/8" />}
+                  </Field>
+                )}
+                {uif && uif !== 'yes' && (
+                  <p className="xs banner">
+                    UIF covers anyone working 24 hours a month or more for you: 1% from them and 1% from you. Employers registered for PAYE register for UIF with SARS; others with the UI Commissioner. Shap works it out; registering and paying are yours to do.
+                  </p>
+                )}
+                <Answer q="SDL (Skills Development Levy)" value={sdl} onChange={setSdl} unsure={false} />
+                {sdl === 'yes' && paye === 'yes' && !payeProblem && <p className="xs muted">Your SDL reference is {sdlRefFor(f.payeRef)}: your PAYE reference with an L in front.</p>}
+                {sdl === 'no' && <p className="xs muted">That’s right while your total payroll is expected to stay under R500 000 over the next 12 months. Once it isn’t, register and switch SDL on in Settings.</p>}
+              </div>
+            )}
             <YesNo q="Do you use casual labour, paid by the day?" hint="Log the days they work on each job and what you’ve paid them." value={casual} onChange={setCasual} />
-            {paysOut && (
+            {paysOut && dividendsAlways && (
+              <p className="xs muted panel panel-pad">
+                {kind.the.charAt(0).toUpperCase() + kind.the.slice(1)} declares every {payoutWord(f.businessType)} it pays to SARS (the DTR01, by the end of the next month), so the {payoutWord(f.businessType)}s section is on, ready for when you pay one.
+              </p>
+            )}
+            {paysOut && !dividendsAlways && (
               <YesNo
                 q={`Will ${kind.the} pay ${kind.owner.many} ${payoutWord(f.businessType)}s?`}
                 hint={kind.dividendsTax ? 'Record them with the 20% dividends tax handled.' : 'Record them: the tax estimate takes this year’s income given to South African beneficiaries off the trust’s taxable income.'}
@@ -210,7 +278,7 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
                 onChange={setDividends}
               />
             )}
-            {nav(employees !== null && casual !== null && (!paysOut || dividends !== null))}
+            {nav(employees !== null && casual !== null && (!paysOut || dividendsAlways || dividends !== null) && (!employees || (paye !== null && uif !== null && sdl !== null && !payeProblem && !uifProblem)))}
           </Q>
         )}
 
@@ -219,6 +287,9 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
             {WORKFLOWS.map((w) => (
               <Choice key={w.key} on={workflow === w.key} onClick={() => setWorkflow(w.key)} title={w.label} hint={w.hint} />
             ))}
+            <p className="xs muted">
+              Selling stock? Shap doesn’t track inventory yet: a stock tracker is in the pipeline. Until then, keep your stock in your own tracker and use Shap for the quotes, invoices and books of what you sell.
+            </p>
             {nav()}
           </Q>
         )}
@@ -265,22 +336,14 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
             </Field>
             <div className="form-grid">
               <Field label="Invoices due after (days)">{(p) => <input {...p} className="input" type="number" min={0} value={f.paymentDays} onChange={(e) => set('paymentDays', Number(e.target.value))} />}</Field>
-              {f.vatRegistered && <Field label="VAT number">{(p) => <input {...p} className="input" value={f.vatNumber} onChange={(e) => set('vatNumber', e.target.value)} />}</Field>}
-              {f.vatRegistered && (
-                <Field label="You file VAT" hint="On your VAT registration letter">
-                  {(p) => (
-                    <select {...p} className="select" value={f.vatCategory} onChange={(e) => set('vatCategory', e.target.value as Settings['vatCategory'])}>
-                      <option value="B">Every two months (Feb, Apr, Jun…)</option>
-                      <option value="A">Every two months (Jan, Mar, May…)</option>
-                      <option value="C">Every month</option>
-                    </select>
-                  )}
+              {kind.regLabel && (
+                <Field label={kind.regLabel} hint={kind.regHint} error={regProblem ?? undefined}>
+                  {(p) => <input {...p} className="input" value={f.regNumber} onChange={(e) => set('regNumber', e.target.value)} placeholder={kind.regPlaceholder} />}
                 </Field>
               )}
-              {kind.regLabel && <Field label={kind.regLabel}>{(p) => <input {...p} className="input" value={f.regNumber} onChange={(e) => set('regNumber', e.target.value)} />}</Field>}
             </div>
             <Field label="Payment terms (on invoices)">{(p) => <textarea {...p} className="textarea" rows={2} value={f.invoiceTerms} onChange={(e) => set('invoiceTerms', e.target.value)} />}</Field>
-            {nav()}
+            {nav(!regProblem)}
           </Q>
         )}
 
@@ -288,7 +351,18 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
           <Q title="How formal are you in business?" sub="Only changes how Shap talks to you. Your quotes and invoices always stay professional.">
             <Choice on={f.tone !== 'formal'} onClick={() => set('tone', 'casual')} title="Not really, keep it lekker" hint="“Howzit!” on Home, “Sharp! Invoice sent”, and a bit of slang." />
             <Choice on={f.tone === 'formal'} onClick={() => set('tone', 'formal')} title="Yes, keep it professional" hint="“Good morning”, “Invoice sent”: plain and polite." />
-            {nav(true, busy ? 'Setting up…' : 'Done: open my books', () => void finish())}
+            {nav()}
+          </Q>
+        )}
+
+        {step === 'terms' && (
+          <Q title="Last step: the terms of use" sub="Shap is free, and it’s yours to run. These are the few things that come with that.">
+            <TermsReview
+              cautions={setupCautions({ vatRegistered: f.vatRegistered, employees: Boolean(employees), payeRegistered: paye, uifRegistered: uif, sdl, turnoverTax: kind.turnoverTax && f.turnoverTax, paysDividends: dividendsAlways || Boolean(dividends) })}
+              accepted={accepted}
+              onAccepted={setAccepted}
+            />
+            {nav(accepted, busy ? 'Setting up…' : 'Accept and open my books', () => void finish())}
           </Q>
         )}
       </div>
@@ -316,6 +390,21 @@ function Choice({ on, onClick, title, hint }: { on: boolean; onClick: () => void
       </strong>
       {hint && <span className="xs muted">{hint}</span>}
     </button>
+  );
+}
+
+function Answer({ q, value, onChange, unsure = true }: { q: string; value: EmployerAnswer | null; onChange: (v: EmployerAnswer) => void; unsure?: boolean }) {
+  return (
+    <div className="stack" style={{ gap: 6 }}>
+      <span className="small">{q}</span>
+      <div className="row wrap">
+        {(['yes', 'no', ...(unsure ? ['unsure' as const] : [])] as EmployerAnswer[]).map((v) => (
+          <button key={v} type="button" className={`btn small ${value === v ? 'primary' : ''}`} onClick={() => onChange(v)}>
+            {v === 'yes' ? 'Yes' : v === 'no' ? 'No' : 'Not sure'}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 

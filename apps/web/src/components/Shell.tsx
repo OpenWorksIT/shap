@@ -1,3 +1,4 @@
+import { Notices } from './Notices';
 import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { ROLE_LABELS, paysOutProfit } from '@shap/shared';
@@ -76,6 +77,7 @@ export function Shell({ children }: { children: ReactNode }) {
       </header>
 
       <main className="main" id="main">
+        <Notices />
         {children}
       </main>
 

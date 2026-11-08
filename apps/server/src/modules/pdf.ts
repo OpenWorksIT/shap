@@ -180,7 +180,10 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   // A pro-forma asks to be paid like an invoice, but it isn't one (no tax invoice until the work's invoiced).
   const isInvoice = doc.kind === 'invoice';
   const asksPayment = isInvoice || isProforma;
-  const heading = isCredit ? 'Credit note' : isInvoice ? (settings.vatRegistered && doc.vatRateBp > 0 ? 'Tax invoice' : 'Invoice') : isProforma ? 'Pro-forma invoice' : 'Quotation';
+  // A VAT vendor's invoice is a tax invoice even when everything on it is zero-rated (VAT Act s20(4)(a)).
+  const vendor = settings.vatRegistered;
+  const heading = isCredit ? 'Credit note' : isInvoice ? (vendor ? 'Tax invoice' : 'Invoice') : isProforma ? 'Pro-forma invoice' : 'Quotation';
+  const vatShown = vendor || doc.vatRateBp > 0;
   const balance = doc.totalCents - (isInvoice ? doc.paidCents : 0);
   const label = (text: string, x: number, at: number, opts: PDFKit.Mixins.TextOptions = {}) =>
     pdf.font(bold).fontSize(7.5).fillColor(MUTED).text(text.toUpperCase(), x, at, { characterSpacing: 0.9, ...opts });
@@ -277,8 +280,8 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
     pdf.font(bold).fontSize(8).fillColor(MUTED);
     pdf.text('DESCRIPTION', cols.desc, y, { characterSpacing: 0.6 });
     pdf.text('QTY', cols.qty, y, { width: 55, align: 'right', characterSpacing: 0.6 });
-    pdf.text('UNIT PRICE', cols.unit, y, { width: 80, align: 'right', characterSpacing: 0.6 });
-    pdf.text('AMOUNT', cols.amount, y, { width: 82, align: 'right', characterSpacing: 0.6 });
+    pdf.text(vatShown ? 'PRICE EXCL.' : 'UNIT PRICE', cols.unit, y, { width: 80, align: 'right', characterSpacing: 0.6 });
+    pdf.text(vatShown ? 'AMOUNT EXCL.' : 'AMOUNT', cols.amount, y, { width: 82, align: 'right', characterSpacing: 0.6 });
     y += 13;
     pdf.moveTo(L, y).lineTo(R, y).lineWidth(1.2).strokeColor(accent).stroke();
     y += 6;
@@ -321,8 +324,9 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   // ---- totals (right) and payment details (left), side by side
   const totals: [string, number][] = [];
   if (grouped) for (const cat of categories) totals.push([lineLabel(settings.industry, cat), lines.filter((l) => l.category === cat).reduce((s, l) => s + l.lineTotalCents, 0)]);
-  totals.push(['Subtotal', doc.subtotalCents]);
-  if (doc.vatRateBp > 0) totals.push([`VAT ${(doc.vatRateBp / 100).toFixed(doc.vatRateBp % 100 ? 1 : 0)}%`, doc.vatCents]);
+  // A tax invoice shows the value of the supply, the VAT and the total (s20(4)(g)); a credit note the reduction and its VAT (s21(3)).
+  totals.push([vatShown ? 'Total excl. VAT' : 'Subtotal', doc.subtotalCents]);
+  if (vatShown) totals.push([`VAT ${(doc.vatRateBp / 100).toFixed(doc.vatRateBp % 100 ? 1 : 0)}%`, doc.vatCents]);
   // A deposit is a request for part of the total up front. On an invoice it's what's due until it's in.
   const deposit = Math.min(doc.depositDueCents ?? 0, doc.totalCents);
   const depositLabel = `Deposit${doc.depositBp ? ` (${(doc.depositBp / 100).toFixed(doc.depositBp % 100 ? 1 : 0)}%)` : ''}`;
@@ -333,15 +337,16 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
     if (doc.paidCents - credited) totals.push([paidLabel, -(doc.paidCents - credited)]);
     if (credited) totals.push(['Credited (credit notes)', -credited]);
   };
+  const totalLabel = vatShown ? 'Total incl. VAT' : 'Total';
   if (deposit > 0 && (!isInvoice || depositDue)) {
-    totals.push(['Total', doc.totalCents]);
+    totals.push([totalLabel, doc.totalCents]);
     totals.push([isInvoice ? `${depositLabel} due now` : `${depositLabel} to confirm`, deposit]);
     if (doc.paidCents) settled('Paid');
     if (!isInvoice || doc.depositShowBalance) totals.push([isInvoice ? 'Balance after the deposit' : 'Balance on completion', doc.totalCents - deposit]);
   } else if (isInvoice && doc.paidCents) {
-    totals.push(['Total', doc.totalCents]);
+    totals.push([totalLabel, doc.totalCents]);
     settled(deposit > 0 ? 'Paid (incl. deposit)' : 'Paid');
-  }
+  } else if (vatShown) totals.push([totalLabel, doc.totalCents]);
   const bigLabel = isCredit
     ? 'Credited'
     : isInvoice

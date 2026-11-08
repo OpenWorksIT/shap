@@ -1,5 +1,5 @@
 /**
- * Anonymous market rates: only the trade's standard items, one median each, nothing shared
+ * Anonymous market rates: only the trade's standard items, one average each, nothing shared
  * until the owner has been told, once a month, and the collector keeping national tallies only.
  */
 import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
@@ -16,7 +16,7 @@ import { login, setup, type TestEnv } from './helpers.js';
 const INSTALL = '3f2a9c1e-5b7d-4e8a-9c0f-1a2b3c4d5e6f';
 
 describe('what a business shares', () => {
-  it('takes only the trade’s standard items, the median of each, and nothing typed', () => {
+  it('takes only the trade’s standard items, the average of each, and nothing typed', () => {
     const rates = marketRates('builder', [
       { description: 'Tiling', unit: 'm²', unitPriceCents: 40000, qty: 30 },
       { description: '  tiling ', unit: 'M²', unitPriceCents: 50000, qty: 12 },

@@ -2,7 +2,7 @@
  * Anonymous market rates (see packages/shared/src/market.ts for what is shared and why).
  *
  * Sending: once a month, unless the owner switched it off in Settings (and only once they've
- * been told about it), the median price of each of
+ * been told about it), the average price of each of
  * the trade's standard items on last month's issued invoices goes to OpenWorks' collector.
  *
  * Collecting (COLLECT=true, OpenWorks' own server): each price is added into a national tally
@@ -40,7 +40,7 @@ export const marketInput = z
   .refine((c) => c.rates.every((r) => isMarketItem(c.industry, r.item, r.unit)), 'Only the standard items of a trade can be shared')
   .refine((c) => new Set(c.rates.map((r) => `${r.item}|${r.unit}`)).size === c.rates.length, 'Each item once');
 
-/** Last month's issued invoices: the median price of each of the trade's standard items. */
+/** Last month's issued invoices: the average price of each of the trade's standard items. */
 export async function monthRates(db: Db, industry: string, month: string) {
   if (!marketItems(industry).size) return [];
   const { from, to } = monthRange(month);

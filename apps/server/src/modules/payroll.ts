@@ -13,7 +13,7 @@
  *     SDL owed                             Cr SDL
  *     the bank (or wherever it's paid from) Cr net pay
  */
-import { dividendInput, dividendTax, financialYear, microDividendTax, dwtDue, emp201Due, employeeInput, payLine, payLineInput, payRunInput, sarsPaymentInput, taxYearEnd, type AgeBand, entity, paysOutProfit, payoutWord } from '@shap/shared';
+import { compact, payeRefProblem, taxNumberProblem, idNumberProblem, sdlRefFor, dividendInput, dividendTax, financialYear, microDividendTax, dwtDue, emp201Due, employeeInput, payLine, payLineInput, payRunInput, sarsPaymentInput, taxYearEnd, type AgeBand, entity, paysOutProfit, payoutWord } from '@shap/shared';
 import PDFDocument from 'pdfkit';
 import { z } from 'zod';
 import { requireRole, userOrThrow } from '../auth.js';
@@ -155,6 +155,78 @@ export async function payrollAttention(db: Db, on = today()) {
     ...s.dividendsTax.filter((r) => r.paidCents < r.dwtCents).map((r) => ({ kind: 'dwt' as const, period: r.period, owingCents: r.dwtCents - r.paidCents, dueOn: r.dueOn })),
   ];
   return due.map((d) => ({ ...d, late: d.dueOn < on })).sort((a, b) => a.dueOn.localeCompare(b.dueOn));
+}
+
+/**
+ * The EMP501 reconciliation SARS asks for twice a year: the interim one (March to August, filed
+ * 21 September to 31 October) and the annual one (the full tax year, March to February, filed
+ * 1 April to 31 May). It checks that the EMP201s (PAYE, UIF and SDL each month) match what was
+ * paid to SARS and what each employee's IRP5 or IT3(a) will show. Shap prepares the figures;
+ * they're captured and submitted on e@syFile Employer or eFiling.
+ * https://www.sars.gov.za/latest-news/employer-interim-declarations-emp501-21-september-to-october-2026/
+ */
+export async function emp501(db: Db, taxYear: number, kind: 'interim' | 'annual') {
+  const from = `${taxYear - 1}-03-01`;
+  const to = kind === 'interim' ? `${taxYear - 1}-08-31` : `${taxYear}-02-${new Date(Date.UTC(taxYear, 2, 0)).getUTCDate()}`;
+  const s = await getSettings(db);
+  const months = await db<{ period: string; payeCents: number; uifCents: number; sdlCents: number; paidCents: number }[]>`
+    with m as (
+      select to_char(r.pay_date, 'YYYY-MM') as period, sum(l.paye_cents)::bigint as paye_cents,
+        sum(l.uif_employee_cents + l.uif_employer_cents)::bigint as uif_cents, sum(l.sdl_cents)::bigint as sdl_cents
+      from pay_runs r join pay_lines l on l.run_id = r.id
+      where r.status = 'final' and r.pay_date between ${from}::date and ${to}::date group by 1
+    )
+    select m.*, coalesce((select sum(p.amount_cents) from sars_payments p where p.kind = 'emp201' and p.period = m.period), 0)::bigint as paid_cents
+    from m order by m.period`;
+  const people = await db<{ id: string; name: string; idNumber: string; taxNumber: string; startDate: string; endDate: string | null; salary: number; overtime: number; commission: number; bonus: number; gross: number; paye: number; uif: number; sdl: number; first: string; last: string }[]>`
+    select e.id, e.name, e.id_number, e.tax_number, e.start_date, e.end_date,
+      sum(l.salary_cents)::bigint as salary, sum(l.overtime_cents)::bigint as overtime, sum(l.commission_cents)::bigint as commission, sum(l.extra_cents)::bigint as bonus,
+      sum(l.gross_cents)::bigint as gross, sum(l.paye_cents)::bigint as paye, sum(l.uif_employee_cents + l.uif_employer_cents)::bigint as uif, sum(l.sdl_cents)::bigint as sdl,
+      min(r.pay_date)::text as first, max(r.pay_date)::text as last
+    from pay_lines l join pay_runs r on r.id = l.run_id join employees e on e.id = l.employee_id
+    where r.status = 'final' and r.pay_date between ${from}::date and ${to}::date
+    group by e.id order by e.name`;
+  const n = (v: number) => Number(v);
+  const employees = people.map((p) => {
+    const codes = {
+      3601: n(p.salary),
+      3605: n(p.bonus),
+      3606: n(p.commission),
+      3607: n(p.overtime),
+      3699: n(p.gross),
+      4102: n(p.paye),
+      4141: n(p.uif),
+      4142: n(p.sdl),
+      4149: n(p.paye) + n(p.uif) + n(p.sdl),
+    };
+    const problems = [
+      !p.taxNumber ? 'No income tax number (SARS rejects certificates without one)' : taxNumberProblem(p.taxNumber),
+      !p.idNumber ? 'No ID or passport number' : idNumberProblem(p.idNumber),
+    ].filter(Boolean) as string[];
+    // An IRP5 when tax was taken off; an IT3(a) when none was.
+    return { id: p.id, name: p.name, idNumber: p.idNumber, taxNumber: p.taxNumber, certificate: n(p.paye) > 0 ? ('IRP5' as const) : ('IT3(a)' as const), periodFrom: p.startDate > from ? p.startDate : from, periodTo: p.endDate && p.endDate < to ? p.endDate : to, codes, problems };
+  });
+  const declared = months.reduce((t, m) => ({ paye: t.paye + n(m.payeCents), uif: t.uif + n(m.uifCents), sdl: t.sdl + n(m.sdlCents), paid: t.paid + n(m.paidCents) }), { paye: 0, uif: 0, sdl: 0, paid: 0 });
+  const certified = employees.reduce((t, e) => ({ paye: t.paye + e.codes[4102], uif: t.uif + e.codes[4141], sdl: t.sdl + e.codes[4142] }), { paye: 0, uif: 0, sdl: 0 });
+  const employer = [
+    !s.payeRef ? 'No PAYE reference in Settings → Company' : payeRefProblem(s.payeRef),
+    !s.taxNumber ? 'No income tax number for the business in Settings → Company' : taxNumberProblem(s.taxNumber),
+  ].filter(Boolean) as string[];
+  const window = kind === 'interim' ? { opens: `${taxYear - 1}-09-21`, closes: `${taxYear - 1}-10-31` } : { opens: `${taxYear}-04-01`, closes: `${taxYear}-05-31` };
+  return {
+    kind,
+    taxYear,
+    from,
+    to,
+    window,
+    employer: { name: s.companyName, payeRef: compact(s.payeRef), sdlRef: s.sdl ? sdlRefFor(s.payeRef) : '', uifRef: s.uifRef, taxNumber: s.taxNumber, problems: employer },
+    months: months.map((m) => ({ ...m, totalCents: n(m.payeCents) + n(m.uifCents) + n(m.sdlCents), dueOn: emp201Due(m.period) })),
+    declared: { ...declared, total: declared.paye + declared.uif + declared.sdl },
+    certified,
+    employees,
+    // What doesn't reconcile: declared against paid, and declared against the certificates.
+    differences: { unpaidCents: declared.paye + declared.uif + declared.sdl - declared.paid, payeCents: declared.paye - certified.paye, uifCents: declared.uif - certified.uif, sdlCents: declared.sdl - certified.sdl },
+  };
 }
 
 export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -416,6 +488,24 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
       );
     }
     return { yearStart, yearEnd, rows };
+  });
+
+  /** The EMP501 reconciliation for a tax year (the year ending in February of `year`), interim or annual. */
+  app.get('/api/payroll/emp501', readers, async (req, reply) => {
+    const qy = parse(z.object({ year: z.coerce.number().int().min(2000).max(2100).optional(), kind: z.enum(['interim', 'annual']).default('annual'), format: z.enum(['json', 'csv']).default('json') }), req.query);
+    const year = qy.year ?? Number(taxYearEnd(today()).slice(0, 4));
+    const r = await emp501(sql, year, qy.kind);
+    if (qy.format === 'csv') {
+      reply.header('content-type', 'text/csv; charset=utf-8');
+      reply.header('content-disposition', `attachment; filename="emp501-${qy.kind}-${year}.csv"`);
+      return reply.send(
+        toCsv(
+          ['Certificate', 'Employee', 'ID or passport', 'Income tax number', 'Period from', 'Period to', '3601 Income', '3605 Annual payment (bonus)', '3606 Commission', '3607 Overtime', '3699 Gross employment income', '4102 PAYE', '4141 UIF (employee and employer)', '4142 SDL', '4149 Total', 'Problems'],
+          r.employees.map((e) => [e.certificate, e.name, e.idNumber, e.taxNumber, e.periodFrom, e.periodTo, centsToCsv(e.codes[3601]), centsToCsv(e.codes[3605]), centsToCsv(e.codes[3606]), centsToCsv(e.codes[3607]), centsToCsv(e.codes[3699]), centsToCsv(e.codes[4102]), centsToCsv(e.codes[4141]), centsToCsv(e.codes[4142]), centsToCsv(e.codes[4149]), e.problems.join('; ')]),
+        ),
+      );
+    }
+    return r;
   });
 
   // ---------------------------------------------------------------- dividends

@@ -1,0 +1,4 @@
+{
+  "about": "OpenWorks' notices to every copy of Shap and Shap Pocket (packages/shared/src/notice.ts, SUNSET.md). Plain words only. Each notice: id, level (info | update | warning | sunset), title, body, optional link (openworks.co.za or github.com), apps ([\"shap\", \"pocket\"]), from / until (YYYY-MM-DD), belowVersion (only copies older than this), supportEndsOn (sunset).",
+  "notices": []
+}

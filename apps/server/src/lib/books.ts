@@ -42,6 +42,14 @@ export interface SettingsRow {
   marketSentMonth: string;
   installId: string;
   sdl: boolean;
+  taxNumber: string;
+  payeRegistered: boolean | null;
+  payeRef: string;
+  uifRegistered: boolean | null;
+  uifRef: string;
+  /** The terms of use accepted (terms.ts TERMS_VERSION), and when. */
+  termsVersion: string;
+  termsAcceptedAt: string | null;
   payLink: string;
   vatRegistered: boolean;
   vatRateBp: number;

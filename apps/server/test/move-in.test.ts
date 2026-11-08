@@ -144,7 +144,7 @@ describe('moving in', () => {
     env = await setup();
     me = await login(env.app, 'owner@example.co.za');
     const { settings } = await me.get('/api/reference');
-    await me.post('/api/settings', { ...settings, vatRegistered: true, vatNumber: '4000000000', features: { ...settings.features, bills: true } }, 'PUT');
+    await me.post('/api/settings', { ...settings, vatRegistered: true, vatNumber: '4000000002', features: { ...settings.features, bills: true } }, 'PUT');
     bank = await (await ref(env.sql)).src('Business bank');
   });
   afterAll(() => env.close());

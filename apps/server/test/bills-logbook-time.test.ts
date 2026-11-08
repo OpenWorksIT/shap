@@ -10,7 +10,7 @@ describe('more of the books', () => {
     env = await setup();
     me = await login(env.app, 'owner@example.co.za');
     const { settings } = await me.get('/api/reference');
-    await me.post('/api/settings', { ...settings, vatRegistered: true, vatNumber: '4000000000', vatCategory: 'B', features: { ...settings.features, bills: true } }, 'PUT');
+    await me.post('/api/settings', { ...settings, vatRegistered: true, vatNumber: '4000000002', vatCategory: 'B', features: { ...settings.features, bills: true } }, 'PUT');
   });
   afterAll(() => env.close());
 

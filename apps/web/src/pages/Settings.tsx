@@ -10,6 +10,12 @@ import {
   entity,
   formatDate,
   paysOutProfit,
+  payeRefProblem,
+  payoutWord,
+  regNumberProblem,
+  taxNumberProblem,
+  uifRefProblem,
+  vatNumberProblem,
   formatZar,
   monthLabel,
   passwordProblem,
@@ -34,6 +40,7 @@ import type { Brand, Settings } from '../lib/types';
 import { SystemSettings } from './System';
 import { Partners } from '../components/Partners';
 import { FeedbackInbox } from './FeedbackInbox';
+import { AuditLog } from '../components/AuditLog';
 import { LogoPlacer } from '../components/LogoPlacer';
 import { LogoField } from '../components/BusinessForm';
 import { FEATURES, FEATURE_GROUPS, FEATURE_KEYS, featureOn, INDUSTRIES, TURNOVER_TAX_LIMIT_CENTS } from '@shap/shared';
@@ -44,7 +51,7 @@ import { MarketWhat } from '../components/MarketShare';
 import { ShowDemoButton } from '../components/Demo';
 import { usePasswordPrompt } from '../components/PasswordPrompt';
 
-type Tab = 'company' | 'invoicing' | 'sections' | 'lists' | 'users' | 'import' | 'system' | 'feedback';
+type Tab = 'company' | 'invoicing' | 'sections' | 'lists' | 'users' | 'import' | 'system' | 'feedback' | 'audit';
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 export default function SettingsPage() {
@@ -66,6 +73,7 @@ export default function SettingsPage() {
             { value: 'users', label: 'People who sign in' },
             { value: 'import', label: 'Import & company file' },
             { value: 'system', label: 'Updates & backups' },
+            { value: 'audit', label: 'Audit log' },
             { value: 'feedback', label: 'Feedback' },
           ]}
         />
@@ -80,6 +88,7 @@ export default function SettingsPage() {
       {tab === 'invoicing' && <SettingsForm section="invoicing" />}
       {tab === 'sections' && <Sections />}
       {tab === 'feedback' && <FeedbackInbox />}
+      {tab === 'audit' && <AuditLog />}
       {tab === 'lists' && <Lists />}
       {tab === 'users' && <Users />}
       {tab === 'system' && (
@@ -155,9 +164,50 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
             <p className="xs muted">The registered company. How it presents itself on quotes and invoices (name, logo, contacts, bank) is set below.</p>
             <div className="form-grid">
               {text('companyName', 'Registered name', 'e.g. Example Builders (Pty) Ltd')}
-              {text('regNumber', kind.regLabel ?? 'Registration number')}
-              {text('vatNumber', 'VAT number')}
+              {kind.regLabel && (
+                <Field label={kind.regLabel} hint={kind.regHint} error={f.regNumber !== settings.regNumber || f.businessType !== settings.businessType ? (regNumberProblem(f.regNumber, f.businessType) ?? undefined) : undefined}>
+                  {(p) => <input {...p} className="input" value={f.regNumber} onChange={(e) => set('regNumber', e.target.value)} placeholder={kind.regPlaceholder} />}
+                </Field>
+              )}
+              <Field label="VAT number" hint={f.vatRegistered ? '10 digits starting with 4' : 'Once you’re registered for VAT'} error={(f.vatNumber !== settings.vatNumber ? vatNumberProblem(f.vatNumber) : null) ?? (f.vatRegistered && !f.vatNumber.trim() ? 'Needed while registered for VAT (Invoicing & books)' : undefined) ?? undefined}>
+                {(p) => <input {...p} className="input" inputMode="numeric" value={f.vatNumber} onChange={(e) => set('vatNumber', e.target.value)} />}
+              </Field>
+              <Field label="Income tax number" hint="The business’s own, 10 digits (for a sole proprietor, yours)" error={f.taxNumber !== settings.taxNumber ? (taxNumberProblem(f.taxNumber) ?? undefined) : undefined}>
+                {(p) => <input {...p} className="input" inputMode="numeric" value={f.taxNumber} onChange={(e) => set('taxNumber', e.target.value)} />}
+              </Field>
             </div>
+            {has('payroll') && (
+              <div className="stack" style={{ gap: 8 }}>
+                <strong className="small">As an employer</strong>
+                <div className="form-grid">
+                  <label className="check">
+                    <input type="checkbox" checked={Boolean(f.payeRegistered)} onChange={(e) => set('payeRegistered', e.target.checked)} />
+                    <span>Registered for PAYE with SARS</span>
+                  </label>
+                  {f.payeRegistered && (
+                    <Field label="PAYE reference" hint="10 digits starting with 7 (SDL and SARS’s UIF number are the same digits with L and U)" error={f.payeRef !== settings.payeRef ? (payeRefProblem(f.payeRef) ?? undefined) : undefined}>
+                      {(p) => <input {...p} className="input" inputMode="numeric" value={f.payeRef} onChange={(e) => set('payeRef', e.target.value)} />}
+                    </Field>
+                  )}
+                  <label className="check">
+                    <input type="checkbox" checked={Boolean(f.uifRegistered)} onChange={(e) => set('uifRegistered', e.target.checked)} />
+                    <span>Registered for UIF</span>
+                  </label>
+                  {f.uifRegistered && (
+                    <Field label="UIF reference" hint="1234567/8 from the Department of Employment and Labour, or SARS’s U-number" error={f.uifRef !== settings.uifRef ? (uifRefProblem(f.uifRef) ?? undefined) : undefined}>
+                      {(p) => <input {...p} className="input" value={f.uifRef} onChange={(e) => set('uifRef', e.target.value)} />}
+                    </Field>
+                  )}
+                </div>
+                {(!f.payeRegistered || !f.uifRegistered) && (
+                  <p className="xs banner">
+                    {!f.payeRegistered && 'Paying employees without a PAYE registration: an employer must register within 21 business days of becoming one, unless no employee earns enough to pay tax. '}
+                    {!f.uifRegistered && 'UIF covers anyone working 24 hours a month or more for you. '}
+                    Shap works out the deductions; registering, declaring and paying are your responsibility.
+                  </p>
+                )}
+              </div>
+            )}
             {ref.brands.length > 1 && (
               <Field label="Default trading name" hint="For new jobs and documents when the job or client doesn’t say">
                 {(p) => (
@@ -1180,17 +1230,24 @@ function CompanyFile() {
 
 /** Not registered for VAT: how close the last 12 months are to the point where you must. */
 function VatThreshold() {
-  const { data } = useApi<{ last12Cents: number; pace12Cents: number; compulsoryCents: number; voluntaryCents: number; state: 'over' | 'near' | 'voluntary' | null }>('/api/vat/threshold');
+  const { data } = useApi<{ last12Cents: number; peak12Cents: number; peakTo: string; pace12Cents: number; compulsoryCents: number; voluntaryCents: number; state: 'over' | 'near' | 'voluntary' | null }>('/api/vat/threshold');
   if (!data) return null;
-  const pct = Math.min(100, Math.round((data.last12Cents / data.compulsoryCents) * 100));
+  const pct = Math.min(100, Math.round((data.peak12Cents / data.compulsoryCents) * 100));
+  const earlier = data.peak12Cents !== data.last12Cents;
   return (
     <div className={`banner small${data.state === 'over' || data.state === 'near' ? ' alert' : ''}`}>
-      <strong>{formatZar(data.last12Cents)}</strong> of income in the last 12 months ({pct}% of the {formatZar(data.compulsoryCents)} at which VAT registration is
-      compulsory).{' '}
+      <strong>{formatZar(data.last12Cents)}</strong> of income in the last 12 months
+      {earlier && (
+        <>
+          {' '}
+          (and <strong>{formatZar(data.peak12Cents)}</strong> in the 12 months to {formatDate(data.peakTo)}, the highest run)
+        </>
+      )}
+      : {pct}% of the {formatZar(data.compulsoryCents)} at which VAT registration is compulsory. Any 12 months in a row count, not only a tax year.{' '}
       {data.state === 'over'
         ? 'That’s over the line: you must register with SARS within 21 days of passing it.'
         : data.state === 'near'
-          ? `Getting close${data.pace12Cents > data.compulsoryCents ? `: the last three months are running at ${formatZar(data.pace12Cents)} a year` : ''}. Talk to your accountant about registering before you pass it.`
+          ? `Getting close${data.pace12Cents > data.compulsoryCents ? `: the last three months are running at ${formatZar(data.pace12Cents)} over 12 months` : ''}. Talk to your accountant about registering before you pass it.`
           : data.state === 'voluntary'
             ? `You may register voluntarily (from ${formatZar(data.voluntaryCents)}), but you don’t have to yet.`
             : 'Nothing to do yet.'}{' '}
@@ -1316,10 +1373,10 @@ function Sections() {
               {g.keys.filter((k) => k !== 'dividends' || paysOutProfit(settings.businessType)).map((k) => (
                 <li key={k} className="list-row">
                   <label className="check grow">
-                    <input type="checkbox" checked={on[k]} onChange={(e) => void toggle(k, e.target.checked)} />
+                    <input type="checkbox" checked={on[k] || (k === 'dividends' && entity(settings.businessType).dividendsTax)} disabled={k === 'dividends' && entity(settings.businessType).dividendsTax} onChange={(e) => void toggle(k, e.target.checked)} />
                     <span>
                       {FEATURES[k].label}
-                      <div className="xs muted">{FEATURES[k].hint}</div>
+                      <div className="xs muted">{k === 'dividends' && entity(settings.businessType).dividendsTax ? `Always on for ${entity(settings.businessType).the}: every ${payoutWord(settings.businessType)} paid is declared to SARS on the DTR01 by the end of the next month.` : FEATURES[k].hint}</div>
                     </span>
                   </label>
                 </li>
@@ -1330,7 +1387,7 @@ function Sections() {
                     <input type="checkbox" checked={prefs.sdl} onChange={(e) => void pref('sdl', e.target.checked)} />
                     <span>
                       Registered for the Skills Development Levy
-                      <div className="xs muted">When your payroll is over R500 000 a year: 1% of salaries, paid by you.</div>
+                      <div className="xs muted">Once your payroll is expected to pass R500 000 over the next 12 months: 1% of salaries, paid by you.</div>
                     </span>
                   </label>
                 </li>

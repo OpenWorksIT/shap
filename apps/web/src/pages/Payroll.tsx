@@ -4,7 +4,7 @@
  */
 import { useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AGE_BAND_LABELS, formatDate, formatZar, todayIso, type AgeBand, entity, paysOutProfit } from '@shap/shared';
+import { AGE_BAND_LABELS, formatDate, formatZar, idNumberProblem, taxNumberProblem, todayIso, type AgeBand, entity, paysOutProfit } from '@shap/shared';
 import { FileButton } from '../components/Files';
 import { PageHead } from '../components/Shell';
 import { Drawer, Empty, ErrorBox, Field, Icon, Loading, Money, MoneyInput, Tabs, useToast } from '../components/ui';
@@ -392,8 +392,12 @@ function EmployeeDrawer({ employee: e, onClose, onSaved }: { employee: Employee 
         <div className="form-grid">
           <Field label="Started">{(p) => <input {...p} className="input" type="date" value={f.startDate} onChange={(x) => set('startDate', x.target.value)} required />}</Field>
           <Field label="Left (if they have)">{(p) => <input {...p} className="input" type="date" value={f.endDate} onChange={(x) => set('endDate', x.target.value)} />}</Field>
-          <Field label="ID number" hint="For their IRP5">{(p) => <input {...p} className="input" value={f.idNumber} onChange={(x) => set('idNumber', x.target.value)} />}</Field>
-          <Field label="Tax number">{(p) => <input {...p} className="input" value={f.taxNumber} onChange={(x) => set('taxNumber', x.target.value)} />}</Field>
+          <Field label="ID number" hint="13 digits (or a passport number): for their IRP5" error={idNumberProblem(f.idNumber) ?? undefined}>
+            {(p) => <input {...p} className="input" inputMode="numeric" value={f.idNumber} onChange={(x) => set('idNumber', x.target.value)} />}
+          </Field>
+          <Field label="Income tax number" hint="10 digits: SARS rejects an EMP501 without it" error={taxNumberProblem(f.taxNumber) ?? undefined}>
+            {(p) => <input {...p} className="input" inputMode="numeric" value={f.taxNumber} onChange={(x) => set('taxNumber', x.target.value)} />}
+          </Field>
           <Field label="Age at the end of February" hint="Older employees get bigger rebates">
             {(p) => (
               <select {...p} className="select" value={f.ageBand} onChange={(x) => set('ageBand', x.target.value as AgeBand)}>
@@ -486,12 +490,7 @@ function Sars() {
       <p className="xs muted">
         Declare and pay on SARS eFiling: the EMP201 each month (by the 7th), and the dividends tax return (DTR01/02) by the end of the month after a dividend. Then tap Paid SARS so the books match.
       </p>
-      {has('payroll') && (
-        <FileButton className="btn" path={`/api/payroll/year?date=${today}&format=csv`} title="Payroll tax year totals">
-          <Icon name="share" size={16} />
-          This tax year’s totals per employee (for IRP5s)
-        </FileButton>
-      )}
+      {has('payroll') && <Emp501 />}
       {pay && (
         <SarsPayDrawer
           pay={pay}
@@ -731,5 +730,147 @@ function PayDividendDrawer({ d, sources, onClose, onSaved }: { d: Dividend; sour
         <button className="btn primary big block">Save</button>
       </form>
     </Drawer>
+  );
+}
+
+interface Emp501Data {
+  kind: 'interim' | 'annual';
+  taxYear: number;
+  from: string;
+  to: string;
+  window: { opens: string; closes: string };
+  employer: { name: string; payeRef: string; sdlRef: string; uifRef: string; taxNumber: string; problems: string[] };
+  months: { period: string; payeCents: number; uifCents: number; sdlCents: number; paidCents: number; totalCents: number }[];
+  declared: { paye: number; uif: number; sdl: number; paid: number; total: number };
+  employees: { id: string; name: string; certificate: 'IRP5' | 'IT3(a)'; taxNumber: string; periodFrom: string; periodTo: string; codes: Record<string, number>; problems: string[] }[];
+  differences: { unpaidCents: number; payeCents: number; uifCents: number; sdlCents: number };
+}
+
+/**
+ * The EMP501: the six-monthly reconciliation of the EMP201s against what was paid and the
+ * employees' IRP5 / IT3(a) certificates. Shap prepares it; it's submitted on e@syFile or eFiling.
+ */
+function Emp501() {
+  const now = todayIso();
+  const thisYear = Number(now.slice(5, 7)) >= 3 ? Number(now.slice(0, 4)) + 1 : Number(now.slice(0, 4));
+  // The one coming up: the annual for the year just ended (March to May), the interim (June to
+  // October), then this year's annual.
+  const m = Number(now.slice(5, 7));
+  const [year, setYear] = useState(m >= 3 && m <= 5 ? thisYear - 1 : thisYear);
+  const [kind, setKind] = useState<'interim' | 'annual'>(m >= 6 && m <= 10 ? 'interim' : 'annual');
+  const { data, error, reload } = useApi<Emp501Data>(`/api/payroll/emp501?year=${year}&kind=${kind}`);
+  const years = [thisYear, thisYear - 1, thisYear - 2];
+  const off = data ? Object.entries(data.differences).filter(([, v]) => v !== 0) : [];
+  return (
+    <section className="panel stack">
+      <div className="panel-head stack" style={{ gap: 4 }}>
+        <strong>EMP501 reconciliation</strong>
+        <span className="xs muted">
+          Twice a year SARS checks your EMP201s against what you paid and each employee’s IRP5 (or IT3(a) when no tax was taken off): the interim for March to August (21 September to 31 October) and the
+          annual for the whole tax year (1 April to 31 May).
+        </span>
+      </div>
+      <div className="panel-pad stack" style={{ paddingTop: 0 }}>
+        <div className="row wrap">
+          <select className="select" value={year} onChange={(e) => setYear(Number(e.target.value))} aria-label="Tax year">
+            {years.map((y) => (
+              <option key={y} value={y}>
+                Tax year to February {y}
+              </option>
+            ))}
+          </select>
+          <select className="select" value={kind} onChange={(e) => setKind(e.target.value as 'interim' | 'annual')} aria-label="Which reconciliation">
+            <option value="interim">Interim (March to August)</option>
+            <option value="annual">Annual (March to February)</option>
+          </select>
+        </div>
+        {error && <ErrorBox error={error} onRetry={reload} />}
+        {!data && !error && <Loading />}
+        {data && (
+          <>
+            <p className="small">
+              {formatDate(data.from)} to {formatDate(data.to)}. File between {formatDate(data.window.opens)} and {formatDate(data.window.closes)}.
+            </p>
+            {data.employer.problems.map((p) => (
+              <div key={p} className="banner alert small">
+                {p}
+              </div>
+            ))}
+            {data.months.length > 0 && <div className="table-wrap">
+              <table className="table small">
+                <thead>
+                  <tr>
+                    <th>EMP201 month</th>
+                    <th className="num">PAYE</th>
+                    <th className="num">UIF</th>
+                    <th className="num">SDL</th>
+                    <th className="num">Declared</th>
+                    <th className="num">Paid</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.months.map((r) => (
+                    <tr key={r.period}>
+                      <td>{monthName(r.period)}</td>
+                      <td className="num">{formatZar(r.payeCents)}</td>
+                      <td className="num">{formatZar(r.uifCents)}</td>
+                      <td className="num">{formatZar(r.sdlCents)}</td>
+                      <td className="num">{formatZar(r.totalCents)}</td>
+                      <td className={`num${r.paidCents !== r.totalCents ? ' warn-text' : ''}`}>{formatZar(r.paidCents)}</td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <th>Total</th>
+                    <th className="num">{formatZar(data.declared.paye)}</th>
+                    <th className="num">{formatZar(data.declared.uif)}</th>
+                    <th className="num">{formatZar(data.declared.sdl)}</th>
+                    <th className="num">{formatZar(data.declared.total)}</th>
+                    <th className="num">{formatZar(data.declared.paid)}</th>
+                  </tr>
+                </tbody>
+              </table>
+            </div>}
+            {!data.months.length && <p className="small muted">No final pay runs in this period.</p>}
+            {off.length > 0 ? (
+              <div className="banner alert small">
+                Doesn’t reconcile yet:{' '}
+                {off
+                  .map(([k, v]) => (k === 'unpaidCents' ? `${formatZar(v)} declared but not recorded as paid` : `${k.replace('Cents', '').toUpperCase()} on the certificates differs by ${formatZar(v)}`))
+                  .join('; ')}
+                . Record SARS payments above, or check the pay runs.
+              </div>
+            ) : (
+              data.months.length > 0 && <div className="banner small">Declared, paid and the certificates agree.</div>
+            )}
+            <ul className="list">
+              {data.employees.map((e) => (
+                <li key={e.id} className="list-row">
+                  <span className="grow">
+                    <strong>{e.name}</strong> <span className="chip">{e.certificate}</span>
+                    <div className="xs muted">
+                      Gross {formatZar(e.codes['3699'] ?? 0)} · PAYE {formatZar(e.codes['4102'] ?? 0)} · UIF {formatZar(e.codes['4141'] ?? 0)}
+                      {(e.codes['4142'] ?? 0) > 0 ? ` · SDL ${formatZar(e.codes['4142'] ?? 0)}` : ''}
+                    </div>
+                    {e.problems.map((p) => (
+                      <div key={p} className="xs warn-text">
+                        {p}
+                      </div>
+                    ))}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <FileButton className="btn" path={`/api/payroll/emp501?year=${year}&kind=${kind}&format=csv`} title={`EMP501 ${kind} ${year}`}>
+              <Icon name="share" size={16} />
+              Certificates with SARS’s source codes (CSV)
+            </FileButton>
+            <p className="xs muted">
+              Capture these on e@syFile Employer (or eFiling, up to 50 certificates) and submit the EMP501 by the closing date. The figures come from your final pay runs and the payments you recorded:
+              check them with your accountant before you submit.
+            </p>
+          </>
+        )}
+      </div>
+    </section>
   );
 }

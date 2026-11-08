@@ -46,6 +46,8 @@ const envSchema = z.object({
   COLLECT: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
   /** Where feedback and usage notes go to reach OpenWorks (blank: nowhere). */
   COLLECTOR_URL: z.string().default('https://shap.openworks.co.za/collect'),
+  /** OpenWorks' notices to every copy (shared/notice.ts); blank to never look. */
+  NOTICE_URL: z.string().default('https://raw.githubusercontent.com/OpenWorksIT/shap/main/notice.json'),
   SMTP_URL: z.string().default(''),
   MAIL_FROM: z.string().default('Shap <no-reply@example.com>'),
   /** Largest upload (tracker import, receipt photo), in megabytes. */

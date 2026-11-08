@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { formatDate } from '@shap/shared';
+import { formatDate, TERMS_URL } from '@shap/shared';
+import { useAuthed } from '../lib/session';
 import { ErrorBox, Icon, Loading, useToast } from '../components/ui';
 import { usePasswordPrompt } from '../components/PasswordPrompt';
 import { api, ApiError, apiUrl } from '../lib/api';
@@ -56,6 +57,7 @@ function newSections(changelog: string, running: string): string {
  * (shap-ctl); this page asks for it and shows how it went.
  */
 export function SystemSettings() {
+  const { settings } = useAuthed();
   const toast = useToast();
   const [passwordPrompt, askPassword] = usePasswordPrompt();
   const [info, setInfo] = useState<SystemInfo | null>(null);
@@ -128,6 +130,14 @@ export function SystemSettings() {
       {passwordPrompt}
       <section className="panel panel-pad stack">
         <h3>Version</h3>
+        <p className="xs muted">
+          Keep Shap up to date: updates carry security fixes and each year’s changes to tax tables, VAT, payroll and accounting rules. Fetching an update needs an internet connection. Installing
+          updates and keeping backups (somewhere other than this server) are your responsibility: OpenWorks can’t do either for you, or recover lost books.{' '}
+          <a href={TERMS_URL} target="_blank" rel="noreferrer">
+            Terms of use
+          </a>
+          {settings.termsAcceptedAt ? ` (accepted ${formatDate(settings.termsAcceptedAt.slice(0, 10))})` : ''}.
+        </p>
         <p className="row wrap" style={{ gap: 8 }}>
           <span className="big-number">Shap {info.version}</span>
           {info.gitSha && <span className="chip">{info.gitSha}</span>}

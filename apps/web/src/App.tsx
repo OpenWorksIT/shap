@@ -2,7 +2,8 @@ import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { FeedbackButton } from './components/Feedback';
 import { Shell } from './components/Shell';
-import { featureOn, paysOutProfit } from '@shap/shared';
+import { featureOn, paysOutProfit, TERMS_VERSION } from '@shap/shared';
+import { TermsGate } from './components/Terms';
 import type { Settings } from './lib/types';
 import { Loading } from './components/ui';
 import { SessionProvider, useSession } from './lib/session';
@@ -55,6 +56,8 @@ function Authed() {
   const has = (f: Parameters<typeof featureOn>[1]) => featureOn(settings.features, f);
   // New books: the owner answers the first-run questions; everyone else waits for that.
   if (!settings.setupDone && user.role === 'owner') return <WelcomePage canRestore={false} />;
+  // The terms of use, accepted at the end of setup: again whenever the published terms change.
+  if (user.role === 'owner' && settings.termsVersion !== TERMS_VERSION) return <TermsGate />;
   const pays = has('payroll') || (paysOutProfit(settings.businessType) && has('dividends'));
   return (
     <Shell>

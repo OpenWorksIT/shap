@@ -165,6 +165,11 @@ recovery codes, secrets encrypted at rest, Argon2id passwords), and an append-on
 Found a security problem? Please report it privately rather than in a public issue; see
 [SECURITY.md](SECURITY.md).
 
+## If support ends
+
+Shap keeps working on your own server whatever happens to OpenWorks. How every copy would be told,
+and what to do, is in [SUNSET.md](SUNSET.md).
+
 ## Licence
 
 [GNU AGPL-3.0-or-later](LICENSE). If you run a modified version as a service, you share the
