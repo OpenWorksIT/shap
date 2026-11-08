@@ -34,6 +34,7 @@ export const PG = {
   uniqueViolation: '23505',
   exclusionViolation: '23P01',
   foreignKeyViolation: '23503',
+  divisionByZero: '22012',
 } as const;
 
 export function pgCode(err: unknown): string | undefined {

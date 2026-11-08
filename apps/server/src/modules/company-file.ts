@@ -18,6 +18,7 @@ import { applyBusinessType, getSettings } from '../lib/books.js';
 import { badRequest } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 import { cleanImage } from '../lib/images.js';
+import { noteShapFigures } from './yearend.js';
 
 const FORMAT = 'shap-company/1';
 
@@ -208,6 +209,7 @@ export async function restoreCompanyFile(tx: Tx, raw: unknown) {
     for (const [code, cents] of Object.entries(y.figures)) {
       await tx`insert into year_end_figures (fy_end, account_id, amount_cents) values (${y.fyEnd}, ${await acc(code)}, ${cents})`;
     }
+    await noteShapFigures(tx, y.fyEnd);
     await tx`update settings set lock_date = greatest(coalesce(lock_date, ${y.fyEnd}::date), ${y.fyEnd}::date) where id`;
     count('yearEnds');
   }

@@ -1,3 +1,4 @@
+import { withoutAddresses } from './logging.js';
 import nodemailer from 'nodemailer';
 import type { FastifyBaseLogger } from 'fastify';
 import { HttpError } from './errors.js';
@@ -32,9 +33,10 @@ export function mailProblem(err: unknown): string {
 export function createMailer(smtpUrl: string, from: string, log: FastifyBaseLogger): Mailer {
   if (!smtpUrl) {
     return {
-      async send(mail) {
-        // Unconfigured: say an email wasn't sent, not to whom (an address is personal) or what.
-        log.info({ subject: mail.subject }, 'email (SMTP not configured, not sent)');
+      async send() {
+        // Unconfigured: say an email wasn't sent, not to whom (an address is personal) or what
+        // (the subject names the business, which for a sole trader is a person).
+        log.info('email (SMTP not configured, not sent)');
       },
     };
   }
@@ -65,7 +67,9 @@ export function createMailer(smtpUrl: string, from: string, log: FastifyBaseLogg
       try {
         await transport.sendMail({ from: fromName ? { name: fromName, address } : from, ...mail });
       } catch (err) {
-        log.error({ err: (err as Error).message, code: (err as { code?: string }).code, subject: mail.subject }, 'email send failed');
+        // Why, without to whom or what about (the mail server's answer can quote the address).
+        const e = err as { message?: string; code?: string; responseCode?: number };
+        log.error({ err: withoutAddresses(e.message ?? '').slice(0, 300), code: e.code, responseCode: e.responseCode }, 'email send failed');
         const why = mailProblem(err);
         throw new HttpError(502, `Not sent: ${why}.`, 'email_failed');
       }

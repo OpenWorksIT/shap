@@ -18,6 +18,11 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+# bash with pipefail: a step like `pentest | tee pentest.txt` fails when the pentest fails, not
+# only when tee does (GitHub's default shell for run steps has no pipefail).
+defaults:
+  run:
+    shell: bash
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: false
@@ -79,7 +84,7 @@ jobs:
         run: |
           psql -h localhost -U postgres -c 'create database shap_pen'
           docker run --rm --network host -e DATABASE_URL -e SECRETS_KEY -e NODE_ENV=production shap-app:ci node apps/server/dist/db/seed.js --i-know-this-is-demo-data
-      - name: start the server as production runs it (no way out to the internet)
+      - name: start the server as production runs it (read-only, no extra powers, not as root)
         run: |
           docker run -d --name shap --network host --read-only --tmpfs /tmp --tmpfs /data/feedback \
             --security-opt no-new-privileges:true --cap-drop ALL \
@@ -87,7 +92,9 @@ jobs:
             -e COOKIE_SECURE=true -e TRUST_PROXY=true -e MFA_REQUIRED=false -e DEMO_ENABLED=false \
             -e COLLECTOR_URL=off -e NOTICE_URL= -e CTL_DIR=/tmp/ctl -e REQUEST_DIR=/tmp/ctl-in \
             shap-app:ci
-          for i in $(seq 1 60); do curl -fsS http://localhost:8080/api/health && break; sleep 2; done
+          up=
+          for i in $(seq 1 60); do if curl -fsS http://localhost:8080/api/health; then up=1; break; fi; sleep 2; done
+          [ -n "$up" ] || { echo "::error::the server never answered"; docker logs shap; exit 1; }
           test "$(docker inspect -f '{{.Config.User}}' shap)" = node || { echo "::error::the app container runs as root"; exit 1; }
       - name: penetration test
         run: EXPECT_SECURE_COOKIE=true node deploy/test/pentest.mjs --url http://localhost:8080 --password demo-shap-1 | tee pentest.txt
@@ -99,6 +106,10 @@ jobs:
           if grep -q '"level":50' server.log; then echo "::error::the server logged errors during the tests"; grep '"level":50' server.log | head -20; exit 1; fi
           if grep -Eq '"url":"[^"]*\?' server.log; then echo "::error::the log holds query strings"; exit 1; fi
           if grep -Eq 'demo-shap-1|shap_session=' server.log; then echo "::error::the log holds a password or session"; exit 1; fi
+          # Values the database refused (the app answered 400): by code and route, for a look.
+          if grep -q '"msg":"a value the database refused"' server.log; then
+            { echo '### Values the database refused (400, the pentest sends rubbish)'; echo '```'; grep '"msg":"a value the database refused"' server.log | jq -r '"\(.pgCode) \(.route)"' | sort | uniq -c; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: summary
         if: always()
         run: |
@@ -126,14 +137,23 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # What servers run now: stable (CI moves it). On a re-run of what's already stable, the
+      # version before it.
       - name: the previous release
         id: prev
         run: |
-          cur="$(jq -r .version package.json)"
-          for c in $(git log --format=%H -- package.json); do
-            v="$(git show "$c:package.json" | jq -r .version)"
-            if [ "$v" != "$cur" ]; then echo "sha=$c" >> "$GITHUB_OUTPUT"; echo "version=$v" >> "$GITHUB_OUTPUT"; echo "Previous release: $v ($c)"; break; fi
-          done
+          prev=
+          if stable="$(git rev-parse -q --verify origin/stable)" && [ "$stable" != "$GITHUB_SHA" ]; then prev="$stable"
+          else
+            cur="$(jq -r .version package.json)"
+            for c in $(git log --format=%H -- package.json); do
+              if [ "$(git show "$c:package.json" | jq -r .version)" != "$cur" ]; then prev="$c"; break; fi
+            done
+          fi
+          if [ -n "$prev" ]; then
+            v="$(git show "$prev:package.json" | jq -r .version)"
+            echo "sha=$prev" >> "$GITHUB_OUTPUT"; echo "version=$v" >> "$GITHUB_OUTPUT"; echo "Previous release: $v ($prev)"
+          fi
       - name: its books (the demo company, on its own code)
         if: steps.prev.outputs.sha != ''
         run: |
@@ -152,7 +172,7 @@ jobs:
           {
             echo "### Upgrade from ${{ steps.prev.outputs.version }}"
             if diff -q "$RUNNER_TEMP/before.txt" "$RUNNER_TEMP/after.txt" >/dev/null; then echo 'No account balance changed.'
-            else echo 'Balances that changed (check the changelog says why):'; echo '```'; diff "$RUNNER_TEMP/before.txt" "$RUNNER_TEMP/after.txt" | head -60; echo '```'; fi
+            else echo 'Balances that changed (check the changelog says why):'; echo '```'; diff "$RUNNER_TEMP/before.txt" "$RUNNER_TEMP/after.txt" | head -60 || true; echo '```'; fi
             echo '```'; tail -3 audit.txt; echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 

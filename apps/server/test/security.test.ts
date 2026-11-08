@@ -3,7 +3,6 @@
  * guessing passwords and codes, using a stolen session, cross-site requests, files that aren't
  * what they say, spreadsheet formulas, what site staff can see, and every route's door.
  */
-import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -192,15 +191,22 @@ describe('breaking in', () => {
     await env.sql`update settings set lock_date = null`;
   });
 
-  it('every route: signed out gets nowhere; the accountant changes nothing; site staff only log', async () => {
-    const files = (dir: string): string[] => readdirSync(dir).flatMap((f) => (statSync(join(dir, f)).isDirectory() ? files(join(dir, f)) : f.endsWith('.ts') ? [join(dir, f)] : []));
-    const routes = new Set<string>();
-    for (const f of files(join(__dirname, '../src'))) {
-      for (const m of readFileSync(f, 'utf8').matchAll(/app\.(get|post|put|delete|patch)\('(\/api\/[^']+)'/g)) routes.add(`${m[1]!.toUpperCase()} ${m[2]}`);
-    }
+  it('reads every route from the code the way the penetration test does', async () => {
+    // The penetration test can't ask the server for its routes: it reads them from the code. It
+    // must find exactly the ones Fastify has, or a route goes untested.
+    const { routesInCode } = await import('../../../deploy/test/routes.mjs');
+    const scan = routesInCode(join(__dirname, '../src'));
+    expect(scan.unread).toEqual([]);
+    expect([...scan.routes].sort()).toEqual([...new Set(env.routes)].sort());
+  });
+
+  it('every route: signed out gets nowhere; the accountant changes nothing; site staff only log, and never read the money', async () => {
+    const routes = new Set(env.routes);
     const open = new Set(['GET /api/health', 'GET /api/demo/status', 'POST /api/auth/login', 'POST /api/auth/mfa/verify', 'POST /api/auth/mfa/enrol', 'POST /api/auth/logout', 'POST /api/demo/leave']);
     // What site staff may do besides read their pickers: log days and costs, attach slips, look after their own sign-in.
     const siteMay = new Set(['POST /api/costs', 'PUT /api/costs/:id', 'POST /api/labour', 'PUT /api/labour/:id', 'POST /api/attachments', 'POST /api/auth/mfa/setup', 'POST /api/auth/mfa/disable', 'POST /api/auth/mfa/recovery-codes', 'POST /api/auth/password', 'POST /api/feedback']);
+    // Money site staff may never read (the same list as the penetration test's).
+    const siteNeverReads = /^\/api\/(reports|vat|payroll|pay-runs|audit|system|users|year-ends|journals|bank|tax|accounts\/|dividends|documents\/[^/]+\/pdf|export)/;
     // Everyone signed in can send feedback.
     const accountantMay = new Set(['POST /api/auth/mfa/setup', 'POST /api/auth/mfa/disable', 'POST /api/auth/mfa/recovery-codes', 'POST /api/auth/password', 'POST /api/feedback']);
     const site = await login(env.app, 'site@example.co.za');
@@ -220,6 +226,9 @@ describe('breaking in', () => {
         if (a !== 403 && !accountantMay.has(r) && !open.has(r)) problems.push(`${r} accountant got ${a}`);
         const s = (await site.call(opts)).statusCode;
         if (s !== 403 && !siteMay.has(r) && !open.has(r)) problems.push(`${r} site got ${s}`);
+      } else if (siteNeverReads.test(path) && !/\/api\/live/.test(path)) {
+        const s = (await site.call(opts)).statusCode;
+        if (s !== 403) problems.push(`${r} site read it (${s})`);
       }
     }
     expect(problems).toEqual([]);

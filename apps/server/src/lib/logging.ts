@@ -26,3 +26,15 @@ export function serverLogger(opts: { dev: boolean; stream?: Writable }) {
     ...(opts.stream ? { stream: opts.stream } : {}),
   };
 }
+
+/**
+ * An error as the log keeps it: what went wrong and where in the code, not the values involved.
+ * (A database error's detail can quote them: "Key (email)=(someone@…) already exists".)
+ */
+export function safeError(err: unknown) {
+  const e = (err ?? {}) as { name?: string; message?: string; code?: string; stack?: string; table_name?: string; constraint_name?: string; routine?: string };
+  return { type: e.name, message: e.message, code: e.code, table: e.table_name, constraint: e.constraint_name, routine: e.routine, stack: e.stack };
+}
+
+/** Email addresses out of a message from elsewhere (a mail server's refusal can quote the recipient). */
+export const withoutAddresses = (s: string) => String(s ?? '').replace(/[^\s<>"'()@]+@[^\s<>"'()]+/g, '…@…');

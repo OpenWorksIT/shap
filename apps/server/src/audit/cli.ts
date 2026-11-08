@@ -1,6 +1,6 @@
 /**
  * The books audit from the command line: for the server audit (deploy/vps/audit-server.sh, in
- * the app's container) and CI. Read-only. Exit code 1 when something must be put right.
+ * the app's container) and CI. It changes nothing in the books. Exit code 1 when something must be put right.
  *
  *   node apps/server/dist/audit/cli.js                 # the books, OK / WARN / FAIL per line
  *   node apps/server/dist/audit/cli.js --json FILE     # also as JSON (- for standard output)

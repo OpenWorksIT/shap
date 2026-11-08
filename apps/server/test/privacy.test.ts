@@ -18,7 +18,8 @@ import { PassThrough } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
-import { serverLogger } from '../src/lib/logging.js';
+import { serverLogger, withoutAddresses } from '../src/lib/logging.js';
+import { createMailer } from '../src/lib/mailer.js';
 import { reportUsage } from '../src/modules/feedback.js';
 import { shareMarketRates } from '../src/modules/market.js';
 import { appVersion } from '../src/modules/system.js';
@@ -99,12 +100,26 @@ describe('what leaves the server', () => {
 
   it('sends feedback as the person wrote it, with their role but not who they are', async () => {
     const me = await login(env.app, 'owner@example.co.za');
-    await me.post('/api/feedback', { kind: 'idea', message: 'A wish of my own', page: '/clients', at: new Date().toISOString(), trail: [{ t: Date.now(), kind: 'nav', detail: '/clients' }] });
+    // A trail as an older (or altered) app might send it: a client's address, number and search
+    // in it. The server blanks them whatever sent it.
+    await me.post('/api/feedback', {
+      kind: 'idea',
+      message: 'A wish of my own',
+      page: '/clients',
+      at: new Date().toISOString(),
+      trail: [
+        { t: Date.now(), kind: 'nav', detail: `/clients?q=${encodeURIComponent(CANARY.client)}` },
+        { t: Date.now(), kind: 'api', detail: 'GET /api/clients/0b9d2d9e-6a51-4e0e-9f5e-1d2c3b4a5f60 200' },
+        { t: Date.now(), kind: 'error', detail: `Couldn't send to ${CANARY.email}, phone ${CANARY.phone}, ID ${CANARY.idNumber}` },
+      ],
+    });
     await new Promise((r) => setTimeout(r, 50));
     const fb = sent.find((x) => x.url.endsWith('/feedback'))!;
     expect(fb).toBeTruthy();
     expect(fb.body).toContain('A wish of my own');
     expect(fb.body).not.toContain('owner@example.co.za');
+    expect(fb.body).not.toContain('0b9d2d9e-6a51');
+    expect(fb.body).toContain('/clients?q=…');
     expect(leaks(fb.body)).toEqual([]);
   });
 
@@ -121,12 +136,15 @@ describe('what leaves the server', () => {
 describe('what the server writes to its log', () => {
   let env: TestEnv;
   let log = '';
+  let sentStatus = 0;
+  let refusedStatus = 0;
 
   beforeAll(async () => {
     env = await setup();
     const stream = new PassThrough();
     stream.on('data', (c: Buffer) => (log += c.toString()));
-    const { app } = await buildApp({ config: loadConfig({ ...process.env, TRUST_PROXY: 'true' }), sql: env.sql, mailer: { send: async () => {} }, logger: serverLogger({ dev: false, stream }) });
+    // The real mailer, pointed at a mail server that isn't there: its failure is logged too.
+    const { app } = await buildApp({ config: loadConfig({ ...process.env, TRUST_PROXY: 'true', SMTP_URL: 'smtp://127.0.0.1:1', MAIL_FROM: 'Fictional Books <books@example.co.za>' }), sql: env.sql, logger: serverLogger({ dev: false, stream }) });
     await app.ready();
     const V = { 'x-shap-version': appVersion(), 'content-type': 'application/json' };
     const owner = await login(app, 'owner@example.co.za');
@@ -139,7 +157,9 @@ describe('what the server writes to its log', () => {
     await owner.get(`/api/clients/${c.id}`);
     const inv = await owner.post('/api/documents', { kind: 'invoice', clientId: c.id, issueDate: '2026-11-03', lines: [{ category: 'labour', description: CANARY.item, qty: 1, unitPriceCents: 10_000 }] });
     await owner.post(`/api/documents/${inv.id}/issue`);
-    await owner.call({ method: 'POST', url: `/api/documents/${inv.id}/email`, payload: { to: CANARY.email, message: 'Hi' } });
+    sentStatus = (await owner.call({ method: 'POST', url: `/api/documents/${inv.id}/email`, payload: { to: CANARY.email, message: 'Hi' } })).statusCode;
+    // A value the database refuses: noted by its code and route, without the value.
+    refusedStatus = (await owner.call({ method: 'GET', url: '/api/costs?from=2026-99-99' })).statusCode;
     await app.inject({ method: 'GET', url: `/api/clients?q=${encodeURIComponent(CANARY.email)}`, headers: { cookie: 'shap_session=canary-session-token' } });
     await app.close();
   });
@@ -147,8 +167,32 @@ describe('what the server writes to its log', () => {
 
   it('logs requests, without anyone’s details, passwords, searches or sessions', () => {
     expect(log).toMatch(/"url":"\/api\/clients"/);
+    // The email really was tried, and failed: the mailer's own line is in the log, without whom or what.
+    expect(sentStatus).toBe(502);
+    expect(log).toMatch(/email send failed/);
+    expect(log).not.toContain('Fictional Books');
+    expect(refusedStatus).toBe(400);
+    expect(log).toMatch(/"pgCode":"22008","route":"GET \/api\/costs","msg":"a value the database refused"/);
+    expect(log).not.toContain('2026-99-99');
     expect(leaks(log)).toEqual([]);
     expect(log).not.toContain('canary-session-token');
     expect(log).not.toContain('canary.user@example.co.za');
+  });
+});
+
+describe('the mailer, on its own', () => {
+  it('logs that an email failed or wasn’t sent, never to whom or what about', async () => {
+    const lines: string[] = [];
+    const log = { info: (...a: unknown[]) => void lines.push(JSON.stringify(a)), error: (...a: unknown[]) => void lines.push(JSON.stringify(a)), warn: () => undefined } as never;
+    const mail = { to: CANARY.email, subject: `Invoice INV-0001 from ${CANARY.company}`, text: `Dear ${CANARY.client}`, fromName: CANARY.company };
+    await createMailer('', 'books@example.co.za', log).send(mail as never);
+    await expect(createMailer('smtp://127.0.0.1:1', 'books@example.co.za', log).send(mail as never)).rejects.toThrow(/Not sent/);
+    expect(lines.join('\n')).toMatch(/not sent/);
+    expect(lines.join('\n')).toMatch(/email send failed/);
+    expect(leaks(lines.join('\n'))).toEqual([]);
+  });
+
+  it('blanks addresses in what a mail server says back', () => {
+    expect(withoutAddresses('550 5.1.1 <zandile.canary@client.example>: Recipient address rejected')).toBe('550 5.1.1 <…@…>: Recipient address rejected');
   });
 });

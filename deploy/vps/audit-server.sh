@@ -11,9 +11,10 @@
 # Covers: SSH, the firewall and what listens on the network (the database and the app never on
 # the internet), automatic security updates and waiting reboots, disk space, who may change
 # Shap's code and read its secrets and backups, the containers (not root, no extra powers, no
-# ports of their own), backups (recent, readable, not readable by others), each site from outside
-# (HTTPS certificate, redirect, security headers, nothing revealing), and Shap's own settings
-# (two-step sign-in required and in use, an update waiting).
+# ports of their own), backups (recent, readable, not readable by others), each site as Caddy
+# serves it (HTTPS certificate, redirect, security headers, nothing revealing) and by its public
+# name, and Shap's own settings (two-step sign-in required and in use, an update waiting).
+# Something it can't check is a WARN saying so, never an OK. It needs jq (as the updater does).
 #
 # The books themselves are checked inside each company's Shap (Settings → Updates & backups →
 # The books, audit/books.ts): this file holds nothing of any company's figures, so every
@@ -31,6 +32,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+command -v jq >/dev/null || { echo "audit-server.sh needs jq (apt install jq)" >&2; exit 3; }
 RESULTS="$(mktemp)"; trap 'rm -f "$RESULTS" "$RESULTS.json"' EXIT
 SECTION=""
 say()  { [ "$QUIET" = yes ] || printf "$@"; }
@@ -99,7 +101,8 @@ else ok "${free}% of the disk is free"; fi
 head_ "Files"
 # root runs this code (the updater, the backups): nobody else may change it
 own="$(stat -c '%U' "$REPO" 2>/dev/null)"
-writable="$(find "$REPO" -path "$REPO/node_modules" -prune -o -path "$REPO/.git" -prune -o \( -perm -o+w -o -perm -g+w \) -type f -print 2>/dev/null | head -3 | tr '\n' ' ')"
+# (Folders too: whoever may write in sites/ or companies/ can add a file root then runs or serves.)
+writable="$(find "$REPO" -path "$REPO/node_modules" -prune -o -path "$REPO/.git" -prune -o \( -perm -o+w -o -perm -g+w \) \( -type f -o -type d \) -print 2>/dev/null | head -3 | tr '\n' ' ')"
 [ "$own" = root ] && ok "Shap's code belongs to root" || warn "Shap's code ($REPO) belongs to $own, not root: whoever that is can change what root runs"
 [ -z "$writable" ] && ok "nobody else can change Shap's code" || fail "others can change Shap's code: $writable"
 if [ -f .env ]; then
@@ -110,6 +113,12 @@ if [ -f .env ]; then
 else
   fail "no .env next to docker-compose.yml"
 fi
+# Each extra company's own settings (its database password and secrets key).
+for f in companies/*.env; do
+  [ -e "$f" ] || continue
+  mode="$(stat -c '%a %U' "$f")"
+  [ "$mode" = "600 root" ] && ok "$f is readable only by root" || fail "$f is $mode: chmod 600 $f && chown root $f"
+done
 [ "$(stat -c '%a %U' "$CTL" 2>/dev/null)" = "755 root" ] && ok "the updater's state is root's alone (the app only reads it)" || warn "$CTL isn't 755 root (ctl/install.sh sets it)"
 case "$(stat -c '%a' "$BACKUPS" 2>/dev/null)" in
   750|700) ok "backups can't be read by other users on the server" ;;
@@ -156,62 +165,71 @@ else
   warn "no backup has been copied off the server yet (deploy/backup on your PC): a backup on the same server isn't safe from losing the server"
 fi
 
-head_ "Each site from outside"
-[ -n "$DOMAIN" ] || warn "no SHAP_DOMAIN in .env: the site wasn't checked from outside"
+head_ "Each site"
+# Asked of Caddy on this server by each site's name (so a provider that doesn't loop a server's
+# own public address back to it can't make a good site look broken), then once by its public
+# name, which shows whether it can be found at all.
+[ -n "$DOMAIN" ] || warn "no SHAP_DOMAIN in .env: the site wasn't checked"
 sites="$DOMAIN $(grep -h -oE '^[a-z0-9.-]+\.[a-z]{2,}' sites/*.caddy 2>/dev/null | sort -u | tr '\n' ' ')"
 for d in $sites; do
   [ -n "$d" ] || continue
-  if ! command -v curl >/dev/null; then warn "curl isn't installed (skipped $d)"; continue; fi
-  hdr="$(curl -sS -m 15 -D - -o /dev/null "https://$d/" 2>/dev/null)"
-  if [ -z "$hdr" ]; then fail "$d doesn't answer over HTTPS"; continue; fi
-  end="$(echo | openssl s_client -connect "$d:443" -servername "$d" 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)"
+  if ! command -v curl >/dev/null || ! command -v openssl >/dev/null; then warn "curl or openssl isn't installed (skipped $d)"; continue; fi
+  here=(--resolve "$d:443:127.0.0.1" --resolve "$d:80:127.0.0.1")
+  hdr="$(curl -sS -m 15 "${here[@]}" -D - -o /dev/null "https://$d/" 2>/dev/null)"
+  if [ -z "$hdr" ]; then fail "$d doesn't answer over HTTPS (asked of Caddy on this server)"; continue; fi
+  end="$(echo | openssl s_client -connect 127.0.0.1:443 -servername "$d" 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)"
   if [ -n "$end" ]; then
     days=$(( ($(date -d "$end" +%s) - $(date +%s)) / 86400 ))
     [ "$days" -ge 14 ] && ok "$d: certificate good for $days more days" || fail "$d: the certificate runs out in $days days"
+  else
+    warn "$d: couldn't read its certificate"
   fi
-  redirect="$(curl -sS -m 10 -o /dev/null -w '%{http_code} %{redirect_url}' "http://$d/" 2>/dev/null)"
+  redirect="$(curl -sS -m 10 "${here[@]}" -o /dev/null -w '%{http_code} %{redirect_url}' "http://$d/" 2>/dev/null)"
   grep -qE '^30[18] https://' <<<"$redirect" && ok "$d: plain HTTP goes to HTTPS" || warn "$d: plain HTTP doesn't send people to HTTPS ($redirect)"
   grep -qi '^strict-transport-security:' <<<"$hdr" && ok "$d: browsers are told to use HTTPS only (HSTS)" || fail "$d: no Strict-Transport-Security"
   for h in content-security-policy x-content-type-options referrer-policy; do
     grep -qi "^$h:" <<<"$hdr" || fail "$d: no $h header"
   done
   grep -qiE '^(server: .*[0-9]|x-powered-by:)' <<<"$hdr" && warn "$d: says what it runs on (Server/X-Powered-By)" || ok "$d: security headers in place, nothing revealing"
-  health="$(curl -sS -m 10 "https://$d/api/health" 2>/dev/null)"
+  health="$(curl -sS -m 10 "${here[@]}" "https://$d/api/health" 2>/dev/null)"
   grep -q '"ok":true' <<<"$health" && ok "$d: Shap answers" || fail "$d: /api/health doesn't answer"
+  # By its public name, the way everyone else reaches it.
+  curl -sS -m 10 -o /dev/null "https://$d/api/health" 2>/dev/null && ok "$d: found by its public name" \
+    || warn "$d: answers here, but not by its public name from this server (its DNS, or a provider that doesn't loop back: open https://$d from your PC)"
 done
 
 head_ "Shap's own settings"
 mfa="$(envv MFA_REQUIRED)"
 [ "${mfa:-true}" = true ] && ok "everyone must use two-step sign-in" || warn "two-step sign-in isn't required (MFA_REQUIRED=$mfa in .env)"
 if dc ps -q db >/dev/null; then
-  nomfa="$(dc exec -T db psql -U shap -d shap -Atc "select count(*) from users where active and role = 'owner' and totp_enabled_at is null" 2>/dev/null)"
-  [ "${nomfa:-0}" = 0 ] && ok "every owner uses two-step sign-in" || warn "$nomfa owner accounts don't use two-step sign-in yet"
+  if nomfa="$(dc exec -T db psql -U shap -d shap -Atc "select count(*) from users where active and role = 'owner' and totp_enabled_at is null")" && [[ "$nomfa" =~ ^[0-9]+$ ]]; then
+    [ "$nomfa" = 0 ] && ok "every owner uses two-step sign-in" || warn "$nomfa owner accounts don't use two-step sign-in yet"
+  else
+    warn "couldn't ask the database who uses two-step sign-in"
+  fi
+else
+  warn "the database container isn't running: couldn't check two-step sign-in"
 fi
-behind="$(jq -r '.check.behind // 0' "$CTL/status.json" 2>/dev/null)"
-[ "${behind:-0}" = 0 ] && ok "Shap is on the newest checked version" || warn "an update is waiting ($behind changes): Settings → Updates & backups"
+if [ ! -f "$CTL/status.json" ]; then warn "the updater hasn't checked for updates yet ($CTL/status.json): Settings → Updates & backups"
+elif behind="$(jq -er '.check.behind // 0' "$CTL/status.json" 2>/dev/null)"; then
+  [ "$behind" = 0 ] && ok "Shap is on the newest checked version" || warn "an update is waiting ($behind changes): Settings → Updates & backups"
+  err="$(jq -r '.check.error // ""' "$CTL/status.json" 2>/dev/null)"
+  [ -z "$err" ] || warn "the last check for updates failed: $err"
+else
+  warn "couldn't read the updater's state ($CTL/status.json)"
+fi
 systemctl is-active -q shap-nightly.timer 2>/dev/null && ok "nightly backups and update checks are on" || fail "the nightly timer is off: systemctl enable --now shap-nightly.timer"
 
 FAILS="$(grep -c '^fail' "$RESULTS")"; WARNS="$(grep -c '^warn' "$RESULTS")"
 say '\n%d to fix, %d to look at.\n' "$FAILS" "$WARNS"
 
 if [ -n "$JSON" ]; then
-  python3 - "$RESULTS" "$RESULTS.json" "$(hostname)" "$(jq -r .version "$REPO/package.json" 2>/dev/null)" "$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null)" <<'PY' && install -m 644 "$RESULTS.json" "$JSON"
-import datetime, json, sys
-src, dst, host, version, code = sys.argv[1:6]
-items = []
-for line in open(src, encoding="utf-8", errors="replace"):
-    parts = line.rstrip("\n").split("\t", 2)
-    if len(parts) == 3 and parts[0] in ("ok", "warn", "fail"):
-        items.append({"level": parts[0], "section": parts[1][:60], "text": parts[2].strip()[:300]})
-json.dump({
-    "format": 1, "kind": "server",
-    "at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-    "host": host[:80], "version": version[:40], "code": code[:40],
-    "fails": sum(i["level"] == "fail" for i in items),
-    "warns": sum(i["level"] == "warn" for i in items),
-    "oks": sum(i["level"] == "ok" for i in items),
-    "items": items[:300],
-}, open(dst, "w"))
-PY
+  jq -Rn --arg host "$(hostname)" --arg version "$(jq -r .version "$REPO/package.json" 2>/dev/null)" --arg code "$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null)" '
+    [inputs | split("\t") | select(length == 3 and (.[0] == "ok" or .[0] == "warn" or .[0] == "fail"))
+      | {level: .[0], section: .[1][:60], text: (.[2] | gsub("^\\s+|\\s+$"; ""))[:300]}] as $items
+    | {format: 1, kind: "server", at: (now | todate), host: $host[:80], version: $version[:40], code: $code[:40],
+       fails: ($items | map(select(.level == "fail")) | length), warns: ($items | map(select(.level == "warn")) | length),
+       oks: ($items | map(select(.level == "ok")) | length), items: $items[:300]}' < "$RESULTS" > "$RESULTS.json" \
+    && install -m 644 "$RESULTS.json" "$JSON" || { echo "couldn't write $JSON" >&2; exit 3; }
 fi
 [ "$FAILS" -eq 0 ]

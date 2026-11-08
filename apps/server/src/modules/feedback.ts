@@ -23,7 +23,7 @@ import { appendFile, mkdir, readdir, readFile, rename, rm, writeFile } from 'nod
 import { join, resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { BUSINESS_TYPES, type BusinessType, entity, FEATURE_KEYS, featureOn } from '@shap/shared';
+import { BUSINESS_TYPES, type BusinessType, entity, FEATURE_KEYS, featureOn, scrubTrailDetail } from '@shap/shared';
 import { requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db } from '../db/index.js';
@@ -57,7 +57,9 @@ const feedbackInput = z.object({
   screenshot: z.string().max(Math.ceil((MAX_SHOT_BYTES * 4) / 3) + 100).nullable().default(null),
   screenshotMasked: z.boolean().default(true),
   trail: z
-    .array(z.object({ t: z.number(), kind: z.enum(['nav', 'click', 'edit', 'api', 'error', 'console']), detail: z.string().max(300) }))
+    // Ids, query values, addresses and long numbers blanked as it comes in, whatever app or version
+    // sent it: in what's kept here and what goes on to OpenWorks.
+    .array(z.object({ t: z.number(), kind: z.enum(['nav', 'click', 'edit', 'api', 'error', 'console']), detail: z.string().max(300).transform(scrubTrailDetail) }))
     .max(80)
     .default([]),
   client: z

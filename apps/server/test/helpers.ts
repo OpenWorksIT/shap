@@ -15,6 +15,8 @@ export interface TestEnv {
   ctx: Ctx;
   sql: Sql;
   mails: Mail[];
+  /** Every route, as Fastify has it ("GET /api/clients/:id"). */
+  routes: string[];
   close: () => Promise<void>;
 }
 
@@ -38,13 +40,14 @@ export async function setup(opts: { demo?: boolean; env?: Record<string, string>
     await sql`update settings set default_brand_id = (select id from brands limit 1)`;
   }
   const mails: Mail[] = [];
-  const { app, ctx } = await buildApp({ config, sql, mailer: { send: async (m) => void mails.push(m) } });
+  const { app, ctx, routes } = await buildApp({ config, sql, mailer: { send: async (m) => void mails.push(m) } });
   await app.ready();
   return {
     app,
     ctx,
     sql,
     mails,
+    routes,
     close: async () => {
       await app.close();
       await sql.end();

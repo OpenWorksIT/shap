@@ -11,6 +11,7 @@ import { pgCode, PG, type Sql } from './db/index.js';
 import { Secrets } from './lib/crypto.js';
 import { HttpError } from './lib/errors.js';
 import { routePath } from './lib/http.js';
+import { safeError } from './lib/logging.js';
 import { createMailer, type Mailer } from './lib/mailer.js';
 import { registerClientRoutes } from './modules/clients.js';
 import { registerCostRoutes } from './modules/costs.js';
@@ -84,7 +85,7 @@ try {
   /* Helvetica */
 }
 
-export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstance; ctx: Ctx }> {
+export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstance; ctx: Ctx; routes: string[] }> {
   const { config } = opts;
   const sql = routedDb(opts.sql, opts.demoSql ?? null);
   const app = Fastify({
@@ -95,6 +96,12 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
     // Room for a tracker spreadsheet or a receipt photo, sent as base64 JSON.
     bodyLimit: config.UPLOAD_MB * 1024 * 1024 * 1.4,
   });
+  // Every route as Fastify has it: the security tests check each one, and that the penetration
+  // test's own reading of the code (deploy/test/routes.mjs) finds the same.
+  const routes: string[] = [];
+  app.addHook('onRoute', (r) => {
+    for (const m of [r.method].flat()) if (m !== 'HEAD' && r.url.startsWith('/api/')) routes.push(`${m} ${r.url}`);
+  });
 
   const realMailer = opts.mailer ?? createMailer(config.SMTP_URL, config.MAIL_FROM, app.log);
   const ctx: Ctx = {
@@ -103,7 +110,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
     dbs: { real: opts.sql, demo: opts.demoSql ?? null },
     // The demo company's clients are made up: nothing is ever emailed from it.
     mailer: {
-      send: async (m) => (inDemo() ? void app.log.info({ to: m.to }, 'demo company: email not sent') : realMailer.send(m)),
+      send: async (m) => (inDemo() ? void app.log.info('demo company: email not sent') : realMailer.send(m)),
       check: async () => (realMailer.check ? realMailer.check() : null),
     },
     secrets: new Secrets(config.secretsKey),
@@ -186,14 +193,20 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
     // A rule the books keep themselves (migrations raise these with code SH001), said as it is.
     if (pgCode(err) === 'SH001') return reply.code(400).send({ error: err.message, code: 'books_rule' });
     // A value Postgres can't take (a date like 2026-99-99, a number out of range, a malformed
-    // id): the request is wrong, not the server. Said plainly, without the database's words.
-    if (/^22/.test(pgCode(err) ?? '')) return reply.code(400).send({ error: 'Something in that request isn’t valid (a date, number or id out of range).', code: 'invalid_value' });
+    // id): the request is wrong, not the server. Said plainly, without the database's words, and
+    // logged as a warning by its code and route (no values), so one the app should have caught
+    // still shows. Division by zero is the server's own mistake: an error, below.
+    const pg = pgCode(err) ?? '';
+    if (/^22/.test(pg) && pg !== PG.divisionByZero) {
+      req.log.warn({ pgCode: pg, route: `${req.method} ${routePath(req)}` }, 'a value the database refused');
+      return reply.code(400).send({ error: 'Something in that request isn’t valid (a date, number or id out of range).', code: 'invalid_value' });
+    }
     // Something chosen that isn't there (a worker or job deleted meanwhile, a made-up id).
     if (pgCode(err) === PG.foreignKeyViolation) return reply.code(400).send({ error: 'Something you chose isn’t there any more. Reload the page and try again.', code: 'missing' });
     // Database rule broken (e.g. an unbalanced journal): say so plainly.
     const msg = err.message ?? '';
     if (/does not balance/.test(msg)) return reply.code(400).send({ error: msg, code: 'unbalanced' });
-    req.log.error({ err }, 'unhandled error');
+    req.log.error({ err: safeError(err), route: `${req.method} ${routePath(req)}` }, 'unhandled error');
     return reply.code(500).send({ error: 'Something went wrong on the server', code: 'internal' });
   });
 
@@ -257,5 +270,5 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
     app.setNotFoundHandler((_req, reply) => reply.code(404).send({ error: 'Not found', code: 'not_found' }));
   }
 
-  return { app, ctx };
+  return { app, ctx, routes };
 }

@@ -5,8 +5,23 @@ entries newer than the version you're running before you update.
 
 ## 1.21.1 (9 November 2026)
 
-Fixes from the first code scanning (CodeQL) of Shap.
+Fixes from the first code scanning (CodeQL) of Shap, and from an independent review of 1.21
+(docs/AUDIT.md).
 
+- **The books check** no longer calls correct books wrong: a year agreed at your accountant's
+  figures, a cost's VAT rounded the way Shap allows, a year end changed after a year was agreed,
+  and old tax invoices after deregistering for VAT all come out clean. Debtors, creditors and
+  PAYE now agree to the cent or say so (journals you typed in are counted apart and shown), and
+  an agreed year says if anything dated in it was added or changed after it was agreed.
+- **Updates** come only from the version that passed every test: if your server can't reach it,
+  nothing is updated and Settings says why.
+- **Every update's tests** can now fail where before some couldn't, the penetration test checks
+  each role is refused exactly, and the upgrade test starts from what servers run.
+- **The server check** says when it couldn't check something instead of reporting it fine, checks
+  each company's settings file and Shap's folders, and checks each site on the server itself
+  first.
+- The server's log no longer keeps an email's subject when sending fails, or a database error's
+  details; bug reports' steps are cleared of addresses and numbers on the server too.
 - Download links on the Accounts screen encode the dates and account they carry, so a typed value
   can only ever be a value.
 - Tidying a company registration number no longer uses a pattern that slows down on a long run

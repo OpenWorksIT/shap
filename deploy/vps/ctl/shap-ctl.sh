@@ -25,9 +25,9 @@ main() {
   mkdir -p "$BACKUPS"
 
   # Servers update from "stable": CI moves it to a commit only once every test and audit passed
-  # on it (.github/workflows/ci.yml, docs/AUDIT.md). Until stable exists, main.
+  # on it (.github/workflows/ci.yml, docs/AUDIT.md). Never main: if stable can't be fetched (no
+  # network, GitHub down, the branch gone), nothing is updated and the check says why.
   TRACK="${SHAP_TRACK:-stable}"
-  git -C "$REPO" ls-remote --exit-code --heads origin "$TRACK" >/dev/null 2>&1 || TRACK=main
   ensure_units
 
   # One at a time. A request left waiting is picked up when the running job ends.
@@ -84,7 +84,7 @@ put() { # put KEY JSON
 check() {
   put checking "$(jq -n --arg at "$(now)" '{at: $at}')"
   local err=""
-  git -C "$REPO" fetch -q origin "$TRACK" 2>"$CTL/.fetch.err" || err="$(tail -c 400 "$CTL/.fetch.err")"
+  timeout 120 git -C "$REPO" fetch -q origin "$TRACK" 2>"$CTL/.fetch.err" || err="Couldn't fetch $TRACK: $(tail -c 400 "$CTL/.fetch.err")"
   local cur latest
   cur="$(git -C "$REPO" rev-parse HEAD)"
   latest="$(git -C "$REPO" rev-parse "origin/$TRACK" 2>/dev/null || echo "$cur")"
@@ -143,7 +143,7 @@ update() {
     return 1
   fi
   put updating "$(jq -n --arg at "$(now)" '{at: $at, step: "Fetching the new version"}')"
-  git -C "$REPO" pull --ff-only -q origin "$TRACK" >> "$log" 2>&1 || ok=false
+  timeout 600 git -C "$REPO" pull --ff-only -q origin "$TRACK" >> "$log" 2>&1 || ok=false
   if $ok; then
     put updating "$(jq -n --arg at "$(now)" '{at: $at, step: "Building and restarting (a few minutes)"}')"
     cd "$VPS" && GIT_SHA="$(git -C "$REPO" rev-parse --short HEAD)" docker compose up -d --build >> "$log" 2>&1 || ok=false
