@@ -1,5 +1,5 @@
 # Shap — single image: API + built web app.
-FROM node:22-bookworm-slim AS build
+FROM node:26-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/
@@ -9,7 +9,7 @@ RUN npm ci
 COPY . .
 RUN npm run build && npm prune --omit=dev
 
-FROM node:22-bookworm-slim
+FROM node:26-bookworm-slim
 # The commit this image was built from (shown under Settings → System).
 ARG GIT_SHA=""
 ENV GIT_SHA=$GIT_SHA
