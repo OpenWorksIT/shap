@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildExport } from '../src/modules/accountantExport.js';
 import { emp201Split } from '../src/modules/payroll.js';
-import { balance, ledgerTotal, login, ref, setup, type TestEnv } from './helpers.js';
+import { balance, ledgerTotal, login, ref, setup, type TestEnv, expectCleanAudit } from './helpers.js';
 
 const round = Math.round;
 const vatOf = (exVat: number) => round((exVat * 1500) / 10000);
@@ -213,6 +213,10 @@ describe('a year in the books, reconciled', () => {
     expect(moved).toBe(-v.fields.field20);
     expect(await balance(env.sql, 'bad_debts', END)).toBe(0);
     expect((await me.get(`/api/reports/trial-balance?date=${END}`)).totals.differenceCents).toBe(0);
+  });
+
+  it('passes the books audit: nothing to fix', async () => {
+    await expectCleanAudit(env.sql, '2027-03-31');
   });
 });
 

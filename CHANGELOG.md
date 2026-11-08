@@ -2,6 +2,19 @@
 
 What changed in each version of Shap Pocket, newest first.
 
+## 1.5.0 (9 November 2026)
+
+- **Checks** in Settings → Checks & audit log: your books checked the way an accountant would.
+  Everything balances; debtors, creditors, VAT and payroll agree with the invoices, bills, VAT201s
+  and EMP201s behind them; agreed years are unchanged; tax invoices are complete; no invoice
+  number is missing unexplained.
+- **Every update is checked before release**: the tests (the accounting, VAT and payroll rules,
+  security and privacy), known vulnerabilities in what the app is built from, and every outside
+  address in the code on a privacy list.
+- Bug reports no longer carry the names on buttons in lists, and blank email addresses and
+  numbers in what they record.
+- A date or number out of range is refused plainly instead of failing.
+
 ## 1.4.0 (9 November 2026)
 
 - **Updates from Google Play, inside the app.** Shap Pocket asks Google Play whether there's a

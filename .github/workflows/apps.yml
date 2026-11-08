@@ -27,6 +27,10 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - name: known vulnerabilities in what the app ships (high and critical fail, unless accepted)
+        run: node scripts/audit-deps.mjs
+      - name: every outside address in the code is on the privacy list
+        run: node scripts/privacy-hosts.mjs
 
   android:
     needs: test

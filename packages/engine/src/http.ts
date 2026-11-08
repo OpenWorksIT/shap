@@ -202,6 +202,12 @@ function errorReply(err: unknown, reply: Reply, log: Logger) {
     reply.code(400).send({ error: e.message, code: 'books_rule' });
     return;
   }
+  // A value the database can't take (a date like 2026-99-99, a number out of range, a malformed
+  // id): the request is wrong, said plainly, without the database's words.
+  if (/^22/.test(String(e.code ?? ''))) {
+    reply.code(400).send({ error: 'Something in that request isn’t valid (a date, number or id out of range).', code: 'invalid_value' });
+    return;
+  }
   // Something chosen that isn't there (deleted meanwhile).
   if (e.code === '23503') {
     reply.code(400).send({ error: 'Something you chose isn’t there any more. Go back and try again.', code: 'missing' });

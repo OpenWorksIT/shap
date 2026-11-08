@@ -24,6 +24,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: known vulnerabilities in what the app ships (high and critical fail, unless accepted)
+        run: node scripts/audit-deps.mjs
+      - name: every outside address in the code is on the privacy list
+        run: node scripts/privacy-hosts.mjs
       - run: npm -w @shap/web run build:web
       - uses: actions/upload-pages-artifact@v3
         with:

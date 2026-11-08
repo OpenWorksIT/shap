@@ -1,0 +1,11 @@
+{
+  "about": "Known vulnerabilities in production dependencies accepted for now: each says why it can't hurt here, and until when (scripts/audit-deps.mjs fails again after that date).",
+  "accepted": [
+    {
+      "id": "GHSA-mrhx-c7xc-m3w5",
+      "package": "zod",
+      "reason": "Zod 3 checks every item of a huge list. Shap Pocket's engine runs on the phone and only its own screens call it; every call goes through parse() (packages/engine/src/lib/validate.ts), which refuses oversized lists before Zod sees them. Fixed by moving to Zod 4.6.6+, planned.",
+      "until": "2027-01-31"
+    }
+  ]
+}

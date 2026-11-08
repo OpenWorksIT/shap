@@ -20,6 +20,7 @@ import { SupportShap } from '../components/Support';
 import { MarketWhat } from '../components/MarketShare';
 import { AuditLog } from '../components/AuditLog';
 import { ClipsSetting } from '../components/HowItWorks';
+import { AuditChecks } from '../components/AuditChecks';
 import { TermPicks } from '../components/TermPicks';
 
 type Tab = 'business' | 'invoicing' | 'sections' | 'lists' | 'audit';
@@ -41,7 +42,7 @@ export default function SettingsPage() {
             { value: 'invoicing', label: 'Invoicing & tax' },
             { value: 'sections', label: 'What you use' },
             { value: 'lists', label: 'Lists' },
-            { value: 'audit', label: 'Audit log' },
+            { value: 'audit', label: 'Checks & audit log' },
           ]}
         />
       </div>
@@ -64,7 +65,12 @@ export default function SettingsPage() {
       {tab === 'invoicing' && <SettingsForm section="invoicing" />}
       {tab === 'sections' && <Sections />}
       {tab === 'lists' && <Lists />}
-      {tab === 'audit' && <AuditLog />}
+      {tab === 'audit' && (
+        <>
+          <AuditChecks />
+          <AuditLog />
+        </>
+      )}
       <About />
     </div>
   );

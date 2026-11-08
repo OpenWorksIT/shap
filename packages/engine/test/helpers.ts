@@ -93,6 +93,18 @@ export async function balance(sql: Sql, systemKey: string, upTo = '2999-12-31'):
   return r!.b;
 }
 
+/**
+ * The books audit (audit/books.ts) on the books as a test left them: nothing may need fixing.
+ * Returns what it found. `on`: the day to audit for.
+ */
+export async function expectCleanAudit(sql: Sql, on?: string) {
+  const { auditBooks } = await import('../src/audit/books.js');
+  const items = await auditBooks(sql as never, on);
+  const fails = items.filter((i) => i.level === 'fail').map((i) => `${i.section}: ${i.text}`);
+  if (fails.length) throw new Error(`The books audit found ${fails.length} to fix:\n${fails.join('\n')}`);
+  return items;
+}
+
 export async function ledgerTotal(sql: Sql): Promise<number> {
   const [r] = await sql<{ t: number }[]>`select coalesce(sum(amount_cents), 0)::bigint as t from ledger`;
   return r!.t;

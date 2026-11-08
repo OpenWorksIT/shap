@@ -26,6 +26,7 @@ import { registerWorkerRoutes } from './modules/workers.js';
 import { registerYearEndRoutes } from './modules/yearend.js';
 import { registerArchiveRoutes } from './modules/archive.js';
 import { registerTaxFormRoutes } from './modules/taxforms.js';
+import { registerAuditRoutes } from './modules/audit.js';
 import { registerBillRoutes } from './modules/bills.js';
 import { registerLogbookRoutes } from './modules/logbook.js';
 import { registerTimeRoutes } from './modules/timetrack.js';
@@ -63,6 +64,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: App; ctx: Ctx
   registerYearEndRoutes(app, ctx);
   registerArchiveRoutes(app, ctx);
   registerTaxFormRoutes(app, ctx);
+  registerAuditRoutes(app, ctx);
   registerBillRoutes(app, ctx);
   registerLogbookRoutes(app, ctx);
   registerTimeRoutes(app, ctx);
