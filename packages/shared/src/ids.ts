@@ -98,7 +98,8 @@ const REG_WHAT: Record<string, string> = { '06': 'a public company', '07': 'a (P
 
 /** Tidies a registration number as typed (2024 733128 07 → 2024/733128/07). */
 export function tidyRegNumber(v: string): string {
-  const s = String(v ?? '').trim().toUpperCase().replace(/\s*\/\s*/g, '/');
+  // Spaces around each slash dropped by splitting (a regex like /\s*\/\s*/ backtracks on a long run of spaces).
+  const s = String(v ?? '').trim().toUpperCase().split('/').map((part) => part.trim()).join('/');
   const bare = s.replace(/^CK\s*/, '');
   const m = /^(\d{4})[\s/-]?(\d{6})[\s/-]?(\d{2})$/.exec(bare);
   return m ? `${m[1]}/${m[2]}/${m[3]}` : s;

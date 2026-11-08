@@ -2,6 +2,16 @@
 
 What changed in each version of Shap Pocket, newest first.
 
+## 1.5.1 (9 November 2026)
+
+Fixes from the first code scanning (CodeQL) of Shap Pocket.
+
+- The engine takes a query parameter called __proto__ or constructor as just a name.
+- The database worker only loads the empty books from the app's own file, and only answers the
+  app's own page.
+- Tidying a company registration number no longer uses a pattern that slows down on a long run
+  of spaces.
+
 ## 1.5.0 (9 November 2026)
 
 - **Checks** in Settings → Checks & audit log: your books checked the way an accountant would.

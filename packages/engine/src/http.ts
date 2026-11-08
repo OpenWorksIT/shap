@@ -139,8 +139,12 @@ export class App {
 
   async handle(method: string, url: string, body?: unknown, headers: Record<string, string | undefined> = {}): Promise<Response> {
     const u = new URL(url, 'http://pocket');
-    const query: Record<string, string> = {};
-    u.searchParams.forEach((v, k) => (query[k] = v));
+    // The query as an object with no prototype: a parameter called __proto__ or constructor is
+    // just a name, never a way into the object itself.
+    const query: Record<string, string> = Object.create(null) as Record<string, string>;
+    u.searchParams.forEach((v, k) => {
+      if (k !== '__proto__' && k !== 'constructor' && k !== 'prototype') query[k] = v;
+    });
     const reply = new Reply();
     const req: Req = { method, url: u.pathname + u.search, params: {}, query, body: body ?? null, headers, ip: 'device', cookies: {}, user: this.user, log: this.log };
     try {
