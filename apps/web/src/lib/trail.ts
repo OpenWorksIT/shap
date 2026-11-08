@@ -2,7 +2,8 @@
  * A short trail of what the user just did, attached to bug reports so we can retrace the steps.
  * It records where they went, what they clicked, which server calls ran and any errors, and never
  * what they typed: clicks on links record the link's path (IDs replaced), clicks on buttons their
- * label, and edits only which field changed.
+ * label (or only "in a list", for a row's button, which can carry a name), and edits only which
+ * field changed.
  */
 export interface TrailEntry {
   t: number; // ms since epoch
@@ -19,7 +20,8 @@ const ID_RE = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/
 export const scrubPath = (p: string) => p.replace(ID_RE, ':id').replace(/\?.*$/, (q) => (/[?&](t|token)=/.test(q) ? '?…' : q.replace(/=[^&]*/g, '=…')));
 
 export function record(kind: TrailEntry['kind'], detail: string) {
-  entries.push({ t: Date.now(), kind, detail: detail.slice(0, 300) });
+  // Error messages can quote what was typed: blank addresses and numbers in those too.
+  entries.push({ t: Date.now(), kind, detail: (kind === 'console' || kind === 'error' ? redact(detail) : detail).slice(0, 300) });
   if (entries.length > MAX) entries.splice(0, entries.length - MAX);
 }
 
@@ -27,6 +29,8 @@ export function getTrail(): TrailEntry[] {
   return entries.slice();
 }
 
+/** Email addresses and phone or ID numbers out of anything recorded. */
+const redact = (s: string) => s.replace(/[^\s@]+@[^\s@]+/g, '…@…').replace(/\+?\d[\d\s-]{6,}\d/g, '…');
 const short = (s: string | null | undefined, n = 40) => (s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
 
 function describe(el: Element): string | null {
@@ -35,9 +39,13 @@ function describe(el: Element): string | null {
   if (link) return `link → ${scrubPath(new URL((link as HTMLAnchorElement).href, location.href).pathname)}`;
   const button = el.closest('button, [role="button"], [role="tab"], [role="radio"]');
   if (button) {
+    const role = button.getAttribute('role') ?? 'button';
+    // A button in a row of a list or table can carry a client's or worker's name: say where it
+    // was, not what it said. Elsewhere its label, with anything like an email address or phone
+    // number blanked, cut short.
+    if (button.closest('tr, li, [role="row"], [role="listitem"], .list-row')) return `${role} in a list`;
     const label = button.getAttribute('aria-label') || short(button.textContent);
-    // Buttons in lists of people (e.g. "Use this file" rows) keep their label only; long labels are cut short.
-    return `${button.getAttribute('role') ?? 'button'} “${label || '(no label)'}”`;
+    return `${role} “${redact(label) || '(no label)'}”`;
   }
   const summary = el.closest('summary');
   if (summary) return `toggle “${short(summary.textContent)}”`;

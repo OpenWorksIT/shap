@@ -1,7 +1,7 @@
 /** Payroll and dividends: SARS's sums, and what reaches the books. */
 import { dividendTax, dwtDue, emp201Due, medicalCredit, payLine, taxYearEnd } from '@shap/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { balance, login, ref, setup, type TestEnv } from './helpers.js';
+import { balance, login, ref, setup, type TestEnv, expectCleanAudit } from './helpers.js';
 
 describe('payroll sums (SARS 2027 tables)', () => {
   it('works out PAYE by annualising, with UIF capped', () => {
@@ -127,5 +127,9 @@ describe('payroll in the books', () => {
     const r = await me.call({ method: 'POST', url: '/api/dividends', payload: { declaredOn: '2026-11-28', shareholder: 'Me', grossCents: 100 } });
     expect(r.json().error).toMatch(/drawings/);
     await env.sql`update settings set business_type = 'company'`;
+  });
+
+  it('passes the books audit: nothing to fix', async () => {
+    await expectCleanAudit(env.sql, '2027-02-28');
   });
 });

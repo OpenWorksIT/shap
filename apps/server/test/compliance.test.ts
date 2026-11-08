@@ -5,7 +5,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { idNumberProblem, noticesFor, payeRefProblem, regNumberProblem, settingsNumberProblem, taxNumberProblem, TERMS_VERSION, tidyNumbers, uifRefProblem, vatNumberProblem } from '@shap/shared';
-import { login, ref, setup, type TestEnv } from './helpers.js';
+import { login, ref, setup, type TestEnv, expectCleanAudit } from './helpers.js';
 
 describe('reference numbers', () => {
   it('knows a VAT number, an income tax number and a PAYE reference by their shape and check digit', () => {
@@ -177,5 +177,9 @@ describe('in the books', () => {
     const csv = await me.call({ method: 'GET', url: '/api/payroll/emp501?year=2027&kind=interim&format=csv' });
     expect(csv.body).toMatch(/3601 Income/);
     expect(csv.body).toMatch(/IT3\(a\)/);
+  });
+
+  it('passes the books audit: nothing to fix', async () => {
+    await expectCleanAudit(env.sql, '2027-02-28');
   });
 });

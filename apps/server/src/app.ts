@@ -36,6 +36,7 @@ import { registerWorkerRoutes } from './modules/workers.js';
 import { registerYearEndRoutes } from './modules/yearend.js';
 import { registerArchiveRoutes } from './modules/archive.js';
 import { registerTaxFormRoutes } from './modules/taxforms.js';
+import { registerAuditRoutes } from './modules/audit.js';
 import { registerBillRoutes } from './modules/bills.js';
 import { registerLogbookRoutes } from './modules/logbook.js';
 import { registerTimeRoutes } from './modules/timetrack.js';
@@ -184,6 +185,9 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
     }
     // A rule the books keep themselves (migrations raise these with code SH001), said as it is.
     if (pgCode(err) === 'SH001') return reply.code(400).send({ error: err.message, code: 'books_rule' });
+    // A value Postgres can't take (a date like 2026-99-99, a number out of range, a malformed
+    // id): the request is wrong, not the server. Said plainly, without the database's words.
+    if (/^22/.test(pgCode(err) ?? '')) return reply.code(400).send({ error: 'Something in that request isn’t valid (a date, number or id out of range).', code: 'invalid_value' });
     // Something chosen that isn't there (a worker or job deleted meanwhile, a made-up id).
     if (pgCode(err) === PG.foreignKeyViolation) return reply.code(400).send({ error: 'Something you chose isn’t there any more. Reload the page and try again.', code: 'missing' });
     // Database rule broken (e.g. an unbalanced journal): say so plainly.
@@ -230,6 +234,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   registerLiveRoutes(app, ctx, bus);
   registerBankRoutes(app, ctx);
   registerSystemRoutes(app, ctx);
+  registerAuditRoutes(app, ctx);
   registerStatementRoutes(app, ctx);
   registerCompanyFileRoutes(app, ctx);
 

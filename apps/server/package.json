@@ -1,6 +1,6 @@
 {
   "name": "@shap/server",
-  "version": "1.20.0",
+  "version": "1.21.0",
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-or-later",
@@ -13,7 +13,8 @@
     "import": "tsx --env-file-if-exists=../../.env src/db/import-cli.ts",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json",
-    "create-owner": "tsx --env-file-if-exists=../../.env src/db/create-owner.ts"
+    "create-owner": "tsx --env-file-if-exists=../../.env src/db/create-owner.ts",
+    "audit:books": "tsx --env-file-if-exists=../../.env src/audit/cli.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.0",

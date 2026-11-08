@@ -1,0 +1,191 @@
+# Every change to Shap, before any server can take it (docs/AUDIT.md):
+#   test       the type checks, every test (the accounting, VAT, payroll and tax rules, the
+#              security and privacy suites, the books audit on books built by the tests), the build
+#   audit      the real server in its Docker image with the demo company: the penetration test
+#              (deploy/test/pentest.mjs), the books audit, and no errors in its log
+#   upgrade    the previous release's database brought up to this one: migrations run, the books
+#              audit finds nothing to fix, and the figures that changed are listed
+#   dependencies  known vulnerabilities in what Shap is built from (also weekly: dependency-check.yml),
+#              and every outside address in the code on the privacy list (.github/hosts.json)
+# When all four pass on main, "stable" moves to that commit: servers update from stable
+# (deploy/vps/ctl/shap-ctl.sh), so nothing reaches a server without passing.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/shap_test
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: psql -h localhost -U postgres -c 'create database shap_test'
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      PGPASSWORD: postgres
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/shap_pen
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: the server's Docker image, as servers build it
+        run: docker build --build-arg GIT_SHA="${GITHUB_SHA::7}" -t shap-app:ci .
+      - name: the demo company
+        run: |
+          psql -h localhost -U postgres -c 'create database shap_pen'
+          docker run --rm --network host -e DATABASE_URL -e NODE_ENV=production shap-app:ci node apps/server/dist/db/seed.js --i-know-this-is-demo-data
+      - name: start the server as production runs it (no way out to the internet)
+        run: |
+          docker run -d --name shap --network host --read-only --tmpfs /tmp --tmpfs /data/feedback \
+            --security-opt no-new-privileges:true --cap-drop ALL \
+            -e DATABASE_URL -e NODE_ENV=production -e PORT=8080 -e SECRETS_KEY="$(head -c 32 /dev/urandom | base64)" \
+            -e COOKIE_SECURE=true -e TRUST_PROXY=true -e MFA_REQUIRED=false -e DEMO_ENABLED=false \
+            -e COLLECTOR_URL=off -e NOTICE_URL= -e CTL_DIR=/tmp/ctl -e REQUEST_DIR=/tmp/ctl-in \
+            shap-app:ci
+          for i in $(seq 1 60); do curl -fsS http://localhost:8080/api/health && break; sleep 2; done
+          test "$(docker inspect -f '{{.Config.User}}' shap)" = node || { echo "::error::the app container runs as root"; exit 1; }
+      - name: penetration test
+        run: EXPECT_SECURE_COOKIE=true node deploy/test/pentest.mjs --url http://localhost:8080 --password demo-shap-1 | tee pentest.txt
+      - name: the books audit on the demo company
+        run: docker run --rm --network host -e DATABASE_URL -e NODE_ENV=production shap-app:ci node apps/server/dist/audit/cli.js
+      - name: no errors in the server's log, nothing personal in it
+        run: |
+          docker logs shap > server.log 2>&1
+          if grep -q '"level":50' server.log; then echo "::error::the server logged errors during the tests"; grep '"level":50' server.log | head -20; exit 1; fi
+          if grep -Eq '"url":"[^"]*\?' server.log; then echo "::error::the log holds query strings"; exit 1; fi
+          if grep -Eq 'demo-shap-1|shap_session=' server.log; then echo "::error::the log holds a password or session"; exit 1; fi
+      - name: summary
+        if: always()
+        run: |
+          { echo '### Penetration test'; echo '```'; tail -40 pentest.txt 2>/dev/null; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  upgrade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      PGPASSWORD: postgres
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/shap_upgrade
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: the previous release
+        id: prev
+        run: |
+          cur="$(jq -r .version package.json)"
+          for c in $(git log --format=%H -- package.json); do
+            v="$(git show "$c:package.json" | jq -r .version)"
+            if [ "$v" != "$cur" ]; then echo "sha=$c" >> "$GITHUB_OUTPUT"; echo "version=$v" >> "$GITHUB_OUTPUT"; echo "Previous release: $v ($c)"; break; fi
+          done
+      - name: its books (the demo company, on its own code)
+        if: steps.prev.outputs.sha != ''
+        run: |
+          psql -h localhost -U postgres -c 'create database shap_upgrade'
+          git worktree add ../prev "${{ steps.prev.outputs.sha }}"
+          cd ../prev && npm ci --no-audit --no-fund && npm -w @shap/server run build
+          node apps/server/dist/db/seed.js --i-know-this-is-demo-data
+          psql -h localhost -U postgres -d shap_upgrade -Atc "select a.code || ' ' || a.name, coalesce(sum(l.amount_cents), 0) from accounts a left join ledger l on l.account_id = a.id group by 1 order by 1" > "$RUNNER_TEMP/before.txt"
+      - name: brought up to this version
+        if: steps.prev.outputs.sha != ''
+        run: |
+          npm ci --no-audit --no-fund && npm -w @shap/server run build
+          node apps/server/dist/db/migrate-cli.js
+          psql -h localhost -U postgres -d shap_upgrade -Atc "select a.code || ' ' || a.name, coalesce(sum(l.amount_cents), 0) from accounts a left join ledger l on l.account_id = a.id group by 1 order by 1" > "$RUNNER_TEMP/after.txt"
+          node apps/server/dist/audit/cli.js | tee audit.txt
+          {
+            echo "### Upgrade from ${{ steps.prev.outputs.version }}"
+            if diff -q "$RUNNER_TEMP/before.txt" "$RUNNER_TEMP/after.txt" >/dev/null; then echo 'No account balance changed.'
+            else echo 'Balances that changed (check the changelog says why):'; echo '```'; diff "$RUNNER_TEMP/before.txt" "$RUNNER_TEMP/after.txt" | head -60; echo '```'; fi
+            echo '```'; tail -3 audit.txt; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  dependencies:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+      - name: known vulnerabilities in what the server and the web app run (high and critical fail, unless accepted)
+        run: node scripts/audit-deps.mjs | tee deps.txt
+      - name: every outside address in the code is on the list (privacy)
+        run: node scripts/privacy-hosts.mjs
+      - name: summary
+        if: always()
+        run: |
+          { echo '### Dependencies'; echo '```'; cat deps.txt 2>/dev/null; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  # Servers update from "stable": only a commit that passed everything above gets there.
+  promote:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [test, audit, upgrade, dependencies]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: promote
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - name: move stable forward (never back: an older run finishing late is refused)
+        run: git push origin "${GITHUB_SHA}:refs/heads/stable"

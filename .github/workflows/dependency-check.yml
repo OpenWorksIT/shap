@@ -1,0 +1,25 @@
+# Known vulnerabilities in what Shap is built from, every week (a new advisory can appear for code
+# that hasn't changed) and on every change (ci.yml runs the same). docs/AUDIT.md.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+name: Dependency check
+on:
+  schedule:
+    - cron: '23 4 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+      - run: node scripts/audit-deps.mjs | tee deps.txt
+      - if: always()
+        run: |
+          { echo '### Dependencies'; echo '```'; cat deps.txt 2>/dev/null; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

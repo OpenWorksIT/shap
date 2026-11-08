@@ -1,0 +1,11 @@
+{
+  "about": "Known vulnerabilities in production dependencies accepted for now: each says why it can't hurt here, and until when (scripts/audit-deps.mjs fails again after that date). docs/AUDIT.md.",
+  "accepted": [
+    {
+      "id": "GHSA-mrhx-c7xc-m3w5",
+      "package": "zod",
+      "reason": "Zod 3 checks every item of a huge list. Every request goes through parse() (apps/server/src/lib/validate.ts), which refuses oversized lists and deep nesting before Zod sees them (test/hardening.test.ts); the direct Zod calls check single values. Fixed by moving to Zod 4.6.6+, planned.",
+      "until": "2027-01-31"
+    }
+  ]
+}

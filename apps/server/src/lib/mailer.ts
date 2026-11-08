@@ -33,8 +33,8 @@ export function createMailer(smtpUrl: string, from: string, log: FastifyBaseLogg
   if (!smtpUrl) {
     return {
       async send(mail) {
-        // Dev / unconfigured: log the envelope only (bodies can contain personal info).
-        log.info({ to: mail.to, subject: mail.subject }, 'email (SMTP not configured, not sent)');
+        // Unconfigured: say an email wasn't sent, not to whom (an address is personal) or what.
+        log.info({ subject: mail.subject }, 'email (SMTP not configured, not sent)');
       },
     };
   }

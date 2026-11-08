@@ -24,6 +24,12 @@ main() {
   install -d -m 1730 -o root -g "$APP_GID" "$CTL_IN"
   mkdir -p "$BACKUPS"
 
+  # Servers update from "stable": CI moves it to a commit only once every test and audit passed
+  # on it (.github/workflows/ci.yml, docs/AUDIT.md). Until stable exists, main.
+  TRACK="${SHAP_TRACK:-stable}"
+  git -C "$REPO" ls-remote --exit-code --heads origin "$TRACK" >/dev/null 2>&1 || TRACK=main
+  ensure_units
+
   # One at a time. A request left waiting is picked up when the running job ends.
   exec 9>/run/shap-ctl.lock
   flock -n 9 || { echo "shap-ctl is already running"; return 0; }
@@ -52,6 +58,20 @@ main() {
 
 now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
+# The 6-hourly security check (audit-server.sh), installed here as well as by install.sh, so a
+# server set up before it existed gets it with its next update or nightly run.
+ensure_units() {
+  local d="$VPS/ctl" changed=no f
+  for f in shap-audit.service shap-audit.timer; do
+    [ -f "$d/$f" ] || continue
+    if ! cmp -s "$d/$f" "/etc/systemd/system/$f"; then install -m 0644 "$d/$f" /etc/systemd/system/ && changed=yes; fi
+  done
+  if [ "$changed" = yes ]; then
+    systemctl daemon-reload && systemctl enable --now shap-audit.timer >/dev/null 2>&1 || true
+    systemctl start --no-block shap-audit.service >/dev/null 2>&1 || true
+  fi
+}
+
 # status.json, read by the app. Keys are merged so each step only changes its own part.
 put() { # put KEY JSON
   local f="$CTL/status.json" tmp
@@ -64,15 +84,15 @@ put() { # put KEY JSON
 check() {
   put checking "$(jq -n --arg at "$(now)" '{at: $at}')"
   local err=""
-  git -C "$REPO" fetch -q origin main 2>"$CTL/.fetch.err" || err="$(tail -c 400 "$CTL/.fetch.err")"
+  git -C "$REPO" fetch -q origin "$TRACK" 2>"$CTL/.fetch.err" || err="$(tail -c 400 "$CTL/.fetch.err")"
   local cur latest
   cur="$(git -C "$REPO" rev-parse HEAD)"
-  latest="$(git -C "$REPO" rev-parse origin/main 2>/dev/null || echo "$cur")"
+  latest="$(git -C "$REPO" rev-parse "origin/$TRACK" 2>/dev/null || echo "$cur")"
   jq -n \
     --arg at "$(now)" --arg err "$err" \
     --arg cur "$cur" --arg curVersion "$(jq -r .version "$REPO/package.json")" \
     --arg curDate "$(git -C "$REPO" log -1 --format=%cI HEAD)" \
-    --arg latest "$latest" --arg latestVersion "$(git -C "$REPO" show origin/main:package.json 2>/dev/null | jq -r .version 2>/dev/null || echo '')" \
+    --arg latest "$latest" --arg latestVersion "$(git -C "$REPO" show "origin/$TRACK":package.json 2>/dev/null | jq -r .version 2>/dev/null || echo '')" \
     --arg latestDate "$(git -C "$REPO" log -1 --format=%cI "$latest")" \
     --argjson behind "$(git -C "$REPO" rev-list --count HEAD.."$latest" 2>/dev/null || echo 0)" \
     --argjson changes "$(git -C "$REPO" log --format='%h%x09%s' HEAD.."$latest" 2>/dev/null | head -40 | jq -R -s 'split("\n") | map(select(length > 0) | split("\t") | {sha: .[0], subject: .[1]})')" \
@@ -123,7 +143,7 @@ update() {
     return 1
   fi
   put updating "$(jq -n --arg at "$(now)" '{at: $at, step: "Fetching the new version"}')"
-  git -C "$REPO" pull --ff-only -q origin main >> "$log" 2>&1 || ok=false
+  git -C "$REPO" pull --ff-only -q origin "$TRACK" >> "$log" 2>&1 || ok=false
   if $ok; then
     put updating "$(jq -n --arg at "$(now)" '{at: $at, step: "Building and restarting (a few minutes)"}')"
     cd "$VPS" && GIT_SHA="$(git -C "$REPO" rev-parse --short HEAD)" docker compose up -d --build >> "$log" 2>&1 || ok=false
@@ -141,6 +161,8 @@ update() {
     --arg tail "$(tail -c 3000 "$log")" '{at: $at, ok: $ok, from: $from, to: $to, version: $version, log: $tail}')"
   put updating null
   docker image prune -f > /dev/null 2>&1 || true
+  # The security check again, on the new version.
+  systemctl start --no-block shap-audit.service >/dev/null 2>&1 || true
   check
 }
 

@@ -19,3 +19,5 @@ deploy/vps/sites/*.caddy
 *.company.json
 shap-company*.json
 *company file*.json
+# Feedback written by a server run from the source folder (FEEDBACK_DIR=./feedback).
+apps/server/feedback/

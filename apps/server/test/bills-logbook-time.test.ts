@@ -1,7 +1,7 @@
 /** Supplier bills, the VAT201 layout, turnover tax, the travel logbook and the time tracker. */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { turnoverTax, vatPeriod } from '@shap/shared';
-import { balance, login, ref, setup, type TestEnv } from './helpers.js';
+import { balance, login, ref, setup, type TestEnv, expectCleanAudit } from './helpers.js';
 
 describe('more of the books', () => {
   let env: TestEnv;
@@ -93,5 +93,9 @@ describe('more of the books', () => {
     await me.post('/api/time/bill', { documentId: inv.id, ids: [t.id] });
     const d = await me.get(`/api/documents/${inv.id}`);
     expect(d.lines[0]).toMatchObject({ qty: 1.5, unitPriceCents: 60000, lineTotalCents: 90000 });
+  });
+
+  it('passes the books audit: nothing to fix', async () => {
+    await expectCleanAudit(env.sql, '2027-02-28');
   });
 });

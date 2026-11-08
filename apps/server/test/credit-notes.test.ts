@@ -1,6 +1,6 @@
 /** Credit notes, pro-forma invoices and payment reminders. */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { balance, login, setup, type TestEnv } from './helpers.js';
+import { balance, login, setup, type TestEnv, expectCleanAudit } from './helpers.js';
 
 describe('credit notes and pro-formas', () => {
   let env: TestEnv;
@@ -74,5 +74,9 @@ describe('credit notes and pro-formas', () => {
     expect(row).toMatchObject({ clientName: 'Mrs Dlamini', reminders: 0 });
     await me.post(`/api/documents/${invoice.id}/reminded`);
     expect((await me.get('/api/dashboard')).overdue.find((r: { id: string }) => r.id === invoice.id).reminders).toBe(1);
+  });
+
+  it('passes the books audit: nothing to fix', async () => {
+    await expectCleanAudit(env.sql, '2027-02-28');
   });
 });

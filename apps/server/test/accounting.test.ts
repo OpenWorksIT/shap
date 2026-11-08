@@ -3,7 +3,7 @@
  * a closed year can't be rewritten from outside it, and VAT on the business's own assets.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { balance, ledgerTotal, login, ref, setup, type TestEnv } from './helpers.js';
+import { balance, ledgerTotal, login, ref, setup, type TestEnv, expectCleanAudit } from './helpers.js';
 
 const csvOf = (rows: [string, string, string, string][]) => ['Transaction Date,Description,Money In,Money Out', ...rows.map((r) => r.join(','))].join('\n');
 
@@ -83,6 +83,10 @@ describe('the bank and what’s already in the books', () => {
     expect(await balance(env.sql, 'bank')).toBe(before);
     const [{ sourceId }] = (await env.sql<{ sourceId: string }[]>`select source_id from receipts where id = ${receipt.id}`) as unknown as [{ sourceId: string }];
     expect(sourceId).toBe(cash);
+  });
+
+  it('passes the books audit: nothing to fix', async () => {
+    await expectCleanAudit(env.sql);
   });
 });
 
@@ -212,5 +216,9 @@ describe('a closed year stays as it was', () => {
     expect(tb.totals.differenceCents).toBe(0);
     const bs = await me.get('/api/reports/balance-sheet?date=2026-06-30');
     expect(bs.differenceCents).toBe(0);
+  });
+
+  it('passes the books audit: nothing to fix', async () => {
+    await expectCleanAudit(env.sql);
   });
 });

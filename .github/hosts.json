@@ -1,0 +1,60 @@
+{
+ "about": "Every outside address in the code: 'sends' means the app sends requests there (what goes, on whose say-so); 'link' only a link shown or a source cited. scripts/privacy-hosts.mjs fails on any address not listed.",
+ "hosts": [
+  {
+   "host": "www.sars.gov.za",
+   "kind": "link",
+   "why": "SARS guides and forms, linked and cited"
+  },
+  {
+   "host": "www.openworks.co.za",
+   "kind": "link",
+   "why": "the terms, privacy policy and info pages"
+  },
+  {
+   "host": "pay.yoco.com",
+   "kind": "link",
+   "why": "an example of a card payment link people paste in"
+  },
+  {
+   "host": "accountingacademy.co.za",
+   "kind": "link",
+   "why": "a source cited in a comment"
+  },
+  {
+   "host": "www.taxtim.com",
+   "kind": "link",
+   "why": "a source cited in a comment"
+  },
+  {
+   "host": "www.taxfaculty.ac.za",
+   "kind": "link",
+   "why": "a source cited in a comment"
+  },
+  {
+   "host": "www.acts.co.za",
+   "kind": "link",
+   "why": "the VAT Act, cited"
+  },
+  {
+   "host": "tradeshield-help.freshdesk.com",
+   "kind": "link",
+   "why": "CIPC registration number formats, cited"
+  },
+  {
+   "host": "lookuptax.com",
+   "kind": "link",
+   "why": "SARS reference number formats, cited"
+  },
+  {
+   "host": "shap.openworks.co.za",
+   "kind": "sends",
+   "why": "OpenWorks' collector: the anonymous usage note and market rates (only with the owner's yes) and feedback someone chooses to send"
+  },
+  {
+   "host": "raw.githubusercontent.com",
+   "kind": "sends",
+   "why": "the notices file (notice.json): fetched with nothing about the business or the person in the request"
+  }
+ ]
+}

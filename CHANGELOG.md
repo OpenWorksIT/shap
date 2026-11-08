@@ -3,6 +3,23 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.21.0 (9 November 2026)
+
+Shap now audits itself: every update, every server and your books (docs/AUDIT.md).
+
+- **Checks** in Settings → Updates & backups: your books checked the way an accountant would
+  (everything balances; debtors, creditors, VAT and payroll agree with the invoices, bills,
+  VAT201s and EMP201s behind them; agreed years unchanged; tax invoices complete; no invoice
+  number missing unexplained), and, on a server set up with deploy/vps, the server's own security
+  and privacy check, run every 6 hours.
+- **Every update is tested before your server can take it**: the full test suite, a penetration
+  test of the running server, a privacy test, an upgrade from the previous version, and known
+  vulnerabilities in what Shap is built from. Servers now update from the version that passed
+  all of it.
+- A date or number out of range in a request is refused plainly instead of failing.
+- The server's log no longer keeps searches or email addresses, and bug reports no longer carry
+  the names on buttons in lists.
+
 ## 1.20.0 (9 November 2026)
 
 - **One tap for payment terms.** On an invoice: due on receipt, in 7, 14 or 30 days, or at month

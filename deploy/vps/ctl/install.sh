@@ -16,9 +16,9 @@ command -v jq >/dev/null && command -v rsync >/dev/null || apt-get install -y jq
 install -d -m 0755 -o root -g root /var/lib/shap/ctl
 install -d -m 1730 -o root -g 1000 /var/lib/shap/ctl-in
 install -d -m 0750 -o root -g 1000 /var/backups/shap
-install -m 0644 shap-ctl.path shap-ctl.service shap-nightly.service shap-nightly.timer /etc/systemd/system/
+install -m 0644 shap-ctl.path shap-ctl.service shap-nightly.service shap-nightly.timer shap-audit.service shap-audit.timer /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now shap-ctl.path shap-nightly.timer
+systemctl enable --now shap-ctl.path shap-nightly.timer shap-audit.timer
 # Mount the folders into the app (the compose file already names them) and take a first look.
 cd .. && docker compose up -d
 /opt/shap/deploy/vps/ctl/shap-ctl.sh check || true

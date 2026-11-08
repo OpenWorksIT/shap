@@ -1,6 +1,7 @@
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { createDb } from './db/index.js';
+import { serverLogger } from './lib/logging.js';
 import { migrate } from './db/migrate.js';
 import { demoUrl, ensureDatabase } from './db/routing.js';
 import { startMonthlyTimer } from './modules/monthly.js';
@@ -8,10 +9,8 @@ import { startMonthlyTimer } from './modules/monthly.js';
 const config = loadConfig();
 const sql = createDb(config.DATABASE_URL);
 
-const logger =
-  config.NODE_ENV === 'development'
-    ? { level: 'info', transport: { target: 'pino-pretty', options: { ignore: 'pid,hostname' } } }
-    : { level: 'info', redact: ['req.headers.authorization', 'req.headers.cookie'] };
+// No personal information in the log (lib/logging.ts).
+const logger = serverLogger({ dev: config.NODE_ENV === 'development' });
 
 // The demo company (Settings → Show the demo company): its own database next to the real one.
 let demoSql: ReturnType<typeof createDb> | null = null;

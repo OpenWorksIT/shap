@@ -3,6 +3,7 @@ import { formatDate, TERMS_URL } from '@shap/shared';
 import { useAuthed } from '../lib/session';
 import { ErrorBox, Icon, Loading, useToast } from '../components/ui';
 import { usePasswordPrompt } from '../components/PasswordPrompt';
+import { AuditChecks } from '../components/AuditChecks';
 import { api, ApiError, apiUrl } from '../lib/api';
 
 interface Check {
@@ -257,6 +258,7 @@ export function SystemSettings() {
           <p className="small muted">No backups on the server yet.</p>
         )}
       </section>
+      <AuditChecks />
     </div>
   );
 }
