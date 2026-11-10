@@ -7,15 +7,18 @@ balance). They're under **Accounts → Financial statements**.
 
 ## What's in the set
 
-Drawn up from the books under the **IFRS for SMEs Accounting Standard**, with the
+Drawn up from the books under the **IFRS for SMEs Accounting Standard** (the 2015 edition for years
+beginning before 1 January 2027, the third edition after: the statements say which), with the
 Companies Act 71 of 2008 for companies. https://www.ifrs.org/issued-standards/ifrs-for-smes/
+docs/IFRS.md is the section-by-section check of what Shap does against the standard.
 
-- a cover, contents and general information (registration, tax and VAT numbers, address,
-  bankers, the compiler);
+- a cover, contents and general information (the legal form, registration, tax and VAT numbers,
+  address, bankers, the compiler);
 - the directors' (members', trustees', owner's) responsibilities and approval, and their report
   (Companies Act s30(3)(b): the nature of the business, the results, share capital,
   distributions, the directors, events after the reporting period, going concern, assurance);
-- the compiler's report (ISRS 4410 (Revised)), once compiled;
+- the compiler's report (ISRS 4410 (Revised)), once compiled; for a close corporation, the
+  accounting officer's report (Close Corporations Act s62, in the words of SAICA's guide);
 - the **statement of financial position** (current and non-current, section 4), **of
   comprehensive income** (one statement, expenses by function with cost of sales apart, section 5), **of changes in equity**
   (section 6) and **of cash flows** (indirect method, section 7), each with last year's figures
@@ -55,13 +58,28 @@ The draft is always built from the books as they are. Before it can be signed:
 - nothing is left in suspense;
 - the books audit finds nothing to fix (its warnings are shown, not stopping anything).
 
+**For your accountant to look at** (shown with the checks, never stopping the signing): what the
+standard asks that the books alone can't settle.
+
+- the year's income tax (a company, trust or taxed NPC): none booked, Shap shows its estimate
+  (the profit less any assessed loss, at the company rate, or the small business corporation rates
+  if the year's last provisional estimate said so) and books it with one tap, as a journal (income
+  tax against tax owed) the accountant can change;
+- stock carried above what it will sell for (write it down: Inventory → Valuation);
+- work in progress at the year end (a job that will make a loss; work done but not invoiced);
+- invoices more than a year overdue (write them off if they won't be paid);
+- with employees on payroll: leave pay and bonuses owed at the year end;
+- the assurance the public interest score asks for, if the statements don't have it;
+- a close corporation: members' interest in deficit (the accounting officer reports it to CIPC,
+  s62(3)), and loans to members (all members' written consent, s52).
+
 ## From draft to signed
 
 | Step | Full Shap | Shap Pocket |
 | --- | --- | --- |
 | The wording | Owner or accountant: the directors, nature of the business, addresses, bankers, the compiler, going concern, events after the reporting period; each accounting policy has Shap's wording for the business, replaced by anything typed (a blank one keeps Shap's) | Owner |
-| To the accountant | Emailed with the draft PDF attached (it goes to the address the owner types), or shared or downloaded | Shared from the phone (WhatsApp, email) |
-| Compiled | The accountant, signed in to Shap as themselves, signs the compiler's report; or the owner uploads the report the accountant signed on paper (or as a PDF) | The owner uploads the signed report |
+| To the accountant | Shared with the accountant (the draft PDF and a short note, from the phone or computer's share, or downloaded), or emailed from Shap when the server sends email | Shared from the phone (WhatsApp, email) |
+| Compiled | The accountant, signed in to Shap as themselves, signs the compiler's report (a CC's accounting officer, their s62 report); or the owner uploads the report the accountant signed on paper (or as a PDF) | The owner uploads the signed report |
 | Approved | The owner signs as director (member, trustee…) | The same |
 
 A sole proprietor's or partnership's statements say the owner's (partners') words, report drawings
@@ -80,21 +98,32 @@ and keeps the signed PDF on file. Each step is in the audit log.
 closed: its lock date can't be moved back while the statements stand approved, and after
 reopening only by moving it (Accounts → Year end), which is in the audit log too.
 
+## The public interest score
+
+For a company, a non-profit company or a close corporation, Shap works out the public interest
+score (Companies Regulations 26(2)) from the books: the average number of employees in the year
+(the people paid on payroll and logged on days worked, month by month; changeable), a point for
+every R1 million (or part) of liabilities at the year end and of turnover in the year, and a point
+for each shareholder (a CC's members; blank, one per director). It says what the score points to:
+
+- an **audit** at 350 or more, or at 100 or more when the statements are compiled internally
+  (regulation 28), even when every shareholder is a director; an audited company names each
+  director's remuneration (Companies Act s30(4));
+- otherwise, when every shareholder is a director, **no audit or review** (s30(2A)): a compilation;
+- otherwise an **independent review** (regulation 29): by a registered auditor (or a member of an
+  accredited professional body) at 100 or more, or below 100 by someone qualified to be a CC's
+  accounting officer;
+- a close corporation without an audit: its accounting officer's report (s62).
+
+It's an estimate, for the business and its accountant to check: who counts as an employee and
+whether loans from the owners are third-party liabilities is the accountant's reading (Shap counts
+every liability, and shows the owners' loans apart). Not for public companies, or a company holding
+more than R5 million for others in a fiduciary capacity (always audited).
+https://www.acts.co.za/companies_act_2008/r351_26__interpretation_of_regulations_affecting_transparency_and_accountability
+
 ## What to check by hand
 
-- The cash flow statement is built from how every other account moved, so it ties to the cash by
-  construction. An asset bought on account (a bill) or with the owner's own money isn't a cash
-  flow (IFRS for SMEs 7.18), but shows here as an investing outflow with the matching payable or
-  loan in operating or financing: the accountant moves it out if it's material.
-- A close corporation also needs its accounting officer's report (Close Corporations Act s62);
-  the accountant provides it with the compilation.
-- Shap doesn't work out the public interest score that decides whether a company needs an audit
-  or an independent review.
-
-## Assurance
-
-A company whose every shareholder is also a director is exempt from audit and independent review
-(Companies Act s30(2A)), so a compilation is enough unless its public interest score says
-otherwise (Companies Regulations 26 to 29). Shap says on the statements which assurance they carry;
-it doesn't work out the public interest score.
-https://www.acts.co.za/companies-act-2008/30_annual_financial_statements
+- The cash flow statement leaves out assets bought without cash (7.18) but leaves their VAT in
+  working capital.
+- Leave balances, escalating leases, components of an asset, deferred tax: journals by the
+  accountant where material (docs/IFRS.md lists them all).

@@ -9,6 +9,8 @@ import { useState, type FormEvent } from 'react';
 import {
   ASSURANCE,
   ASSURANCE_LABELS,
+  ESTIMATE_NOTE,
+  ESTIMATE_SHORT,
   formatDate,
   POLICY_KEYS,
   POLICY_LABELS,
@@ -50,8 +52,21 @@ interface StatementsView {
     sfp: { totalAssets: Amounts; totalLiabilities: Amounts; equity: Amounts & { label: string }; totalEquityAndLiabilities: Amounts };
     sci: { revenue: (Amounts & { label: string })[]; grossProfit: Amounts; profit: Amounts };
     scf: { netChange: Amounts; closing: Amounts };
-    checks: { label: string; ok: boolean; detail: string }[];
+    checks: { label: string; ok: boolean; detail: string; level?: 'look' }[];
     policyDefaults?: Record<PolicyKey, string>;
+    company: { businessType: string };
+    taxEstimate?: { profitCents: number; assessedLossCents: number; taxableCents: number; taxCents: number; sbc: boolean } | null;
+    publicInterest?: {
+      employees: number;
+      employeesWorkedOut: number;
+      liabilitiesCents: number;
+      shareholderLoansCents: number;
+      turnoverCents: number;
+      holders: number;
+      parts: { employees: number; liabilities: number; turnover: number; holders: number };
+      score: number;
+      meaning: { audit: boolean; review: null | 'auditor' | 'accounting_officer'; framework: string; summary: string };
+    } | null;
   };
   status: StatementStatus;
   row: {
@@ -68,7 +83,7 @@ interface StatementsView {
 }
 
 export function FinancialStatements() {
-  const { isOwner, user } = useAuthed();
+  const { isOwner, user, can, ref, settings } = useAuthed();
   const years = useApi<Year[]>('/api/statements');
   const [picked, setPicked] = useState<string | null>(null);
   const fyEnd = picked ?? years.data?.[0]?.fyEnd ?? null;
@@ -81,9 +96,9 @@ export function FinancialStatements() {
   };
   const accountant = user.role === 'accountant';
   const toast = useToast();
-  const share = async (path: string, title: string) => {
+  const share = async (path: string, title: string, text?: string) => {
     try {
-      if ((await sharePdf(path, title)) === 'downloaded') toast('Saved');
+      if ((await sharePdf(path, title, text)) === 'downloaded') toast('Saved');
     } catch (err) {
       toast(err instanceof ApiError ? err.message : 'Couldn’t get the file', 'error');
     }
@@ -91,7 +106,43 @@ export function FinancialStatements() {
   const v = view.data;
   const s = v?.statements;
   const status = v?.status ?? 'draft';
-  const ready = Boolean(s && s.checks.every((c) => c.ok) && !v?.audit.some((a) => a.level === 'fail'));
+  // What's for the accountant to look at never stops the signing; the rest must pass.
+  const stops = (s?.checks ?? []).filter((c) => c.level !== 'look');
+  const looks = (s?.checks ?? []).filter((c) => c.level === 'look');
+  const ready = Boolean(s && stops.every((c) => c.ok) && !v?.audit.some((a) => a.level === 'fail'));
+  const cc = s?.company?.businessType === 'cc';
+  const report = cc ? 'accounting officer’s report' : 'compiler’s report';
+  const accountId = (key: string) => (ref.accounts as { id: string; systemKey: string | null }[]).find((a) => a.systemKey === key)?.id;
+  const bookTax = async () => {
+    if (!s?.taxEstimate) return;
+    const debit = accountId('income_tax');
+    const credit = accountId('income_tax_payable');
+    if (!debit || !credit) return toast('The income tax accounts aren’t in the chart of accounts', 'error');
+    if (!confirm(`Book R${(s.taxEstimate.taxCents / 100).toFixed(2)} as the income tax for the year? ${ESTIMATE_SHORT}`)) return;
+    try {
+      await api('/api/journals', {
+        body: {
+          date: s.fyEnd,
+          description: 'Income tax for the year (Shap’s estimate, to be confirmed by the accountant)',
+          lines: [
+            { accountId: debit, debitCents: s.taxEstimate.taxCents },
+            { accountId: credit, creditCents: s.taxEstimate.taxCents },
+          ],
+        },
+      });
+      toast('Booked: the statements show it now');
+      await reload();
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Couldn’t book it', 'error');
+    }
+  };
+  const shareWithAccountant = () =>
+    s &&
+    void share(
+      `/api/statements/${s.fyEnd}/pdf`,
+      `${s.title} ${s.period}`,
+      `Good day,\n\nPlease find our draft financial statements ${s.period} attached, prepared in Shap. Once you’ve ${cc ? 'done your work as our accounting officer' : 'compiled them'}, please send back your signed ${report}.\n\nKind regards\n${settings.companyName}`,
+    );
 
   if (years.loading && !years.data) return <Loading />;
   if (years.error) return <ErrorBox error={years.error} onRetry={years.reload} />;
@@ -126,7 +177,7 @@ export function FinancialStatements() {
             </strong>
             {status === 'sent' && v.row?.sentAt && (
               <span className="small">
-                Sent to {v.row.sentTo} on {formatDate(v.row.sentAt.slice(0, 10))}. When the signed compiler’s report comes back, upload it here.
+                Sent to {v.row.sentTo} on {formatDate(v.row.sentAt.slice(0, 10))}. When the signed {report} comes back, upload it here.
               </span>
             )}
             {(status === 'compiled' || status === 'approved') && v.row?.compiler && (
@@ -162,8 +213,8 @@ export function FinancialStatements() {
               Share or save the PDF
             </button>
             {v.row?.compilerReportId && (
-              <button className="btn quiet" onClick={() => void share(`/api/statements/${s.fyEnd}/compiler-report`, 'Compiler’s report')}>
-                The signed compiler’s report
+              <button className="btn quiet" onClick={() => void share(`/api/statements/${s.fyEnd}/compiler-report`, cc ? 'Accounting officer’s report' : 'Compiler’s report')}>
+                The signed {report}
               </button>
             )}
             {status !== 'approved' && status !== 'compiled' && (
@@ -176,7 +227,7 @@ export function FinancialStatements() {
 
           <div className="panel panel-pad stack-sm">
             <h3 className="small strong">Checks</h3>
-            {s.checks.map((c) => (
+            {stops.map((c) => (
               <div key={c.label} className={`small ${c.ok ? 'ok-text' : 'warn-text'}`}>
                 <Icon name={c.ok ? 'check' : 'alert'} size={14} /> {c.label}
                 {!c.ok && c.detail && <div className="xs">{c.detail}</div>}
@@ -215,24 +266,67 @@ export function FinancialStatements() {
             )}
           </div>
 
+          {looks.length > 0 && (
+            <div className="panel panel-pad stack-sm">
+              <h3 className="small strong">For your accountant to look at</h3>
+              <p className="xs muted">What the standard asks that the books alone can’t settle. None of it stops the signing: your accountant decides, and adjusts with a journal where it matters.</p>
+              {looks.map((c) => (
+                <div key={c.label} className={`small ${c.ok ? 'ok-text' : 'warn-text'}`}>
+                  <Icon name={c.ok ? 'check' : 'alert'} size={14} /> {c.label}
+                  {!c.ok && c.detail && <div className="xs">{c.detail}</div>}
+                  {!c.ok && c.label.startsWith('The year’s income tax') && s.taxEstimate && can('books.adjust') && (status === 'draft' || status === 'sent') && (
+                    <button type="button" className="btn small" style={{ marginTop: 6 }} onClick={() => void bookTax()}>
+                      Book <Money cents={s.taxEstimate.taxCents} /> as the year’s tax
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {s.publicInterest && (
+            <div className="panel panel-pad stack-sm">
+              <h3 className="small strong">Public interest score: {s.publicInterest.score}</h3>
+              <div className="xs muted">
+                {s.publicInterest.parts.employees} for the average employees ({s.publicInterest.employees}
+                {s.details.piEmployees == null ? ', from payroll and the days logged' : ', as you gave it'}) + {s.publicInterest.parts.liabilities} for the liabilities (<Money cents={s.publicInterest.liabilitiesCents} whole />
+                {s.publicInterest.shareholderLoansCents ? (
+                  <>
+                    , <Money cents={s.publicInterest.shareholderLoansCents} whole /> of them loans from the {s.governing.many}
+                  </>
+                ) : null}
+                ) + {s.publicInterest.parts.turnover} for the turnover (<Money cents={s.publicInterest.turnoverCents} whole />) + {s.publicInterest.parts.holders} for the {cc ? 'members' : 'shareholders'} (regulation 26(2)).
+              </div>
+              <div className="small">{s.publicInterest.meaning.summary}</div>
+              <div className="xs muted">Framework: {s.publicInterest.meaning.framework}.</div>
+              <p className="xs muted">{ESTIMATE_NOTE} Whether loans from the {s.governing.many} count as third-party liabilities, and who counts as an employee, is for your accountant to say. Change the employees or {cc ? 'members' : 'shareholders'} under Wording and details.</p>
+            </div>
+          )}
+
           {/* What can be done next, by who's signed in and where the statements are. */}
           <div className="row wrap">
             {isOwner && (status === 'draft' || status === 'sent') && (
               <>
-                <button className="btn primary" onClick={() => setForm('send')}>
-                  <Icon name="mail" size={18} />
-                  {status === 'sent' ? 'Send again' : 'Send to the accountant'}
+                <button className="btn primary" onClick={shareWithAccountant}>
+                  <Icon name="share" size={18} />
+                  Share with your accountant
                 </button>
+                {ref.emailOn && (
+                  <button className="btn" onClick={() => setForm('send')}>
+                    <Icon name="mail" size={18} />
+                    {status === 'sent' ? 'Email again' : 'Email to the accountant'}
+                  </button>
+                )}
                 <button className="btn" onClick={() => setForm('upload')} disabled={!ready}>
                   <Icon name="upload" size={18} />
-                  Upload the signed compiler’s report
+                  Upload the signed {report}
                 </button>
               </>
             )}
             {accountant && (status === 'draft' || status === 'sent') && (
               <button className="btn primary" onClick={() => setForm('compile')} disabled={!ready}>
                 <Icon name="check" size={18} />
-                Compile and sign
+                {cc ? 'Sign as the accounting officer' : 'Compile and sign'}
               </button>
             )}
             {isOwner && status === 'compiled' && !v.changedSince && (
@@ -254,8 +348,8 @@ export function FinancialStatements() {
       {preview && s && <PdfPreview title={`${s.title} ${s.period}`} load={async () => (await apiBlob(`/api/statements/${s.fyEnd}/pdf`)).blob} onClose={() => setPreview(false)} />}
       {form === 'details' && s && <DetailsForm defaults={s.policyDefaults} governing={s.governing} onClose={() => setForm(null)} onSaved={reload} />}
       {form === 'send' && s && <SendForm fyEnd={s.fyEnd} to={v?.row?.sentTo || s.details.accountantEmail} onClose={() => setForm(null)} onDone={reload} />}
-      {form === 'upload' && s && <UploadForm fyEnd={s.fyEnd} compiler={s.details.compiler.name} onClose={() => setForm(null)} onDone={reload} />}
-      {form === 'compile' && s && <CompileForm fyEnd={s.fyEnd} compiler={s.details.compiler} onClose={() => setForm(null)} onDone={reload} />}
+      {form === 'upload' && s && <UploadForm fyEnd={s.fyEnd} compiler={s.details.compiler.name} cc={cc} onClose={() => setForm(null)} onDone={reload} />}
+      {form === 'compile' && s && <CompileForm fyEnd={s.fyEnd} compiler={s.details.compiler} cc={cc} onClose={() => setForm(null)} onDone={reload} />}
       {form === 'approve' && s && <ApproveForm fyEnd={s.fyEnd} governing={s.governing} onClose={() => setForm(null)} onDone={reload} />}
       {form === 'reopen' && s && <ReopenForm fyEnd={s.fyEnd} approved={status === 'approved'} onClose={() => setForm(null)} onDone={reload} />}
     </div>
@@ -330,6 +424,26 @@ function DetailsFields({ initial, defaults, governing, onSaved }: { initial: Sta
           </span>
         </label>
       )}
+      {['company', 'inc', 'npc', 'cc'].includes(settings.businessType) && (
+        <fieldset className="fieldset stack-sm">
+          <legend className="small strong">For the public interest score</legend>
+          <div className="form-grid">
+            <Field label={settings.businessType === 'cc' ? 'Members' : 'Shareholders (individuals)'} hint={`Blank: one for each of the ${governing.many} below`}>
+              {(p) => <input {...p} className="input" type="number" min={0} value={d.piHolders ?? ''} onChange={(e) => set('piHolders', e.target.value === '' ? null : Math.max(0, Math.round(Number(e.target.value))))} />}
+            </Field>
+            <Field label="Average employees in the year" hint="Blank: worked out from payroll and the days logged">
+              {(p) => <input {...p} className="input" type="number" min={0} step={0.1} value={d.piEmployees ?? ''} onChange={(e) => set('piEmployees', e.target.value === '' ? null : Math.max(0, Number(e.target.value)))} />}
+            </Field>
+          </div>
+          <label className="check">
+            <input type="checkbox" checked={d.internallyCompiled} onChange={(e) => set('internallyCompiled', e.target.checked)} />
+            <span>
+              Compiled by someone in the business, not an independent accountant
+              <div className="xs muted">With a score of 100 or more, internally compiled statements must be audited (regulation 28).</div>
+            </span>
+          </label>
+        </fieldset>
+      )}
       <fieldset className="fieldset stack-sm">
         <legend className="small strong">{governing.many.charAt(0).toUpperCase() + governing.many.slice(1)}</legend>
         {d.directors.map((x, i) => (
@@ -357,7 +471,7 @@ function DetailsFields({ initial, defaults, governing, onSaved }: { initial: Sta
         <Field label="Holding company (optional)">{(p) => <input {...p} className="input" value={d.holdingCompany} onChange={(e) => set('holdingCompany', e.target.value)} />}</Field>
       </div>
       <fieldset className="fieldset stack-sm">
-        <legend className="small strong">The accountant (compiler)</legend>
+        <legend className="small strong">{settings.businessType === 'cc' ? 'The accounting officer (and compiler)' : 'The accountant (compiler)'}</legend>
         <div className="form-grid">
           <Field label="Name">{(p) => <input {...p} className="input" value={d.compiler.name} onChange={(e) => comp('name', e.target.value)} />}</Field>
           <Field label="Designation" hint="e.g. CA(SA), AGA(SA), Professional Accountant (SA)">{(p) => <input {...p} className="input" value={d.compiler.qualification} onChange={(e) => comp('qualification', e.target.value)} />}</Field>
@@ -425,7 +539,7 @@ function SendForm({ fyEnd, to: initial, onClose, onDone }: { fyEnd: string; to: 
   );
 }
 
-function UploadForm({ fyEnd, compiler, onClose, onDone }: { fyEnd: string; compiler: string; onClose: () => void; onDone: () => Promise<void> }) {
+function UploadForm({ fyEnd, compiler, cc, onClose, onDone }: { fyEnd: string; compiler: string; cc: boolean; onClose: () => void; onDone: () => Promise<void> }) {
   const [file, setFile] = useState<{ id: string; name: string } | null>(null);
   const [uploading, setUploading] = useState(false);
   const [name, setName] = useState(compiler);
@@ -446,7 +560,7 @@ function UploadForm({ fyEnd, compiler, onClose, onDone }: { fyEnd: string; compi
     }
   };
   return (
-    <Drawer title="The signed compiler’s report" sub="From your accountant: the report, or the whole signed set" onClose={onClose}>
+    <Drawer title={cc ? 'The signed accounting officer’s report' : 'The signed compiler’s report'} sub="From your accountant: the report, or the whole signed set" onClose={onClose}>
       <form className="stack" onSubmit={submit}>
         <p className="small muted">Uploading it freezes the statements at their figures as they stand now. Make sure it’s the report for this draft: if the books have changed since you sent it, send it again first.</p>
         <div className="row wrap">
@@ -472,18 +586,20 @@ function UploadForm({ fyEnd, compiler, onClose, onDone }: { fyEnd: string; compi
   );
 }
 
-function CompileForm({ fyEnd, compiler, onClose, onDone }: { fyEnd: string; compiler: StatementDetailsInput['compiler']; onClose: () => void; onDone: () => Promise<void> }) {
+function CompileForm({ fyEnd, compiler, cc, onClose, onDone }: { fyEnd: string; compiler: StatementDetailsInput['compiler']; cc: boolean; onClose: () => void; onDone: () => Promise<void> }) {
   const { user } = useAuthed();
   const [c, setC] = useState({ ...compiler, name: compiler.name || user.name });
   const [date, setDate] = useState(todayIso());
   const [sure, setSure] = useState(false);
-  const { submit, error, busy } = useSubmit(() => api(`/api/statements/${fyEnd}/compile`, { body: { date, compiler: c } }), onDone, 'Compiled and signed');
+  const { submit, error, busy } = useSubmit(() => api(`/api/statements/${fyEnd}/compile`, { body: { date, compiler: c } }), onDone, 'Signed');
   const set = (k: keyof typeof c, v: string) => setC((x) => ({ ...x, [k]: v }));
   return (
-    <Drawer title="Compile and sign" sub="Your compiler’s report (ISRS 4410 (Revised)) on these statements" onClose={onClose}>
+    <Drawer title={cc ? 'Sign as the accounting officer' : 'Compile and sign'} sub={cc ? 'Your report as accounting officer (Close Corporations Act s62), and your compiler’s report if you compiled them' : 'Your compiler’s report (ISRS 4410 (Revised)) on these statements'} onClose={onClose}>
       <form className="stack" onSubmit={submit}>
         <p className="small muted">
-          The report says you compiled the statements from the information the business gave you, applying your expertise in accounting and financial reporting, and that you didn’t audit or review them. It goes on the statements with your name and designation, and the figures are frozen as they are now.
+          {cc
+            ? 'Your report as accounting officer says the statements agree with the accounting records and the accounting policies are appropriate to the business (s62(1)), with no audit or review. If the compiler’s report is on them too, it says you compiled them from the information the business gave you. They go on the statements with your name and designation, and the figures are frozen as they are now.'
+            : 'The report says you compiled the statements from the information the business gave you, applying your expertise in accounting and financial reporting, and that you didn’t audit or review them. It goes on the statements with your name and designation, and the figures are frozen as they are now.'}
         </p>
         <div className="form-grid">
           <Field label="Your name">{(p) => <input {...p} className="input" value={c.name} onChange={(e) => set('name', e.target.value)} required />}</Field>
@@ -496,7 +612,7 @@ function CompileForm({ fyEnd, compiler, onClose, onDone }: { fyEnd: string; comp
         <Field label="Practice address">{(p) => <textarea {...p} className="textarea" rows={2} value={c.address} onChange={(e) => set('address', e.target.value)} />}</Field>
         <label className="check">
           <input type="checkbox" checked={sure} onChange={(e) => setSure(e.target.checked)} />
-          <span>I compiled these statements and sign the compiler’s report</span>
+          <span>{cc ? 'I performed the duties of accounting officer and sign the report' : 'I compiled these statements and sign the compiler’s report'}</span>
         </label>
         {error && <div className="banner alert small">{error}</div>}
         <button className="btn primary big block" disabled={busy || !sure}>

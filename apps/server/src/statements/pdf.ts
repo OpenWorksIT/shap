@@ -50,7 +50,8 @@ export function renderStatementsPdf(s: Statements, sig: Signatures = {}): Promis
   // Companies Act, the Close Corporations Act, the Co-operatives Act); anyone else on the basis
   // note 1 describes (its recognition and measurement principles).
   const law = lawFor(s.company.businessType);
-  const framework = companyish ? `the IFRS for SMEs Accounting Standard and ${law?.short ?? 'the Companies Act'}` : 'the basis of accounting described in note 1';
+  const standard = s.edition ?? 'the IFRS for SMEs Accounting Standard';
+  const framework = companyish ? `${standard} and ${law?.short ?? 'the Companies Act'}` : 'the basis of accounting described in note 1';
 
   const heading = (title: string, sub?: string) => {
     contents.push({ title, page: pdf.bufferedPageRange().count });
@@ -141,6 +142,7 @@ export function renderStatementsPdf(s: Statements, sig: Signatures = {}): Promis
   heading('General information');
   const info: [string, string][] = [
     [companyish ? 'Country of incorporation and domicile' : 'Country of domicile', 'South Africa'],
+    ['Legal form', s.legalForm ?? ''],
     ['Nature of the business', s.directorsReport.find((r) => r.title === 'Nature of the business')?.text ?? ''],
     [Many, s.details.directors.map((d) => d.name).join('\n') || '(to be completed)'],
     ['Registered office', companyish ? s.details.registeredAddress || s.company.address : ''],
@@ -201,6 +203,33 @@ export function renderStatementsPdf(s: Statements, sig: Signatures = {}): Promis
     para(r.text);
   });
 
+  // ---------------------------------------------------------------- accounting officer's report (a CC)
+  // Close Corporations Act s62(1)(c), in the words of SAICA's guide on close corporations (appendix
+  // XII): the accounting officer signs it when they sign the statements in Shap, or it's uploaded.
+  if (s.company.businessType === 'cc') {
+    newPage();
+    heading('Report of the accounting officer', `To the members of ${s.company.name}`);
+    const c = sig.compiler ?? null;
+    const ao = c ?? { ...s.details.compiler, date: '' };
+    para(`We have performed the duties of accounting officer to ${s.company.name} ${s.period}, as required by section 62 of the Close Corporations Act 69 of 1984.`);
+    para('The annual financial statements set out on the pages that follow are the responsibility of the members.');
+    if (s.details.assurance !== 'audit')
+      para('No audit or review is required to be carried out by the Act and no audit or review was conducted. Accordingly, we do not imply or express an opinion or any other form of assurance on the annual financial statements.');
+    pdf.font(bold).fontSize(10).fillColor(INK).text('Duties of the accounting officer', L, pdf.y);
+    pdf.moveDown(0.3);
+    para('We report, as required by section 62(1) of the Close Corporations Act of South Africa, having performed such procedures and conducted such enquiries in relation to the accounting records as we considered necessary in the circumstances, that:');
+    para('• the annual financial statements are in agreement with the accounting records, summarised in the manner required by section 58(2)(d) of the Act; and');
+    para('• the accounting policies presented to us as having been applied in the preparation of the annual financial statements are appropriate to the business.');
+    pdf.moveDown(1.5);
+    if (c?.how === 'uploaded') para(`Signed by ${c.name} on ${formatDate(c.date, 'long')}: the signed report is kept with these statements in Shap.`, { font: bold });
+    else if (c) para(`Signed in Shap by ${c.name} on ${formatDate(c.date, 'long')}.`, { font: bold });
+    else {
+      pdf.moveTo(L, pdf.y + 20).lineTo(L + 220, pdf.y + 20).lineWidth(0.6).strokeColor(INK).stroke();
+      pdf.y += 26;
+    }
+    para(['Accounting officer', ao.name, [ao.qualification, ao.body && ao.number ? `${ao.body} ${ao.number}` : ao.body].filter(Boolean).join(', '), ao.practice, ao.address, ao.date ? formatDate(ao.date, 'long') : 'Date: ________________'].filter(Boolean).join('\n'), { size: 9.5 });
+  }
+
   // ---------------------------------------------------------------- compiler's report
   if (s.details.assurance === 'compiled') {
     newPage();
@@ -214,7 +243,7 @@ export function renderStatementsPdf(s: Statements, sig: Signatures = {}): Promis
     );
     para('We performed this compilation engagement in accordance with the International Standard on Related Services 4410 (Revised), Compilation Engagements.');
     para(
-      `We have applied our expertise in accounting and financial reporting to assist you in the preparation and presentation of these financial statements in accordance with ${companyish ? `the IFRS for SMEs Accounting Standard and the requirements of ${law?.full ?? 'the Companies Act 71 of 2008'}` : 'the basis of accounting described in note 1'}. We have complied with relevant ethical requirements, including principles of integrity, objectivity, professional competence and due care.`,
+      `We have applied our expertise in accounting and financial reporting to assist you in the preparation and presentation of these financial statements in accordance with ${companyish ? `${standard} and the requirements of ${law?.full ?? 'the Companies Act 71 of 2008'}` : 'the basis of accounting described in note 1'}. We have complied with relevant ethical requirements, including principles of integrity, objectivity, professional competence and due care.`,
     );
     para('These financial statements and the accuracy and completeness of the information used to compile them are your responsibility.');
     para(
@@ -366,7 +395,7 @@ export function renderStatementsPdf(s: Statements, sig: Signatures = {}): Promis
       pdf.font(regular).fontSize(7.5).fillColor(MUTED).text(`${s.company.name}  ·  ${s.title} ${s.period}`, L, 30, { width: W, lineBreak: false });
       pdf.moveTo(L, 44).lineTo(R, 44).lineWidth(0.4).strokeColor(RULE).stroke();
       pdf.font(regular).fontSize(7.5).fillColor(MUTED).text(`Page ${i + 1}`, R - 60, bottom, { width: 60, align: 'right', lineBreak: false });
-      pdf.text('The notes form part of these financial statements. Prepared in Shap.', L, bottom, { width: W - 70, lineBreak: false });
+      pdf.text(sig.compiler || final ? 'The notes form part of these financial statements. Prepared in Shap.' : 'A draft from the books in Shap, for the accountant: not yet compiled or approved.', L, bottom, { width: W - 70, lineBreak: false });
     }
     if (!final) {
       pdf.save();

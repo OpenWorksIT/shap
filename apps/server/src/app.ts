@@ -37,6 +37,7 @@ import { registerWorkerRoutes } from './modules/workers.js';
 import { registerYearEndRoutes } from './modules/yearend.js';
 import { registerArchiveRoutes } from './modules/archive.js';
 import { registerTaxFormRoutes } from './modules/taxforms.js';
+import { registerTaxPackRoutes } from './modules/tax-pack.js';
 import { registerAuditRoutes } from './modules/audit.js';
 import { registerBillRoutes } from './modules/bills.js';
 import { registerSalesRoutes } from './modules/sales.js';
@@ -246,6 +247,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   registerYearEndRoutes(app, ctx);
   registerArchiveRoutes(app, ctx);
   registerTaxFormRoutes(app, ctx);
+  registerTaxPackRoutes(app, ctx);
   registerBillRoutes(app, ctx);
   registerSalesRoutes(app, ctx);
   registerStockRoutes(app, ctx);

@@ -71,7 +71,7 @@ describe('the financial statements', () => {
   it('adds up: the position balances, the cash flows are the change in cash, equity ties', async () => {
     for (const y of [Y1, Y2]) {
       const s = await buildStatements(env.sql, y);
-      expect(s.checks.filter((c) => !c.ok)).toEqual([]);
+      expect(s.checks.filter((c) => !c.ok && c.level !== 'look')).toEqual([]);
     }
     const s = await buildStatements(env.sql, Y2);
     expect(s.hasPrior).toBe(true);
@@ -223,7 +223,7 @@ describe('the statements’ words and lines (from the accountant bot’s run)', 
     await me.post(`/api/documents/${inv.id}/receipts`, { date: '2025-06-10', amountCents: 1_050_000, sourceId: bank });
     await me.post('/api/journals', { date: '2026-02-28', description: 'Income tax (made up)', lines: [{ accountId: await r.acc('income_tax'), debitCents: 100_000 }, { accountId: await r.acc('income_tax_payable'), creditCents: 100_000 }] });
     const s = await buildStatements(env.sql, '2026-02-28');
-    expect(s.checks.filter((c) => !c.ok)).toEqual([]);
+    expect(s.checks.filter((c) => !c.ok && c.level !== 'look')).toEqual([]);
     expect(s.sci.revenue.reduce((t, l) => t + l.current, 0)).toBe(1_050_000);
     expect(s.sci.otherIncome).toEqual([]);
     expect(s.soce.rows.find((x) => x.label === 'Issue of shares')).toMatchObject({ total: 10_000 });
@@ -247,7 +247,7 @@ describe('the statements’ words and lines (from the accountant bot’s run)', 
     await me.post(`/api/documents/${inv.id}/receipts`, { date: '2025-06-10', amountCents: 500_000, sourceId: bank });
     await me.post('/api/journals', { date: '2025-07-01', description: 'Drawings (made up)', lines: [{ accountId: await r.acc('owner_loan'), debitCents: 300_000 }, { accountId: await r.acc('bank'), creditCents: 300_000 }] });
     const s = await buildStatements(env.sql, '2026-02-28');
-    expect(s.checks.filter((c) => !c.ok)).toEqual([]);
+    expect(s.checks.filter((c) => !c.ok && c.level !== 'look')).toEqual([]);
     const report = s.directorsReport;
     expect(report.find((x) => x.title === 'Financial results')!.text).not.toMatch(/after tax/);
     expect(report.find((x) => x.title === 'Contributions and drawings')!.text).toMatch(/drew a net R\s?3 000/);
@@ -269,7 +269,7 @@ describe('the statements’ words and lines (from the accountant bot’s run)', 
     await me.post('/api/journals', { date: '2025-03-01', description: 'Float (made up)', lines: [{ accountId: petty.id, debitCents: 50_000 }, { accountId: await r.acc('share_capital'), creditCents: 50_000 }] });
     await me.post('/api/journals', { date: '2025-04-01', description: 'Equipment on overdraft (made up)', lines: [{ accountId: await r.acc('sundry'), debitCents: 200_000 }, { accountId: await r.acc('bank'), creditCents: 200_000 }] });
     const s = await buildStatements(env.sql, '2026-02-28');
-    expect(s.checks.filter((c) => !c.ok)).toEqual([]);
+    expect(s.checks.filter((c) => !c.ok && c.level !== 'look')).toEqual([]);
     const note = s.notes.find((n) => n.key === 'cash')!;
     expect(note.tables[0]!.rows.at(-1)!.current).toBe(s.scf.closing.current);
     expect(s.scf.closing.current).toBe(50_000 - 200_000);

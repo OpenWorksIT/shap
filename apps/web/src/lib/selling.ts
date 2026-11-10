@@ -117,7 +117,7 @@ export const MOVE_LABELS: Record<MoveKind, string> = {
   supplier_return: 'Sent back to the supplier',
   count: 'Stock take',
   void: 'Voided (back in stock)',
-  revalue: 'Revalued (stock arrived after selling short)',
+  revalue: 'Revalued (written down, or stock arrived after selling short)',
 };
 
 export const qtyText = (q: number | string) => {

@@ -68,12 +68,15 @@ The name is the shaka: thumb and pinky out, *shap, all good*.
   each item's whole history. See [docs/SALES_AND_STOCK.md](docs/SALES_AND_STOCK.md).
 - **Annual financial statements** (optional). Drawn up from the books under the IFRS for SMEs
   Accounting Standard, compiled and signed by the accountant (in Shap or on paper), approved by
-  the directors, and the year is closed. See [docs/STATEMENTS.md](docs/STATEMENTS.md).
+  the directors, and the year is closed: a close corporation's with its accounting officer's
+  report, and the public interest score worked out. Every decision is checked against the standard
+  in [docs/IFRS.md](docs/IFRS.md). See [docs/STATEMENTS.md](docs/STATEMENTS.md).
 - **Year end and tax.** Type in the accountant's figures from the annual financial statements and
   Shap posts one adjustment per account, so that year's statements match and the next year opens
   from the agreed balances; whatever doesn't tie up shows in Suspense. A **provisional tax**
   estimate projects this year to twelve months next to last year, with the SARS small business
-  corporation table.
+  corporation table. The **tax pack** puts a year's tax figures (income tax, VAT201s, payroll,
+  dividends, assets) in one PDF for your accountant. Every tax figure is an estimate to check.
 - **Import your tracker.** Upload the Excel project tracker (Per Project, Costs, Wages List…) and
   Shap brings across clients, jobs, invoices and payments, costs, workers, days, wage payments and
   savings. It checks every job against *Per Project* and every month against the *Trade Statement*,

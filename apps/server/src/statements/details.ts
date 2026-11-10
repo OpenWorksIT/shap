@@ -19,6 +19,10 @@ export interface PolicyContext {
   employees: boolean;
   leases: boolean;
   deferredTax: boolean;
+  /** Which edition of the standard ("the IFRS for SMEs Accounting Standard (2015 edition)"). */
+  edition?: string;
+  /** Job costs waiting for their invoice at the year end (work in progress). */
+  wip?: boolean;
 }
 
 const COMPANYISH: BusinessType[] = ['company', 'inc', 'cc', 'npc', 'coop'];
@@ -54,16 +58,17 @@ export function defaultPolicies(bt: BusinessType, ctx: PolicyContext = { lives: 
   const kind = entity(bt);
   const company = COMPANYISH.includes(bt);
   const who = company ? 'The company' : `The ${kind.label.toLowerCase().replace(/\s*\(.*\)$/, '')}`;
+  const standard = ctx.edition ?? 'the IFRS for SMEs Accounting Standard';
   const lives = ctx.lives.length
     ? ` The useful lives used are: ${ctx.lives.map((l) => `${l.category} ${l.months % 12 === 0 ? `${l.months / 12} year${l.months === 12 ? '' : 's'}` : `${l.months} months`}`).join('; ')}.`
     : '';
   return {
     basis: company
-      ? `The annual financial statements have been prepared in accordance with the IFRS for SMEs Accounting Standard and the requirements of ${lawFor(bt)?.full ?? 'the Companies Act 71 of 2008'} of South Africa. They are prepared on the historical cost basis and presented in South African Rand. The accounting policies are consistent with those of the previous year.`
-      : `The financial statements have been prepared using the recognition and measurement principles of the IFRS for SMEs Accounting Standard, for the ${kind.owner.many} and the South African Revenue Service. They are prepared on the historical cost basis and presented in South African Rand. The accounting policies are consistent with those of the previous year.`,
+      ? `The annual financial statements have been prepared in accordance with ${standard} and the requirements of ${lawFor(bt)?.full ?? 'the Companies Act 71 of 2008'} of South Africa. They are prepared on the historical cost basis and presented in South African Rand. The accounting policies are consistent with those of the previous year.`
+      : `The financial statements have been prepared using the recognition and measurement principles of ${standard}, for the ${kind.owner.many} and the South African Revenue Service. They are prepared on the historical cost basis and presented in South African Rand. The accounting policies are consistent with those of the previous year.`,
     going_concern: `The financial statements are prepared on the going concern basis: ${who.toLowerCase()} is expected to continue operating for the foreseeable future.`,
     revenue:
-      'Revenue is the fair value of what is received or receivable for goods sold and services rendered in the ordinary course of business, excluding value-added tax, after discounts and returns. Revenue from selling goods is recognised when the goods are delivered and their risks and rewards have passed to the buyer. Revenue from services is recognised as the work is performed.',
+      `Revenue is what is received or receivable for goods sold and services rendered in the ordinary course of business, excluding value-added tax, after discounts and returns. Revenue from selling goods is recognised when the goods are delivered to the buyer (at the counter, when they are sold). Revenue from services is recognised as the work is performed, which is when it is invoiced: the business invoices its work as it is done.${ctx.wip ? ' The costs of jobs not yet invoiced at the year end are carried as work in progress, at cost.' : ''}`,
     ppe: `Property, plant and equipment is carried at cost less accumulated depreciation and any impairment loss. Depreciation is charged on the straight-line basis over each asset’s expected useful life to its residual value.${lives} Useful lives and residual values are reviewed when there is an indication that they have changed. The profit or loss on disposing of an asset is the difference between what it was sold for and its carrying amount.`,
     intangibles:
       'Intangible assets (patents, trade marks and software) are carried at cost less accumulated amortisation and any impairment loss, and amortised on the straight-line basis over their expected useful lives.',

@@ -3,6 +3,41 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.23.0 (10 November 2026)
+
+People who sign in, with what each may do; the statements checked against the IFRS for SMEs
+Accounting Standard; and a tax pack for your accountant.
+
+- **People who sign in** (Settings): besides the owner and the accountant (read only), everyone is
+  staff and does the jobs ticked for them, under a heading for each part of Shap (what's switched
+  off isn't shown). Build a **profile** once (Teller, Admin and Site staff come with Shap) and give
+  it to each person, changed for them if they do a bit more or less. Change a profile and everyone
+  on it has the change at once, except what was changed for them. Site capture logins are now staff
+  on the Site staff profile, with the same access as before. See docs/PEOPLE.md.
+- A teller sees their own sales and today's takings from them, and stock in quantities only;
+  refunds, all sales, stock costs, quotes and invoices, costs, payroll and the reports are each a
+  job to tick. Settings, the people who sign in, the year end and approving the statements stay
+  the owner's.
+- **The IFRS for SMEs check** (docs/IFRS.md): every decision the books and statements make, section
+  by section. From it: interest paid and received on lines of their own in the statement of cash
+  flows; assets paid personally by a director, financed, or on a bill unpaid at the year end left
+  out of the cash flows and told in a note; the legal form and the edition of the standard in the
+  general information; the revenue policy worded as Shap books it; and **For your accountant to
+  look at** with the checks: the year's income tax (with Shap's estimate, booked with one tap),
+  stock above its selling price, work in progress, invoices over a year overdue, leave pay owed.
+- **Stock written down** to its selling price (Inventory → Valuation), into stock losses.
+- **The public interest score**: worked out from the books for a company or close corporation,
+  with what it points to (an audit, an independent review, or a compilation), as an estimate.
+- **Close corporations**: the statements carry the accounting officer's report (s62), signed in
+  Shap by the accountant or uploaded.
+- **Share with your accountant**: the draft statements go from your phone or computer's share (or
+  download) with a short note, as in Shap Pocket; email from Shap stays where the server sends it.
+- **Tax pack** (Accounts → Export): a year's income statement, Shap's estimate of the income tax
+  and your provisional tax estimates, the VAT201s, payroll (EMP201 and EMP501), dividends and the
+  assets bought and sold, in one PDF for your accountant.
+- Every figure Shap works out for tax or the law says it's an estimate: OpenWorks IT aren't
+  accountants, and Shap isn't advice.
+
 ## 1.22.0 (10 November 2026)
 
 Sales, inventory and the annual financial statements (docs/SALES_AND_STOCK.md, docs/STATEMENTS.md).

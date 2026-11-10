@@ -1326,7 +1326,9 @@ function TakeForm({ items, onClose, onDone }: { items: Item[]; onClose: () => vo
 /* ------------------------------------------------------------------ valuation */
 
 function Valuation({ onOpen }: { onOpen: (id: string) => void }) {
-  const { settings } = useAuthed();
+  const { settings, can } = useAuthed();
+  const toast = useToast();
+  const [writing, setWriting] = useState(false);
   const [date, setDate] = useState(todayIso());
   const { data, error, loading, reload } = useApi<{ date: string; totalCents: number; rows: { id: string; description: string; sku: string; unit: string; qty: number; valueCents: number; unitPriceCents: number; priceIncludesVat: boolean; vatCode: 'standard' | 'zero' | 'export' | 'exempt' }[] }>(
     `/api/stock/valuation?date=${date}`,
@@ -1340,8 +1342,34 @@ function Valuation({ onOpen }: { onOpen: (id: string) => void }) {
       </div>
       <p className="small muted">Each item’s quantity and value from its movements up to the date, at weighted average cost: what the financial statements carry as inventories (IFRS for SMEs section 13).</p>
       {above.length > 0 && (
-        <div className="banner signal small">
-          {above.length} item{above.length === 1 ? ' is' : 's are'} carried above what {above.length === 1 ? 'it' : 'they'} would sell for. Stock is carried at the lower of cost and selling price (IFRS for SMEs 13.4 and 27.2): write the difference down at a stock take, or check the price.
+        <div className="banner signal small stack-sm">
+          <span>
+            {above.length} item{above.length === 1 ? ' is' : 's are'} carried above what {above.length === 1 ? 'it' : 'they'} would sell for. Stock is carried at the lower of cost and selling price less the costs to sell (IFRS for SMEs 13.19 and 27.2): write the difference down, or check the price.
+          </span>
+          {can('stock.buy') && date === todayIso() && (
+            <button
+              type="button"
+              className="btn small start"
+              disabled={writing}
+              onClick={async () => {
+                if (!confirm(`Write ${above.length === 1 ? 'it' : 'them'} down to the selling price (VAT excluded), into stock losses? The selling price is used as what ${above.length === 1 ? 'it' : 'they'} will sell for: if selling costs something too, write down further at a count.`)) return;
+                setWriting(true);
+                try {
+                  const r = await api<{ written: number; valueCents: number }>('/api/stock/write-downs', {
+                    body: { date, lines: above.map((x) => ({ itemId: x.id, unitValueCents: netPriceCents(x, rate), reason: 'Written down to its selling price (IFRS for SMEs 27.2)' })) },
+                  });
+                  toast(`${r.written} written down: ${formatZar(-r.valueCents)} to stock losses`);
+                  await reload();
+                } catch (err) {
+                  toast(err instanceof ApiError ? err.message : 'Couldn’t write it down', 'error');
+                } finally {
+                  setWriting(false);
+                }
+              }}
+            >
+              Write {above.length === 1 ? 'it' : 'them'} down to the selling price
+            </button>
+          )}
         </div>
       )}
       <ErrorBox error={error} onRetry={reload} />

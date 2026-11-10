@@ -20,3 +20,4 @@ export * from './paymentTerms.js';
 export * from './trail.js';
 export * from './statement-lines.js';
 export * from './financial-statements.js';
+export * from './public-interest.js';

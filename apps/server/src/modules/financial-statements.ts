@@ -94,7 +94,9 @@ const signaturesOf = (r: Row | null): Signatures => ({
 /** Ready to sign: the statements add up and the books audit finds nothing to fix. */
 async function readyToSign(db: Ctx['sql'], fyEnd: string): Promise<Statements> {
   const s = await buildStatements(db, fyEnd);
-  if (s.checks.some((c) => !c.ok)) throw badRequest(`The statements aren’t ready to sign: ${s.checks.filter((c) => !c.ok).map((c) => c.label.toLowerCase()).join('; ')}`);
+  // What's for the accountant to look at never stops anything; the rest must pass.
+  const stops = s.checks.filter((c) => !c.ok && c.level !== 'look');
+  if (stops.length) throw badRequest(`The statements aren’t ready to sign: ${stops.map((c) => c.label.toLowerCase()).join('; ')}`);
   const fails = (await auditBooks(db, fyEnd)).filter((i) => i.level === 'fail');
   if (fails.length) throw badRequest(`The books audit found something to fix first: ${fails[0]!.text}`);
   return s;

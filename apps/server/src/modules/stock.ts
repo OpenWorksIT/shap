@@ -324,6 +324,43 @@ export function registerStockRoutes(app: FastifyInstance, ctx: Ctx): void {
     });
   });
 
+  /**
+   * Stock written down to what it will sell for (IFRS for SMEs 13.19, 27.2): each item's value on
+   * hand down to its quantity at the given price per unit (selling price less the costs to sell),
+   * the difference to stock losses (in cost of sales). Only ever down; a price that's no lower than
+   * its average cost changes nothing.
+   */
+  app.post('/api/stock/write-downs', { preHandler: requireAccess('stock.buy') }, async (req) => {
+    const user = userOrThrow(req);
+    await on();
+    const input = parse(
+      z.object({
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        lines: z.array(z.object({ itemId: z.string().uuid(), unitValueCents: z.number().int().min(0), reason: z.string().trim().max(300).default('') })).min(1).max(500),
+      }),
+      req.body,
+    );
+    return sql.begin(async (tx) => {
+      await assertOpen(tx, input.date);
+      let written = 0;
+      let valueCents = 0;
+      for (const l of input.lines) {
+        const [it] = await tx<{ description: string; qtyOnHand: string; stockValueCents: string }[]>`select description, qty_on_hand, stock_value_cents from items where id = ${l.itemId} and stocked for update`;
+        if (!it) throw notFound('Item');
+        const qM = milli(it.qtyOnHand);
+        if (qM <= 0) throw badRequest(`${it.description}: nothing on hand to write down`);
+        const target = Math.round((qM * l.unitValueCents) / 1000);
+        const diff = target - Number(it.stockValueCents);
+        if (diff >= 0) continue;
+        await moveStock(tx, { itemId: l.itemId, date: input.date, kind: 'revalue', qty: 0, valueCents: diff, contra: 'stock_losses', reason: l.reason || 'Written down to what it will sell for', userId: user.id });
+        written++;
+        valueCents += diff;
+      }
+      await audit(tx, { userId: user.id, action: 'write_down', entity: 'stock', ip: req.ip, details: { date: input.date, items: written, valueCents } });
+      return { written, valueCents };
+    });
+  });
+
   app.post('/api/stock/takes', { preHandler: requireAccess('stock.count') }, async (req) => {
     const user = userOrThrow(req);
     await on();

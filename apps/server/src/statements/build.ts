@@ -15,7 +15,14 @@
  */
 import {
   addDays,
+  companyRate,
+  estimateTax,
+  PI_APPLIES,
+  publicInterestScore,
+  whatScoreMeans,
+  type PiMeaning,
   entity,
+  vatRateOn,
   flipOf,
   formatDate,
   INDUSTRIES,
@@ -107,7 +114,32 @@ export interface Statements {
   directorsReport: { title: string; text: string }[];
   notes: Note[];
   detailed: { label: string; lines: { code: string; name: string; current: number; prior: number }[]; total: Amounts }[];
-  checks: { label: string; ok: boolean; detail: string }[];
+  /**
+   * What's checked before the statements can be signed (they must all be ok), and what's for the
+   * accountant to look at (`look`: shown, never stopping anything).
+   */
+  checks: { label: string; ok: boolean; detail: string; level?: 'look' }[];
+  /** For a business taxed on its own profit with none booked for the year: Shap's estimate of the year's tax (an estimate only). */
+  taxEstimate: { profitCents: number; assessedLossCents: number; taxableCents: number; taxCents: number; sbc: boolean } | null;
+  /** The legal form, as the general information states it (IFRS for SMEs 3.24(a)). */
+  legalForm: string;
+  /** Which edition of the IFRS for SMEs Accounting Standard the year is prepared under. */
+  edition: string;
+  /**
+   * The public interest score (Companies Regulations 26(2)) for a company or CC, and what it points
+   * to (an estimate from the books, for the business and its accountant to confirm).
+   */
+  publicInterest: {
+    employees: number;
+    employeesWorkedOut: number;
+    liabilitiesCents: number;
+    shareholderLoansCents: number;
+    turnoverCents: number;
+    holders: number;
+    parts: { employees: number; liabilities: number; turnover: number; holders: number };
+    score: number;
+    meaning: PiMeaning;
+  } | null;
   /** Shap's wording of each policy for this business (what a blank one in the details gives). */
   policyDefaults: Record<PolicyKey, string>;
 }
@@ -325,13 +357,59 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
     { key: 'proceeds', label: 'Proceeds on disposal of assets', ...add(disposedAtBookValue, gainOnDisposal) },
     { key: 'investing_other', label: 'Investments and loans made', ...both((mv) => contrib((a) => cls(a) === 'investing_other', mv)) },
   ]);
+  const ownerLoansLabel = bt === 'sole_prop' || bt === 'partnership' ? `Contributions and drawings (${governingFor(bt).many})` : `Movement in ${label('shareholder_loans').toLowerCase()}`;
   const financing: Line[] = nonZero([
-    { key: 'owner_loans', label: bt === 'sole_prop' || bt === 'partnership' ? `Contributions and drawings (${governingFor(bt).many})` : `Movement in ${label('shareholder_loans').toLowerCase()}`, ...both((mv) => contrib((a) => cls(a) === 'owner_loans', mv)) },
+    { key: 'owner_loans', label: ownerLoansLabel, ...both((mv) => contrib((a) => cls(a) === 'owner_loans', mv)) },
     { key: 'borrowings', label: 'Movement in loans and borrowings', ...both((mv) => contrib((a) => cls(a) === 'borrowings', mv)) },
     { key: 'capital', label: bt === 'company' || bt === 'inc' ? 'Proceeds from shares issued' : 'Capital contributed', ...both((mv) => contrib((a) => cls(a) === 'capital', mv)) },
     { key: 'distributions', label: `${label('distributions')} paid`, ...both((mv) => contrib((a) => cls(a) === 'distributions', mv)) },
     { key: 'retained', label: 'Other movements in equity', ...both((mv) => contrib((a) => cls(a) === 'retained' && a.statementLine === 'retained_earnings', mv)) },
   ]);
+  // Interest paid and received on lines of their own (7.14), in operating activities (as in profit):
+  // profit before tax has them in, so they're added back above and shown as paid and received.
+  const interestPaid = total(financeCosts);
+  const interestReceived = total(financeIncome);
+  if (interestPaid.current || interestPaid.prior || interestReceived.current || interestReceived.prior) {
+    operating.splice(1, 0, ...nonZero([
+      { key: 'finance_costs_back', label: 'Finance costs', ...neg(interestPaid), ...(hasPrior ? {} : { prior: 0 }) },
+      { key: 'finance_income_back', label: 'Investment income', ...neg(interestReceived), ...(hasPrior ? {} : { prior: 0 }) },
+    ]));
+    operating.push(...nonZero([
+      { key: 'interest_received', label: 'Interest and dividends received', ...interestReceived, ...(hasPrior ? {} : { prior: 0 }) },
+      { key: 'interest_paid', label: 'Interest paid', ...interestPaid, ...(hasPrior ? {} : { prior: 0 }) },
+    ]));
+  }
+
+  // Assets bought without the business's cash (7.18): paid personally by an owner (their loan
+  // account), financed by a loan, or on a bill still unpaid at the year end. They're not cash flows,
+  // so they come out of investing and out of the loan or payables they went to, and are told in a
+  // note. A bill paid later is an investing outflow when it's paid. (The VAT on them stays where it was.)
+  const nonCash = await nonCashAssets(db, { priorStart, priorEnd, fyStart, fyEnd, beforePrior });
+  const adjust = (ls: Line[], key: string, a: Amounts, make?: Omit<Line, 'current' | 'prior'>) => {
+    if (!a.current && !a.prior) return;
+    const l = ls.find((x) => x.key === key);
+    if (l) {
+      l.current += a.current;
+      l.prior += hasPrior ? a.prior : 0;
+    } else if (make) ls.push({ ...make, current: a.current, prior: hasPrior ? a.prior : 0 });
+  };
+  for (const c of ['ppe', 'intangibles'] as const) {
+    const n = nonCash.filter((x) => x.line === c);
+    const by = (k: 'owner' | 'loan' | 'bill') => ({ current: sum(n.filter((x) => x.via === k).map((x) => x.current)), prior: sum(n.filter((x) => x.via === k).map((x) => x.prior)) });
+    adjust(investing, c, total([by('owner'), by('loan'), by('bill')]), { key: c, label: c === 'ppe' ? 'Purchase of property, plant and equipment' : 'Purchase of intangible assets' });
+    adjust(financing, 'owner_loans', neg(by('owner')), { key: 'owner_loans', label: ownerLoansLabel });
+    adjust(financing, 'borrowings', neg(by('loan')), { key: 'borrowings', label: 'Movement in loans and borrowings' });
+    adjust(operating, 'wc_trade_payables', neg(by('bill')), { key: 'wc_trade_payables', label: 'Increase (decrease) in trade and other payables' });
+  }
+  for (const ls of [operating, investing, financing]) for (let i = ls.length - 1; i >= 0; i--) if (!ls[i]!.current && !ls[i]!.prior) ls.splice(i, 1);
+  const nonCashRows = (['owner', 'loan', 'bill'] as const)
+    .map((k) => ({
+      label: k === 'owner' ? `Assets paid for personally by the ${governingFor(bt).many} (on their loan accounts)` : k === 'loan' ? 'Assets financed by loans' : 'Assets bought on credit, unpaid at the year end',
+      current: sum(nonCash.filter((x) => x.via === k).map((x) => x.added.current)),
+      prior: hasPrior ? sum(nonCash.filter((x) => x.via === k).map((x) => x.added.prior)) : 0,
+    }))
+    .filter((r) => r.current || r.prior);
+
   const netOperating = total(operating);
   const netInvesting = total(investing);
   const netFinancing = total(financing);
@@ -358,6 +436,8 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
     employees: moved(['salaries', 'director_salary', 'payroll_levies']),
     leases: moved(['rent']),
     deferredTax: lineTotals.has('deferred_tax_asset') || lineTotals.has('deferred_tax_liability'),
+    edition: editionFor(fyStart),
+    wip: accounts.some((a) => a.systemKey === 'wip' && val(a, 'atEnd') !== 0),
   });
   // A first year has no previous year to be consistent with.
   if (!hasPrior) policyDefaults.basis = policyDefaults.basis.replace(' The accounting policies are consistent with those of the previous year.', '');
@@ -502,6 +582,13 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
           : []),
       ],
     });
+  if (nonCashRows.length)
+    addNote({
+      key: 'non_cash',
+      title: 'Non-cash investing and financing transactions',
+      paragraphs: ['These were not cash flows, so they are left out of the statement of cash flows (IFRS for SMEs 7.18):'],
+      tables: [{ rows: nonCashRows }],
+    });
   const dirPay = plAccounts.filter((a) => a.systemKey === 'director_salary');
   const related = [
     ...(dirPay.length ? [{ label: entity(bt).accounts.director_salary, current: sum(dirPay.map((a) => val(a, 'mvCur'))), prior: sum(dirPay.map((a) => val(a, 'mvPrior'))) }] : []),
@@ -565,7 +652,91 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
   const suspense = accounts.filter((a) => a.systemKey === 'suspense').reduce((t, a) => t + val(a, 'atEnd'), 0);
   checks.push({ label: 'Nothing is left in suspense', ok: suspense === 0, detail: suspense ? `${money(suspense)} in suspense: sort it out before the statements are signed` : 'none' });
 
+  // ---------------------------------------------------------------- for the accountant to look at
+  // What the standard asks that Shap can't settle from the books alone: shown with the checks, never
+  // stopping anything (the accountant decides, and adjusts with a journal if it's material).
   const kind = entity(bt);
+  const look = (label: string, ok: boolean, detail: string) => checks.push({ label, ok, detail, level: 'look' });
+  // Income tax (section 29): a business taxed on its own profit has the year's tax in the books.
+  let taxEstimate: Statements['taxEstimate'] = null;
+  if ((kind.taxedAs === 'company' || kind.taxedAs === 'npc' || kind.taxedAs === 'trust') && !(bt === 'npc' && settings.approvedPbo)) {
+    const pbt = profitBeforeTax.current;
+    const [lossRow] = await db<{ t: string }[]>`
+      select coalesce(sum(l.amount_cents), 0)::bigint as t from ledger_totals l join accounts a on a.id = l.account_id
+      where a.type in ('income', 'cost_of_sales', 'expense') and coalesce(a.system_key, '') <> 'income_tax' and l.date < ${fyStart}::date`;
+    const assessedLossCents = Math.max(0, Number(lossRow!.t));
+    const [est] = await db<{ lines: { sbc?: boolean } }[]>`select lines from tax_estimates where fy_end = ${fyEnd}::date order by created_at desc limit 1`;
+    const sbc = kind.taxedAs === 'company' && Boolean(est?.lines?.sbc);
+    const e = estimateTax({ kind: kind.taxedAs === 'company' ? 'company' : kind.taxedAs, profitCents: pbt, assessedLossCents, fyEnd, sbc, approvedPbo: settings.approvedPbo, distributedCents: 0 } as Parameters<typeof estimateTax>[0]);
+    if (incomeTax.current === 0 && e.taxCents > 0) taxEstimate = { profitCents: pbt, assessedLossCents, taxableCents: e.taxableCents, taxCents: e.taxCents, sbc };
+    look(
+      'The year’s income tax is in the books (IFRS for SMEs 29)',
+      incomeTax.current !== 0 || e.taxCents === 0,
+      incomeTax.current !== 0
+        ? `R${money(-incomeTax.current)} for the year`
+        : e.taxCents === 0
+          ? 'no tax on the year’s profit (after any assessed loss), on Shap’s estimate'
+          : `none booked: Shap estimates R${money(e.taxCents)} on a taxable income of R${money(e.taxableCents)}${sbc ? ' (small business corporation rates)' : ` (at ${Math.round(companyRate(fyEnd) * 100)}%)`}. An estimate only: your accountant works out the tax, and it’s booked with a journal (income tax against tax owed).`,
+    );
+  }
+  // Inventories at no more than they'll sell for (13.19, 27.2).
+  if (lineTotals.has('inventories')) {
+    const rate = settings.vatRegistered ? vatRateOn(fyEnd) : 0;
+    const items = await db<{ description: string; qty: string; valueCents: string; unitPriceCents: string; priceIncludesVat: boolean; vatCode: string }[]>`
+      select i.description, i.unit_price_cents, i.price_includes_vat, i.vat_code, coalesce(sum(m.qty), 0) as qty, coalesce(sum(m.value_cents), 0)::bigint as value_cents
+      from items i join stock_moves m on m.item_id = i.id and m.date <= ${fyEnd}::date group by i.id`;
+    const above = items.filter((i) => {
+      const q = Number(i.qty);
+      const net = rate > 0 && i.vatCode === 'standard' && i.priceIncludesVat ? Math.round((Number(i.unitPriceCents) * 10000) / (10000 + rate)) : Number(i.unitPriceCents);
+      return q > 0 && Number(i.valueCents) > Math.round(q * net);
+    });
+    look('Stock is carried at no more than it will sell for (IFRS for SMEs 13.19, 27.2)', above.length === 0, above.length ? `${above.slice(0, 5).map((i) => i.description).join(', ')}${above.length > 5 ? ` and ${above.length - 5} more` : ''}: above the selling price at the year end. Write them down (Inventory → Valuation).` : 'none above its selling price');
+  }
+  // Work in progress (13.14 of the 2015 edition; 23 for revenue): jobs' costs waiting for their invoice.
+  const wipAcc = accounts.find((a) => a.systemKey === 'wip');
+  const wip = wipAcc ? val(wipAcc, 'atEnd') : 0;
+  if (wip) look('Work in progress at the year end is recoverable, and work done is invoiced', false, `R${money(wip)} of job costs not yet invoiced at the year end, carried at cost. If a job will make a loss, write its costs down; if work was done but not invoiced, consider accruing the revenue (stage of completion).`);
+  // Receivables long overdue (11.21): impaired if they won't be recovered.
+  const [old] = await db<{ n: number; owing: string }[]>`
+    select count(*)::int as n, coalesce(sum(owing), 0)::bigint as owing from (
+      select d.total_cents - coalesce((select sum(r.amount_cents) from receipts r where r.invoice_id = d.id and r.date <= ${fyEnd}::date), 0) as owing
+      from documents d where d.kind = 'invoice' and d.status = 'issued' and d.issue_date <= ${fyEnd}::date
+        and (d.written_off_on is null or d.written_off_on > ${fyEnd}::date) and coalesce(d.due_date, d.issue_date) < (${fyEnd}::date - 365)) x where owing > 0`;
+  look('Receivables will be recovered (IFRS for SMEs 11.21)', old!.n === 0, old!.n ? `${old!.n} invoice${old!.n === 1 ? '' : 's'} more than a year overdue at the year end (R${money(Number(old!.owing))}): if they won’t be paid, mark them delinquent (written off as bad debts).` : 'nothing more than a year overdue');
+  // Leave pay and bonuses owed at the year end (28.6, 28.8): Shap's payroll doesn't keep leave balances.
+  if (moved(['salaries'])) look('Leave pay and bonuses owed to employees at the year end are provided for (IFRS for SMEs 28.6)', false, 'Shap’s payroll doesn’t keep leave balances: if employees have leave owing (or a bonus earned) at the year end, your accountant provides for it with a journal.');
+
+  // The public interest score (regulations 26 to 29) and what the business needs for it.
+  let publicInterest: Statements['publicInterest'] = null;
+  if (PI_APPLIES.includes(bt)) {
+    const [emp] = await db<{ avg: string }[]>`
+      with months as (select to_char(generate_series(${fyStart}::date, ${fyEnd}::date, interval '1 month'), 'YYYY-MM') as m),
+      people as (
+        select r.period as m, 'e' || pl.employee_id::text as who from pay_lines pl join pay_runs r on r.id = pl.run_id where r.status = 'final'
+        union
+        select to_char(e.date, 'YYYY-MM'), 'w' || e.worker_id::text from labour_entries e where e.date between ${fyStart}::date and ${fyEnd}::date
+      )
+      select coalesce(avg(n), 0)::float8 as avg from (select months.m, count(distinct p.who) as n from months left join people p on p.m = months.m group by months.m) x`;
+    const employeesWorkedOut = Math.round(Number(emp!.avg) * 10) / 10;
+    const employees = details.piEmployees ?? employeesWorkedOut;
+    const liabilitiesCents = totalLiabilities.current;
+    const shareholderLoansCents = (['shareholder_loans', 'shareholder_loans_current'] as StatementLineKey[]).reduce((t, k) => t + (lineTotals.get(k)?.current ?? 0), 0);
+    const turnoverCents = sum(revenue.map((l) => l.current));
+    const holders = details.piHolders ?? details.directors.filter((d) => d.name.trim()).length;
+    const pi = publicInterestScore({ employees, liabilitiesCents, turnoverCents, holders });
+    const meaning = whatScoreMeans(pi.score, bt, { independentlyCompiled: !details.internallyCompiled, ownerManaged: details.ownerManaged });
+    const { score, ...parts } = pi;
+    publicInterest = { employees, employeesWorkedOut, liabilitiesCents, shareholderLoansCents, turnoverCents, holders, parts, score, meaning };
+    const est = `Shap’s estimate of the public interest score is ${score}`;
+    if (meaning.audit) look('The assurance fits the public interest score', details.assurance === 'audit', `${est}: the statements must be audited (${meaning.auditWhy}). Check the score with your accountant.`);
+    else if (meaning.review) look('The assurance fits the public interest score', details.assurance === 'independent_review' || details.assurance === 'audit', `${est}: ${meaning.summary} Check the score with your accountant.`);
+  }
+  if (bt === 'cc') {
+    // Close Corporations Act: the accounting officer reports insolvency to CIPC (s62(3)(c)); a loan to a member needs every member's written consent (s52).
+    look('The members’ interest is not in deficit (Close Corporations Act s62(3))', totalLiabilities.current <= totalAssets.current, totalLiabilities.current > totalAssets.current ? 'Liabilities exceed assets at the year end: the accounting officer must report this to CIPC.' : 'assets cover the liabilities');
+    if (lineTotals.has('loans_to_shareholders')) look('Loans to members were consented to (Close Corporations Act s52)', false, 'A close corporation may lend to a member only with the prior written consent of all the members: keep it with the statements.');
+  }
+
   const report = directorsReport({
     company: { name: settings.companyName, businessType: bt, kind: kind.label },
     governing: governingFor(bt),
@@ -612,8 +783,81 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
     notes,
     detailed,
     checks,
+    taxEstimate,
+    legalForm: legalFormOf(bt),
+    edition: editionFor(fyStart),
+    publicInterest,
     policyDefaults,
   };
 }
 
+/** The legal form, for the general information (IFRS for SMEs 3.24(a)). */
+export function legalFormOf(bt: BusinessType): string {
+  return ({
+    company: 'Private company with limited liability, incorporated in South Africa under the Companies Act 71 of 2008',
+    inc: 'Personal liability company, incorporated in South Africa under the Companies Act 71 of 2008: its directors are jointly and severally liable with it for its debts and liabilities contracted during their terms of office (section 19(3))',
+    npc: 'Non-profit company, incorporated in South Africa under the Companies Act 71 of 2008',
+    cc: 'Close corporation, registered in South Africa under the Close Corporations Act 69 of 1984, its members’ liability limited',
+    coop: 'Co-operative, registered in South Africa under the Co-operatives Act 14 of 2005',
+    trust: 'Trust, registered with the Master of the High Court of South Africa',
+    partnership: 'Partnership: not a separate legal person, its partners personally liable for its debts',
+    sole_prop: 'Sole proprietorship: not a separate legal person, its owner personally liable for its debts',
+  } as Record<BusinessType, string>)[bt];
+}
+
+/** The edition of the IFRS for SMEs Accounting Standard a year is prepared under (the third applies to years beginning on or after 1 January 2027). */
+export function editionFor(yearStart: string): string {
+  return yearStart >= '2027-01-01' ? 'the IFRS for SMEs Accounting Standard (third edition, 2025)' : 'the IFRS for SMEs Accounting Standard (2015 edition)';
+}
+
 const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/**
+ * Assets bought during each year without the business's cash (IFRS for SMEs 7.18), with what each
+ * year's statement of cash flows takes out of investing (`current`, `prior`) and what the note shows
+ * (`added`): paid personally by an owner, financed by a loan, or on a bill (what of it was unpaid at
+ * a year end; paying it later is an investing outflow then). Amounts before VAT, as the assets carry them.
+ */
+async function nonCashAssets(db: Db, p: { priorStart: string; priorEnd: string; fyStart: string; fyEnd: string; beforePrior: string }) {
+  const bought = await db<{ costId: string | null; date: string; assetCents: string; billCents: string; line: 'ppe' | 'intangibles'; role: string | null; sourceLine: StatementLineKey | null }[]>`
+    select c.id as cost_id, c.date::text as date, (c.amount_cents - c.vat_cents) as asset_cents, c.amount_cents as bill_cents,
+      case when a.category in ('patents', 'software') or ka.statement_line = 'intangibles' then 'intangibles' else 'ppe' end as line,
+      s.role, sa.statement_line as source_line
+    from costs c join cost_categories k on k.id = c.category_id join accounts ka on ka.id = k.account_id
+    left join assets a on a.cost_id = c.id
+    left join payment_sources s on s.id = c.source_id left join accounts sa on sa.id = s.account_id
+    where (a.id is not null or ka.statement_line in ('ppe', 'intangibles')) and c.date <= ${p.fyEnd}::date
+    union all
+    select null, a.purchase_date::text, a.cost_cents, a.cost_cents + a.vat_cents,
+      case when a.category in ('patents', 'software') then 'intangibles' else 'ppe' end,
+      s.role, coalesce(sa.statement_line, (select statement_line from accounts where system_key = 'owner_loan'))
+    from assets a left join payment_sources s on s.id = a.source_id left join accounts sa on sa.id = s.account_id
+    where a.cost_id is null and a.purchase_date <= ${p.fyEnd}::date`;
+  const billIds = bought.filter((b) => b.role === 'bills' && b.costId).map((b) => b.costId!);
+  const paid = billIds.length ? await db<{ costId: string; date: string; amountCents: string }[]>`select cost_id, date::text as date, amount_cents from bill_payments where cost_id = any(${billIds}::uuid[])` : [];
+  const out: { line: 'ppe' | 'intangibles'; via: 'owner' | 'loan' | 'bill'; current: number; prior: number; added: Amounts }[] = [];
+  const within = (d: string, from: string, to: string) => d >= from && d <= to;
+  for (const b of bought) {
+    const asset = Number(b.assetCents);
+    const cash = b.sourceLine ? STATEMENT_LINES[b.sourceLine]?.cash : undefined;
+    const via = b.role === 'bills' ? 'bill' : cash === 'owner_loans' ? 'owner' : cash === 'borrowings' ? 'loan' : null;
+    if (!via || !asset) continue;
+    if (via !== 'bill') {
+      const cur = within(b.date, p.fyStart, p.fyEnd) ? asset : 0;
+      const pri = within(b.date, p.priorStart, p.priorEnd) ? asset : 0;
+      if (cur || pri) out.push({ line: b.line, via, current: cur, prior: pri, added: { current: cur, prior: pri } });
+      continue;
+    }
+    const whole = Number(b.billCents) || asset;
+    const unpaidAt = (d: string) => {
+      if (d < b.date) return 0;
+      const settled = paid.filter((x) => x.costId === b.costId && x.date <= d).reduce((t, x) => t + Number(x.amountCents), 0);
+      return Math.round((asset * Math.max(0, whole - settled)) / whole);
+    };
+    const cur = unpaidAt(p.fyEnd) - unpaidAt(p.priorEnd);
+    const pri = unpaidAt(p.priorEnd) - unpaidAt(p.beforePrior);
+    const added = { current: within(b.date, p.fyStart, p.fyEnd) ? unpaidAt(p.fyEnd) : 0, prior: within(b.date, p.priorStart, p.priorEnd) ? unpaidAt(p.priorEnd) : 0 };
+    if (cur || pri || added.current || added.prior) out.push({ line: b.line, via, current: cur, prior: pri, added });
+  }
+  return out;
+}
