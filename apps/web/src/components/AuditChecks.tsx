@@ -1,7 +1,7 @@
 /**
  * The audits, on Settings → Updates & backups: the books audit (run here, now) and the server's
  * security and privacy check (run on the server every 6 hours). Each finding is OK, worth a look,
- * or to fix. docs/AUDIT.md says what each covers.
+ * or to fix. CPDAUDIT.md says what each covers.
  */
 import { useEffect, useState } from 'react';
 import { formatDate } from '@shap/shared';

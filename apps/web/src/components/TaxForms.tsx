@@ -11,7 +11,7 @@ import { ErrorBox, Loading, Money } from './ui';
 import { EstimateNote } from './EstimateNote';
 
 interface Vat201Data {
-  category: 'A' | 'B' | 'C';
+  category: 'A' | 'B' | 'C' | 'D' | 'E';
   registered: boolean;
   vatNumber: string;
   period: { start: string; end: string };

@@ -505,7 +505,8 @@ function Sars() {
   );
 }
 
-function SarsPayDrawer({ pay, sources, onClose, onSaved }: { pay: { kind: 'emp201' | 'dwt'; period: string; owing: number }; sources: { id: string; name: string; kind: string }[]; onClose: () => void; onSaved: () => void }) {
+/** A payment to SARS: an EMP201, dividends tax, or provisional tax (IRP6, for the year ending in `period`). */
+export function SarsPayDrawer({ pay, sources, onClose, onSaved }: { pay: { kind: 'emp201' | 'dwt' | 'irp6'; period: string; owing: number }; sources: { id: string; name: string; kind: string }[]; onClose: () => void; onSaved: () => void }) {
   const [amount, setAmount] = useState<number | null>(pay.owing);
   const [date, setDate] = useState(todayIso());
   const [sourceId, setSourceId] = useState(sources.find((s) => s.kind === 'bank')?.id ?? sources[0]?.id ?? '');
@@ -521,7 +522,7 @@ function SarsPayDrawer({ pay, sources, onClose, onSaved }: { pay: { kind: 'emp20
     }
   };
   return (
-    <Drawer title={pay.kind === 'emp201' ? `EMP201 ${monthName(pay.period)}` : `Dividends tax ${monthName(pay.period)}`} onClose={onClose}>
+    <Drawer title={pay.kind === 'emp201' ? `EMP201 ${monthName(pay.period)}` : pay.kind === 'irp6' ? `Provisional tax (IRP6), the year to ${monthName(pay.period)}` : `Dividends tax ${monthName(pay.period)}`} onClose={onClose}>
       <form className="stack" onSubmit={save}>
         <Field label="Amount paid">{(p) => <MoneyInput {...p} value={amount} onChange={setAmount} />}</Field>
         <Field label="Date paid">{(p) => <input {...p} className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />}</Field>

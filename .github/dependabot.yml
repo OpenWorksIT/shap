@@ -1,5 +1,5 @@
 # Weekly: updates and security fixes for what Shap is built from, each as a pull request that
-# goes through CI (ci.yml) before it can reach main, and stable. docs/AUDIT.md.
+# goes through CI (ci.yml) before it can reach main, and stable. CPDAUDIT.md.
 # SPDX-License-Identifier: AGPL-3.0-or-later
 version: 2
 updates:

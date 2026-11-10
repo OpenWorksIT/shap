@@ -80,14 +80,14 @@ export function registerTaxFormRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { on } = parse(z.object({ on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }), req.query);
     const cat = settings.vatCategory;
     // The default: the last period that has ended.
-    const current = vatPeriod(today(), cat);
-    const lastEnded = vatPeriod(addMonths(current.start, -1), cat);
-    const period = on ? vatPeriod(on, cat) : lastEnded;
+    const current = vatPeriod(today(), cat, settings.fyEndMonth);
+    const lastEnded = vatPeriod(addMonths(current.start, -1), cat, settings.fyEndMonth);
+    const period = on ? vatPeriod(on, cat, settings.fyEndMonth) : lastEnded;
     const periods: { start: string; end: string }[] = [];
     let p = current;
     for (let i = 0; i < 8; i++) {
       periods.push(p);
-      p = vatPeriod(addMonths(p.start, -1), cat);
+      p = vatPeriod(addMonths(p.start, -1), cat, settings.fyEndMonth);
     }
     return { category: cat, registered: settings.vatRegistered, vatNumber: settings.vatNumber, period, due: vat201Due(period.end), periods, fields: await vat201(sql, period.start, period.end) };
   });

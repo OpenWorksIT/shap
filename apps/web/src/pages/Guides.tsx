@@ -171,13 +171,13 @@ const GUIDES: Guide[] = [
   },
   {
     key: 'dividends',
-    title: 'Dividends tax return (DTR01)',
+    title: 'Dividends tax return (DTR01 and DTR02)',
     who: 'Companies, close corporations and co-operatives that pay a dividend (a CC’s distributions to its members count).',
     when: 'By the last day of the month after the dividend was paid.',
     figures: [{ label: 'Payroll → Dividends: each dividend and the 20% tax held back', to: '/payroll?tab=dividends' }],
     steps: [
       'In Shap, open Payroll → Dividends for the dividend and the dividends tax on it.',
-      'Log in to eFiling as the company and complete the dividends tax return for the month, with the dividend and the tax withheld.',
+      'Log in to eFiling as the company and complete the dividends tax return for the month (DTR01), with the dividend and the tax withheld, and a DTR02 for each shareholder it was paid to (with their exemption, if any).',
       'Pay the dividends tax by the end of the next month with the PRN, and record the payment in Shap.',
     ],
     tips: ['Dividends paid to a South African company are exempt, but the return is still needed.'],

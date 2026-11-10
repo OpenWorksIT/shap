@@ -176,6 +176,14 @@ deploy/backup   pg_dump + restic backups (systemd timer)
 Built on Fastify, Postgres and a React PWA, with sessions and two-factor sign-in (TOTP with
 recovery codes, secrets encrypted at rest, Argon2id passwords), and an append-only audit log.
 
+## How every update is checked
+
+Like an accountant's continuing professional development, every update goes through the CPD
+audit before any server or phone takes it ([CPDAUDIT.md](CPDAUDIT.md)): four reviews (security and
+privacy with a penetration test, IFRS for SMEs and company law, SARS and tax, accounting and
+arithmetic), the tests and CI, each server checking itself, and the books checking themselves.
+Every SARS figure is listed with its source in [docs/SARS.md](docs/SARS.md).
+
 ## Security
 
 Found a security problem? Please report it privately rather than in a public issue; see

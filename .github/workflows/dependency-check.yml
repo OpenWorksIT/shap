@@ -1,5 +1,5 @@
 # Known vulnerabilities in what Shap is built from, every week (a new advisory can appear for code
-# that hasn't changed) and on every change (ci.yml runs the same). docs/AUDIT.md.
+# that hasn't changed) and on every change (ci.yml runs the same). CPDAUDIT.md.
 # SPDX-License-Identifier: AGPL-3.0-or-later
 name: Dependency check
 on:

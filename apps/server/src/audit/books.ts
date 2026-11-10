@@ -140,7 +140,7 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
     for (let m = 0; m < 12; m++) {
       const d = new Date(`${on}T00:00:00Z`);
       d.setUTCMonth(d.getUTCMonth() - m, 1);
-      const p = vatPeriod(d.toISOString().slice(0, 10), settings.vatCategory);
+      const p = vatPeriod(d.toISOString().slice(0, 10), settings.vatCategory, settings.fyEndMonth);
       periods.set(p.start, p);
     }
     const off: string[] = [];

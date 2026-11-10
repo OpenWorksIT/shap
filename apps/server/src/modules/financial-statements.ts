@@ -178,7 +178,12 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
     let changedSince = false;
     if (r?.snapshot && r.snapshotHash && (r.status === 'compiled' || r.status === 'approved')) changedSince = !stillSigned(r as { snapshot: Statements; snapshotHash: string }, await buildStatements(sql, fyEnd, statements.details));
     const audit = (await auditBooks(sql, fyEnd, { people: can(userOrThrow(req), 'payroll.view') })).filter((i) => i.level !== 'ok');
-    return { statements, status: r?.status ?? 'draft', row: r ? { ...r, snapshot: undefined } : null, changedSince, audit };
+    // Agreed with the accountant (its accounts held at the agreed figures: a journal into it doesn't
+    // move them), or closed (nothing more is posted into it): the year's tax goes in another way.
+    const [agreed] = await sql`select 1 from year_ends where fy_end = ${fyEnd}::date`;
+    const settings = await getSettings(sql);
+    const yearClosed = Boolean(settings.lockDate && String(settings.lockDate) >= fyEnd);
+    return { statements, status: r?.status ?? 'draft', row: r ? { ...r, snapshot: undefined } : null, changedSince, audit, yearAgreed: Boolean(agreed), yearClosed };
   });
 
   app.get('/api/statements/:fyEnd/pdf', { preHandler: requireAccess('reports.view') }, async (req, reply) => {

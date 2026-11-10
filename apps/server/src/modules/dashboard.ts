@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { addDays, addMonths, featureOn, financialYear, lastBusinessDay, monthEnd, monthLabel, monthStart, monthsBetween, vat201Due, vatPeriod } from '@shap/shared';
+import { addDays, addMonths, featureOn, financialYear, lastBusinessDay, monthEnd, monthLabel, monthStart, monthsBetween, vat201Due, vatPeriod, type VatCategory } from '@shap/shared';
 import { requireRole, seesBooks, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { getSettings, today, freshTotals } from '../lib/books.js';
@@ -139,12 +139,12 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
  * SARS dates coming up in the next five weeks that Shap has the figures for: the VAT201 for the
  * period just ended, and turnover tax's interim payments. (Payroll's EMP201 is in sarsDue.)
  */
-export function taxDue(settings: { vatRegistered: boolean; vatCategory: 'A' | 'B' | 'C'; turnoverTax: boolean; fyEndMonth: number }, now: string) {
+export function taxDue(settings: { vatRegistered: boolean; vatCategory: VatCategory; turnoverTax: boolean; fyEndMonth: number }, now: string) {
   const soon = addDays(now, 35);
   const out: { key: string; label: string; due: string; to: string }[] = [];
   if (settings.vatRegistered) {
-    const current = vatPeriod(now, settings.vatCategory);
-    const last = vatPeriod(addMonths(current.start, -1), settings.vatCategory);
+    const current = vatPeriod(now, settings.vatCategory, settings.fyEndMonth);
+    const last = vatPeriod(addMonths(current.start, -1), settings.vatCategory, settings.fyEndMonth);
     const due = vat201Due(last.end);
     if (due >= now && due <= soon) out.push({ key: `vat201-${last.end}`, label: `VAT201 for ${last.start.slice(0, 7) === last.end.slice(0, 7) ? monthLabel(last.end.slice(0, 7)) : `${monthLabel(last.start.slice(0, 7), last.start.slice(0, 4) !== last.end.slice(0, 4))} to ${monthLabel(last.end.slice(0, 7))}`}`, due, to: '/accounts?tab=vat201' });
   }

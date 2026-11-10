@@ -1,4 +1,4 @@
 {
-  "about": "Known vulnerabilities in production dependencies accepted for now: each says why it can't hurt here, and until when (scripts/audit-deps.mjs fails again after that date). docs/AUDIT.md.",
+  "about": "Known vulnerabilities in production dependencies accepted for now: each says why it can't hurt here, and until when (scripts/audit-deps.mjs fails again after that date). CPDAUDIT.md.",
   "accepted": []
 }

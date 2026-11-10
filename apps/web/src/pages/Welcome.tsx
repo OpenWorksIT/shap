@@ -272,7 +272,7 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
             <YesNo q="Do you use casual labour, paid by the day?" hint="Log the days they work on each job and what you’ve paid them." value={casual} onChange={setCasual} />
             {paysOut && dividendsAlways && (
               <p className="xs muted panel panel-pad">
-                {kind.the.charAt(0).toUpperCase() + kind.the.slice(1)} declares every {payoutWord(f.businessType)} it pays to SARS (the DTR01, by the end of the next month), so the {payoutWord(f.businessType)}s section is on, ready for when you pay one.
+                {kind.the.charAt(0).toUpperCase() + kind.the.slice(1)} declares every {payoutWord(f.businessType)} it pays to SARS (the DTR01 and DTR02, by the end of the next month), so the {payoutWord(f.businessType)}s section is on, ready for when you pay one.
               </p>
             )}
             {paysOut && !dividendsAlways && (

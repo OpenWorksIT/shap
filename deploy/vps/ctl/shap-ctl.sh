@@ -25,7 +25,7 @@ main() {
   mkdir -p "$BACKUPS"
 
   # Servers update from "stable": CI moves it to a commit only once every test and audit passed
-  # on it (.github/workflows/ci.yml, docs/AUDIT.md). Never main: if stable can't be fetched (no
+  # on it (.github/workflows/ci.yml, CPDAUDIT.md). Never main: if stable can't be fetched (no
   # network, GitHub down, the branch gone), nothing is updated and the check says why.
   TRACK="${SHAP_TRACK:-stable}"
   ensure_units

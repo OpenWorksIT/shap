@@ -4,7 +4,7 @@
  * either somewhere the app sends requests ("sends": what goes there, and on whose say-so) or
  * only a link shown to people or a source cited in a comment ("link"). A new address fails until
  * it's put on the list, so a tracker, an analytics service or any new place data could go can't
- * slip in unnoticed. docs/AUDIT.md.
+ * slip in unnoticed. CPDAUDIT.md.
  *
  *   node scripts/privacy-hosts.mjs
  * SPDX-License-Identifier: AGPL-3.0-or-later

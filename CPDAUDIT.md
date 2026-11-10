@@ -1,10 +1,67 @@
-# Shap's audit: security, safety, privacy, penetration and the books
+# Shap's CPD audit
 
-Shap holds a business's money and its people's details, so every change is checked before any
-server can take it, every server checks itself, and the books check themselves. Modelled on
-Steady's (OpenWorksIT/steady: `docs/UPKEEP.md`, `deploy/audit-server.sh`).
+Shap holds a business's books and its people's details, and an accountant signs what it draws
+up. So, like the continuing professional development an accountant keeps up, every update is
+checked the way the profession would check it, before any server or phone takes it: four
+reviews, the tests and CI, each server checking itself, and the books checking themselves.
+Shap Pocket (OpenWorksIT/shap-pocket) shares the accounting code and goes through the same.
 
-## 1. Every change (CI, `.github/workflows/ci.yml`)
+## 1. Every update: the four reviews
+
+Before the version goes up and the update is pushed, four reviews of everything since the last
+release, each by someone (or a separate AI session) that didn't write it. Each finding is fixed
+with a test that fails without the fix, in Shap and in Shap Pocket where the code is shared, and
+each review's findings are written up in section 7.
+
+1. **Security and privacy**, with the penetration test (`deploy/test/pentest.mjs` against a
+   server with the demo company): who may reach what (every route, every role and task,
+   `requireAccess`/`requireRole`), what each answer gives away, sessions and sign-in, files,
+   nothing personal leaving without the owner's yes (`.github/hosts.json`, `privacy.test.ts`),
+   the logs, and for Shap Pocket what runs in the app (no server-only code, the database worker,
+   the store builds).
+2. **IFRS for SMEs and company law** (docs/IFRS.md, docs/STATEMENTS.md): every decision the books
+   and the statements make against the standard, section by section; the Companies Act and Close
+   Corporations Act (the public interest score, the audit or review it points to, the accounting
+   officer's report, the directors' report); what's left to the accountant, said so.
+3. **SARS and tax** (docs/SARS.md): every rate, table, threshold, form and due date against
+   SARS's current pages (with links), year by year; the estimates (income tax, provisional tax,
+   turnover tax, the tax pack) worked through for each kind of business with made-up books; the
+   other statutory bodies Shap touches (UIF for the Department of Employment and Labour, CIPC).
+   Every figure Shap works out for tax or the law says it's an estimate: OpenWorks IT aren't
+   accountants, and Shap isn't advice.
+4. **Accounting and arithmetic**: double entry and the cent, and every figure the same wherever
+   it goes: a document, the ledger, the reports, the VAT201, the payroll returns, the
+   statements, the tax pack, the PDFs and the exports. A year of made-up trading through the API
+   with its own books to compare. And data safety on upgrade: the same books give the same figures
+   after the update (CI's upgrade job lists any balance that moved), and what was signed stays
+   signed.
+
+Then:
+
+- CI is green on the commit, all four jobs, and `stable` moved to it (CI moves it; nobody moves it
+  by hand: servers update from it).
+- vps1 updates; `sudo /opt/shap/deploy/vps/audit-server.sh` shows nothing new; the books audit on
+  its companies shows nothing new.
+- The changelog says what changed, security fixes included once servers have had a chance to
+  update (SECURITY.md).
+
+## 2. When SARS changes something: the standard update
+
+A Budget, a new table or rate, a new form or due date: anything in docs/SARS.md that changes.
+And every 1 March, CI fails until the new tax year's figures are checked (`SARS_CHECKED_TO`,
+`packages/shared/src/tax.ts`), so a year can't start on last year's tables unnoticed.
+
+1. The SARS review (section 1) on what changed, from SARS's own pages: each figure, the years it
+   applies to (a table applies to years of assessment ending on or after its `from`; a year
+   SARS left unchanged needs no new row).
+2. The tables changed where docs/SARS.md says they live, each with a test of a figure worked out
+   by hand from SARS's table; `SARS_CHECKED_TO` moved to the last year checked; docs/SARS.md's
+   checked date and sources brought up to date.
+3. The same in Shap Pocket (the shared code is copied: `packages/shared/src`).
+4. The version goes up, with the four reviews, as any update (section 1), and the changelog says
+   which figures changed and from when.
+
+## 3. Every change (CI, `.github/workflows/ci.yml`)
 
 Runs on every push and pull request. When **all** of it passes on `main`, CI moves the `stable`
 branch to that commit. Servers update only from `stable` (`deploy/vps/ctl/shap-ctl.sh`), so a
@@ -30,10 +87,10 @@ security tests check it finds exactly the routes Fastify has.
 Also on GitHub: Dependabot's weekly pull requests (`.github/dependabot.yml`), the weekly dependency
 check (`dependency-check.yml`), CodeQL code scanning, and secret scanning with push protection
 (the repository's Security tab). A ruleset on `stable` (Settings → Rules) blocks deleting it and
-force-pushing it, so it can only move forward; nobody moves it by hand (CLAUDE.md). Every action a
+force-pushing it, so it can only move forward; nobody moves it by hand. Every action a
 workflow uses is pinned to a commit (Dependabot moves the pins).
 
-## 2. Every server, every 6 hours (`deploy/vps/audit-server.sh`)
+## 4. Every server, every 6 hours (`deploy/vps/audit-server.sh`)
 
 The `shap-audit` timer runs it (installed by `ctl/install.sh`, or by the updater itself on its
 next run) and after every update. It changes nothing. Its results show in **Settings → Updates &
@@ -51,7 +108,7 @@ down, the branch gone), nothing is updated and Settings says why; it never falls
 
 Run it by hand any time: `sudo /opt/shap/deploy/vps/audit-server.sh`.
 
-## 3. The books, any time (`apps/server/src/audit/books.ts`)
+## 5. The books, any time (`apps/server/src/audit/books.ts`)
 
 **Settings → Updates & backups → Checks → Your books** (owner and accountant), or
 `node apps/server/dist/audit/cli.js` in the app's container. It changes nothing in the books (it
@@ -94,19 +151,7 @@ cash flows tie, equity ties, nothing is in suspense and this audit finds nothing
 compiled they're frozen at their figures, and approving checks the books still give exactly
 those.
 
-## 4. Before each release (the version goes up)
-
-1. CI is green on the commit, all four jobs (and `stable` moved to it).
-2. An **independent review** of everything since the last release, by someone (or a separate
-   AI session) that didn't write it: security, privacy, the accounting and SARS rules, data
-   safety on upgrade. Findings fixed, each with a test.
-3. vps1 updates; `sudo /opt/shap/deploy/vps/audit-server.sh` shows nothing new; the books audit
-   on its companies shows nothing new.
-4. The changelog says what changed, security fixes included once servers have had a chance to
-   update (SECURITY.md).
-5. Shap Pocket shares the accounting: the same fixes go there, with its tests.
-
-## 5. Once a month
+## 6. Once a month
 
 - [ ] Dependabot's pull requests and the latest dependency check: take what's worth taking (each
       goes through CI).
@@ -115,8 +160,12 @@ those.
 - [ ] Each server's Checks (Settings → Updates & backups): all clear, or each item explained.
 - [ ] A backup restored to a scratch machine once a quarter, and opened (`docs/backups.md`).
 - [ ] Who has access: GitHub collaborators, deploy keys, the servers' SSH keys.
+- [ ] SARS news since the last check (a Budget, a new rate or table, a new form or due date):
+      anything that changed is the standard update (section 2).
 
-## What the first audit found (November 2026, version 1.20)
+## 7. What each review found
+
+### The first audit (November 2026, version 1.20)
 
 - A date like `2026-99-99` in a list's filter crashed the request (a server error, not a refusal):
   any value the database can't take is now refused plainly (400).
@@ -256,6 +305,30 @@ collector too), were server errors, not refusals. The zod advisory accepted unti
 from `.github/accepted-advisories.json`. Accepted: a whole-form check (a deposit as a percentage
 or an amount, not both) is told only once the fields themselves are right; the request is
 refused either way.
+
+### The SARS review, and the four reviews on every update (1.23.2, before release)
+
+The SARS review (an accountant bot through the tax and SARS rules, and a made-up small business
+corporation through the API: `apps/server/test/review-1.23/sbc-and-sars.test.ts`), all fixed
+with tests:
+
+- A company that qualifies as a small business corporation was estimated at 27% (R108 000 on
+  R400 000 of profit, against R26 198 on SARS's table) unless a provisional estimate for that
+  very year said otherwise, and the statements and the tax pack could pick different estimates.
+  The business now says once whether it qualifies (s12E, Settings, or on the statements and the
+  IRP6): every estimate goes by it, gross income over R20 million rules the table out, and not
+  said, both figures are shown. The tax note shows the SBC rates' effect on its own line.
+- Any tax in the books hid the estimate (a provisional payment journalled to the expense made it
+  look booked): the tax booked is now compared with the estimate. Provisional tax paid has its
+  own SARS payment (off what's owed to SARS).
+- Booking the tax in a year agreed with the accountant changed nothing (the agreed figures hold),
+  each tap booked it again, and closing the year then stopped the statements being compiled:
+  the button is gone from agreed and closed years, which say why.
+- The SBC tables before the year ending March 2022 used 2023's, and a year ending 31 March 2023
+  had 28% at the top (27%); 2023's medical credits were 2024's; VAT categories D (six-monthly)
+  and E (yearly) were missing; the dividends tax return was named without its DTR02.
+- Each figure is now in docs/SARS.md with its source, and CI fails on 1 March until the new tax
+  year's figures have been checked (`SARS_CHECKED_TO`).
 
 ### Code scanning (CodeQL), first run
 

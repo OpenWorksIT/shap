@@ -11,7 +11,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import PDFDocument from 'pdfkit';
-import { entity, ESTIMATE_NOTE, ESTIMATE_SHORT, estimateTax, featureOn, financialYear, formatAmount, formatDate, vat201Due, vatPeriod, addMonths, monthsBetween } from '@shap/shared';
+import { entity, ESTIMATE_NOTE, ESTIMATE_SHORT, estimateTax, sbcApplies, featureOn, financialYear, formatAmount, formatDate, vat201Due, vatPeriod, addMonths, monthsBetween } from '@shap/shared';
 import { z } from 'zod';
 import { requireAccess, can, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -50,8 +50,12 @@ export async function taxPack(db: Db, fyEnd: string, o: { people?: boolean } = {
   const extra = await taxFigures(db, s.businessType, fy);
   const estimates = await db<{ period: number; asAt: string; taxableIncomeCents: string; taxCents: string; payableCents: string; note: string; createdAt: Date; lines: { sbc?: boolean } }[]>`
     select period, as_at::text as as_at, taxable_income_cents, tax_cents, payable_cents, note, created_at, lines from tax_estimates where fy_end = ${fy.end}::date order by period, created_at`;
-  const sbc = kind === 'company' && Boolean(estimates.at(-1)?.lines?.sbc);
-  const estimate = estimateTax({ kind, profitCents: profitBeforeTax, assessedLossCents, fyEnd: fy.end, sbc, approvedPbo: s.approvedPbo, distributedCents: extra.distributedCents, partners: extra.partners } as Parameters<typeof estimateTax>[0]);
+  // The small business corporation table if the company says it qualifies (Settings) and its gross
+  // income is within the limit; not said, both figures (the company rate's as the estimate).
+  const sbc = kind === 'company' && entity(s.businessType).sbcPossible ? sbcApplies(s.sbc, income) : false;
+  const est = (onSbc: boolean) => estimateTax({ kind, profitCents: profitBeforeTax, assessedLossCents, fyEnd: fy.end, sbc: onSbc, approvedPbo: s.approvedPbo, distributedCents: extra.distributedCents, partners: extra.partners } as Parameters<typeof estimateTax>[0]);
+  const estimate = est(sbc === true);
+  const sbcTaxCents = sbc === null ? est(true).taxCents : null;
   const [paidTax] = await db<{ paid: string; booked: string }[]>`
     select coalesce(sum(l.amount_cents) filter (where l.amount_cents > 0), 0)::bigint as paid,
            coalesce(-sum(l.amount_cents) filter (where l.amount_cents < 0), 0)::bigint as booked
@@ -59,10 +63,10 @@ export async function taxPack(db: Db, fyEnd: string, o: { people?: boolean } = {
   // VAT201s: each period that ends in the year.
   const vat: { start: string; end: string; due: string; fields: Awaited<ReturnType<typeof vat201>> }[] = [];
   if (s.vatRegistered) {
-    let p = vatPeriod(fy.end, s.vatCategory);
+    let p = vatPeriod(fy.end, s.vatCategory, s.fyEndMonth);
     while (p.end >= fy.start) {
       if (p.end <= fy.end) vat.unshift({ ...p, due: vat201Due(p.end), fields: await vat201(db, p.start, p.end) });
-      p = vatPeriod(addMonths(p.start, -1), s.vatCategory);
+      p = vatPeriod(addMonths(p.start, -1), s.vatCategory, s.fyEndMonth);
     }
   }
   // Payroll: the months in the year, and each tax year (March to February) it touches.
@@ -87,7 +91,7 @@ export async function taxPack(db: Db, fyEnd: string, o: { people?: boolean } = {
     costsCents: costs,
     profitBeforeTax,
     assessedLossCents,
-    estimate: { ...estimate, sbc },
+    estimate: { ...estimate, sbc, sbcTaxCents },
     estimates,
     paidToSarsCents: Number(paidTax!.paid),
     taxBookedCents: Number(paidTax!.booked),
@@ -194,6 +198,7 @@ export function renderTaxPack(t: Awaited<ReturnType<typeof taxPack>>): Promise<B
       ...(t.assessedLossCents ? [['Assessed loss brought forward (earlier years’ losses in the books)', -t.assessedLossCents] as [string, number]] : []),
       ['Taxable income (estimate)', t.estimate.taxableCents],
       [`Tax (estimate${t.kind === 'company' ? (t.estimate.sbc ? ', small business corporation rates' : ', company rate') : ''})`, t.estimate.taxCents],
+      ...(t.estimate.sbcTaxCents != null ? [['Tax on the small business corporation table, if the company qualifies (s12E: not said in Shap)', t.estimate.sbcTaxCents] as [string, number]] : []),
       ['Income tax booked for the year', t.taxBookedCents],
       ['Paid to SARS for income tax in the year (provisional tax and any balance)', t.paidToSarsCents],
     ],
@@ -246,7 +251,7 @@ export function renderTaxPack(t: Awaited<ReturnType<typeof taxPack>>): Promise<B
 
   // ---------------------------------------------------------------- dividends
   if (t.dividends.length) {
-    heading('Dividends and dividends tax', 'Declared in the year: dividends tax (DTR01) is withheld and paid by the end of the month after the dividend is paid.');
+    heading('Dividends and dividends tax', 'Declared in the year: dividends tax is declared (DTR01, with a DTR02 for each shareholder), withheld and paid by the end of the month after the dividend is paid.');
     table(
       ['Declared', 'To', 'Gross', 'Dividends tax'],
       t.dividends.map((d) => [formatDate(d.declaredOn), `${d.shareholder}${d.exempt ? ' (exempt)' : ''}`, Number(d.grossCents), Number(d.dwtCents)]),

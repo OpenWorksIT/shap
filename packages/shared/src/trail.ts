@@ -1,7 +1,7 @@
 /**
  * Keeping people's details out of a feedback trail (the steps attached to a bug report). The web
  * app records clicks, pages and errors with these applied; the server applies them again to every
- * trail it receives or forwards, whatever app or version sent it (docs/AUDIT.md, privacy).
+ * trail it receives or forwards, whatever app or version sent it (CPDAUDIT.md, privacy).
  */
 const ID_RE = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
 

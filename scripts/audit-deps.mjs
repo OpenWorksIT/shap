@@ -6,7 +6,7 @@
  *
  *   node scripts/audit-deps.mjs            # exit 1 if anything unaccepted is high or critical
  *
- * Used by CI (ci.yml) and the weekly dependency check (dependency-check.yml). docs/AUDIT.md.
+ * Used by CI (ci.yml) and the weekly dependency check (dependency-check.yml). CPDAUDIT.md.
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 import { execFileSync } from 'node:child_process';

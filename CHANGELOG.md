@@ -3,6 +3,28 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.23.2 (10 November 2026)
+
+The tax and SARS rules checked again by an accountant, and every update now goes through four
+reviews (CPDAUDIT.md).
+
+- **Small business corporations**: say once whether the company qualifies (s12E: Settings → Tax,
+  VAT and the financial year, or on the financial statements or the provisional tax screen), and
+  the provisional tax estimate, the financial statements and the tax pack all go by it. Until
+  it's said, they show both figures (they used the flat 27% unless a provisional estimate for that
+  year said otherwise, so the statements' "income tax" item showed the wrong tax). Gross income
+  over R20 million rules the table out. The tax note shows the SBC rates' effect on its own line.
+- The statements' income tax item compares the tax booked with the estimate (a provisional
+  payment booked as the expense no longer passes for the year's tax), and "Book the tax" is gone
+  from a year agreed with your accountant or closed, where it changed nothing.
+- **Provisional tax paid** (IRP6): record it from the provisional tax screen; it comes off what's
+  owed to SARS for the year's income tax.
+- The small business corporation tables back to 2021 (a year ending 31 March 2023 at 27% above
+  R550 000), 2023's medical scheme credits, and **VAT categories D** (six-monthly) and **E**
+  (yearly). The dividends tax return named with its DTR02.
+- Every SARS figure is listed with its source in docs/SARS.md, and from 1 March each year the
+  checks fail until the new tax year's figures are in.
+
 ## 1.23.1 (10 November 2026)
 
 - zod 4 (4.6.7), Shap's checker of everything sent to it: the security update for

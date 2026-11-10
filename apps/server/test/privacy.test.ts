@@ -4,7 +4,7 @@
  * company's own details, an item typed by hand), then everything that can leave the server, and
  * everything it writes to its log, is searched for them.
  *
- * What may leave, and only with the owner's yes (docs/AUDIT.md, the privacy policy):
+ * What may leave, and only with the owner's yes (CPDAUDIT.md, the privacy policy):
  * - the anonymous usage note: the app, version, a random install number, the kind of business,
  *   which parts are switched on;
  * - anonymous market rates: average prices of the trade's standard items, nothing typed;

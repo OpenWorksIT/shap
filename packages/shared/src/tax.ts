@@ -32,7 +32,8 @@ const SBC_TABLES: { from: string; bands: Band[] }[] = [
     ],
   },
   {
-    // Years ending 1 April 2022 – 31 March 2023 (and, as the nearest, any earlier year).
+    // Years ending 1 April 2022 – 31 March 2023 (the top band at the company rate: 27% for a year
+    // ending on 31 March 2023, 28% before).
     from: '2022-04-01',
     bands: [
       { upTo: 91_250, base: 0, rate: 0, over: 0 },
@@ -41,7 +42,50 @@ const SBC_TABLES: { from: string; bands: Band[] }[] = [
       { upTo: null, base: 58_013, rate: 0.28, over: 550_000 },
     ],
   },
+  {
+    // Years ending 1 April 2021 – 31 March 2022.
+    from: '2021-04-01',
+    bands: [
+      { upTo: 87_300, base: 0, rate: 0, over: 0 },
+      { upTo: 365_000, base: 0, rate: 0.07, over: 87_300 },
+      { upTo: 550_000, base: 19_439, rate: 0.21, over: 365_000 },
+      { upTo: null, base: 58_289, rate: 0.28, over: 550_000 },
+    ],
+  },
+  {
+    // Years ending 1 April 2020 – 31 March 2021 (and, as the nearest, any earlier year).
+    from: '2020-04-01',
+    bands: [
+      { upTo: 83_100, base: 0, rate: 0, over: 0 },
+      { upTo: 365_000, base: 0, rate: 0.07, over: 83_100 },
+      { upTo: 550_000, base: 19_733, rate: 0.21, over: 365_000 },
+      { upTo: null, base: 58_583, rate: 0.28, over: 550_000 },
+    ],
+  },
 ];
+/**
+ * A small business corporation (Income Tax Act s12E): among its tests, gross income for the year
+ * of no more than R20 million. The others (every shareholder a natural person holding no shares in
+ * another company, no more than 20% investment income and personal services, not a personal service
+ * provider) are the business’s to say. https://www.sars.gov.za/tax-rates/income-tax/companies-trusts-and-small-business-corporations-sbc/
+ */
+export const SBC_GROSS_INCOME_LIMIT_CENTS = 2_000_000_000;
+/**
+ * Whether the small business corporation rates apply to a year: the business says whether it
+ * qualifies (null: it hasn't said), and gross income over R20 million rules them out whatever it said.
+ */
+export function sbcApplies(qualifies: boolean | null | undefined, grossIncomeCents: number): boolean | null {
+  if (grossIncomeCents > SBC_GROSS_INCOME_LIMIT_CENTS) return false;
+  return qualifies ?? null;
+}
+/**
+ * The last day of the latest year of assessment whose SARS figures in Shap were checked against
+ * what SARS published (docs/SARS.md, the SARS review in CPDAUDIT.md): the tables for years up to it
+ * are known right. From the day after (1 March), the tests fail until the next year's figures are
+ * checked, put in and this moved on: the standard update for a new tax year (CPDAUDIT.md).
+ */
+export const SARS_CHECKED_TO = '2027-02-28';
+
 /** The company rate: 27% for years of assessment ending on or after 31 March 2023, 28% before. */
 export const COMPANY_RATE = 0.27;
 export const companyRate = (fyEnd: string) => (fyEnd >= '2023-03-31' ? 0.27 : 0.28);
@@ -51,13 +95,14 @@ export function companyTax(taxableCents: number, fyEnd: string, sbc: boolean): n
   if (taxableCents <= 0) return 0;
   const r = taxableCents / 100;
   if (!sbc) return Math.round(r * companyRate(fyEnd) * 100);
-  const table = SBC_TABLES.find((t) => fyEnd >= t.from) ?? SBC_TABLES[SBC_TABLES.length - 1]!;
-  const band = table.bands.find((b) => b.upTo == null || r <= b.upTo)!;
+  const band = sbcTableFor(fyEnd).find((b) => b.upTo == null || r <= b.upTo)!;
   return Math.round((band.base + (r - band.over) * band.rate) * 100);
 }
 
+/** The SBC table for a year ending `fyEnd`: its top band at the company rate for that year (27% from 31 March 2023). */
 export function sbcTableFor(fyEnd: string) {
-  return (SBC_TABLES.find((t) => fyEnd >= t.from) ?? SBC_TABLES[SBC_TABLES.length - 1]!).bands;
+  const bands = (SBC_TABLES.find((t) => fyEnd >= t.from) ?? SBC_TABLES[SBC_TABLES.length - 1]!).bands;
+  return bands.map((b) => (b.upTo == null ? { ...b, rate: companyRate(fyEnd) } : b));
 }
 
 // ---------------------------------------------------------------- individuals (sole proprietors)
@@ -233,7 +278,7 @@ export interface TaxEstimateFigures {
   profitCents: number;
   assessedLossCents: number;
   fyEnd: string;
-  /** Companies: small business corporation rates. */
+  /** Companies: small business corporation rates (left out: the flat company rate). */
   sbc?: boolean;
   /** Individuals: age on the last day of the year, other taxable income, retirement contributions. */
   ageBand?: AgeBand;
@@ -263,7 +308,8 @@ export function estimateTax(f: TaxEstimateFigures): { taxableCents: number; reti
   }
   if (f.kind === 'company') {
     const taxableCents = Math.max(0, f.profitCents - assessedLossSetOff('company', f.profitCents, f.assessedLossCents, f.fyEnd));
-    return { taxableCents, retirementDeductionCents: 0, taxCents: companyTax(taxableCents, f.fyEnd, f.sbc ?? true) };
+    // The small business corporation table only when it's said to apply (s12E): the flat rate otherwise.
+    return { taxableCents, retirementDeductionCents: 0, taxCents: companyTax(taxableCents, f.fyEnd, f.sbc ?? false) };
   }
   const before = f.profitCents + (f.otherIncomeCents ?? 0) - f.assessedLossCents;
   const retirementDeductionCents = retirementDeduction(f.retirementCents ?? 0, before, f.fyEnd);
@@ -305,13 +351,22 @@ export function turnoverTax(turnoverCents: number, yearEnd: string): number {
 /* ---------------------------------------------------------------- VAT201 periods */
 
 /** The VAT period (two months for categories A and B, one for C) ending in or before `on`'s month. */
-export function vatPeriod(on: string, category: 'A' | 'B' | 'C'): { start: string; end: string } {
+/**
+ * SARS's VAT categories (tax periods): https://www.sars.gov.za/types-of-tax/value-added-tax/tax-periods-for-vat-vendors/
+ * D is mainly for small farmers and micro businesses on turnover tax; E for some companies, trusts
+ * and lessors (VAT 404, chapter 3).
+ */
+export const VAT_CATEGORIES = ['A', 'B', 'C', 'D', 'E'] as const;
+export type VatCategory = (typeof VAT_CATEGORIES)[number];
+export function vatPeriod(on: string, category: VatCategory, fyEndMonth = 2): { start: string; end: string } {
   const [y, m] = on.split('-').map(Number) as [number, number];
+  // How many months a period is, and a month one ends in: A every two months ending Jan, Mar…;
+  // B ending Feb, Apr…; C monthly; D six-monthly ending Feb and Aug; E yearly at the year end.
+  const [months, endsIn] = ({ A: [2, 1], B: [2, 2], C: [1, 1], D: [6, 2], E: [12, fyEndMonth] } as const)[category];
   let endMonth = m;
-  if (category === 'A' && m % 2 === 0) endMonth = m + 1; // A ends Jan, Mar, May…
-  if (category === 'B' && m % 2 === 1) endMonth = m + 1; // B ends Feb, Apr, Jun…
+  while ((((endMonth - endsIn) % months) + months) % months !== 0) endMonth++;
   const end = new Date(Date.UTC(y, endMonth, 0));
-  const start = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() - (category === 'C' ? 0 : 1), 1));
+  const start = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() - (months - 1), 1));
   const iso = (d: Date) => d.toISOString().slice(0, 10);
   return { start: iso(start), end: iso(end) };
 }

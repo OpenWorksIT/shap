@@ -1,6 +1,6 @@
 # CodeQL: GitHub's code scanning looks through the code for security mistakes (injection, unsafe
 # paths, leaks, unsafe regular expressions…) on every change and weekly. Findings show in the
-# repository's Security tab. docs/AUDIT.md.
+# repository's Security tab. CPDAUDIT.md.
 # SPDX-License-Identifier: AGPL-3.0-or-later
 name: CodeQL
 on:

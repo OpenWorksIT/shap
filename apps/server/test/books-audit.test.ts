@@ -152,7 +152,7 @@ describe('the books audit', () => {
 });
 
 /**
- * The review of 1.21 (docs/AUDIT.md): books kept the way the app means them to be kept must come
+ * The review of 1.21 (CPDAUDIT.md): books kept the way the app means them to be kept must come
  * out clean, and a check must be able to fail, not only warn.
  */
 describe('the books audit on books an accountant has agreed', () => {

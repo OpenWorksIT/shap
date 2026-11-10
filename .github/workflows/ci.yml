@@ -1,4 +1,4 @@
-# Every change to Shap, before any server can take it (docs/AUDIT.md):
+# Every change to Shap, before any server can take it (CPDAUDIT.md):
 #   test       the type checks, every test (the accounting, VAT, payroll and tax rules, the
 #              security and privacy suites, the books audit on books built by the tests), the build
 #   audit      the real server in its Docker image with the demo company: the penetration test

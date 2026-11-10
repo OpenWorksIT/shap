@@ -445,6 +445,13 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
           { key: 'sdl_payable', debit: split.sdl, memo: 'SDL' },
           { key: src.accountId, credit: input.amountCents, memo: `Paid from ${src.name}` },
         ];
+      } else if (input.kind === 'irp6') {
+        // Provisional tax: paid towards the year's income tax, so it comes off what's owed to SARS
+        // (the year's tax is booked against the same account), not an expense.
+        lines = [
+          { key: 'income_tax_payable', debit: input.amountCents, memo: 'Provisional tax (IRP6)' },
+          { key: src.accountId, credit: input.amountCents, memo: `Paid from ${src.name}` },
+        ];
       } else {
         lines = [
           { key: 'dwt_payable', debit: input.amountCents, memo: 'Dividends tax' },
@@ -453,7 +460,7 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
       }
       const journalId = await postJournal(tx, {
         date: input.date,
-        description: input.kind === 'emp201' ? `SARS: PAYE, UIF and SDL for ${input.period}` : `SARS: dividends tax for ${input.period}`,
+        description: input.kind === 'emp201' ? `SARS: PAYE, UIF and SDL for ${input.period}` : input.kind === 'irp6' ? `SARS: provisional tax (IRP6), the year ending ${input.period}` : `SARS: dividends tax for ${input.period}`,
         reference: input.reference,
         kind: 'sars',
         sourceId: p!.id,
