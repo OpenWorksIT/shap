@@ -26,6 +26,7 @@ import type { Ctx } from '../context.js';
 import type { Db } from '../db/index.js';
 import { getSettings, isIsoDate, today, type SettingsRow } from '../lib/books.js';
 import { badRequest } from '../lib/errors.js';
+import { parse } from '../lib/validate.js';
 
 interface Query {
   from: string;
@@ -316,7 +317,7 @@ export function registerAccountantExportRoutes(app: FastifyInstance, ctx: Ctx): 
    */
   app.get('/api/accountant-export', readers, async (req, reply) => {
     const raw = req.query as Record<string, string | undefined>;
-    const dataset = z.enum(EXPORT_DATASET_KEYS as [ExportDataset, ...ExportDataset[]]).parse(raw.dataset ?? 'journal');
+    const dataset = parse(z.enum(EXPORT_DATASET_KEYS as [ExportDataset, ...ExportDataset[]]), raw.dataset ?? 'journal');
     let options: ExportOptions;
     try {
       options = exportOptionsSchema.parse(raw.options ? JSON.parse(raw.options) : { columns: EXPORT_DATASETS[dataset].columns.map((c) => ({ key: c.key, header: c.label })) });

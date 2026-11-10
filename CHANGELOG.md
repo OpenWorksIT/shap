@@ -6,7 +6,8 @@ What changed in each version of Shap Pocket, newest first.
 
 - zod 4 (4.6.7), the checker of everything the app's screens hand its books: the security update
   for [CVE-2023-54404](https://www.vulncheck.com/advisories/zod-uncontrolled-resource-consumption-via-array-validation)
-  (from Shap 1.23.1).
+  (from Shap 1.23.1). A refused entry still says "Required" or "Invalid" where a field has no words
+  of its own, and an unknown accountant export is refused rather than failing.
 
 ## 1.7.0 (10 November 2026)
 
