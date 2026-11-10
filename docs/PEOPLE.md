@@ -54,7 +54,7 @@ the sales to be seen): ticking one ticks the other.
 | Payroll | See payroll and payslips | |
 | | Run payroll (employees, pay runs, SARS payments) | See payroll |
 | Accounts & reports | Reports, VAT201 and the ledger (every report and the books, read only, and the statements; the ledger names each worker's days and wages) | See days worked and wages |
-| | Bank statements (bring them in, tick off what's captured, and capture what isn't: costs, payments received) | Reports, Capture and change any cost, Record what's paid |
+| | Bank statements (bring them in, tick off what's captured, and capture what isn't: costs, payments received; so it also lets them delete or merge costs and write off invoices) | Reports, Capture and change any cost, Record what's paid |
 | | Journals, assets and balance checks | Reports |
 
 **Always the owner's**: the settings, the people who sign in and their profiles, the year end, tax

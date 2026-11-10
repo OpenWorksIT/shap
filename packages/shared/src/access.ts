@@ -111,7 +111,7 @@ export const ACCESS_GROUPS = [
     label: 'Accounts & reports',
     tasks: [
       { key: 'reports.view', label: 'Reports, VAT201 and the ledger', hint: 'Every report and the books, read only, and the financial statements (the books show each worker’s wages)', needs: ['labour.view'] },
-      { key: 'bank.reconcile', label: 'Bank statements', hint: 'Bring them in, tick off what’s captured, and capture the rest (costs and payments received)', feature: 'bank', needs: ['reports.view', 'costs.manage', 'documents.paid'] },
+      { key: 'bank.reconcile', label: 'Bank statements', hint: 'Bring them in, tick off what’s captured, and capture the rest. Comes with “Capture and change any cost” and “Record what’s paid on them”, so they can also delete or merge costs and write off invoices', feature: 'bank', needs: ['reports.view', 'costs.manage', 'documents.paid'] },
       { key: 'books.adjust', label: 'Journals, assets and balance checks', needs: ['reports.view'] },
     ],
   },

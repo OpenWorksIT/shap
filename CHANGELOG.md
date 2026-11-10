@@ -3,6 +3,16 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.23.1 (10 November 2026)
+
+- zod 4 (4.6.7), Shap's checker of everything sent to it: the security update for
+  [CVE-2023-54404](https://www.vulncheck.com/advisories/zod-uncontrolled-resource-consumption-via-array-validation)
+  (a very long list sent to a server could use up its memory; Shap already refused lists over
+  20 000 items before checking them).
+- People who sign in: "Bank statements" says at the tick what it comes with ("Capture and change
+  any cost" and "Record what's paid on them", so also deleting or merging costs and writing off
+  invoices).
+
 ## 1.23.0 (10 November 2026)
 
 People who sign in, with what each may do; the statements checked against the IFRS for SMEs
