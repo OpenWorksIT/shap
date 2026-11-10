@@ -58,8 +58,8 @@ const feedbackInput = z.object({
   screenshotMasked: z.boolean().default(true),
   trail: z
     // Ids, query values, addresses and long numbers blanked as it comes in, whatever app or version
-    // sent it: in what's kept here and what goes on to OpenWorks.
-    .array(z.object({ t: z.number(), kind: z.enum(['nav', 'click', 'edit', 'api', 'error', 'console']), detail: z.string().max(300).transform(scrubTrailDetail) }))
+    // sent it: in what's kept here and what goes on to OpenWorks. `t` a time (ms) a date can hold.
+    .array(z.object({ t: z.number().int().min(0).max(8.64e15), kind: z.enum(['nav', 'click', 'edit', 'api', 'error', 'console']), detail: z.string().max(300).transform(scrubTrailDetail) }))
     .max(80)
     .default([]),
   client: z

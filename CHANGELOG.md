@@ -8,7 +8,9 @@ entries newer than the version you're running before you update.
 - zod 4 (4.6.7), Shap's checker of everything sent to it: the security update for
   [CVE-2023-54404](https://www.vulncheck.com/advisories/zod-uncontrolled-resource-consumption-via-array-validation)
   (a very long list sent to a server could use up its memory; Shap already refused lists over
-  20 000 items before checking them).
+  20 000 items before checking them). A refused request still says "Required" or "Invalid" where
+  a field has no words of its own; an unknown accountant export and an impossible time in a
+  feedback trail are refused rather than server errors.
 - People who sign in: "Bank statements" says at the tick what it comes with ("Capture and change
   any cost" and "Record what's paid on them", so also deleting or merging costs and writing off
   invoices).

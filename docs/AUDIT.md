@@ -244,6 +244,19 @@ signed on 1.22 was compared by its statements but not its notes; a later builder
 every set signed now look changed; and whoever makes the invoices could no longer put a
 colleague's time on one.
 
+### zod 4 (1.23.1, before release)
+
+The independent review compared every schema under zod 3 and zod 4 (about 50 inputs a field):
+the same output, nothing let through that zod 3 refused, saved statement details read back the
+same, every id a valid uuid. Fixed with tests (`apps/server/test/review-1.23/zod-4.test.ts`):
+a refused request said zod 4's own words where a schema has none ("Invalid input: expected
+string, received undefined", a field's pattern): "Required" and "Invalid" again. Found on the way,
+older: an unknown accountant export, and a feedback trail time no date can hold (on the open
+collector too), were server errors, not refusals. The zod advisory accepted until Zod 4 is gone
+from `.github/accepted-advisories.json`. Accepted: a whole-form check (a deposit as a percentage
+or an amount, not both) is told only once the fields themselves are right; the request is
+refused either way.
+
 ### Code scanning (CodeQL), first run
 
 - The Accounts screen's download links carried the period's dates unencoded (flagged as text

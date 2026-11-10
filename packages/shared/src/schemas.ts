@@ -1,5 +1,12 @@
 import { lineFits, STATEMENT_LINE_KEYS, type StatementLineKey } from './statement-lines.js';
 import { z } from 'zod';
+
+// What a refused request says when a schema has no words of its own, as before zod 4: a field
+// left out is "Required", a text that doesn't fit its pattern "Invalid" (zod 4 would say
+// "Invalid input: expected string, received undefined" and show the pattern). Global: one zod.
+z.config({
+  customError: (iss) => (iss.code === 'invalid_type' && iss.input === undefined ? 'Required' : iss.code === 'invalid_format' && iss.format === 'regex' ? 'Invalid' : undefined),
+});
 import { BUSINESS_TYPES } from './entities.js';
 import { clientVatNumberProblem, compact, idNumberProblem, taxNumberProblem } from './ids.js';
 import { PURCHASE_VAT_CODES, SALE_VAT_CODES } from './vat.js';
