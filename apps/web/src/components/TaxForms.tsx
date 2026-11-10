@@ -8,6 +8,7 @@ import { formatDate, formatZar, monthLabel } from '@shap/shared';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
 import { ErrorBox, Loading, Money } from './ui';
+import { EstimateNote } from './EstimateNote';
 
 interface Vat201Data {
   category: 'A' | 'B' | 'C';
@@ -58,6 +59,7 @@ export function Vat201() {
           Category {data.category} · due {formatDate(data.due)} on eFiling
         </span>
       </div>
+      <EstimateNote />
       {pending && <div className="banner signal small">This period hasn’t ended yet: the figures will still change.</div>}
       <section className="panel">
         <div className="panel-head spread">
@@ -120,6 +122,7 @@ export function TurnoverTax() {
           income tax (SARS must be told within 21 days of exceeding the limit).
         </div>
       )}
+      <EstimateNote />
       <section className="panel panel-pad stack">
         <h3>Turnover tax, {data.fy.label}</h3>
         <div className="kpis compact">

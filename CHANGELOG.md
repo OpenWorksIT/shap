@@ -2,6 +2,28 @@
 
 What changed in each version of Shap Pocket, newest first.
 
+## 1.7.0 (10 November 2026)
+
+The financial statements checked against the IFRS for SMEs Accounting Standard, and a tax pack for
+your accountant, from Shap 1.23.
+
+- **The IFRS for SMEs check** (Shap's docs/IFRS.md, the same accounting code): interest paid and
+  received on lines of their own in the statement of cash flows; assets you paid for personally,
+  financed, or bought on a bill still unpaid at the year end left out of the cash flows and told in
+  a note; the legal form and the edition of the standard in the general information; the revenue
+  policy worded as the app books it; and **For your accountant to look at** with the checks: the
+  year's income tax (with the app's estimate, booked with one tap), work in progress, invoices
+  over a year overdue, leave pay owed.
+- **The public interest score**: worked out from your books for a company or close corporation,
+  with what it points to (an audit, an independent review, or a compilation), as an estimate.
+- **Close corporations**: the statements carry the accounting officer's report (s62); upload it
+  signed with the statements.
+- **Tax pack** (Accounts → Export): the year's income statement, the income tax estimate and your
+  provisional tax estimates, the VAT201s, payroll, dividends and the assets bought and sold, in
+  one PDF to share with your accountant.
+- Every figure the app works out for tax or the law says it's an estimate: OpenWorks IT aren't
+  accountants, and the app isn't advice.
+
 ## 1.6.0 (10 November 2026)
 
 Sales at the counter and the annual financial statements, from Shap 1.22. Each is switched on in

@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ACCOUNT_TYPE_LABELS, addMonths, ASSET_CATEGORIES, ASSET_DEFAULT_LIFE_MONTHS, INTANGIBLE_CATEGORIES, ASSET_CATEGORY_LABELS, financialYear, formatAmount, formatDate, formatZar, LEDGER_SOURCE_LABELS, todayIso, vatIncluded, vatOn, type AssetCategory, equityHeading } from '@shap/shared';
+import { ACCOUNT_TYPE_LABELS, addMonths, ASSET_CATEGORIES, ASSET_DEFAULT_LIFE_MONTHS, INTANGIBLE_CATEGORIES, ASSET_CATEGORY_LABELS, ESTIMATE_NOTE, financialYear, formatAmount, formatDate, formatZar, LEDGER_SOURCE_LABELS, todayIso, vatIncluded, vatOn, type AssetCategory, equityHeading } from '@shap/shared';
 import { PageHead } from '../components/Shell';
 import { Drawer, Empty, ErrorBox, Field, Icon, Loading, Money, MoneyInput, Segmented, Tabs, useToast } from '../components/ui';
 import { api, ApiError } from '../lib/api';
@@ -14,6 +14,7 @@ import { ProvisionalTax, YearEnd } from './YearEnd';
 import { ExportStudio } from '../components/ExportStudio';
 import { FinancialStatements } from './FinancialStatements';
 import { TurnoverTax, Vat201 } from '../components/TaxForms';
+import { sharePdf } from '../lib/share-pdf';
 
 type Tab = 'income' | 'balance' | 'trial' | 'ledger' | 'journals' | 'assets' | 'bank' | 'files' | 'checks' | 'yearend' | 'statements' | 'tax' | 'vat201' | 'export';
 
@@ -1101,6 +1102,61 @@ function BalanceChecks() {
 }
 
 /* ---------------------------------------------------------------- exports */
+/**
+ * The tax pack: a year's tax figures in one PDF for whoever files the returns (modules/tax-pack.ts):
+ * the year in the books, Shap's estimate of the income tax and the IRP6 estimates, the VAT201s,
+ * payroll (EMP201, EMP501), dividends, and the assets bought and sold.
+ */
+function TaxPack() {
+  const { settings } = useAuthed();
+  const toast = useToast();
+  // The years that have ended, newest first (and the one running, for its provisional tax).
+  const years = useMemo(() => {
+    const out: string[] = [];
+    let end = financialYear(todayIso(), settings.fyEndMonth).end;
+    for (let i = 0; i < 6; i++) {
+      out.push(end);
+      end = financialYear(addMonths(end, -12), settings.fyEndMonth).end;
+    }
+    return out;
+  }, [settings.fyEndMonth]);
+  const [fyEnd, setFyEnd] = useState(years[1] ?? years[0]!);
+  return (
+    <section className="panel panel-pad stack-sm">
+      <div className="spread">
+        <div>
+          <strong>Tax pack for your accountant</strong>
+          <div className="xs muted">The year’s income statement, Shap’s estimate of the income tax and your provisional tax estimates, the VAT201s, payroll (EMP201 and EMP501), dividends and the assets bought and sold, in one PDF.</div>
+        </div>
+      </div>
+      <div className="row wrap">
+        <select className="select" style={{ maxWidth: 260 }} value={fyEnd} onChange={(e) => setFyEnd(e.target.value)} aria-label="The year">
+          {years.map((y, i) => (
+            <option key={y} value={y}>
+              Year ended {formatDate(y, 'long')}
+              {i === 0 ? ' (still running)' : ''}
+            </option>
+          ))}
+        </select>
+        <button
+          className="btn primary"
+          onClick={async () => {
+            try {
+              if ((await sharePdf(`/api/tax-pack?fyEnd=${fyEnd}`, `Tax pack ${fyEnd}`)) === 'downloaded') toast('Saved');
+            } catch (err) {
+              toast(err instanceof ApiError ? err.message : 'Couldn’t make it', 'error');
+            }
+          }}
+        >
+          <Icon name="share" size={18} />
+          Share or save the tax pack
+        </button>
+      </div>
+      <p className="xs muted">{ESTIMATE_NOTE}</p>
+    </section>
+  );
+}
+
 function Exports() {
   const { fy, today } = usePeriods();
   const workers = useAuthed().has('workers');
@@ -1126,6 +1182,7 @@ function Exports() {
   );
   return (
     <div className="stack">
+      <TaxPack />
       <PeriodPicker from={range.from} to={range.to} onChange={(from, to) => setRange({ from, to })} />
       <ExportStudio from={range.from} to={range.to} />
       <section className="panel">

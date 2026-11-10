@@ -92,7 +92,7 @@ describe('selling at the counter, VAT registered', () => {
     expect(years.map((y: { fyEnd: string }) => y.fyEnd)).toContain(fy);
     const draft = await me.get(`/api/statements/${fy}`);
     expect(draft.status).toBe('draft');
-    expect(draft.statements.checks.filter((c: { ok: boolean }) => !c.ok)).toEqual([]);
+    expect(draft.statements.checks.filter((c: { ok: boolean; level?: string }) => !c.ok && c.level !== 'look')).toEqual([]);
     expect(draft.statements.sci.revenue.reduce((t: number, l: { current: number }) => t + l.current, 0)).toBeGreaterThan(0);
     const pdf = await me.call({ method: 'GET', url: `/api/statements/${fy}/pdf` });
     expect(pdf.statusCode).toBe(200);

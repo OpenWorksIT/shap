@@ -68,7 +68,7 @@ describe('Shap 1.22’s review fixes, in Shap Pocket', () => {
 
   it('puts other lines in revenue and the owner’s loan under current liabilities', async () => {
     const s = await buildStatements(env.sql, '2026-02-28');
-    expect(s.checks.filter((c) => !c.ok)).toEqual([]);
+    expect(s.checks.filter((c) => !c.ok && c.level !== 'look')).toEqual([]);
     expect(s.sci.otherIncome).toEqual([]);
     const [acc] = await env.sql<{ statementLine: string }[]>`select statement_line from accounts where system_key = 'owner_loan'`;
     expect(acc!.statementLine).toBe('shareholder_loans_current');

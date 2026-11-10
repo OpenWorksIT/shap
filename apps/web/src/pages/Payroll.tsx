@@ -11,6 +11,7 @@ import { Drawer, Empty, ErrorBox, Field, Icon, Loading, Money, MoneyInput, Tabs,
 import { api, ApiError } from '../lib/api';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
+import { EstimateNote } from '../components/EstimateNote';
 
 type Tab = 'runs' | 'people' | 'sars' | 'dividends';
 
@@ -490,6 +491,7 @@ function Sars() {
       <p className="xs muted">
         Declare and pay on SARS eFiling: the EMP201 each month (by the 7th), and the dividends tax return (DTR01/02) by the end of the month after a dividend. Then tap Paid SARS so the books match.
       </p>
+      <EstimateNote />
       {has('payroll') && <Emp501 />}
       {pay && (
         <SarsPayDrawer
@@ -868,6 +870,7 @@ function Emp501() {
               Capture these on e@syFile Employer (or eFiling, up to 50 certificates) and submit the EMP501 by the closing date. The figures come from your final pay runs and the payments you recorded:
               check them with your accountant before you submit.
             </p>
+            <EstimateNote />
           </>
         )}
       </div>

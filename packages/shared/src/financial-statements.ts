@@ -62,6 +62,12 @@ export const statementDetailsInput = z.object({
   preparedBy: t(200).default(''),
   compiler: compilerInput.default({}),
   accountantEmail: z.union([z.literal(''), z.string().trim().email('That email address doesn’t look right').max(200)]).default(''),
+  /** For the public interest score: how many individuals hold shares (a CC's members); blank: one per director (member). */
+  piHolders: z.number().int().min(0).max(1_000_000).nullable().default(null),
+  /** The average number of employees in the year, if not what Shap works out from payroll and the days logged. */
+  piEmployees: z.number().min(0).max(1_000_000).nullable().default(null),
+  /** Somebody in the business compiles the statements (not an independent accountant): it matters to the score's meaning. */
+  internallyCompiled: z.boolean().default(false),
   policies: z.record(z.enum(POLICY_KEYS), t(4000)).default({}),
 });
 export type StatementDetailsInput = z.infer<typeof statementDetailsInput>;

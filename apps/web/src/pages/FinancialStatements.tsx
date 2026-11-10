@@ -9,6 +9,8 @@ import { useState, type FormEvent } from 'react';
 import {
   ASSURANCE,
   ASSURANCE_LABELS,
+  ESTIMATE_NOTE,
+  ESTIMATE_SHORT,
   formatDate,
   POLICY_KEYS,
   POLICY_LABELS,
@@ -50,8 +52,21 @@ interface StatementsView {
     sfp: { totalAssets: Amounts; totalLiabilities: Amounts; equity: Amounts & { label: string }; totalEquityAndLiabilities: Amounts };
     sci: { revenue: (Amounts & { label: string })[]; grossProfit: Amounts; profit: Amounts };
     scf: { netChange: Amounts; closing: Amounts };
-    checks: { label: string; ok: boolean; detail: string }[];
+    checks: { label: string; ok: boolean; detail: string; level?: 'look' }[];
     policyDefaults?: Record<PolicyKey, string>;
+    company: { businessType: string };
+    taxEstimate?: { profitCents: number; assessedLossCents: number; taxableCents: number; taxCents: number; sbc: boolean } | null;
+    publicInterest?: {
+      employees: number;
+      employeesWorkedOut: number;
+      liabilitiesCents: number;
+      shareholderLoansCents: number;
+      turnoverCents: number;
+      holders: number;
+      parts: { employees: number; liabilities: number; turnover: number; holders: number };
+      score: number;
+      meaning: { audit: boolean; review: null | 'auditor' | 'accounting_officer'; framework: string; summary: string };
+    } | null;
   };
   status: StatementStatus;
   row: {
@@ -69,6 +84,7 @@ interface StatementsView {
 
 export function FinancialStatements() {
   const isOwner = true;
+  const { ref, settings } = useAuthed();
   const years = useApi<Year[]>('/api/statements');
   const [picked, setPicked] = useState<string | null>(null);
   const fyEnd = picked ?? years.data?.[0]?.fyEnd ?? null;
@@ -90,7 +106,36 @@ export function FinancialStatements() {
   const v = view.data;
   const s = v?.statements;
   const status = v?.status ?? 'draft';
-  const ready = Boolean(s && s.checks.every((c) => c.ok) && !v?.audit.some((a) => a.level === 'fail'));
+  // What's for the accountant to look at never stops the signing; the rest must pass.
+  const stops = (s?.checks ?? []).filter((c) => c.level !== 'look');
+  const looks = (s?.checks ?? []).filter((c) => c.level === 'look');
+  const ready = Boolean(s && stops.every((c) => c.ok) && !v?.audit.some((a) => a.level === 'fail'));
+  const cc = s?.company?.businessType === 'cc';
+  const report = cc ? 'accounting officer’s report' : 'compiler’s report';
+  const accountId = (key: string) => (ref.accounts as { id: string; systemKey: string | null }[]).find((a) => a.systemKey === key)?.id;
+  const bookTax = async () => {
+    if (!s?.taxEstimate) return;
+    const debit = accountId('income_tax');
+    const credit = accountId('income_tax_payable');
+    if (!debit || !credit) return toast('The income tax accounts aren’t in the chart of accounts', 'error');
+    if (!confirm(`Book R${(s.taxEstimate.taxCents / 100).toFixed(2)} as the income tax for the year? ${ESTIMATE_SHORT}`)) return;
+    try {
+      await api('/api/journals', {
+        body: {
+          date: s.fyEnd,
+          description: 'Income tax for the year (Shap’s estimate, to be confirmed by the accountant)',
+          lines: [
+            { accountId: debit, debitCents: s.taxEstimate.taxCents },
+            { accountId: credit, creditCents: s.taxEstimate.taxCents },
+          ],
+        },
+      });
+      toast('Booked: the statements show it now');
+      await reload();
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Couldn’t book it', 'error');
+    }
+  };
 
   if (years.loading && !years.data) return <Loading />;
   if (years.error) return <ErrorBox error={years.error} onRetry={years.reload} />;
@@ -175,7 +220,7 @@ export function FinancialStatements() {
 
           <div className="panel panel-pad stack-sm">
             <h3 className="small strong">Checks</h3>
-            {s.checks.map((c) => (
+            {stops.map((c) => (
               <div key={c.label} className={`small ${c.ok ? 'ok-text' : 'warn-text'}`}>
                 <Icon name={c.ok ? 'check' : 'alert'} size={14} /> {c.label}
                 {!c.ok && c.detail && <div className="xs">{c.detail}</div>}
@@ -214,17 +259,48 @@ export function FinancialStatements() {
             )}
           </div>
 
+          {looks.length > 0 && (
+            <div className="panel panel-pad stack-sm">
+              <h3 className="small strong">For your accountant to look at</h3>
+              <p className="xs muted">What the standard asks that the books alone can’t settle. None of it stops the signing: your accountant decides, and adjusts with a journal where it matters.</p>
+              {looks.map((c) => (
+                <div key={c.label} className={`small ${c.ok ? 'ok-text' : 'warn-text'}`}>
+                  <Icon name={c.ok ? 'check' : 'alert'} size={14} /> {c.label}
+                  {!c.ok && c.detail && <div className="xs">{c.detail}</div>}
+                  {!c.ok && c.label.startsWith('The year’s income tax') && s.taxEstimate && (status === 'draft' || status === 'sent') && (
+                    <button type="button" className="btn small" style={{ marginTop: 6 }} onClick={() => void bookTax()}>
+                      Book <Money cents={s.taxEstimate.taxCents} /> as the year’s tax
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {s.publicInterest && (
+            <div className="panel panel-pad stack-sm">
+              <h3 className="small strong">Public interest score: {s.publicInterest.score}</h3>
+              <div className="xs muted">
+                {s.publicInterest.parts.employees} for the average employees ({s.publicInterest.employees}) + {s.publicInterest.parts.liabilities} for the liabilities (<Money cents={s.publicInterest.liabilitiesCents} whole />) + {s.publicInterest.parts.turnover} for the turnover (
+                <Money cents={s.publicInterest.turnoverCents} whole />) + {s.publicInterest.parts.holders} for the {cc ? 'members' : 'shareholders'} (regulation 26(2)).
+              </div>
+              <div className="small">{s.publicInterest.meaning.summary}</div>
+              <div className="xs muted">Framework: {s.publicInterest.meaning.framework}.</div>
+              <p className="xs muted">{ESTIMATE_NOTE} Change the employees or {cc ? 'members' : 'shareholders'} under Wording and details.</p>
+            </div>
+          )}
+
           {/* What can be done next, by who's signed in and where the statements are. */}
           <div className="row wrap">
             {isOwner && (status === 'draft' || status === 'sent') && (
               <>
-                <button className="btn primary" onClick={() => void share(`/api/statements/${s.fyEnd}/pdf`, `${s.title} ${s.period}`, `Good day,\n\nPlease find our draft financial statements ${s.period} attached, prepared in Shap Pocket. Once you’ve compiled them, please send back your signed compiler’s report.\n\nKind regards`)}>
+                <button className="btn primary" onClick={() => void share(`/api/statements/${s.fyEnd}/pdf`, `${s.title} ${s.period}`, `Good day,\n\nPlease find our draft financial statements ${s.period} attached, prepared in Shap Pocket. Once you’ve ${cc ? 'done your work as our accounting officer' : 'compiled them'}, please send back your signed ${report}.\n\nKind regards\n${settings.companyName}`)}>
                   <Icon name="share" size={18} />
                   Share with your accountant
                 </button>
                 <button className="btn" onClick={() => setForm('upload')} disabled={!ready}>
                   <Icon name="upload" size={18} />
-                  Upload the signed compiler’s report
+                  Upload the signed {report}
                 </button>
               </>
             )}
@@ -321,6 +397,26 @@ function DetailsFields({ initial, defaults, governing, onSaved }: { initial: Sta
           </span>
         </label>
       )}
+      {['company', 'inc', 'npc', 'cc'].includes(settings.businessType) && (
+        <fieldset className="fieldset stack-sm">
+          <legend className="small strong">For the public interest score</legend>
+          <div className="form-grid">
+            <Field label={settings.businessType === 'cc' ? 'Members' : 'Shareholders (individuals)'} hint={`Blank: one for each of the ${governing.many} below`}>
+              {(p) => <input {...p} className="input" type="number" min={0} value={d.piHolders ?? ''} onChange={(e) => set('piHolders', e.target.value === '' ? null : Math.max(0, Math.round(Number(e.target.value))))} />}
+            </Field>
+            <Field label="Average employees in the year" hint="Blank: worked out from payroll and the days logged">
+              {(p) => <input {...p} className="input" type="number" min={0} step={0.1} value={d.piEmployees ?? ''} onChange={(e) => set('piEmployees', e.target.value === '' ? null : Math.max(0, Number(e.target.value)))} />}
+            </Field>
+          </div>
+          <label className="check">
+            <input type="checkbox" checked={d.internallyCompiled} onChange={(e) => set('internallyCompiled', e.target.checked)} />
+            <span>
+              Compiled by someone in the business, not an independent accountant
+              <div className="xs muted">With a score of 100 or more, internally compiled statements must be audited (regulation 28).</div>
+            </span>
+          </label>
+        </fieldset>
+      )}
       <fieldset className="fieldset stack-sm">
         <legend className="small strong">{governing.many.charAt(0).toUpperCase() + governing.many.slice(1)}</legend>
         {d.directors.map((x, i) => (
@@ -348,7 +444,7 @@ function DetailsFields({ initial, defaults, governing, onSaved }: { initial: Sta
         <Field label="Holding company (optional)">{(p) => <input {...p} className="input" value={d.holdingCompany} onChange={(e) => set('holdingCompany', e.target.value)} />}</Field>
       </div>
       <fieldset className="fieldset stack-sm">
-        <legend className="small strong">The accountant (compiler)</legend>
+        <legend className="small strong">{settings.businessType === 'cc' ? 'The accounting officer (and compiler)' : 'The accountant (compiler)'}</legend>
         <div className="form-grid">
           <Field label="Name">{(p) => <input {...p} className="input" value={d.compiler.name} onChange={(e) => comp('name', e.target.value)} />}</Field>
           <Field label="Designation" hint="e.g. CA(SA), AGA(SA), Professional Accountant (SA)">{(p) => <input {...p} className="input" value={d.compiler.qualification} onChange={(e) => comp('qualification', e.target.value)} />}</Field>
@@ -393,6 +489,7 @@ function DetailsFields({ initial, defaults, governing, onSaved }: { initial: Sta
 }
 
 function UploadForm({ fyEnd, compiler, onClose, onDone }: { fyEnd: string; compiler: string; onClose: () => void; onDone: () => Promise<void> }) {
+  const cc = useAuthed().settings.businessType === 'cc';
   const [file, setFile] = useState<{ id: string; name: string } | null>(null);
   const [uploading, setUploading] = useState(false);
   const [name, setName] = useState(compiler);
@@ -413,7 +510,7 @@ function UploadForm({ fyEnd, compiler, onClose, onDone }: { fyEnd: string; compi
     }
   };
   return (
-    <Drawer title="The signed compiler’s report" sub="From your accountant: the report, or the whole signed set" onClose={onClose}>
+    <Drawer title={cc ? 'The signed accounting officer’s report' : 'The signed compiler’s report'} sub="From your accountant: the report, or the whole signed set" onClose={onClose}>
       <form className="stack" onSubmit={submit}>
         <p className="small muted">Uploading it freezes the statements at their figures as they stand now. Make sure it’s the report for this draft: if the books have changed since you shared it, share it again first.</p>
         <div className="row wrap">

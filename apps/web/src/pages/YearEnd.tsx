@@ -24,6 +24,7 @@ import { ARCHIVED_SLIP, fileToBase64, squeezePhoto } from '../lib/files';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
 import { ProfitShare } from '../components/ProfitShare';
+import { EstimateNote } from '../components/EstimateNote';
 
 const fmt = (c: number) => (c === 0 ? '–' : formatAmount(c));
 
@@ -516,6 +517,7 @@ export function ProvisionalTax() {
       <section className="panel table-wrap">
         <div className="panel-head">
           <strong>Provisional tax estimate · year ending {formatDate(data.fy.end, 'long')}</strong>
+          <EstimateNote />
           <div className="xs muted">
             {settings.companyName}
             {settings.regNumber ? ` · ${settings.regNumber}` : ''} · actual to {formatDate(data.asAt)} ({data.months} month{data.months === 1 ? '' : 's'})

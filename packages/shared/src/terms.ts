@@ -11,6 +11,16 @@ export const TERMS_VERSION = '2026-11-09';
 export const TERMS_URL = 'https://www.openworks.co.za/shap/terms/';
 export const DISCLAIMER_URL = 'https://www.openworks.co.za/shap/disclaimer/';
 
+/**
+ * Said with every figure Shap works out under tax law or company law (provisional tax, VAT, payroll
+ * taxes, turnover tax, the public interest score, the draft statements' tax): on the screens, on the
+ * PDFs and in the tax pack, the same words in Shap and Shap Pocket.
+ */
+export const ESTIMATE_NOTE =
+  'An estimate worked out from your books, as an aid. Shap is free software from OpenWorks IT, who are not accountants, tax practitioners or auditors, and this is not advice: check it with your accountant or tax practitioner before you rely on it or file anything.';
+/** The short form, where there's no room for the whole note. */
+export const ESTIMATE_SHORT = 'An estimate only, not advice: check it with your accountant before you rely on it.';
+
 /** The points that limit what OpenWorks is responsible for, in plain words (shown before agreeing). */
 export function termsPoints(app: 'shap' | 'pocket'): { title: string; body: string }[] {
   const where = app === 'pocket' ? 'on your phone (or in your browser)' : 'on the server you run it on';
