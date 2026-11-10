@@ -1,3 +1,4 @@
+import type { StatementLineKey } from '@shap/shared';
 import type { SaleVatCode, AccountType, CategoryKind, LineCategory, ProjectStatus, Role, SourceKind, WorkerKind, BusinessType } from '@shap/shared';
 
 export interface User {
@@ -97,6 +98,8 @@ export interface Source {
   active: boolean;
   statementsRequired?: boolean;
   statementsFrom?: string | null;
+  /** The till: cash takings at the counter (Sales). */
+  till?: boolean;
 }
 export interface Category {
   id: string;
@@ -118,6 +121,8 @@ export interface Account {
   name: string;
   type: AccountType;
   systemKey: string | null;
+  /** Where it shows on the financial statements (statement-lines.ts). */
+  statementLine?: StatementLineKey;
   active: boolean;
 }
 

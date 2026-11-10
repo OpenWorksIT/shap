@@ -2,6 +2,32 @@
 
 What changed in each version of Shap Pocket, newest first.
 
+## 1.6.0 (10 November 2026)
+
+Sales at the counter and the annual financial statements, from Shap 1.22. Each is switched on in
+setup, or in Settings → What you use.
+
+- **Sales**: a Sales tab for selling over the counter. Pick items from a quick list, take the
+  money into the till or the bank, and share the slip on WhatsApp or email. Each line keeps its
+  VAT class (standard, zero-rated, export, exempt); if you're not registered for VAT you sell
+  without it. Over R5 000, or with an export, the app asks for the customer (a full tax
+  invoice). A sale can be made an invoice afterwards, and refunded: a credit note for what came
+  back and the money paid out. Sales and refunds are never changed or deleted. (Stock records
+  are full Shap's: Shap Pocket sells without keeping them.)
+- **Financial statements** (Accounts → Financial statements): the year's statements drawn up from
+  your books under the IFRS for SMEs Accounting Standard. Share them with your accountant, upload
+  their signed compiler's report when it comes back, approve them, and the year is agreed and
+  closed.
+- **Where each account goes** on the statements (current or non-current and so on) is set on the
+  account in Settings → Chart of accounts; the app sets it for every account already.
+- A new kind of business in setup: **Shop, retail or trading**.
+- **Goods returned** on an invoice: a credit note for what came back, the money paid back or
+  taken off what's still owed.
+- **Bills to pay**: a supplier's credit note on account is taken off one of their bills (it waits
+  under Bills to pay until it is), so the bill shows what's really owed.
+- Reports and the accountant's export up to a past day (a year end) start at that day's
+  financial year, instead of refusing.
+
 ## 1.5.1 (9 November 2026)
 
 Fixes from the first code scanning (CodeQL) of Shap Pocket, and from an independent review of

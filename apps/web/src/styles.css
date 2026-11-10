@@ -2527,3 +2527,89 @@ button.list-row {
 .audit-clear {
   color: var(--ok);
 }
+/* ---------- Sales: the till ---------- */
+.till {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr);
+  align-items: start;
+}
+.till .cart {
+  position: sticky;
+  top: 12px;
+}
+.item-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+.item-tile {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  min-height: 84px;
+}
+.item-tile:hover {
+  border-color: var(--action);
+}
+.item-tile:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+.item-tile.on {
+  border-color: var(--action);
+  background: var(--action-soft);
+}
+.cart-lines {
+  margin: 0;
+  padding: 0;
+}
+.cart-line {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--rule-2);
+}
+.cart-line:last-child {
+  border-bottom: 0;
+}
+.cart-nums {
+  gap: 8px;
+  align-items: center;
+}
+.cart-nums .money-input {
+  width: 120px;
+}
+.stock-neg {
+  color: var(--alert);
+  font-weight: 700;
+}
+.till-bar {
+  display: none;
+}
+@media (max-width: 860px) {
+  .till {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .till .cart {
+    position: static;
+  }
+  .item-grid {
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  }
+  .till-bar {
+    display: flex;
+    position: sticky;
+    /* Above the tab bar and the feedback button. */
+    bottom: calc(124px + env(safe-area-inset-bottom));
+    z-index: 20;
+    justify-content: center;
+    box-shadow: var(--shadow);
+  }
+}

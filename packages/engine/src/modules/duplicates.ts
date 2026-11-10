@@ -29,7 +29,10 @@ const norm = (a: string) => `lower(regexp_replace(${a}.description, '[^A-Za-z0-9
 /** Which of two costs to keep: the one on a job, then one you captured, then one with a slip. */
 const rank = (a: string) =>
   `((case when ${a}.project_id is not null then 8 else 0 end) + (case when ${a}.note not like '${FROM_STATEMENT}' then 4 else 0 end) + (case when ${a}.receipt_id is not null then 2 else 0 end))`;
-const removable = (a: string) => `not exists (select 1 from assets x where x.cost_id = ${a}.id)`;
+// An asset purchase or a stock purchase (or supplier credit) is never the one removed: each is put
+// right where it was made (the asset register, a return or credit under Inventory).
+const removable = (a: string) =>
+  `not exists (select 1 from assets x where x.cost_id = ${a}.id) and not exists (select 1 from cost_categories xk where xk.id = ${a}.category_id and xk.kind = 'stock')`;
 
 export interface Duplicate {
   kind: 'imported_twice' | 'captured_twice';
@@ -202,8 +205,12 @@ export async function mergeCosts(tx: Db, removeId: string, keepId: string | null
   if (!c) return 'It was already removed';
   const [asset] = await tx`select 1 from assets where cost_id = ${removeId}`;
   if (asset) return 'The one to remove is an asset purchase';
+  const [stock] = await tx`select 1 from costs c join cost_categories k on k.id = c.category_id where c.id = ${removeId} and k.kind = 'stock'`;
+  if (stock) return 'The one to remove is a stock purchase: put it right under Inventory (a return or the supplier’s credit)';
   const [o] = keepId ? await tx<{ date: string; amountCents: number }[]>`select date::text, amount_cents from costs where id = ${keepId}` : [];
   if (keepId && !o) return 'The one to keep was deleted';
+  const [keepStock] = keepId ? await tx`select 1 from costs c join cost_categories k on k.id = c.category_id where c.id = ${keepId} and k.kind = 'stock'` : [];
+  if (keepStock && o && o.amountCents !== c.amountCents) return 'The one to keep is a stock purchase: its amount is its supplier invoice, so it can’t be rounded to the other';
   if (o && Math.abs(c.amountCents - o.amountCents) > 100) return 'The amounts differ by more than R1';
   await assertOpen(tx, c.date, ...(o ? [o.date] : []));
 

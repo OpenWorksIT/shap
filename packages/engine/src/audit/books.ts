@@ -22,7 +22,7 @@
  * audit (deploy/vps/audit-server.sh) and by the tests, which also break the books on purpose to
  * see each check catch it (test/books-audit.test.ts).
  */
-import { financialYear, formatZar, vatIncluded, vatPeriod, vatRateOn } from '@shap/shared';
+import { featureOn, financialYear, formatZar, vatIncluded, vatPeriod, vatRateOn } from '@shap/shared';
 import type { Ctx } from '../context.js';
 
 type Db = Ctx['sql'];
@@ -113,14 +113,15 @@ export async function auditBooks(db: Db, on = today()): Promise<AuditItem[]> {
   section = 'Debtors, creditors, VAT and payroll';
   const [deb] = await db<{ expected: number }[]>`
     select (coalesce(sum(d.total_cents), 0) - coalesce(sum(d.written_off_cents), 0)
-            - coalesce((select sum(r.amount_cents) from receipts r join documents i on i.id = r.invoice_id where i.kind = 'invoice' and i.status = 'issued'), 0))::bigint as expected
-    from documents d where d.kind = 'invoice' and d.status = 'issued'`;
+            - coalesce((select sum(r.amount_cents) from receipts r join documents i on i.id = r.invoice_id where i.kind in ('invoice', 'sale') and i.status = 'issued'), 0))::bigint as expected
+    from documents d where d.kind in ('invoice', 'sale') and d.status = 'issued'`;
   const debtors = await posted(['receivables']);
   if (debtors.app === n(deb!.expected)) ok(`the debtors account agrees with the open invoices (${rand(debtors.app)}${besides(debtors.byHand)})`);
   else fail(`the debtors account (${rand(debtors.app)}, not counting journals by hand or year-end adjustments) and the open invoices (${rand(n(deb!.expected))}) differ by ${rand(debtors.app - n(deb!.expected))}`);
 
   const [cred] = await db<{ owing: number }[]>`
-    select coalesce(sum(c.amount_cents - coalesce((select sum(p.amount_cents) from bill_payments p where p.cost_id = c.id), 0)), 0)::bigint as owing
+    select coalesce(sum(c.amount_cents - coalesce((select sum(p.amount_cents) from bill_payments p where p.cost_id = c.id), 0)
+                        + coalesce((select sum(p.amount_cents) from bill_payments p where p.credit_cost_id = c.id), 0)), 0)::bigint as owing
     from costs c join payment_sources s on s.id = c.source_id and s.role = 'bills'`;
   const payables = await posted(['payables']);
   const creditors = -payables.app;
@@ -282,6 +283,9 @@ export async function auditBooks(db: Db, on = today()): Promise<AuditItem[]> {
   if (!unnumbered.length) ok('everyone paid this tax year has an ID (or passport) and tax number for their IRP5');
   else warn(`paid this tax year without an ID or tax number (SARS rejects the EMP501 without them): ${few(unnumbered.map((u) => u.name))}`);
 
+  // ---------------------------------------------------------------- sales and stock
+  await salesAndStock(db, on, settings, { ok, warn, fail, setSection: (t) => (section = t), posted });
+
   // ---------------------------------------------------------------- safeguards
   section = 'Safeguards in the database';
   const triggers = new Set((await db<{ name: string }[]>`select tgname as name from pg_trigger where not tgisinternal`).map((t) => t.name));
@@ -289,6 +293,17 @@ export async function auditBooks(db: Db, on = today()): Promise<AuditItem[]> {
   else fail('the audit log can be changed: its safeguard (audit_log_no_update) is missing');
   if (triggers.has('journal_balanced')) ok('a journal that doesn’t balance is refused');
   else fail('journals that don’t balance can be saved: their safeguard (journal_balanced) is missing');
+  // Every table the ledger takes amounts from tells the report totals it changed (books_changed).
+  const read = (await db<{ t: string }[]>`
+    select distinct table_name as t from information_schema.view_table_usage
+    where view_name in ('ledger_core', 'ledger_detail') and table_name not in ('ledger_core', 'items', 'workers', 'work_types')`).map((r) => r.t);
+  const unwatched = read.filter((t) => !triggers.has(`${t}_books_changed`));
+  if (!unwatched.length) ok('every change to what the books are made of brings the report totals up to date');
+  else fail(`changes to ${unwatched.join(', ')} don't bring the report totals up to date: their safeguards (…_books_changed) are missing`);
+  const fixed = ['stock_moves_fixed', 'stock_claims_fixed', 'stock_claim_settlements_fixed', 'stock_purchase_lines_fixed', 'stock_takes_fixed', 'stock_take_lines_fixed', 'refunds_fixed'];
+  const loose = fixed.filter((t) => !triggers.has(t));
+  if (!loose.length) ok('stock movements, counts, supplier claims and refunds can only be added to, never changed or deleted');
+  else fail(`stock records can be changed: their safeguards are missing (${loose.join(', ')})`);
 
   return items;
 }
@@ -299,3 +314,157 @@ export const tally = (items: AuditItem[]) => ({
   warns: items.filter((i) => i.level === 'warn').length,
   oks: items.filter((i) => i.level === 'ok').length,
 });
+
+type Say = (text: string) => void;
+
+/**
+ * Sales and stock (docs/SALES_AND_STOCK.md): every sale paid, every refund within what was paid,
+ * the stock's quantity and value the sum of its movements, the inventory account that value, the
+ * stock purchases clearing account empty, claims against suppliers what's still owed back, every
+ * stocked line on an invoice or sale with its movement, and stock counted and not valued above
+ * what it sells for (IFRS for SMEs 27.2-27.4).
+ */
+async function salesAndStock(
+  db: Db,
+  on: string,
+  settings: { features: Record<string, boolean> | null; vatRegistered: boolean },
+  a: { ok: Say; warn: Say; fail: Say; setSection: (t: string) => void; posted: (keys: string[]) => Promise<{ app: number; byHand: number }> },
+): Promise<void> {
+  const { ok, warn, fail } = a;
+  const [has] = await db<{ sales: number; moves: number; refunds: number }[]>`
+    select (select count(*)::int from documents where sale_number is not null) as sales, (select count(*)::int from stock_moves) as moves, (select count(*)::int from refunds) as refunds`;
+  const salesOn = featureOn(settings.features, 'sales');
+  const stockOn = featureOn(settings.features, 'inventory');
+  if (!has!.sales && !has!.moves && !has!.refunds && !salesOn && !stockOn) return;
+
+  a.setSection('Sales');
+  const unpaid = await db<{ number: string }[]>`
+    select coalesce(d.sale_number, d.number) as number from documents d left join receipts r on r.id = d.sale_receipt_id
+    where d.sale_number is not null and d.status = 'issued' and (r.id is null or r.amount_cents <> d.total_cents or r.invoice_id <> d.id
+      -- and nothing else paid on it (money back on a sale is a refund, never a payment the other way)
+      or exists (select 1 from receipts x where x.invoice_id = d.id and x.method <> 'credit' and x.id <> d.sale_receipt_id)) limit 20`;
+  if (!unpaid.length) ok(`every sale has its payment, for its full amount (${has!.sales} sales)`);
+  else fail(`sales without their payment (or a payment for another amount): ${few(unpaid.map((u) => u.number))}`);
+
+  const over = await db<{ number: string }[]>`
+    select d.number from documents d
+    where d.kind in ('sale', 'invoice') and exists (select 1 from documents cn join refunds rf on rf.credit_note_id = cn.id where cn.credited_invoice_id = d.id)
+      and (select coalesce(sum(rf.amount_cents), 0) from refunds rf join documents cn on cn.id = rf.credit_note_id where cn.credited_invoice_id = d.id)
+        > (select coalesce(sum(r.amount_cents), 0) from receipts r where r.invoice_id = d.id and r.method <> 'credit')
+    limit 20`;
+  const refundsOff = await db<{ number: string }[]>`
+    select cn.number from refunds rf join documents cn on cn.id = rf.credit_note_id where rf.amount_cents <> cn.total_cents or cn.status <> 'issued' or cn.kind <> 'credit_note' limit 20`;
+  if (!over.length && !refundsOff.length) ok(`every refund is for its credit note, and no more than was paid (${has!.refunds} refunds)`);
+  if (over.length) fail(`more refunded than was paid: ${few(over.map((o) => o.number))}`);
+  if (refundsOff.length) fail(`refunds that aren't for their credit note's amount (or on a voided one): ${few(refundsOff.map((r) => r.number))}`);
+
+  // Credit notes: each settles what's owed (a payment from the credit notes account) or is refunded.
+  const [cn] = await db<{ expected: string }[]>`
+    select (coalesce((select sum(total_cents) from documents where kind = 'credit_note' and status = 'issued'), 0)
+      - coalesce((select sum(r.amount_cents) from receipts r join payment_sources s on s.id = r.source_id where s.role = 'credit_notes'), 0)
+      - coalesce((select sum(amount_cents) from refunds), 0)) as expected`;
+  const clearing = await a.posted(['credit_clearing']);
+  if (-clearing.app === n(cn!.expected)) ok('every credit note is either taken off what was owed or refunded');
+  else fail(`credit notes issued and what settled them differ by ${rand(-clearing.app - n(cn!.expected))} (the credit notes account)`);
+
+  // A sale's own numbers can't go missing: a sale is never deleted.
+  const sold = (await db<{ number: string }[]>`select sale_number as number from documents where sale_number is not null`).map((x) => x.number);
+  const bySeries = new Map<string, number[]>();
+  for (const num of sold) {
+    const m = /^(.*?)(\d+)$/.exec(num);
+    if (m) bySeries.set(m[1]!, [...(bySeries.get(m[1]!) ?? []), Number(m[2])]);
+  }
+  const missing: string[] = [];
+  for (const [prefix, nums] of bySeries) {
+    const sorted = [...new Set(nums)].sort((x, y) => x - y);
+    for (let i = 1; i < sorted.length && missing.length < 10; i++) if (sorted[i]! - sorted[i - 1]! > 1) missing.push(`${prefix}… after ${sorted[i - 1]}`);
+  }
+  if (!missing.length) ok('sale numbers run in sequence');
+  else warn(`sale numbers with gaps: ${few(missing)} (a sale is never deleted, so this needs a look)`);
+
+  if (!has!.moves && !stockOn) return;
+  a.setSection('Stock');
+  const [tot] = await db<{ moves: string; items: string }[]>`
+    select (select coalesce(sum(value_cents), 0) from stock_moves) as moves, (select coalesce(sum(stock_value_cents), 0) from items) as items`;
+  const inv = await a.posted(['inventory']);
+  if (inv.app === n(tot!.moves) && n(tot!.moves) === n(tot!.items)) ok(`the inventory account is the stock's value, movement by movement (${rand(inv.app)}${inv.byHand ? `; journals by hand add ${rand(inv.byHand)}` : ''})`);
+  else fail(`the inventory account (${rand(inv.app)}), the stock movements (${rand(n(tot!.moves))}) and the items' stock values (${rand(n(tot!.items))}) don't agree`);
+
+  const drift = await db<{ description: string }[]>`
+    select i.description from items i
+    left join lateral (select coalesce(sum(qty), 0) as qty, coalesce(sum(value_cents), 0) as value from stock_moves m where m.item_id = i.id) s on true
+    left join lateral (select qty_after, value_after_cents from stock_moves m where m.item_id = i.id order by seq desc limit 1) l on true
+    where i.qty_on_hand <> s.qty or i.stock_value_cents <> s.value
+       or (l.qty_after is not null and (l.qty_after <> i.qty_on_hand or l.value_after_cents <> i.stock_value_cents)) limit 20`;
+  if (!drift.length) ok('each item’s stock is the sum of its movements');
+  else fail(`items whose stock isn't the sum of their movements: ${few(drift.map((d) => d.description))}`);
+
+  const odd = await db<{ description: string }[]>`
+    select description from items where (qty_on_hand = 0 and stock_value_cents <> 0) or (qty_on_hand > 0 and stock_value_cents < 0) limit 20`;
+  if (!odd.length) ok('no stock is valued at less than nothing, or worth something with none left');
+  else fail(`stock valued oddly (worth something with none left, or less than nothing): ${few(odd.map((o) => o.description))}`);
+
+  const negative = await db<{ description: string; qty: string }[]>`select description, qty_on_hand as qty from items where qty_on_hand < 0 order by description limit 20`;
+  if (negative.length) warn(`sold more than was in stock: ${few(negative.map((x) => `${x.description} (${Number(x.qty)})`))}. Capture the purchase, or count it.`);
+
+  const stockClearing = await a.posted(['stock_clearing']);
+  if (stockClearing.app === 0) ok('every stock purchase and supplier credit is fully accounted for in stock and claims');
+  else fail(`${rand(stockClearing.app)} is left in stock purchases (clearing): a purchase or credit not fully allocated`);
+  // Opening stock is cleared by the opening balances, which are journals by hand: all of it counts.
+  const opening = await a.posted(['stock_opening']);
+  const openingLeft = opening.app + opening.byHand;
+  if (openingLeft !== 0) warn(`the opening stock and the opening balances' inventory differ by ${rand(openingLeft)} (Opening stock account)`);
+
+  const [claims] = await db<{ left: string }[]>`
+    select coalesce(sum(c.value_cents), 0) - coalesce((select sum(amount_cents) from stock_claim_settlements where claim_id is not null), 0) as left from stock_claims c`;
+  const claimAcc = await a.posted(['supplier_claims']);
+  if (claimAcc.app === n(claims!.left)) ok(`claims against suppliers agree with what's still owed back (${rand(claimAcc.app)})`);
+  else fail(`the claims account (${rand(claimAcc.app)}) and the open claims (${rand(n(claims!.left))}) differ`);
+  const old = await db<{ supplier: string; left: string }[]>`
+    select c.supplier, c.value_cents - coalesce((select sum(amount_cents) from stock_claim_settlements x where x.claim_id = c.id), 0) as left
+    from stock_claims c where c.date < ${on}::date - 60
+      and c.value_cents > coalesce((select sum(amount_cents) from stock_claim_settlements x where x.claim_id = c.id), 0)`;
+  if (old.length) warn(`claims against suppliers open for more than 60 days: ${few(old.map((o) => `${o.supplier} ${rand(n(o.left))}`))}. Chase the credit, or write it off.`);
+
+  const badPurchases = await db<{ supplier: string; reference: string }[]>`
+    select c.supplier, c.bill_number as reference from costs c join cost_categories k on k.id = c.category_id and k.kind = 'stock'
+    where c.amount_cents > 0 and (c.amount_cents - c.vat_cents) <> coalesce((select sum(line_cents) from stock_purchase_lines pl where pl.cost_id = c.id), 0)
+    union all
+    select c.supplier, c.bill_number from stock_purchase_lines pl join costs c on c.id = pl.cost_id
+    where pl.line_cents <> coalesce((select sum(value_cents) from stock_moves m where m.purchase_line_id = pl.id and m.kind = 'purchase'), 0)
+      + coalesce((select sum(value_cents) from stock_claims s where s.cost_id = pl.cost_id and s.item_id = pl.item_id and s.kind = 'short'), 0)
+      and not exists (select 1 from stock_purchase_lines o where o.cost_id = pl.cost_id and o.item_id = pl.item_id and o.id <> pl.id)
+    limit 20`;
+  if (!badPurchases.length) ok('every stock purchase’s lines add up to it, each into stock or claimed');
+  else fail(`stock purchases whose lines don't add up: ${few(badPurchases.map((b) => `${b.supplier} ${b.reference}`))}`);
+
+  const unmoved = await db<{ number: string }[]>`
+    select d.number from document_lines l join documents d on d.id = l.document_id join items i on i.id = l.item_id
+    where i.stocked and l.qty > 0 and d.kind in ('sale', 'invoice') and d.status in ('issued', 'void')
+      and coalesce((select sum(-m.qty) from stock_moves m where m.document_line_id = l.id), 0) <> case when d.status = 'void' then 0 else l.qty end
+      -- (A line issued before the item's stock was kept, this time round, never moved stock: only those since.)
+      and (exists (select 1 from stock_moves m where m.document_line_id = l.id)
+           or coalesce(d.issued_at, d.created_at) > coalesce(i.stocked_since, (select min(m.created_at) from stock_moves m where m.item_id = i.id)))
+    union all
+    select d.number from document_lines l join documents d on d.id = l.document_id
+    where l.restock and d.kind = 'credit_note' and d.status in ('issued', 'void')
+      and coalesce((select sum(m.qty) from stock_moves m where m.document_line_id = l.id), 0) <> case when d.status = 'void' then 0 else l.qty end
+    limit 20`;
+  if (!unmoved.length) ok('every stocked item sold, invoiced or taken back moved stock by exactly its quantity');
+  else fail(`stocked items on these that didn't move stock by their quantity: ${few(unmoved.map((u) => u.number))}`);
+
+  const above = await db<{ description: string }[]>`
+    select description from items where qty_on_hand > 0 and unit_price_cents > 0
+      and stock_value_cents / qty_on_hand > case when ${settings.vatRegistered} and price_includes_vat and vat_code = 'standard'
+                                                 then unit_price_cents * 10000.0 / (10000 + ${vatRateOn(on)}) else unit_price_cents end
+    order by description limit 20`;
+  if (!above.length) ok('no stock is valued above what it sells for');
+  else warn(`stock valued above its selling price (write it down to what it will sell for, IFRS for SMEs 27.2): ${few(above.map((x) => x.description))}`);
+
+  const uncounted = await db<{ description: string }[]>`
+    select i.description from items i where i.stocked and i.qty_on_hand <> 0
+      and not exists (select 1 from stock_take_lines l join stock_takes t on t.id = l.stock_take_id where l.item_id = i.id and t.date >= ${on}::date - 365)
+    order by i.description limit 50`;
+  if (!uncounted.length) ok('all stock on hand has been counted in the last year');
+  else warn(`stock not counted in the last year: ${few(uncounted.map((u) => u.description))}. A count at the year end is what the financial statements rest on.`);
+}

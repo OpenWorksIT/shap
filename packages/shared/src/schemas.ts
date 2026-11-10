@@ -1,3 +1,4 @@
+import { lineFits, STATEMENT_LINE_KEYS, type StatementLineKey } from './statement-lines.js';
 import { z } from 'zod';
 import { BUSINESS_TYPES } from './entities.js';
 import { clientVatNumberProblem, compact, idNumberProblem, taxNumberProblem } from './ids.js';
@@ -262,6 +263,8 @@ export const documentLineInput = z.object({
   unitPriceCents: cents,
   /** What kind of supply the line is (vat.ts): standard-rated unless said otherwise. */
   vatCode: z.enum(SALE_VAT_CODES).default('standard'),
+  /** The item sold (a stocked one moves stock when the invoice is issued). */
+  itemId: optionalUuid,
 });
 
 export const documentInput = z.object({
@@ -311,12 +314,16 @@ export const receiptInput = z.object({
   note: text(300).default(''),
 });
 
-export const accountInput = z.object({
-  code: text(10).min(1, 'Give it a code, e.g. 6200'),
-  name: text(120).min(1, 'Name is needed'),
-  type: z.enum(ACCOUNT_TYPES),
-  active: z.boolean().default(true),
-});
+export const accountInput = z
+  .object({
+    code: text(10).min(1, 'Give it a code, e.g. 6200'),
+    name: text(120).min(1, 'Name is needed'),
+    type: z.enum(ACCOUNT_TYPES),
+    /** Where it shows on the financial statements (statement-lines.ts); left out, Shap picks by type. */
+    statementLine: z.enum(STATEMENT_LINE_KEYS as [StatementLineKey, ...StatementLineKey[]]).optional(),
+    active: z.boolean().default(true),
+  })
+  .refine((a) => !a.statementLine || lineFits(a.statementLine, a.type), { message: 'That line of the financial statements doesn’t fit this kind of account', path: ['statementLine'] });
 
 export const sourceInput = z.object({
   name: text(80).min(1, 'Name is needed'),
@@ -510,6 +517,13 @@ export const billPaymentInput = z.object({
   note: text(300).default(''),
 });
 
+/** A supplier's credit note taken off one of their bills. */
+export const billCreditInput = z.object({
+  date: isoDate,
+  creditId: uuid,
+  amountCents: cents.refine((v) => v > 0, 'Enter the amount'),
+});
+
 export const tripInput = z.object({
   date: isoDate,
   fromPlace: text(200).default(''),
@@ -532,4 +546,145 @@ export const timeEntryInput = z.object({
   startedAt: z.string().datetime({ offset: true }),
   endedAt: z.string().datetime({ offset: true }).nullable().default(null),
   note: text(300).default(''),
+});
+
+// ---------------------------------------------------------------- sales and stock (docs/SALES_AND_STOCK.md)
+const qty = z.number().gt(0, 'A quantity more than nothing').max(1_000_000);
+
+export const saleLineInput = z.object({
+  itemId: optionalUuid,
+  description: text(300).min(1, 'Describe what was sold'),
+  qty,
+  unit: text(20).default(''),
+  /** As typed, including VAT or not as the sale says. Negative for a discount line. */
+  unitPriceCents: cents,
+  vatCode: z.enum(SALE_VAT_CODES).default('standard'),
+  category: z.enum(LINE_CATEGORIES).default('goods'),
+});
+
+/** A sale at the counter, paid on the spot. With a client it's an invoice paid at once. */
+export const saleInput = z.object({
+  date: isoDate,
+  sourceId: uuid,
+  method: z.enum(PAYMENT_METHODS).default('cash'),
+  reference: text(80).default(''),
+  /** Prices as on the shelf, VAT included (usual at a counter), or excluding it. */
+  pricesIncludeVat: z.boolean().default(true),
+  customerName: text(120).default(''),
+  clientId: optionalUuid,
+  note: text(500).default(''),
+  lines: z.array(saleLineInput).min(1, 'Add something to sell').max(200),
+});
+
+/** A sale made into an invoice afterwards: the client's details on it, the amounts as they were. */
+export const saleToInvoiceInput = z.object({ clientId: uuid });
+
+/**
+ * Goods back on a sale or an invoice: a credit note for what's returned, the money paid out (a
+ * refund), or, on an invoice still owed, taken off what's owed.
+ */
+export const refundInput = z.object({
+  date: isoDate,
+  money: z.enum(['paid_out', 'off_owing']).default('paid_out'),
+  /** Where the money was paid out of (a refund). */
+  sourceId: optionalUuid,
+  method: z.enum(PAYMENT_METHODS).default('cash'),
+  reference: text(80).default(''),
+  reason: text(300).min(2, 'Say why it’s refunded (it goes on the credit note)'),
+  lines: z
+    .array(z.object({ lineId: uuid, qty, restock: z.boolean().default(true) }))
+    .min(1, 'Choose what’s being returned')
+    .max(200),
+});
+
+export const itemInput = z.object({
+  description: text(200).min(1, 'Name the item'),
+  sku: text(40).default(''),
+  category: z.enum(LINE_CATEGORIES).default('goods'),
+  unit: text(20).default(''),
+  unitPriceCents: positiveCents.default(0),
+  priceIncludesVat: z.boolean().default(true),
+  vatCode: z.enum(SALE_VAT_CODES).default('standard'),
+  stocked: z.boolean().default(false),
+  reorderLevel: z.number().min(0).max(1_000_000).default(0),
+  active: z.boolean().default(true),
+});
+
+/** Stock already on hand when an item starts being tracked. */
+export const openingStockInput = z.object({
+  date: isoDate,
+  qty,
+  unitCostCents: positiveCents,
+  /** Already in the books as a cost (bought before), or part of the opening balances moved in. */
+  from: z.enum(['costs', 'opening_balances']).default('costs'),
+  reason: text(300).default(''),
+});
+
+/** A supplier's invoice for stock: what was invoiced, and what arrived. */
+export const stockPurchaseInput = z.object({
+  date: isoDate,
+  supplier: text(120).min(1, 'Who is the supplier?'),
+  reference: text(60).default(''),
+  /** Where it was paid from, or the bills account (paid later). */
+  sourceId: uuid,
+  dueDate: isoDate.nullable().optional(),
+  receiptId: optionalUuid,
+  note: text(500).default(''),
+  lines: z
+    .array(
+      z.object({
+        itemId: uuid,
+        qtyInvoiced: qty,
+        /** Less than invoiced: short supplied (a claim against the supplier). Left out: all of it. */
+        qtyReceived: z.number().min(0).max(1_000_000).optional(),
+        /** Per unit, excluding VAT. */
+        unitCostCents: positiveCents,
+        vatCode: z.enum(['standard', 'zero', 'exempt', 'no_vat', 'not_claimable']).default('standard'),
+      }),
+    )
+    .min(1, 'Add what was bought')
+    .max(200),
+  /** The VAT on the supplier's invoice, if it differs from Shap's sum by their rounding (a cent or two). */
+  vatCents: positiveCents.optional(),
+});
+
+/** Stock sent back to the supplier: received in bad order, or the wrong item. */
+export const stockReturnInput = z.object({
+  date: isoDate,
+  supplier: text(120).min(1, 'Who is it going back to?'),
+  /** The purchase it came in on (its cost per unit is what the supplier owes back). */
+  costId: optionalUuid,
+  itemId: uuid,
+  qty,
+  reason: text(300).min(2, 'Say why it’s going back'),
+});
+
+/** A supplier's credit note: what it settles of the claims against them. */
+export const supplierCreditInput = z.object({
+  date: isoDate,
+  supplier: text(120).min(1, 'Which supplier?'),
+  reference: text(60).default(''),
+  /** Where the money goes: the bills account (less owed) or back into the bank. */
+  sourceId: uuid,
+  /** What they credited, including VAT, and the VAT on it. */
+  amountCents: positiveCents.refine((v) => v > 0, 'How much did they credit?'),
+  vatCents: positiveCents.default(0),
+  vatCode: z.enum(['standard', 'zero', 'exempt', 'no_vat', 'not_claimable']).default('standard'),
+  /** The claims it settles, oldest first; anything beyond them is a discount on stock bought. */
+  claimIds: z.array(uuid).max(100).default([]),
+  /** Taken off what's owed to them: the bill it comes off (with "Not paid yet"). */
+  billId: optionalUuid,
+  note: text(500).default(''),
+});
+
+export const claimWriteOffInput = z.object({ date: isoDate, reason: text(300).min(2, 'Say why it’s written off') });
+
+/** A count of what's on the shelf: each difference corrected, with why. */
+export const stockTakeInput = z.object({
+  date: isoDate,
+  note: text(500).default(''),
+  lines: z
+    .array(z.object({ itemId: uuid, countedQty: z.number().min(0).max(1_000_000), reason: text(300).default('') }))
+    .min(1, 'Count at least one item')
+    .max(5000),
 });

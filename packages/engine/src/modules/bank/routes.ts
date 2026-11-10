@@ -223,11 +223,13 @@ async function link(tx: Db, line: LineRow, items: { kind: Kind; id: string }[]) 
     const diff = -line.amountCents - t!.total;
     if (diff !== 0 && Math.abs(diff) <= HAND_ROUNDING_CENTS) {
       const note = `Rounded by ${diff > 0 ? '+' : '−'}R${(Math.abs(diff) / 100).toFixed(2)} to match the statement`;
-      const [big] = await tx<{ id: string }[]>`select id from costs where id = any(${costIds}::uuid[]) order by amount_cents desc limit 1`;
-      await tx`update bank_matches m set prev_amount_cents = c.amount_cents, prev_note = c.note from costs c
-        where m.kind = 'cost' and m.record_id = c.id and c.id = ${big!.id} and m.prev_amount_cents is null`;
-      await tx`update costs set amount_cents = amount_cents + ${diff}, note = case when note = '' then ${note} else note || ' · ' || ${note} end
-        where id = ${big!.id}`;
+      // (Never a stock purchase: its amount is its supplier invoice, line by line into stock.)
+      const [big] = await tx<{ id: string }[]>`select c.id from costs c join cost_categories k on k.id = c.category_id
+        where c.id = any(${costIds}::uuid[]) and k.kind <> 'stock' order by c.amount_cents desc limit 1`;
+      if (big) await tx`update bank_matches m set prev_amount_cents = c.amount_cents, prev_note = c.note from costs c
+        where m.kind = 'cost' and m.record_id = c.id and c.id = ${big.id} and m.prev_amount_cents is null`;
+      if (big) await tx`update costs set amount_cents = amount_cents + ${diff}, note = case when note = '' then ${note} else note || ' · ' || ${note} end
+        where id = ${big.id}`;
     }
   }
 }
@@ -556,7 +558,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { sourceId, statementId } = q(req);
     if (!sourceId || !uuid.safeParse(sourceId).success) throw badRequest('Choose an account');
     const { lines, matched, suggestions, rejectedCount } = await recon(sourceId, statementId && uuid.safeParse(statementId).success ? statementId : null);
-    const categories = await sql<{ id: string; name: string; active: boolean }[]>`select id, name, active from cost_categories`;
+    const categories = await sql<{ id: string; name: string; active: boolean }[]>`select id, name, active from cost_categories where kind <> 'stock'`;
     const history = await sql<{ supplier: string; categoryId: string }[]>`
       select supplier, category_id from costs where supplier <> '' order by date desc limit 3000`;
     const [src] = await sql<{ name: string; accountId: string }[]>`select name, account_id from payment_sources where id = ${sourceId}`;
@@ -798,6 +800,9 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
           created++;
           continue;
         }
+        // Stock comes in under Inventory, line by line (its supplier invoice), then is matched here.
+        const [kind] = await tx<{ kind: string }[]>`select kind from cost_categories where id = ${it.categoryId}`;
+        if (kind?.kind === 'stock') throw badRequest(`${line.date} ${line.description}: stock is bought in under Inventory (a supplier invoice), then matched to this line`);
         // Money out is a cost; money in on a cost type is a refund (a negative cost).
         const [c] = await tx<{ id: string }[]>`
           insert into costs (date, description, amount_cents, supplier, category_id, source_id, project_id, note, created_by)

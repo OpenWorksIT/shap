@@ -30,7 +30,7 @@ const fileSchema = z.object({
     // The same limits as typing them into Settings (lengths, an accent that's a colour).
     .array(brandInput.omit({ logoLayout: true }).extend({ logo }))
     .default([]),
-  accounts: z.array(z.object({ code: z.string().min(1), name: z.string().min(1), type: z.enum(['asset', 'liability', 'equity', 'income', 'cost_of_sales', 'expense']), active: z.boolean().default(true) })).default([]),
+  accounts: z.array(z.object({ code: z.string().min(1), name: z.string().min(1), type: z.enum(['asset', 'liability', 'equity', 'income', 'cost_of_sales', 'expense']), statementLine: z.string().max(40).optional(), active: z.boolean().default(true) })).default([]),
   sources: z.array(z.object({ name: z.string().min(1), kind: z.enum(['bank', 'card', 'cash', 'owner', 'other']), account: z.string(), active: z.boolean().default(true) })).default([]),
   categories: z.array(z.object({ name: z.string().min(1), kind: z.enum(['materials', 'demo', 'overhead', 'asset', 'personal']), account: z.string(), active: z.boolean().default(true) })).default([]),
   workTypes: z.array(z.object({ name: z.string().min(1), active: z.boolean().default(true) })).default([]),
@@ -61,9 +61,9 @@ export async function exportCompanyFile(tx: Tx | import('../db/index.js').Sql): 
   const settings = await getSettings(tx);
   const brands = await tx<{ id: string; name: string; legalLine: string; email: string; phone: string; website: string; address: string; bankDetails: string; accent: string; active: boolean; logoMime: string | null; logoBytes: Buffer | null }[]>`
     select b.*, a.mime as logo_mime, a.bytes as logo_bytes from brands b left join attachments a on a.id = b.logo_id order by b.sort`;
-  const accounts = await tx<{ code: string; name: string; type: 'asset'; active: boolean }[]>`select code, name, type, active from accounts order by code`;
+  const accounts = await tx<{ code: string; name: string; type: 'asset'; statementLine: string; active: boolean }[]>`select code, name, type, statement_line, active from accounts order by code`;
   const sources = await tx<{ name: string; kind: 'bank'; account: string; active: boolean }[]>`select s.name, s.kind, a.code as account, s.active from payment_sources s join accounts a on a.id = s.account_id order by s.sort`;
-  const categories = await tx<{ name: string; kind: 'overhead'; account: string; active: boolean }[]>`select c.name, c.kind, a.code as account, c.active from cost_categories c join accounts a on a.id = c.account_id order by c.sort`;
+  const categories = await tx<{ name: string; kind: 'overhead'; account: string; active: boolean }[]>`select c.name, c.kind, a.code as account, c.active from cost_categories c join accounts a on a.id = c.account_id where c.kind <> 'stock' order by c.sort`; // (Stock purchases is Shap's own, in every install)
   const workTypes = await tx<{ name: string; active: boolean }[]>`select name, active from work_types order by sort`;
   const clients = await tx<{ code: string | null; name: string; contactPerson: string; email: string; phone: string; address: string; vatNumber: string; notes: string; brand: string | null; active: boolean }[]>`
     select c.code, c.name, c.contact_person, c.email, c.phone, c.address, c.vat_number, c.notes, b.name as brand, c.active
@@ -141,8 +141,9 @@ export async function restoreCompanyFile(tx: Tx, raw: unknown) {
 
   // Accounts and lists
   for (const a of file.accounts) {
-    await tx`insert into accounts (code, name, type, active) values (${a.code}, ${a.name}, ${a.type}, ${a.active})
-      on conflict (code) do update set name = excluded.name, active = excluded.active`;
+    // (A line that doesn't fit the type, or none, is set by the database's own rules.)
+    await tx`insert into accounts (code, name, type, statement_line, active) values (${a.code}, ${a.name}, ${a.type}, ${a.statementLine ?? null}, ${a.active})
+      on conflict (code) do update set name = excluded.name, active = excluded.active, statement_line = coalesce(excluded.statement_line, accounts.statement_line)`;
   }
   const acc = async (code: string) => {
     const [r] = await tx<{ id: string }[]>`select id from accounts where code = ${code}`;

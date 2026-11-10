@@ -29,6 +29,7 @@ const BillsPage = lazy(() => import('./pages/Bills'));
 const LogbookPage = lazy(() => import('./pages/Logbook'));
 const GuidesPage = lazy(() => import('./pages/Guides'));
 const MoveInPage = lazy(() => import('./pages/MoveIn'));
+const SalesPage = lazy(() => import('./pages/Sales'));
 
 export function App() {
   return (
@@ -90,6 +91,7 @@ function Books() {
           {has('workers') && <Route path="/workers" element={<WorkersPage />} />}
           {has('workers') && <Route path="/workers/:id" element={<WorkerPage />} />}
           {pays && <Route path="/payroll" element={<PayrollPage />} />}
+          {has('sales') && <Route path="/sales" element={<SalesPage />} />}
           <Route path="/costs" element={<CostsPage />} />
           {has('bills') && <Route path="/bills" element={<BillsPage />} />}
           {has('logbook') && <Route path="/logbook" element={<LogbookPage />} />}

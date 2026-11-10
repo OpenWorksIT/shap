@@ -54,6 +54,9 @@ const VAT_RATES: { from: string; bp: number }[] = [
   { from: '2018-04-01', bp: 1500 },
   { from: '1993-04-07', bp: 1400 },
 ];
+/** A full tax invoice (over R5 000) names the recipient and their address: VAT Act s20(4)(c). Up to it, an abridged one (a till slip) will do. */
+export const FULL_TAX_INVOICE_CENTS = 5_000_00;
+
 export const vatRateOn = (date: string) => (VAT_RATES.find((r) => date >= r.from) ?? VAT_RATES[VAT_RATES.length - 1]!).bp;
 
 export interface TotalsLine {

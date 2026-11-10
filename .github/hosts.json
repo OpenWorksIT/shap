@@ -34,7 +34,7 @@
   {
    "host": "www.acts.co.za",
    "kind": "link",
-   "why": "the VAT Act, cited"
+   "why": "the VAT Act and the Companies Act, cited"
   },
   {
    "host": "tradeshield-help.freshdesk.com",
@@ -65,6 +65,11 @@
    "host": "developer.android.com",
    "kind": "link",
    "why": "Google Play in-app updates, cited"
+  },
+  {
+   "host": "www.ifrs.org",
+   "kind": "link",
+   "why": "the IFRS for SMEs Accounting Standard, cited for the financial statements"
   }
  ]
 }

@@ -21,8 +21,12 @@ someone else.
   captured (optional).
 - **Jobs** (optional): what a job was quoted, what it cost, what it made.
 - **Workers** (optional): a helper's days and pay.
+- **Sales** (optional): sell over the counter from a quick item list, take the money, share the
+  slip, refund what comes back, make it an invoice for a business customer. (Stock records are
+  in full Shap.)
 - **The books, done for you**: income statement, balance sheet, assets with wear and tear, year
-  end for your accountant, CSV exports.
+  end for your accountant, CSV exports, and (optional) the annual financial statements under the
+  IFRS for SMEs Accounting Standard, shared with your accountant to compile and sign.
 - **Tax**: a provisional tax estimate on SARS's tables (sole proprietor or company), and a
   warning when your income gets near the VAT registration line (R2.3 million from April 2026).
 - **Only what you need**: switch off jobs, quotes, workers, bank statements, assets or trading

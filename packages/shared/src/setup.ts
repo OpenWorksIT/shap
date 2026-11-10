@@ -25,6 +25,7 @@ export const INDUSTRIES = [
   { key: 'catering', label: 'Catering or events', workflow: 'quote_invoice' },
   { key: 'health', label: 'Health or wellness practice', workflow: 'invoice' },
   { key: 'transport', label: 'Transport or deliveries', workflow: 'quote_invoice' },
+  { key: 'retail', label: 'Shop, retail or trading', workflow: 'invoice' },
   { key: 'other', label: 'Something else', workflow: 'quote_invoice' },
 ] as const satisfies readonly { key: string; label: string; workflow: Workflow }[];
 
@@ -59,7 +60,19 @@ export function extrasFor(industry: string): SetupExtras {
 }
 
 /** The switches the answers add up to. */
-export function featuresFor(a: { workflow: Workflow; employees: boolean; casual: boolean; company: boolean; dividends?: boolean; extras?: SetupExtras; payshap?: boolean }): Partial<Record<Feature, boolean>> {
+export function featuresFor(a: {
+  workflow: Workflow;
+  employees: boolean;
+  casual: boolean;
+  company: boolean;
+  dividends?: boolean;
+  extras?: SetupExtras;
+  payshap?: boolean;
+  /** Sells over the counter, and (only then) keeps its stock in Shap. */
+  selling?: { sales: boolean; inventory: boolean };
+  /** Shap drafts the annual financial statements (no: the accountant prepares them in their own software). */
+  statements?: boolean;
+}): Partial<Record<Feature, boolean>> {
   return {
     jobs: a.workflow === 'quote_job_invoice',
     quotes: a.workflow !== 'invoice',
@@ -68,6 +81,8 @@ export function featuresFor(a: { workflow: Workflow; employees: boolean; casual:
     dividends: a.company && (a.dividends ?? true),
     ...(a.extras ? { timeTracker: a.extras.hourly, logbook: a.extras.travel, bills: a.extras.bills, proformas: a.extras.upfront } : {}),
     ...(a.payshap != null ? { payshap: a.payshap } : {}),
+    ...(a.selling ? { sales: a.selling.sales, inventory: a.selling.sales && a.selling.inventory } : {}),
+    ...(a.statements != null ? { statements: a.statements } : {}),
   };
 }
 

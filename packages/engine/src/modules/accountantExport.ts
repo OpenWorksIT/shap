@@ -134,7 +134,7 @@ async function invoiceLines(db: Db, s: SettingsRow, q: Query) {
     from documents d join document_lines l on l.document_id = d.id
     left join clients c on c.id = d.client_id left join projects p on p.id = d.project_id
     left join accounts a on a.system_key = 'revenue_' || l.category
-    where d.kind in ('invoice', 'credit_note') and d.status = 'issued' and d.issue_date between ${q.from}::date and ${q.to}::date
+    where d.kind in ('invoice', 'credit_note', 'sale') and d.status = 'issued' and d.issue_date between ${q.from}::date and ${q.to}::date
     order by d.issue_date, d.number, l.sort`;
   const lineNo = new Map<string, number>();
   return rows.map((r) => {
@@ -144,7 +144,7 @@ async function invoiceLines(db: Db, s: SettingsRow, q: Query) {
     const total = sign * Number(r.lineTotalCents);
     return {
       number: r.number,
-      kind: r.kind === 'credit_note' ? 'Credit note' : 'Invoice',
+      kind: r.kind === 'credit_note' ? 'Credit note' : r.kind === 'sale' ? 'Sale' : 'Invoice',
       date: r.issueDate,
       dueDate: r.dueDate ?? r.issueDate,
       client: r.client ?? '',
@@ -187,7 +187,7 @@ async function invoices(db: Db, q: Query) {
       c.name as client, c.vat_number as client_vat, p.name as job, d.subtotal_cents, d.vat_cents, d.total_cents, coalesce(d.written_off_cents, 0)::bigint as written_off_cents,
       coalesce((select sum(amount_cents) from receipts r where r.invoice_id = d.id), 0)::bigint as paid, ci.number as credited
     from documents d left join clients c on c.id = d.client_id left join projects p on p.id = d.project_id left join documents ci on ci.id = d.credited_invoice_id
-    where d.kind in ('invoice', 'credit_note') and d.status = 'issued' and d.issue_date between ${q.from}::date and ${q.to}::date
+    where d.kind in ('invoice', 'credit_note', 'sale') and d.status = 'issued' and d.issue_date between ${q.from}::date and ${q.to}::date
     order by d.issue_date, d.number`;
   return rows.map((r) => {
     const sign = r.kind === 'credit_note' ? -1 : 1;
@@ -195,7 +195,7 @@ async function invoices(db: Db, q: Query) {
     const wo = r.kind === 'credit_note' ? 0 : Number(r.writtenOffCents);
     return {
       number: r.number,
-      kind: r.kind === 'credit_note' ? 'Credit note' : 'Invoice',
+      kind: r.kind === 'credit_note' ? 'Credit note' : r.kind === 'sale' ? 'Sale' : 'Invoice',
       date: r.issueDate,
       dueDate: r.dueDate,
       status: r.status,
@@ -324,9 +324,9 @@ export function registerAccountantExportRoutes(app: FastifyInstance, ctx: Ctx): 
       throw badRequest('Those export settings don’t look right');
     }
     const settings = await getSettings(sql);
-    const fy = financialYear(today(), settings.fyEndMonth);
-    const from = isIsoDate(raw.from) ? raw.from! : fy.start;
+    // Up to a day given (today by default), from the start of that day's financial year unless said.
     const to = isIsoDate(raw.to) ? raw.to! : today();
+    const from = isIsoDate(raw.from) ? raw.from! : financialYear(to, settings.fyEndMonth).start;
     if (from > to) throw badRequest('The start date is after the end date');
     const { rows, notes } = await buildExport(sql, dataset, { from, to, groupBy: options.groupBy });
     const { headers, cells } = formatExportRows(dataset, rows, options);

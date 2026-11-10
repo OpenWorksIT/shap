@@ -19,7 +19,7 @@ import type { Settings } from '../lib/types';
 import { MarketWhat } from '../components/MarketShare';
 import { setTone } from '../lib/words';
 
-const STEPS = ['hello', 'structure', 'industry', 'people', 'workflow', 'extras', 'logo', 'details', 'backup', 'tone', 'terms'] as const;
+const STEPS = ['hello', 'structure', 'industry', 'people', 'workflow', 'selling', 'extras', 'logo', 'details', 'backup', 'tone', 'terms'] as const;
 type Step = (typeof STEPS)[number];
 
 export default function WelcomePage({ canRestore = true }: { canRestore?: boolean }) {
@@ -44,6 +44,9 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
   const [extras, setExtras] = useState<SetupExtras>(() => extrasFor(settings.industry || ''));
   const [movingIn, setMovingIn] = useState<boolean | null>(null);
   const extra = (k: keyof SetupExtras) => (v: boolean) => setExtras((x) => ({ ...x, [k]: v }));
+  // Sells over the counter? (Stock records are full Shap's.) And does Shap Pocket draft the annual statements?
+  const [sales, setSales] = useState<boolean | null>(settings.features.sales ? true : null);
+  const [statements, setStatements] = useState<boolean | null>(settings.features.statements ? true : null);
   const [place, setPlace] = useState<BackupPlace | null>(null);
   const os = platform();
   const [error, setError] = useState('');
@@ -70,7 +73,7 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
     setError('');
     const features = {
       ...f.features,
-      ...featuresFor({ workflow, employees: Boolean(employees), casual: Boolean(casual), company: paysOut, dividends: dividendsAlways || (dividends ?? false), extras, payshap: Boolean(f.payshapId.trim()) }),
+      ...featuresFor({ workflow, employees: Boolean(employees), casual: Boolean(casual), company: paysOut, dividends: dividendsAlways || (dividends ?? false), extras, payshap: Boolean(f.payshapId.trim()), selling: { sales: Boolean(sales), inventory: false }, statements: Boolean(statements) }),
     };
     try {
       const employer = employees
@@ -306,10 +309,20 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
             {WORKFLOWS.map((w) => (
               <Choice key={w.key} on={workflow === w.key} onClick={() => setWorkflow(w.key)} title={w.label} hint={w.hint} />
             ))}
-            <p className="xs muted">
-              Selling stock? Shap doesn’t track inventory yet: a stock tracker is in the pipeline. Until then, keep your stock in your own tracker and use Shap for the quotes, invoices and books of what you sell.
-            </p>
             {nav()}
+          </Q>
+        )}
+
+        {step === 'selling' && (
+          <Q title="Do you sell things over the counter?" sub="Walk-in customers who pay on the spot: a stall, a shop, a salon’s products, parts at the counter.">
+            <YesNo
+              q="Do you do sales?"
+              hint="A Sales tab: pick what’s sold from a quick list, take the money, and hand over a slip. A big customer can have it turned into a tax invoice afterwards, and refunds are a tap."
+              value={sales}
+              onChange={setSales}
+            />
+            {sales && <p className="xs muted">Shap Pocket sells without keeping stock records: keep your stock list where you have it. Full Shap, on a computer, has the inventory (stock on hand, supplier invoices, stock takes).</p>}
+            {nav(sales !== null)}
           </Q>
         )}
 
@@ -324,9 +337,15 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
             <YesNo q="Do you drive for work?" hint="SARS’s travel logbook: each business trip and the odometer at the start and end of the tax year. You need it to claim your travel." value={extras.travel} onChange={extra('travel')} />
             <YesNo q="Do suppliers give you bills to pay later (an account)?" hint="Bills to pay: what you owe, when it’s due, and a nudge on Home before it is." value={extras.bills} onChange={extra('bills')} />
             <YesNo q="Do clients sometimes pay before you start?" hint="Pro-forma invoices: ask for the money up front, without a tax invoice. Once paid, turn it into the invoice." value={extras.upfront} onChange={extra('upfront')} />
+            <YesNo
+              q="Should Shap Pocket draw up your annual financial statements?"
+              hint="Yes: they’re prepared from your books (IFRS for SMEs), you send them to your accountant, and once their signed compiler’s report is back here the year is finished. No: your accountant prepares them in their own software from what Shap Pocket gives them."
+              value={statements}
+              onChange={setStatements}
+            />
             <YesNo q="Are you moving from another package?" hint="Sage, Xero, QuickBooks, Zoho or Invoice Ninja: after setup Shap opens Move in, to bring your clients, invoices and balances across." value={movingIn} onChange={setMovingIn} />
             <p className="xs muted">Switched on for everyone: credit notes, payment reminders on Home (with a message ready for WhatsApp) and step-by-step SARS filing guides.</p>
-            {nav(movingIn !== null)}
+            {nav(movingIn !== null && statements !== null)}
           </Q>
         )}
 

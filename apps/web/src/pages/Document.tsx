@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { DeleteRecord } from '../components/DeleteRecord';
 import { PdfPreview } from '../components/PdfPreview';
+import { SaleDrawer } from './Sales';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   addDays,
@@ -131,6 +132,8 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
   const [error, setError] = useState('');
   const [drawer, setDrawer] = useState<null | 'pay' | 'charge' | 'writeoff' | 'client' | 'time'>(null);
   const [preview, setPreview] = useState(false);
+  // Goods back on an issued invoice: a credit note for them, back into stock, paid back or off what's owed.
+  const [returns, setReturns] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const profile = useMemo(() => industryProfile(settings.industry), [settings.industry]);
   const L = (c: LineCategory) => lineLabel(settings.industry, c);
@@ -753,6 +756,11 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                     {doc.reminders ? <span className="xs muted"> (last {formatDate(String(doc.remindedAt).slice(0, 10))})</span> : null}
                   </button>
                 )}
+                {doc.kind === 'invoice' && doc.status === 'issued' && has('sales') && (
+                  <button type="button" className="btn block" disabled={busy} onClick={() => setReturns(true)}>
+                    Goods returned…
+                  </button>
+                )}
                 {doc.kind === 'invoice' && doc.status === 'issued' && has('creditNotes') && (
                   <button type="button" className="btn block" disabled={busy} onClick={() => void run(async () => {
                     const r = await api<{ id: string }>(`/api/documents/${doc.id}/credit-note`, { body: {} });
@@ -910,6 +918,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
           }
         />
       )}
+      {returns && doc && <SaleDrawer id={doc.id} onClose={() => setReturns(false)} onChanged={() => void reload()} />}
       {drawer === 'pay' && doc && <PaymentDrawer invoiceId={doc.id} balance={total - paid} onClose={() => setDrawer(null)} onSaved={() => (setDrawer(null), void reload())} />}
       {drawer === 'charge' && project.data && (
         <ChargeDrawer

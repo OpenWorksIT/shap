@@ -12,9 +12,10 @@ import { BankRecon } from './Bank';
 import { StatementFiles } from './StatementFiles';
 import { ProvisionalTax, YearEnd } from './YearEnd';
 import { ExportStudio } from '../components/ExportStudio';
+import { FinancialStatements } from './FinancialStatements';
 import { TurnoverTax, Vat201 } from '../components/TaxForms';
 
-type Tab = 'income' | 'balance' | 'trial' | 'ledger' | 'journals' | 'assets' | 'bank' | 'files' | 'checks' | 'yearend' | 'tax' | 'vat201' | 'export';
+type Tab = 'income' | 'balance' | 'trial' | 'ledger' | 'journals' | 'assets' | 'bank' | 'files' | 'checks' | 'yearend' | 'statements' | 'tax' | 'vat201' | 'export';
 
 export default function AccountsPage() {
   const [params, setParams] = useSearchParams();
@@ -36,6 +37,7 @@ export default function AccountsPage() {
             ...(has('bank') ? [{ value: 'bank' as Tab, label: 'Bank statements' }] : []),
             ...(has('assets') ? [{ value: 'assets' as Tab, label: 'Assets' }] : []),
             { value: 'yearend' as Tab, label: 'Year end' },
+            ...(has('statements') ? [{ value: 'statements' as Tab, label: 'Financial statements' }] : []),
             { value: 'export' as Tab, label: 'Export' },
             { value: 'checks' as Tab, label: 'Balance checks' },
             ...(has('bank') ? [{ value: 'files' as Tab, label: 'Statement PDFs' }] : []),
@@ -55,6 +57,7 @@ export default function AccountsPage() {
       {tab === 'files' && <StatementFiles />}
       {tab === 'checks' && <BalanceChecks />}
       {tab === 'yearend' && <YearEnd />}
+      {tab === 'statements' && has('statements') && <FinancialStatements />}
       {tab === 'tax' && (settings.turnoverTax ? <TurnoverTax /> : <ProvisionalTax />)}
       {tab === 'vat201' && <Vat201 />}
       {tab === 'export' && <Exports />}

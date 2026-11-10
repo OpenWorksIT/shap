@@ -28,6 +28,38 @@ export async function taxFigures(db: Db, businessType: string, fy: { start: stri
   return { partners: partners.map((p) => ({ name: p.name, shareBp: p.shareBp })), distributedCents: Number(d!.t) };
 }
 
+/**
+ * Agrees a year: the figures given (debit-positive), every other account pinned at what the books
+ * say now, Shap's own figures noted (the books audit), and closed if asked. Call inside a transaction.
+ */
+export async function agreeYear(
+  tx: Db,
+  input: { fyEnd: string; fyStart: string; note: string; lock: boolean; figures: { accountId: string; amountCents: number }[]; keepImport?: boolean },
+): Promise<void> {
+  await tx`insert into year_ends (fy_end, note) values (${input.fyEnd}, ${input.note}) on conflict (fy_end) do update set note = excluded.note`;
+  await tx`delete from year_end_figures where fy_end = ${input.fyEnd}`;
+  // The tracker's own trial-balance journal is superseded by the accountant's figures (not when
+  // the year is agreed at the books as they are: approved statements, which include it).
+  if (!input.keepImport) await tx`delete from journals where kind = 'import' and date <= ${input.fyEnd}::date`;
+  for (const f of input.figures) {
+    await tx`insert into year_end_figures (fy_end, account_id, amount_cents) values (${input.fyEnd}, ${f.accountId}, ${f.amountCents})`;
+  }
+  // Agreed in full: every other account is pinned at what the books say now, so a later change
+  // that reaches back into this year can't move its figures (the books audit notices it instead).
+  await freshTotals(tx);
+  await tx`
+    insert into year_end_figures (fy_end, account_id, amount_cents)
+    select ${input.fyEnd}, a.id,
+      coalesce((select sum(l.amount_cents) from ledger_totals l
+        where l.account_id = a.id and not (l.source = 'year_end' and l.date = ${input.fyEnd}::date) and l.date <= ${input.fyEnd}::date
+          and (a.type not in ('income', 'cost_of_sales', 'expense') and coalesce(a.system_key, '') <> 'dividends' or l.date >= ${input.fyStart}::date)), 0)::bigint
+    from accounts a
+    where coalesce(a.system_key, '') not in ('retained_earnings', 'suspense')
+      and not exists (select 1 from year_end_figures f where f.fy_end = ${input.fyEnd} and f.account_id = a.id)`;
+  await noteShapFigures(tx, input.fyEnd);
+  if (input.lock) await tx`update settings set lock_date = greatest(coalesce(lock_date, ${input.fyEnd}::date), ${input.fyEnd}::date) where id`;
+}
+
 export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
   const readers = { preHandler: requireRole('owner', 'accountant') };
@@ -96,29 +128,11 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
     const types = new Map((await sql<{ id: string; type: AccountType }[]>`select id, type from accounts`).map((a) => [a.id, a.type]));
     const fy = financialYear(input.fyEnd, settings.fyEndMonth);
     await sql.begin(async (tx) => {
-      await tx`insert into year_ends (fy_end, note) values (${input.fyEnd}, ${input.note}) on conflict (fy_end) do update set note = excluded.note`;
-      await tx`delete from year_end_figures where fy_end = ${input.fyEnd}`;
-      // The tracker's own trial-balance journal is superseded by the accountant's figures.
-      await tx`delete from journals where kind = 'import' and date <= ${input.fyEnd}::date`;
-      for (const f of input.figures) {
+      await agreeYear(tx, { fyEnd: input.fyEnd, fyStart: fy.start, note: input.note, lock: input.lock, figures: input.figures.map((f) => {
         const t = types.get(f.accountId);
         if (!t) throw badRequest('Unknown account');
-        await tx`insert into year_end_figures (fy_end, account_id, amount_cents) values (${input.fyEnd}, ${f.accountId}, ${f.amountCents * natural(t)})`;
-      }
-      // Agreed in full: every other account is pinned at what the books say now, so a later change
-      // that reaches back into this year can't move its figures (it shows in suspense instead).
-      await freshTotals(tx);
-      await tx`
-        insert into year_end_figures (fy_end, account_id, amount_cents)
-        select ${input.fyEnd}, a.id,
-          coalesce((select sum(l.amount_cents) from ledger_totals l
-            where l.account_id = a.id and not (l.source = 'year_end' and l.date = ${input.fyEnd}::date) and l.date <= ${input.fyEnd}::date
-              and (a.type not in ('income', 'cost_of_sales', 'expense') and coalesce(a.system_key, '') <> 'dividends' or l.date >= ${fy.start}::date)), 0)::bigint
-        from accounts a
-        where coalesce(a.system_key, '') not in ('retained_earnings', 'suspense')
-          and not exists (select 1 from year_end_figures f where f.fy_end = ${input.fyEnd} and f.account_id = a.id)`;
-      await noteShapFigures(tx, input.fyEnd);
-      if (input.lock) await tx`update settings set lock_date = greatest(coalesce(lock_date, ${input.fyEnd}::date), ${input.fyEnd}::date) where id`;
+        return { accountId: f.accountId, amountCents: f.amountCents * natural(t) };
+      }) });
       await audit(tx, { userId: user.id, action: 'agree_year_end', entity: 'year_end', entityId: input.fyEnd, ip: req.ip, details: { figures: input.figures.length } });
     });
     return { ok: true };

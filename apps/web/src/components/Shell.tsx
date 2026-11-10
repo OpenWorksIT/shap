@@ -26,6 +26,7 @@ export function Shell({ children }: { children: ReactNode }) {
     { to: '/jobs', label: 'Jobs', icon: 'jobs', show: has('jobs') },
     { to: '/workers', label: 'Workers', icon: 'workers', show: has('workers') },
     { to: '/payroll', label: has('payroll') ? 'Payroll' : entityWords(settings.businessType).Payouts, icon: 'money', show: has('payroll') || (paysOutProfit(settings.businessType) && has('dividends')) },
+    { to: '/sales', label: 'Sales', icon: 'till', show: has('sales') },
     { to: '/costs', label: 'Costs', icon: 'costs', show: true },
     { to: '/bills', label: 'Bills to pay', icon: 'bill', show: has('bills') },
     { to: '/logbook', label: 'Logbook', icon: 'car', show: has('logbook') },
@@ -38,7 +39,8 @@ export function Shell({ children }: { children: ReactNode }) {
   ];
   const items = all.filter((i) => i.show);
   // Phones: four tabs plus "More". Log sits in the middle, where a thumb finds it.
-  const tabKeys = ['/', has('jobs') ? '/jobs' : '/costs', '/log', '/documents'];
+  // A stall's second tab is the till.
+  const tabKeys = ['/', has('sales') ? '/sales' : has('jobs') ? '/jobs' : '/costs', '/log', '/documents'];
   const tabs = tabKeys.map((k) => items.find((i) => i.to === k)).filter(Boolean) as Item[];
   const overflow = items.filter((i) => !tabKeys.includes(i.to));
 

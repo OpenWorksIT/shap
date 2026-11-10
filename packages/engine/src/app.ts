@@ -32,6 +32,8 @@ import { registerLogbookRoutes } from './modules/logbook.js';
 import { registerTimeRoutes } from './modules/timetrack.js';
 import { registerAccountantExportRoutes } from './modules/accountantExport.js';
 import { registerMoveInRoutes } from './modules/movein.js';
+import { registerSalesRoutes } from './modules/sales.js';
+import { registerFinancialStatementRoutes } from './modules/financial-statements.js';
 
 export interface BuildOptions {
   sql: Sql;
@@ -75,5 +77,8 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: App; ctx: Ctx
   registerCompanyFileRoutes(app, ctx);
   registerPayrollRoutes(app, ctx);
   registerPartnerRoutes(app, ctx);
+  // Sales at the counter (no stock: inventory is full Shap's), and the annual financial statements.
+  registerSalesRoutes(app, ctx);
+  registerFinancialStatementRoutes(app, ctx);
   return { app, ctx };
 }

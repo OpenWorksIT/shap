@@ -20,13 +20,17 @@ export const FEATURES = {
   logbook: { label: 'Travel logbook', hint: 'SARS’s logbook for your vehicle: trips, kilometres, business share', default: false },
   timeTracker: { label: 'Time tracker', hint: 'A clock per job, an hourly rate, and the time onto the invoice', default: false },
   guides: { label: 'SARS filing guides', hint: 'Step by step through VAT201, provisional tax, EMP201 and returns', default: true },
+  sales: { label: 'Sales', hint: 'Sell from a quick list at the counter, paid on the spot: a slip, a refund, or an invoice afterwards', default: false },
+  inventory: { label: 'Inventory', hint: 'Stock records are in full Shap: Shap Pocket sells without keeping stock', default: false },
+  statements: { label: 'Financial statements', hint: 'Shap prepares the annual financial statements (IFRS for SMEs) for your accountant to compile and sign', default: false },
 } as const;
 
 /** How the switches are grouped in Settings. */
 export const FEATURE_GROUPS: { label: string; keys: Feature[] }[] = [
   { label: 'Work', keys: ['jobs', 'quotes', 'timeTracker', 'workers', 'payroll'] },
   { label: 'Invoicing', keys: ['proformas', 'creditNotes', 'reminders', 'payshap', 'brands'] },
-  { label: 'Money and tax', keys: ['bills', 'bank', 'assets', 'dividends', 'logbook', 'guides'] },
+  { label: 'Selling', keys: ['sales'] },
+  { label: 'Money and tax', keys: ['bills', 'bank', 'assets', 'dividends', 'logbook', 'statements', 'guides'] },
 ];
 
 export type Feature = keyof typeof FEATURES;
