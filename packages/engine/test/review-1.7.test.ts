@@ -7,7 +7,9 @@
  * run in the app (compiling or approving would fail on the phone): plain JavaScript now. All data
  * made up.
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { companyTax, sha256Hex } from '@shap/shared';
@@ -102,6 +104,34 @@ describe('Shap Pocket', () => {
     await expectCleanAudit(env.sql, FY);
   });
 
+  it('ends the cash flows at the cash for an asset bill split three ways (second review)', async () => {
+    const { me, sources, r } = await start({ companyName: 'Fictional Rounding (Pty) Ltd', vatRegistered: true, vatNumber: '4000000002', features: { bills: true } });
+    const bills = sources.find((s: { role: string | null }) => s.role === 'bills').id;
+    await me.post('/api/journals', { date: '2025-03-01', description: 'Shares issued (made up)', lines: [{ accountId: await r.acc('bank'), debitCents: 5_000_000 }, { accountId: await r.acc('share_capital'), creditCents: 5_000_000 }] });
+    // R115.00 with R15.00 VAT: R54.94 from the bank, R10.02 by the owner personally, R50.04 owed at the year end.
+    const bill = await me.post('/api/costs', { date: '2025-06-01', description: 'Drill (made up)', supplier: 'Fictional Tools', billNumber: 'FT-1', amountCents: 11_500, vatCents: 1_500, vatCode: 'standard', categoryId: await r.cat('Asset purchase'), sourceId: bills });
+    await me.post('/api/assets', { name: 'Drill (made up)', category: 'tools', purchaseDate: '2025-06-01', costCents: 10_000, costId: bill.id, lifeMonths: 36 });
+    await me.post(`/api/costs/${bill.id}/bill-payments`, { date: '2025-07-01', amountCents: 5_494, sourceId: await r.src('Business bank') });
+    await me.post(`/api/costs/${bill.id}/bill-payments`, { date: '2025-07-02', amountCents: 1_002, sourceId: await r.src('Paid personally (owner)') });
+    const s = await buildStatements(env.sql, FY);
+    expect(s.scf.netChange.current).toBe(s.scf.closing.current - s.scf.opening.current);
+    await expectCleanAudit(env.sql, FY);
+  });
+
+  it('makes no assessed loss of a trust’s distributions beyond its income (second review)', async () => {
+    const { me, r } = await start({ businessType: 'trust', companyName: 'Fictional Family Trust', features: { dividends: true } });
+    const bank = await r.acc('bank');
+    const rev = await r.acc('revenue_other');
+    const j = (date: string, cents: number) => me.post('/api/journals', { date, description: 'Income (made up)', lines: [{ accountId: bank, debitCents: cents }, { accountId: rev, creditCents: cents }] });
+    await j('2023-06-30', 5_000_000);
+    await j('2024-06-30', 10_000_000);
+    const res = await me.call({ method: 'POST', url: '/api/dividends', payload: { declaredOn: '2025-02-20', paidOn: '2025-02-25', shareholder: 'Fictional Beneficiary', grossCents: 15_000_000, conduit: true, sourceId: await r.src('Business bank') } });
+    expect(res.statusCode, res.body).toBe(200);
+    await j('2025-06-30', 10_000_000);
+    expect((await taxPack(env.sql, FY)).assessedLossCents).toBe(0);
+    await expectCleanAudit(env.sql, FY);
+  });
+
   it('keeps a set signed before the update signed, and fingerprints new ones by the books', async () => {
     const { me, r } = await start({ companyName: 'Fictional Upgrade (Pty) Ltd', regNumber: '2021/654321/07' });
     await me.post('/api/journals', { date: '2025-03-01', description: 'Shares issued (made up)', lines: [{ accountId: await r.acc('bank'), debitCents: 100_000 }, { accountId: await r.acc('share_capital'), creditCents: 100_000 }] });
@@ -115,6 +145,12 @@ describe('Shap Pocket', () => {
     expect(figuresHash(old as Statements)).not.toBe(figuresHash(now));
     expect(stillSigned({ snapshot: old as Statements, snapshotHash: figuresHash(old as Statements) }, now)).toBe(true);
     expect(stillSigned({ snapshot: old as Statements, snapshotHash: null }, { ...now, sci: { ...now.sci, profit: { current: 1, prior: 0 } } } as Statements)).toBe(false);
+    // A note's figures moved (same statement totals): changed too.
+    const moved = JSON.parse(JSON.stringify(now)) as Statements;
+    moved.notes.find((n) => n.tables.length)!.tables[0]!.rows.push({ label: 'Made up', current: 1, prior: 0 } as never);
+    expect(stillSigned({ snapshot: old as Statements, snapshotHash: null }, moved)).toBe(false);
+    // A later Shap Pocket that draws the same books: a set signed now stays signed.
+    expect(stillSigned({ snapshot: now, snapshotHash: figuresHash(now) }, { ...now, builder: 3 } as Statements)).toBe(true);
     await expectCleanAudit(env.sql, FY);
   });
 });
@@ -125,8 +161,10 @@ describe('the statements in the app', () => {
       expect(sha256Hex(t)).toBe(createHash('sha256').update(t).digest('hex'));
   });
 
-  it('don’t reach for Node’s own modules, which the app doesn’t have', () => {
-    for (const f of ['../src/statements/build.ts', '../src/statements/pdf.ts', '../src/statements/details.ts', '../src/modules/financial-statements.ts', '../src/modules/tax-pack.ts'])
-      expect(readFileSync(new URL(f, import.meta.url), 'utf8'), f).not.toMatch(/from 'node:/);
+  it('don’t reach for Node’s own modules anywhere in the engine, which the app doesn’t have', () => {
+    const root = fileURLToPath(new URL('../src/', import.meta.url));
+    const files = (readdirSync(root, { recursive: true }) as string[]).filter((f) => f.endsWith('.ts'));
+    expect(files.length).toBeGreaterThan(40);
+    for (const f of files) expect(readFileSync(join(root, f), 'utf8'), f).not.toMatch(/from ['"](node:|crypto['"]|fs['"]|path['"])/);
   });
 });

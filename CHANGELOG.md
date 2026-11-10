@@ -26,7 +26,7 @@ your accountant, from Shap 1.23.
 - The assessed loss brought forward is worked out year by year (a profit before a loss doesn't use
   it up), and a company's set-off is limited to the greater of R1 million and 80% of its taxable
   income (years ending on or after 31 March 2023); a trust's estimate leaves out what it gave its
-  beneficiaries.
+  beneficiaries, up to the year's income.
 - Uploading the signed compiler's report, and approving, failed in the app (the statements'
   fingerprint used something only a server has). Fixed, and statements uploaded on 1.6 stay signed
   after the update: a signed set is now fingerprinted by the books it came from.

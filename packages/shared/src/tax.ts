@@ -252,7 +252,8 @@ export function estimateTax(f: TaxEstimateFigures): { taxableCents: number; reti
     return { taxableCents, retirementDeductionCents: 0, taxCents: partners.reduce((t, p) => t + p.taxCents, 0), partners };
   }
   if (f.kind === 'trust') {
-    const kept = f.profitCents - (f.distributedCents ?? 0);
+    // Only the year's income is the beneficiaries' (s25B): giving out more doesn't make a loss.
+    const kept = f.profitCents - Math.min(f.distributedCents ?? 0, Math.max(0, f.profitCents));
     const taxableCents = Math.max(0, kept - assessedLossSetOff('trust', kept, f.assessedLossCents, f.fyEnd));
     return { taxableCents, retirementDeductionCents: 0, taxCents: Math.round(taxableCents * 0.45) };
   }
