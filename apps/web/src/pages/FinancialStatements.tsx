@@ -55,7 +55,7 @@ interface StatementsView {
     checks: { label: string; ok: boolean; detail: string; level?: 'look' }[];
     policyDefaults?: Record<PolicyKey, string>;
     company: { businessType: string };
-    taxEstimate?: { profitCents: number; assessedLossCents: number; taxableCents: number; taxCents: number; sbc: boolean } | null;
+    taxEstimate?: { profitCents: number; assessedLossCents: number; taxableCents: number; taxCents: number; sbc: boolean | null; sbcTaxCents?: number; standardTaxCents?: number } | null;
     publicInterest?: {
       employees: number;
       employeesWorkedOut: number;
@@ -80,6 +80,9 @@ interface StatementsView {
   } | null;
   changedSince: boolean;
   audit: { level: 'fail' | 'warn'; section: string; text: string }[];
+  /** Agreed with the accountant, or closed: the year's tax goes in through them, not a journal here. */
+  yearAgreed?: boolean;
+  yearClosed?: boolean;
 }
 
 export function FinancialStatements() {
@@ -134,6 +137,16 @@ export function FinancialStatements() {
       await reload();
     } catch (err) {
       toast(err instanceof ApiError ? err.message : 'Couldn’t book it', 'error');
+    }
+  };
+  // The small business corporation question (s12E), answered here for the statements, the tax pack and the IRP6.
+  const answerSbc = async (sbc: boolean) => {
+    try {
+      await api('/api/settings/sbc', { method: 'PUT', body: { sbc } });
+      toast(sbc ? 'On the small business corporation table' : 'At the company rate');
+      await reload();
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Couldn’t save that', 'error');
     }
   };
 
@@ -268,9 +281,26 @@ export function FinancialStatements() {
                   <Icon name={c.ok ? 'check' : 'alert'} size={14} /> {c.label}
                   {!c.ok && c.detail && <div className="xs">{c.detail}</div>}
                   {!c.ok && c.label.startsWith('The year’s income tax') && s.taxEstimate && (status === 'draft' || status === 'sent') && (
-                    <button type="button" className="btn small" style={{ marginTop: 6 }} onClick={() => void bookTax()}>
-                      Book <Money cents={s.taxEstimate.taxCents} /> as the year’s tax
-                    </button>
+                    <div className="row wrap" style={{ marginTop: 6 }}>
+                      {s.taxEstimate.sbc === null ? (
+                        <>
+                          <button type="button" className="btn small" onClick={() => void answerSbc(true)}>
+                            It qualifies: <Money cents={s.taxEstimate.sbcTaxCents ?? 0} />
+                          </button>
+                          <button type="button" className="btn small" onClick={() => void answerSbc(false)}>
+                            It doesn’t: <Money cents={s.taxEstimate.standardTaxCents ?? s.taxEstimate.taxCents} />
+                          </button>
+                        </>
+                      ) : v?.yearAgreed || v?.yearClosed ? (
+                        <div className="xs muted">
+                          {v.yearClosed ? 'The year is closed' : 'The year is agreed with your accountant at their figures'}, so a journal here wouldn’t change it: the year’s tax goes in through your accountant (Accounts → Year end).
+                        </div>
+                      ) : (
+                        <button type="button" className="btn small" onClick={() => void bookTax()}>
+                          Book <Money cents={s.taxEstimate.taxCents} /> as the year’s tax
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
               ))}

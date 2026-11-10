@@ -10,6 +10,7 @@ z.config({
 import { BUSINESS_TYPES } from './entities.js';
 import { clientVatNumberProblem, compact, idNumberProblem, taxNumberProblem } from './ids.js';
 import { PURCHASE_VAT_CODES, SALE_VAT_CODES } from './vat.js';
+import { VAT_CATEGORIES } from './tax.js';
 import {
   ACCOUNT_TYPES,
   ASSET_CATEGORIES,
@@ -75,6 +76,8 @@ export const settingsInput = z.object({
   businessType: z.enum(BUSINESS_TYPES).default('company'),
   /** A non-profit company that SARS has approved as a public benefit organisation (tax-exempt). */
   approvedPbo: z.boolean().default(false),
+  /** Qualifies as a small business corporation (s12E): yes, no, or not said (null). Left out, it stays as it is. */
+  sbc: z.boolean().nullable().optional(),
   features: z.record(z.string(), z.boolean()).default({}),
   /** Casual ("Howzit, lekker") or formal words in the app. */
   tone: z.enum(['casual', 'formal']).default('casual'),
@@ -120,7 +123,7 @@ export const settingsInput = z.object({
   proformaNext: z.number().int().min(1).max(10_000_000).default(1),
   /** PayShap: the ShapID or cellphone number clients pay to. */
   payshapId: text(80).default(''),
-  vatCategory: z.enum(['A', 'B', 'C']).default('B'),
+  vatCategory: z.enum(VAT_CATEGORIES).default('B'),
   turnoverTax: z.boolean().default(false),
   /** The usual hourly rate for time not on a job (or a job without its own rate). */
   hourlyRateCents: positiveCents.default(0),
@@ -450,7 +453,8 @@ export const taxEstimateInput = z.object({
     .max(300),
   assessedLossCents: positiveCents.default(0),
   paidCents: positiveCents.default(0),
-  sbc: z.boolean().default(true),
+  /** On the small business corporation table (s12E); left out, as the business said in Settings. */
+  sbc: z.boolean().optional(),
   /** Who pays (set by the server from the kind of business; entities.ts). */
   kind: z.enum(['company', 'individual', 'trust', 'npc', 'partners']).default('company'),
   ageBand: z.enum(['under65', '65to74', '75plus']).default('under65'),
@@ -509,7 +513,8 @@ export const dividendInput = z.object({
 });
 
 export const sarsPaymentInput = z.object({
-  kind: z.enum(['emp201', 'dwt']),
+  /** EMP201 (PAYE, UIF, SDL), dividends tax, or provisional tax (IRP6: paid towards the year's income tax). */
+  kind: z.enum(['emp201', 'dwt', 'irp6']),
   period: z.string().regex(/^\d{4}-\d{2}$/),
   date: isoDate,
   amountCents: positiveCents,

@@ -2,6 +2,24 @@
 
 What changed in each version of Shap Pocket, newest first.
 
+## 1.7.2 (10 November 2026)
+
+The tax and SARS rules checked again by an accountant (from Shap 1.23.2).
+
+- **Small business corporations**: say once whether the company qualifies (s12E: Settings → Tax,
+  VAT and the financial year, or on the financial statements or the provisional tax screen), and
+  the provisional tax estimate, the financial statements and the tax pack all go by it. Until it's
+  said, they show both figures (they used the flat 27% unless a provisional estimate for that year
+  said otherwise). Gross income over R20 million rules the table out. The tax note shows the SBC
+  rates' effect on its own line.
+- The statements' income tax item compares the tax booked with the estimate, and "Book the tax"
+  is gone from a year agreed with your accountant or closed, where it changed nothing.
+- **Provisional tax paid** (IRP6): record it from the provisional tax screen; it comes off what's
+  owed to SARS for the year's income tax.
+- The small business corporation tables back to 2021, 2023's medical scheme credits, and **VAT
+  categories D** (six-monthly) and **E** (yearly). The dividends tax return named with its DTR02.
+- From 1 March each year the checks fail until the new tax year's figures are in.
+
 ## 1.7.1 (10 November 2026)
 
 - zod 4 (4.6.7), the checker of everything the app's screens hand its books: the security update

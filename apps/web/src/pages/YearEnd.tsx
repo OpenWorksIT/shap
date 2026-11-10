@@ -14,6 +14,7 @@ import {
   individualTableFor,
   individualThreshold,
   sbcTableFor,
+  SBC_GROSS_INCOME_LIMIT_CENTS,
   todayIso,
   type AccountType,
   type AgeBand,
@@ -25,6 +26,7 @@ import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
 import { ProfitShare } from '../components/ProfitShare';
 import { EstimateNote } from '../components/EstimateNote';
+import { SarsPayDrawer } from './Payroll';
 
 const fmt = (c: number) => (c === 0 ? '–' : formatAmount(c));
 
@@ -353,6 +355,8 @@ interface TaxData {
   /** Who pays (entities.ts), and what that needs. */
   kind?: 'company' | 'individual' | 'trust' | 'npc' | 'partners';
   approvedPbo?: boolean;
+  /** Qualifies as a small business corporation (s12E): as the business said (null: not yet). */
+  sbc?: boolean | null;
   partners?: { name: string; shareBp: number }[];
   distributedCents?: number;
   saved: { id: string; period: number; asAt: string; taxableIncomeCents: number; taxCents: number; payableCents: number; note: string; createdAt: string }[];
@@ -364,7 +368,8 @@ interface TaxData {
  * can be overridden before it's saved.
  */
 export function ProvisionalTax() {
-  const { settings, isOwner } = useAuthed();
+  const { settings, isOwner, ref } = useAuthed();
+  const [paying, setPaying] = useState(false);
   const toast = useToast();
   const today = todayIso();
   const thisFy = financialYear(today, settings.fyEndMonth);
@@ -385,9 +390,9 @@ export function ProvisionalTax() {
 
   useEffect(() => {
     if (!data) return;
-    // Most Inc.s give a personal service (law, accounting, engineering), which rules out the
-    // small business corporation table: it starts off for them.
-    setSbc(data.businessType !== 'inc');
+    // What the business said (Settings), or, not said yet: on, except for an Inc. (most give a
+    // personal service, law, accounting, engineering, which rules the table out).
+    setSbc(data.sbc ?? data.businessType !== 'inc');
     setProj(Object.fromEntries(data.lines.map((l) => [l.accountId, l.projectedCents])));
     setLoss(data.assessedLossCents);
     // First period runs to the half-year; after that it's the second.
@@ -410,7 +415,19 @@ export function ProvisionalTax() {
   const kind = data.kind ?? (data.businessType === 'sole_prop' ? 'individual' : 'company');
   const individual = kind === 'individual';
   const rules = entity(data.businessType ?? settings.businessType);
-  const est = estimateTax({ kind, profitCents: net, assessedLossCents: loss, fyEnd: data.fy.end, sbc: sbc && rules.sbcPossible, ageBand, otherIncomeCents: otherIncome, retirementCents: retirement, distributedCents: data.distributedCents, approvedPbo: data.approvedPbo, partners: data.partners });
+  // Gross income over R20 million rules the small business corporation table out (s12E).
+  const overLimit = totals[2]!.income > SBC_GROSS_INCOME_LIMIT_CENTS;
+  const onSbc = sbc && rules.sbcPossible && !overLimit;
+  const setSbcSaved = async (on: boolean) => {
+    setSbc(on);
+    if (!isOwner) return;
+    try {
+      await api('/api/settings/sbc', { method: 'PUT', body: { sbc: on } });
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Couldn’t save that', 'error');
+    }
+  };
+  const est = estimateTax({ kind, profitCents: net, assessedLossCents: loss, fyEnd: data.fy.end, sbc: onSbc, ageBand, otherIncomeCents: otherIncome, retirementCents: retirement, distributedCents: data.distributedCents, approvedPbo: data.approvedPbo, partners: data.partners });
   const taxable = est.taxableCents;
   const tax = est.taxCents;
   const { dueCents: due, payableCents: payable } = provisionalPayable({ taxCents: tax, payeCents: individual ? paye : 0, period, paidCents: paid });
@@ -662,14 +679,17 @@ export function ProvisionalTax() {
               <tr>
                 <td>
                   <label className="check">
-                    <input type="checkbox" checked={sbc} onChange={(e) => setSbc(e.target.checked)} />
+                    <input type="checkbox" checked={sbc} onChange={(e) => void setSbcSaved(e.target.checked)} />
                     <span>
-                      Small business corporation rates
+                      Small business corporation rates (s12E)
                       <div className="xs muted">
                         {data.businessType === 'inc' && 'Usually not for an Inc.: a personal service (law, accounting, engineering, health) with fewer than three full-time employees who aren’t connected to the owners can’t use it. '}
-                        {sbc
-                          ? bands.map((b, i) => (i === 0 ? `0% to R${b.upTo!.toLocaleString('en-ZA')}` : `${Math.round(b.rate * 100)}% above R${b.over.toLocaleString('en-ZA')}`)).join(', ')
-                          : 'Flat 27% company rate'}
+                        {overLimit
+                          ? 'Not this year: gross income over R20 million. Flat 27% company rate.'
+                          : onSbc
+                            ? bands.map((b, i) => (i === 0 ? `0% to R${b.upTo!.toLocaleString('en-ZA')}` : `${Math.round(b.rate * 100)}% above R${b.over.toLocaleString('en-ZA')}`)).join(', ')
+                            : 'Flat 27% company rate'}
+                        {' '}If it qualifies: gross income up to R20 million, every shareholder a person holding no shares in another company, no more than 20% investment income and personal services. Saved for the financial statements and the tax pack too.
                       </div>
                     </span>
                   </label>
@@ -725,7 +745,23 @@ export function ProvisionalTax() {
             <button className="btn primary" onClick={() => void save()}>
               Save this estimate
             </button>
+            {kind !== 'individual' && kind !== 'partners' && (
+              <button className="btn" onClick={() => setPaying(true)}>
+                Record a provisional tax payment to SARS
+              </button>
+            )}
           </div>
+        )}
+        {paying && (
+          <SarsPayDrawer
+            pay={{ kind: 'irp6', period: data.fy.end.slice(0, 7), owing: payable }}
+            sources={ref.sources.filter((x) => x.active && !x.role)}
+            onClose={() => setPaying(false)}
+            onSaved={() => {
+              setPaying(false);
+              toast('Paid: off what’s owed to SARS for the year’s income tax');
+            }}
+          />
         )}
       </section>
 

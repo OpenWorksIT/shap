@@ -133,6 +133,17 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     return getSettings(sql);
   });
 
+  /** Whether the company qualifies as a small business corporation (s12E): yes, no, or not said (null). */
+  app.put('/api/settings/sbc', { preHandler: requireRole('owner') }, async (req) => {
+    const user = userOrThrow(req);
+    const { sbc } = parse(z.object({ sbc: z.boolean().nullable() }), req.body);
+    const before = await getSettings(sql);
+    if (sbc && !entity(before.businessType).sbcPossible) throw badRequest(`${entity(before.businessType).label} can’t be a small business corporation`);
+    await sql`update settings set sbc = ${sbc}, updated_at = now() where id`;
+    await audit(sql, { userId: user.id, action: 'update', entity: 'settings', ip: req.ip, details: { sbc } });
+    return { sbc };
+  });
+
   // ---- logo for quotes and invoices
   app.post('/api/settings/logo', { preHandler: requireRole('owner') }, async (req) => {
     const input = parse(attachmentInput, req.body);

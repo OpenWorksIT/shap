@@ -145,3 +145,12 @@ describe('a sole proprietor in the app', () => {
     expect(await vatStatus(env.sql, '2026-11-01')).toMatchObject({ registered: true, state: null });
   });
 });
+
+describe('SARS’s figures for the year we’re in', () => {
+  it('have been checked for the current year of assessment (the standard update on a new tax year, CPDAUDIT.md)', async () => {
+    const { SARS_CHECKED_TO, taxYearEnd, todayIso } = await import('@shap/shared');
+    // From 1 March, this fails until the new year's tables are checked against SARS and put in
+    // (Shap's docs/SARS.md says where each is), and SARS_CHECKED_TO is moved on.
+    expect(taxYearEnd(todayIso()) <= SARS_CHECKED_TO, `the year to ${taxYearEnd(todayIso())} hasn't been checked against SARS: see CPDAUDIT.md`).toBe(true);
+  });
+});

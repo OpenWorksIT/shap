@@ -1,5 +1,5 @@
 import type { App as FastifyInstance } from '../http.js';
-import { addMonths, companyTax, estimateTax, provisionalPayable, financialYear, isoDate, monthEnd, monthsBetween, taxEstimateInput, yearEndInput, type AccountType, entity } from '@shap/shared';
+import { addMonths, companyTax, estimateTax, provisionalPayable, financialYear, isoDate, monthEnd, monthsBetween, taxEstimateInput, yearEndInput, type AccountType, entity, sbcApplies, SBC_GROSS_INCOME_LIMIT_CENTS } from '@shap/shared';
 import { z } from 'zod';
 import { requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -203,6 +203,8 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
       businessType: settings.businessType,
       kind: taxKind(settings.businessType),
       approvedPbo: settings.approvedPbo,
+      // Qualifies as a small business corporation (s12E): what the business said (null: not yet).
+      sbc: settings.sbc,
       ...(await taxFigures(sql, settings.businessType, fy)),
       exampleTaxOn100k: companyTax(10_000_000, fy.end, true),
     };
@@ -217,7 +219,12 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
     const fy = financialYear(input.fyEnd, settings.fyEndMonth);
     const extra = await taxFigures(sql, settings.businessType, fy);
     const income = input.lines.reduce((s, l) => s + (l.type === 'income' ? l.projectedCents : -l.projectedCents), 0);
+    // The small business corporation table only if the company qualifies, and never over R20 million of gross income.
+    const gross = input.lines.reduce((s, l) => s + (l.type === 'income' ? l.projectedCents : 0), 0);
+    input.sbc = input.kind === 'company' && entity(settings.businessType).sbcPossible ? sbcApplies(input.sbc ?? settings.sbc, gross) === true : false;
     const { taxableCents: taxable, taxCents: tax } = estimateTax({ ...input, profitCents: income, approvedPbo: settings.approvedPbo, distributedCents: extra.distributedCents, partners: extra.partners });
+    // An estimate on the SBC table (or not) answers the question for the statements and the tax pack too, if it wasn't answered yet.
+    if (settings.sbc === null && req.body && typeof (req.body as { sbc?: unknown }).sbc === 'boolean' && input.kind === 'company' && entity(settings.businessType).sbcPossible && gross <= SBC_GROSS_INCOME_LIMIT_CENTS) await sql`update settings set sbc = ${input.sbc} where id`;
     const { payableCents: payable } = provisionalPayable({ taxCents: tax, payeCents: input.kind === 'individual' ? input.payeCents : 0, period: input.period, paidCents: input.paidCents });
     const [row] = await sql`
       insert into tax_estimates (fy_end, period, as_at, lines, taxable_income_cents, tax_cents, payable_cents, note, created_by)

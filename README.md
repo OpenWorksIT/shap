@@ -68,6 +68,13 @@ npm -w @shap/web run build       # then: cd apps/web && npx cap sync && npx cap 
 Android builds on any OS (Android Studio, JDK 21). iPhone builds need Xcode on a Mac; the
 GitHub Actions workflow builds both on every push. Store releases: [docs/app-stores.md](docs/app-stores.md).
 
+## How every update is checked
+
+Like an accountant's continuing professional development, every update goes through the CPD audit
+before any phone takes it ([CPDAUDIT.md](CPDAUDIT.md), with Shap's, whose accounting code Pocket
+shares): four reviews (security and privacy, IFRS for SMEs and company law, SARS and tax,
+accounting and arithmetic), then the tests and CI.
+
 ## Licence
 
 AGPL-3.0-or-later, with an additional permission that allows distribution through app stores

@@ -24,7 +24,9 @@ export const DWT_RATE_BP = 2000;
 
 const MEDICAL_CREDITS: { from: string; main: number; first: number; more: number }[] = [
   { from: '2027-02-28', main: 37_600, first: 75_200, more: 25_400 },
-  { from: '2026-02-28', main: 36_400, first: 72_800, more: 24_600 },
+  // Unchanged from the 2024 year (1 March 2023) to the 2026 one.
+  { from: '2024-02-29', main: 36_400, first: 72_800, more: 24_600 },
+  { from: '2023-02-28', main: 34_700, first: 69_400, more: 23_400 },
 ];
 
 /** The last day of the SARS tax year (1 March to end February) a date falls in. */

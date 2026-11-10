@@ -1,5 +1,5 @@
 import type { Req as FastifyRequest } from '../http.js';
-import { assessedLossCarried, entity, financialYear, safeText, standardNames, todayIso, type BusinessType, type TaxEstimateFigures } from '@shap/shared';
+import { assessedLossCarried, entity, financialYear, safeText, standardNames, todayIso, type BusinessType, type TaxEstimateFigures, type VatCategory } from '@shap/shared';
 import type { Db } from '../db/index.js';
 import { badRequest } from './errors.js';
 
@@ -18,6 +18,8 @@ export interface SettingsRow {
   businessType: BusinessType;
   /** A non-profit company approved by SARS as a public benefit organisation. */
   approvedPbo: boolean;
+  /** Qualifies as a small business corporation (s12E); null: not said. */
+  sbc: boolean | null;
   features: Record<string, boolean>;
   tone: 'casual' | 'formal';
   creditPrefix: string;
@@ -26,7 +28,7 @@ export interface SettingsRow {
   proformaPrefix: string;
   proformaNext: number;
   payshapId: string;
-  vatCategory: 'A' | 'B' | 'C';
+  vatCategory: VatCategory;
   turnoverTax: boolean;
   hourlyRateCents: number;
   watermark: boolean;
