@@ -47,6 +47,9 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
   // Sells over the counter? (Stock records are full Shap's.) And does Shap Pocket draft the annual statements?
   const [sales, setSales] = useState<boolean | null>(settings.features.sales ? true : null);
   const [statements, setStatements] = useState<boolean | null>(settings.features.statements ? true : null);
+  // Selling: how each month is closed (month end): by hand, or it locks itself on a day of the next month.
+  const [monthEnd, setMonthEnd] = useState<'manual' | 'auto' | null>(settings.features.sales ? settings.monthEndMode ?? null : null);
+  const [monthEndDay, setMonthEndDay] = useState(settings.monthEndDay ?? 7);
   const [place, setPlace] = useState<BackupPlace | null>(null);
   const os = platform();
   const [error, setError] = useState('');
@@ -81,6 +84,7 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
         : { payeRegistered: null, payeRef: '', uifRegistered: null, uifRef: '', sdl: false };
       const { logoId: _l, termsAcceptedAt: _t, ...rest } = { ...f, ...employer, features, industry, usageConsent: Boolean(consent), marketConsent: market, marketNoticeSeen: true, setupDone: true, termsVersion: TERMS_VERSION, fyEndMonth: kind.febYearEnd ? 2 : f.fyEndMonth, turnoverTax: kind.turnoverTax && f.turnoverTax } as Settings & { logoId: string | null };
       await api('/api/settings', { method: 'PUT', body: rest });
+      if (sales && monthEnd) await api('/api/periods/month-end', { method: 'PUT', body: { mode: monthEnd, day: monthEndDay } });
       setTone(f.tone);
       setBackupPlace(place);
       if (consent) void reportUsage({ ...f, features, industry, usageConsent: true });
@@ -317,12 +321,25 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
           <Q title="Do you sell things over the counter?" sub="Walk-in customers who pay on the spot: a stall, a shop, a salon’s products, parts at the counter.">
             <YesNo
               q="Do you do sales?"
-              hint="A Sales tab: pick what’s sold from a quick list, take the money, and hand over a slip. A big customer can have it turned into a tax invoice afterwards, and refunds are a tap."
+              hint="A Sales tab: pick what’s sold from a quick list, take the money, and hand over the invoice (each sale is an invoice, numbered with your others). A big customer’s details can go on it at the time or afterwards, and refunds are a tap."
               value={sales}
               onChange={setSales}
             />
             {sales && <p className="xs muted">Shap Pocket sells without keeping stock records: keep your stock list where you have it. Full Shap, on a computer, has the inventory (stock on hand, supplier invoices, stock takes).</p>}
-            {nav(sales !== null)}
+            {sales && (
+              <div className="stack-sm">
+                <p className="strong">Month end: how should each month be closed?</p>
+                <p className="small muted">Once a month is closed, nothing dated in it can change, so the takings, the VAT and the bank stay as they were checked. You can reopen it, with the reason, to put something right.</p>
+                <Choice on={monthEnd === 'manual'} onClick={() => setMonthEnd('manual')} title="I’ll close each month myself" hint="Accounts → Locks shows the month’s figures and a button to close it. Home reminds you while last month is still open." />
+                <Choice on={monthEnd === 'auto'} onClick={() => setMonthEnd('auto')} title="Close it by itself" hint="Each month locks itself on a day of the next month, whether or not it’s been checked. You can still close one earlier." />
+                {monthEnd && (
+                  <Field label={monthEnd === 'auto' ? 'Day of the next month it locks' : 'Day of the next month to remind me'} hint="1 to 28">
+                    {(p) => <input {...p} className="input" type="number" min={1} max={28} value={monthEndDay} onChange={(e) => setMonthEndDay(Math.min(28, Math.max(1, Number(e.target.value) || 1)))} style={{ width: 100 }} />}
+                  </Field>
+                )}
+              </div>
+            )}
+            {nav(sales === false || (sales === true && monthEnd !== null))}
           </Q>
         )}
 

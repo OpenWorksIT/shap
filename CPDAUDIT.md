@@ -49,3 +49,6 @@ Shap's CPD audit (section 7) has each review; what was Pocket's own:
 - **1.7.2**: Shap 1.23.2's SARS review and its four reviews (Shap's section 7) apply here: the same
   code, fixed the same way, with the tests in `packages/engine/test/sbc-and-sars.test.ts`. What was
   about staff (provisional tax kept from payroll staff) doesn't arise: Pocket has one person.
+- **1.8.0**: Shap 1.24's four reviews (Shap's section 7) apply here: the same code, with the tests
+  in `packages/engine/test/sales-invoices-locks.test.ts`. Locking is the owner's (one person: no
+  task to give).

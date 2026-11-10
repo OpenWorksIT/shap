@@ -1,17 +1,17 @@
 /**
  * Sales at the counter and the item list (docs/SALES_AND_STOCK.md).
  *
- * A sale is a document of its own kind, paid on the spot: it posts like an invoice and its
- * payment at once, so debtors are untouched, the VAT is on the VAT201 for its date, and stocked
- * items go out of stock at average cost. A walk-in needs no client: the slip is the short
- * (abridged) tax invoice, up to R5 000. Over that, or with anything exported, SARS wants a full
- * tax invoice, so the customer is chosen and it's made an invoice paid at once.
+ * A sale is an invoice, issued and paid on the spot, with the next invoice number (`counter`: sold
+ * at the counter). It posts like any invoice and its payment at once, so debtors are untouched, the
+ * VAT is on the VAT201 for its date, and stocked items go out of stock at average cost. A walk-in
+ * needs no client: theirs is the abridged tax invoice, up to R5 000. Over that, or with anything
+ * exported, SARS wants a full tax invoice, so the customer is chosen.
  * https://www.sars.gov.za/businesses-and-employers/tax-invoices/
  *
- * Afterwards a sale can be made an invoice (the client's details added, every amount and VAT
- * class as it was) and taken back with a refund: a credit note for what came back, paid out of
- * the till or the bank, the goods back into stock (or not, if they came back damaged). Nothing
- * here is ever changed or deleted once made.
+ * Afterwards the customer's details can be added to a walk-in's invoice (the same invoice: its
+ * number, every amount and VAT class as it was), and a sale is taken back with a refund: a credit
+ * note for what came back, paid out of the till or the bank, the goods back into stock (or not, if
+ * they came back damaged). Nothing here is ever changed or deleted once made.
  */
 import type { App as FastifyInstance } from '../http.js';
 import {
@@ -20,8 +20,8 @@ import {
   itemInput,
   openingStockInput,
   refundInput,
+  saleCustomerInput,
   saleInput,
-  saleToInvoiceInput,
   vatRateOn,
   type Feature,
 } from '@shap/shared';
@@ -34,7 +34,7 @@ import { assertOpen, getSettings, q, today } from '../lib/books.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
 import { milli, moveStock, stockOutForDocument, unitCostOut } from '../lib/stock.js';
 import { parse } from '../lib/validate.js';
-import { assertTaxDocument, createDocument, defaultBrand, FULL_TAX_INVOICE_CENTS, loadDocument, nextNumber } from './documents.js';
+import { assertTaxDocument, createDocument, defaultBrand, FULL_TAX_INVOICE_CENTS, loadDocument } from './documents.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 const readers = { preHandler: requireRole('owner', 'accountant') };
@@ -73,8 +73,8 @@ async function linesWithCredits(db: Db, id: string): Promise<(Record<string, unk
 
 const PAID_AT_SALE = 'Paid in full when sold. Thank you.';
 
-/** Makes a sale (or, with a client, an invoice paid at once). Call inside a transaction. */
-export async function makeSale(tx: Db, user: AuthUser, raw: unknown): Promise<{ id: string; number: string; saleNumber: string; kind: 'sale' | 'invoice' }> {
+/** Makes a sale: an invoice, issued and paid at once. Call inside a transaction. */
+export async function makeSale(tx: Db, user: AuthUser, raw: unknown): Promise<{ id: string; number: string }> {
   const input = parse(saleInput, raw);
   const settings = await getSettings(tx);
   if (!featureOn(settings.features, 'sales')) throw badRequest('Sales is switched off. Switch it on in Settings → What you use.');
@@ -101,26 +101,24 @@ export async function makeSale(tx: Db, user: AuthUser, raw: unknown): Promise<{ 
         : 'An export needs a full tax invoice, with the buyer’s name and address: choose the customer.',
     );
   }
-  const kind = input.clientId ? 'invoice' : 'sale';
-  const saleNumber = await nextNumber(tx, 'sale');
+  // The next invoice number: a sale is an invoice like any other.
   const doc = await createDocument(
     tx,
     user,
-    kind,
+    'invoice',
     {
       clientId: input.clientId ?? null,
       issueDate: input.date,
       dueDate: input.date,
       notes: input.note,
-      // Paid on the spot: no payment terms (a slip, or an invoice already paid).
-      terms: kind === 'invoice' ? PAID_AT_SALE : '',
-      number: kind === 'sale' ? saleNumber : undefined,
+      // Paid on the spot: no payment terms.
+      terms: PAID_AT_SALE,
       lines: lines.map((l) => ({ category: l.category, description: l.description, qty: l.qty, unit: l.unit, unitPriceCents: l.unitPriceCents, vatCode: l.vatCode, itemId: l.itemId ?? null })),
       pricesIncludeVat: input.pricesIncludeVat,
     },
     { status: 'issued' },
   );
-  await tx`update documents set sale_number = ${saleNumber}, customer_name = ${input.customerName} where id = ${doc.id}`;
+  await tx`update documents set counter = true, customer_name = ${input.customerName} where id = ${doc.id}`;
   await assertTaxDocument(tx, doc.id);
   const [total] = await tx<{ totalCents: string }[]>`select total_cents from documents where id = ${doc.id}`;
   const [r] = await tx<{ id: string }[]>`
@@ -128,29 +126,31 @@ export async function makeSale(tx: Db, user: AuthUser, raw: unknown): Promise<{ 
     values (${doc.id}, ${input.date}, ${total!.totalCents}, ${input.sourceId}, ${input.method}, ${input.reference}, 'Paid at the counter', ${user.id}) returning id`;
   await tx`update documents set sale_receipt_id = ${r!.id} where id = ${doc.id}`;
   await stockOutForDocument(tx, doc.id, input.date, user.id);
-  await audit(tx, { userId: user.id, action: 'sell', entity: kind, entityId: doc.id, details: { sale: saleNumber, number: doc.number, totalCents: Number(total!.totalCents) } });
-  return { id: doc.id, number: doc.number, saleNumber, kind };
+  await audit(tx, { userId: user.id, action: 'sell', entity: 'invoice', entityId: doc.id, details: { number: doc.number, totalCents: Number(total!.totalCents) } });
+  return { id: doc.id, number: doc.number };
 }
 
-/** A sale made an invoice: the client's details on it, every amount and VAT class as it was. */
-export async function saleToInvoice(tx: Db, user: AuthUser, id: string, raw: unknown): Promise<{ number: string }> {
-  const { clientId } = parse(saleToInvoiceInput, raw);
-  const [d] = await tx<{ kind: string; saleNumber: string; issueDate: string; projectId: string | null }[]>`select kind, sale_number, issue_date, project_id from documents where id = ${id} for update`;
-  if (!d) throw notFound('Sale');
-  if (d.kind !== 'sale') throw badRequest('This sale is already an invoice');
-  // It becomes an invoice on the sale's date: that year has to be open.
+/**
+ * The customer's details added to a walk-in's invoice (they ask for a full tax invoice): the same
+ * invoice, its number, every amount and VAT class as it was.
+ */
+export async function addSaleCustomer(tx: Db, user: AuthUser, id: string, raw: unknown): Promise<{ number: string }> {
+  const { clientId } = parse(saleCustomerInput, raw);
+  const [d] = await tx<{ kind: string; counter: boolean; number: string; clientId: string | null; issueDate: string; projectId: string | null }[]>`
+    select kind, counter, number, client_id, issue_date, project_id from documents where id = ${id} for update`;
+  if (!d || !d.counter) throw notFound('Sale');
+  if (d.clientId) throw badRequest('This sale’s invoice already has its customer');
+  // The invoice is dated the sale's day: that period has to be open.
   await assertOpen(tx, d.issueDate);
   const [c] = await tx`select 1 from clients where id = ${clientId}`;
   if (!c) throw badRequest('That customer isn’t on the client list');
-  const number = await nextNumber(tx, 'invoice');
   await tx`
-    update documents set kind = 'invoice', number = ${number}, client_id = ${clientId}, due_date = issue_date, terms = ${PAID_AT_SALE},
-      brand_id = coalesce(brand_id, ${await defaultBrand(tx, d.projectId, clientId)}), invoiced_at = now(), updated_at = now()
+    update documents set client_id = ${clientId}, brand_id = coalesce(brand_id, ${await defaultBrand(tx, d.projectId, clientId)}), invoiced_at = now(), updated_at = now()
     where id = ${id}`;
-  // Over R5 000, or with zero-rated or exported items, the client's name and address must be on it.
+  // With the client on it, it's the full tax invoice: their name and address must be there.
   await assertTaxDocument(tx, id);
-  await audit(tx, { userId: user.id, action: 'invoice_sale', entity: 'invoice', entityId: id, details: { sale: d.saleNumber, invoice: number, clientId } });
-  return { number };
+  await audit(tx, { userId: user.id, action: 'sale_customer', entity: 'invoice', entityId: id, details: { number: d.number, clientId } });
+  return { number: d.number };
 }
 
 /**
@@ -160,9 +160,9 @@ export async function saleToInvoice(tx: Db, user: AuthUser, id: string, raw: unk
  */
 export async function refundDocument(tx: Db, user: AuthUser, id: string, raw: unknown): Promise<{ id: string; number: string; amountCents: number }> {
   const input = parse(refundInput, raw);
-  const [d] = await tx<{ kind: string; status: string; number: string; issueDate: string; clientId: string | null; projectId: string | null; brandId: string | null; pricesIncludeVat: boolean; title: string }[]>`
-    select kind, status, number, issue_date, client_id, project_id, brand_id, prices_include_vat, title from documents where id = ${id} for update`;
-  if (!d || !(d.kind === 'sale' || d.kind === 'invoice')) throw notFound('Sale');
+  const [d] = await tx<{ kind: string; counter: boolean; status: string; number: string; issueDate: string; clientId: string | null; projectId: string | null; brandId: string | null; pricesIncludeVat: boolean; title: string }[]>`
+    select kind, counter, status, number, issue_date, client_id, project_id, brand_id, prices_include_vat, title from documents where id = ${id} for update`;
+  if (!d || d.kind !== 'invoice') throw notFound('Sale');
   if (d.status !== 'issued') throw badRequest('Only an issued sale or invoice can be refunded');
   await assertOpen(tx, input.date);
   if (input.date < d.issueDate) throw badRequest('A refund can’t be dated before the sale');
@@ -170,7 +170,7 @@ export async function refundDocument(tx: Db, user: AuthUser, id: string, raw: un
   if (payOut) {
     if (!input.sourceId) throw badRequest('Choose where the money was paid out of');
     await counterSource(tx, input.sourceId);
-  } else if (d.kind !== 'invoice') throw badRequest('A sale was paid in full: money back on it is paid out');
+  } else if (d.counter) throw badRequest('A sale was paid in full: money back on it is paid out');
   const lines = await linesWithCredits(tx, id);
   const seen = new Set<string>();
   const back = input.lines.map((r) => {
@@ -345,7 +345,7 @@ export function registerSalesRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [item] = await sql`select * from items where id = ${id}`;
     if (!item) throw notFound('Item');
     const moves = await sql`
-      select m.*, u.name as by_name, d.kind as document_kind, d.number as document_number, d.sale_number, c.name as client_name,
+      select m.*, u.name as by_name, d.kind as document_kind, d.number as document_number, d.counter, c.name as client_name,
         cs.supplier as cost_supplier, cs.bill_number as cost_reference, cs.amount_cents as cost_amount_cents,
         st.note as stock_take_note, cl.kind as claim_kind, cl.supplier as claim_supplier
       from stock_moves m
@@ -357,9 +357,9 @@ export function registerSalesRoutes(app: FastifyInstance, ctx: Ctx): void {
       left join stock_claims cl on cl.id = m.claim_id
       where m.item_id = ${id} order by m.seq`;
     const sold = await sql`
-      select d.id, d.kind, d.number, d.sale_number, d.issue_date, d.status, l.qty, l.line_total_cents, c.name as client_name
+      select d.id, d.kind, d.number, d.counter, d.issue_date, d.status, l.qty, l.line_total_cents, c.name as client_name
       from document_lines l join documents d on d.id = l.document_id left join clients c on c.id = d.client_id
-      where l.item_id = ${id} and d.kind in ('sale', 'invoice', 'credit_note') and d.status <> 'draft' order by d.issue_date desc, d.created_at desc limit 500`;
+      where l.item_id = ${id} and d.kind in ('invoice', 'credit_note') and d.status <> 'draft' order by d.issue_date desc, d.created_at desc limit 500`;
     const audits = await sql`
       select a.at, a.action, a.details, u.name as by_name from audit_log a left join users u on u.id = a.user_id
       where a.entity = 'item' and a.entity_id = ${id} order by a.at desc limit 200`;
@@ -371,17 +371,17 @@ export function registerSalesRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { from, to, search } = q(req);
     const s = search?.trim() || null;
     return sql`
-      select d.id, d.kind, d.number, d.sale_number, d.issue_date, d.total_cents, d.vat_cents, d.customer_name, d.invoiced_at,
+      select d.id, d.kind, d.number, d.sale_number, d.issue_date, d.total_cents, d.vat_cents, d.customer_name, d.invoiced_at, d.client_id,
         c.name as client_name, r.method, src.name as source_name,
         coalesce((select sum(rf.amount_cents) from refunds rf join documents cn on cn.id = rf.credit_note_id where cn.credited_invoice_id = d.id), 0)::bigint as refunded_cents
       from documents d
       left join clients c on c.id = d.client_id
       left join receipts r on r.id = d.sale_receipt_id
       left join payment_sources src on src.id = r.source_id
-      where d.sale_number is not null
+      where d.counter
         and (${from ?? null}::date is null or d.issue_date >= ${from ?? null}::date)
         and (${to ?? null}::date is null or d.issue_date <= ${to ?? null}::date)
-        and (${s}::text is null or d.sale_number ilike '%' || ${s} || '%' or d.number ilike '%' || ${s} || '%' or d.customer_name ilike '%' || ${s} || '%'
+        and (${s}::text is null or d.number ilike '%' || ${s} || '%' or d.sale_number ilike '%' || ${s} || '%' or d.customer_name ilike '%' || ${s} || '%'
              or c.name ilike '%' || ${s} || '%'
              or exists (select 1 from document_lines l where l.document_id = d.id and l.description ilike '%' || ${s} || '%'))
       order by d.issue_date desc, d.created_at desc limit 1000`;
@@ -390,9 +390,9 @@ export function registerSalesRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/sales/:id', readers, async (req) => {
     const { id } = parse(idParam, req.params);
     const data = await loadDocument(sql, id);
-    // A sale, or an invoice (its returns and refunds are taken the same way).
+    // A sale, or another invoice (its returns and refunds are taken the same way).
     const kind = (data.doc as { kind: string }).kind;
-    if (!(kind === 'sale' || kind === 'invoice')) throw notFound('Sale');
+    if (kind !== 'invoice') throw notFound('Sale');
     const lines = await linesWithCredits(sql, id);
     const refunds = await sql`
       select rf.*, cn.number as credit_note_number, cn.credit_reason, s.name as source_name
@@ -408,10 +408,11 @@ export function registerSalesRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { ...made, ...(await loadDocument(sql, made.id)) };
   });
 
-  app.post('/api/sales/:id/invoice', owner, async (req) => {
+  /** A walk-in's invoice gets the customer's details (they asked for a full tax invoice). */
+  app.post('/api/sales/:id/customer', owner, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
-    await sql.begin((tx) => saleToInvoice(tx, user, id, req.body));
+    await sql.begin((tx) => addSaleCustomer(tx, user, id, req.body));
     return loadDocument(sql, id);
   });
 
@@ -427,8 +428,8 @@ export function registerSalesRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [r] = await sql<{ count: number; total: string; refunded: string }[]>`
       select count(*)::int as count, coalesce(sum(total_cents), 0) as total,
         coalesce((select sum(rf.amount_cents) from refunds rf join documents cn on cn.id = rf.credit_note_id join documents s on s.id = cn.credited_invoice_id
-                  where rf.date = ${t}::date and s.sale_number is not null), 0) as refunded
-      from documents where sale_number is not null and issue_date = ${t}::date`;
+                  where rf.date = ${t}::date and s.counter), 0) as refunded
+      from documents where counter and issue_date = ${t}::date`;
     return { date: t, count: r!.count, totalCents: Number(r!.total), refundedCents: Number(r!.refunded) };
   });
 }

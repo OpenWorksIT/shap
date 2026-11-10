@@ -281,7 +281,7 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
     return { ok: true };
   });
 
-  /** Back to draft (the year stays closed until its lock date is moved). */
+  /** Back to draft (the year stays closed until it's reopened: periods.ts). */
   app.post('/api/statements/:fyEnd/reopen', owner, async (req) => {
     const user = userOrThrow(req);
     const { fyEnd } = parse(fyParam, req.params);

@@ -35,7 +35,7 @@ export async function vat201(db: Db, start: string, end: string) {
              coalesce(sum(x.line_total_cents) filter (where x.vat_code = 'export'), 0) as exported,
              coalesce(sum(x.line_total_cents) filter (where x.vat_code = 'exempt'), 0) as exempt
       from document_lines x where x.document_id = d.id) l
-    where d.kind in ('invoice', 'credit_note', 'sale') and d.status = 'issued' and d.vat_rate_bp > 0 and d.issue_date between ${start}::date and ${end}::date`;
+    where d.kind in ('invoice', 'credit_note') and d.status = 'issued' and d.vat_rate_bp > 0 and d.issue_date between ${start}::date and ${end}::date`;
   // Input VAT: capital goods (field 14) are the costs of the asset type or on the asset register,
   // and assets bought straight from an account; everything else is field 15.
   const [inp] = await db<{ capital: number; other: number }[]>`

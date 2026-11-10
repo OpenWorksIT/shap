@@ -4,6 +4,7 @@ import { requireRole, seesMoney, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { getSettings, today, freshTotals } from '../lib/books.js';
 import { paymentStateSql } from './documents.js';
+import { lockState } from './periods.js';
 import { missingStatements } from './statements.js';
 import { findDuplicates } from './duplicates.js';
 import { findRecurring } from './recurring.js';
@@ -127,6 +128,8 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
       taxDue: taxDue(settings, now),
       // This version's SARS tables were checked up to SARS_CHECKED_TO: a later tax year needs an update.
       sarsCheckedTo: taxYearEnd(now) > SARS_CHECKED_TO ? SARS_CHECKED_TO : null,
+      // Month end due (last month still open) or the books reopened: for whoever may lock them.
+      periods: await (async () => { const p = await lockState(sql); return { monthDue: p.monthDue, reopened: p.reopened, lockDate: p.lockDate }; })(),
       bankCents: bal('bank'),
       ownerLoanCents: -bal('owner_loan'),
       projects: projects.map((p) => ({ ...p, ...totals(p as unknown as ProjectSummary) })),

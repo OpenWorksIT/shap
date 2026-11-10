@@ -11,12 +11,13 @@ import type { Account, StatementLine, Totals } from '../lib/types';
 import { BankRecon } from './Bank';
 import { StatementFiles } from './StatementFiles';
 import { ProvisionalTax, YearEnd } from './YearEnd';
+import { Locks } from './Locks';
 import { ExportStudio } from '../components/ExportStudio';
 import { FinancialStatements } from './FinancialStatements';
 import { TurnoverTax, Vat201 } from '../components/TaxForms';
 import { sharePdf } from '../lib/share-pdf';
 
-type Tab = 'income' | 'balance' | 'trial' | 'ledger' | 'journals' | 'assets' | 'bank' | 'files' | 'checks' | 'yearend' | 'statements' | 'tax' | 'vat201' | 'export';
+type Tab = 'income' | 'balance' | 'trial' | 'ledger' | 'journals' | 'assets' | 'bank' | 'files' | 'checks' | 'locks' | 'yearend' | 'statements' | 'tax' | 'vat201' | 'export';
 
 export default function AccountsPage() {
   const [params, setParams] = useSearchParams();
@@ -37,6 +38,7 @@ export default function AccountsPage() {
             ...(settings.vatRegistered ? [{ value: 'vat201' as Tab, label: 'VAT201' }] : []),
             ...(has('bank') ? [{ value: 'bank' as Tab, label: 'Bank statements' }] : []),
             ...(has('assets') ? [{ value: 'assets' as Tab, label: 'Assets' }] : []),
+            { value: 'locks' as Tab, label: has('sales') ? 'Month end & locks' : 'Locks' },
             { value: 'yearend' as Tab, label: 'Year end' },
             ...(has('statements') ? [{ value: 'statements' as Tab, label: 'Financial statements' }] : []),
             { value: 'export' as Tab, label: 'Export' },
@@ -57,6 +59,8 @@ export default function AccountsPage() {
       {tab === 'bank' && <BankRecon />}
       {tab === 'files' && <StatementFiles />}
       {tab === 'checks' && <BalanceChecks />}
+      {tab === 'locks' && <Locks />}
+      {tab === 'locks' && <Locks />}
       {tab === 'yearend' && <YearEnd />}
       {tab === 'statements' && has('statements') && <FinancialStatements />}
       {tab === 'tax' && (settings.turnoverTax ? <TurnoverTax /> : <ProvisionalTax />)}

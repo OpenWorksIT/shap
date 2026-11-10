@@ -603,7 +603,7 @@ function ReopenForm({ fyEnd, approved, onClose, onDone }: { fyEnd: string; appro
     <Drawer title="Reopen the statements" onClose={onClose}>
       <form className="stack" onSubmit={submit}>
         <p className="small muted">
-          They go back to a draft, built from the books as they are, and need compiling and approving again. {approved ? 'The year stays closed until you move its lock date (Accounts → Year end).' : ''} The reason goes in the audit log.
+          They go back to a draft, built from the books as they are, and need compiling and approving again. {approved ? 'The year stays closed until it’s reopened (Accounts → Locks).' : ''} The reason goes in the audit log.
         </p>
         <Field label="Why">{(p) => <input {...p} className="input" value={reason} onChange={(e) => setReason(e.target.value)} required autoFocus />}</Field>
         {error && <div className="banner alert small">{error}</div>}

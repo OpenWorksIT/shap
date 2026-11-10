@@ -2,6 +2,22 @@
 
 What changed in each version of Shap Pocket, newest first.
 
+## 1.8.0 (10 November 2026)
+
+Every sale is a tax invoice, and the books lock month by month (from Shap 1.24).
+
+- **No more cash receipts for sales** (your accountant's call). Every sale is an invoice, issued
+  and paid on the spot, with the next number in the same series as your other invoices; a
+  walk-in's is the abridged tax invoice (no details needed up to R5 000). Not registered for VAT:
+  "Invoice", not "Tax invoice". The separate sale numbers and the slip are gone.
+- **Add the customer's details** to a walk-in's invoice afterwards: the same invoice and number.
+- Sales made before are invoices now, each at the number it was issued under.
+- **Month end** (with Sales on): close each month yourself, or let it lock itself on a day of the
+  next month; setup asks, and Accounts → Month end & locks shows each month's figures. Home
+  reminds you while last month is open. Without sales, the year's lock as before.
+- A closed period is closed: reopen it with the reason (kept with the books), put it right, and
+  lock it again. The lock date is no longer a setting.
+
 ## 1.7.2 (10 November 2026)
 
 The tax and SARS rules checked again by an accountant (from Shap 1.23.2).

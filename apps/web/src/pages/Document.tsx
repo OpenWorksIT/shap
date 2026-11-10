@@ -355,6 +355,12 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
       />
 
       {doc?.status === 'void' && <div className="banner alert">Voided: {doc.voidReason}</div>}
+      {doc?.counter && (
+        <div className="banner small">
+          A sale at the counter, paid when it was made: what it charges, its date and customer stay as they are. Refunds and a walk-in’s details are under{' '}
+          {has('sales') ? <Link to="/sales">Sales</Link> : 'Sales'}.
+        </div>
+      )}
       {taxLocked && editable && (
         <div className="banner small">
           This tax invoice is issued, so what it charges is fixed: its items and prices, the client, the date and the number (SARS allows one tax invoice per supply).{' '}
@@ -738,7 +744,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                     Issue credit note (takes it off the invoice)
                   </button>
                 )}
-                {doc.kind === 'invoice' && doc.status === 'issued' && !doc.writtenOffOn && (
+                {doc.kind === 'invoice' && doc.status === 'issued' && !doc.writtenOffOn && !doc.counter && (
                   <button type="button" className="btn block" onClick={() => setDrawer('pay')}>
                     <Icon name="money" size={18} />
                     Record a payment
@@ -756,12 +762,12 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                     {doc.reminders ? <span className="xs muted"> (last {formatDate(String(doc.remindedAt).slice(0, 10))})</span> : null}
                   </button>
                 )}
-                {doc.kind === 'invoice' && doc.status === 'issued' && has('sales') && (
+                {doc.kind === 'invoice' && doc.status === 'issued' && has('sales') && !doc.counter && (
                   <button type="button" className="btn block" disabled={busy} onClick={() => setReturns(true)}>
                     Goods returned…
                   </button>
                 )}
-                {doc.kind === 'invoice' && doc.status === 'issued' && has('creditNotes') && (
+                {doc.kind === 'invoice' && doc.status === 'issued' && has('creditNotes') && !doc.counter && (
                   <button type="button" className="btn block" disabled={busy} onClick={() => void run(async () => {
                     const r = await api<{ id: string }>(`/api/documents/${doc.id}/credit-note`, { body: {} });
                     toast('Draft credit note made: change it to what’s being taken back');

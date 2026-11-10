@@ -22,9 +22,11 @@ export interface Item {
 
 export interface SaleRow {
   id: string;
-  kind: 'sale' | 'invoice';
+  kind: 'invoice';
   number: string;
-  saleNumber: string;
+  /** Before 1.24 only: the sale number an invoice made from a sale was first issued under. */
+  saleNumber: string | null;
+  clientId: string | null;
   issueDate: string;
   totalCents: number;
   vatCents: number;
@@ -53,9 +55,11 @@ export interface SaleLine {
 export interface SaleDetail {
   doc: {
     id: string;
-    kind: 'sale' | 'invoice';
+    kind: 'invoice';
     number: string;
-    saleNumber: string;
+    /** Sold at the counter (an invoice paid on the spot); false: an invoice from Quotes & invoices. */
+    counter: boolean;
+    saleNumber: string | null;
     status: string;
     issueDate: string;
     customerName: string;
@@ -100,7 +104,8 @@ export interface StockMove {
   byName: string | null;
   documentKind: string | null;
   documentNumber: string | null;
-  saleNumber: string | null;
+  /** The document was a sale at the counter. */
+  counter: boolean | null;
   clientName: string | null;
   costSupplier: string | null;
   costReference: string | null;

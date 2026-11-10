@@ -4,7 +4,7 @@ import { requireRole, userOrThrow } from '../../auth.js';
 import type { Ctx } from '../../context.js';
 import type { Db } from '../../db/index.js';
 import { audit } from '../../lib/audit.js';
-import { assertOpen, q, freshTotals } from '../../lib/books.js';
+import { applyMonthLock, assertOpen, q, freshTotals } from '../../lib/books.js';
 import { badRequest, notFound } from '../../lib/errors.js';
 import { parse } from '../../lib/validate.js';
 import { depositDueSql, syncProjectOfDocument } from '../documents.js';
@@ -34,10 +34,10 @@ interface LineRow {
  * inside an agreed year: the accountant's figures pin that year's statements either way.
  */
 async function assertCanChange(db: Db, dates: string[]) {
-  const [s] = await db<{ lockDate: string | null }[]>`select lock_date from settings where id`;
-  if (!s?.lockDate) return;
+  const lockDate = await applyMonthLock(db);
+  if (!lockDate) return;
   for (const d of dates) {
-    if (d > s.lockDate) continue;
+    if (d > lockDate) continue;
     const [agreed] = await db`select 1 from year_ends where fy_end >= ${d}::date limit 1`;
     if (!agreed) await assertOpen(db, d);
   }
@@ -769,7 +769,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
     // Lines in the closed period are left (and counted), so the rest still go in.
     const locked: string[] = [];
     await sql.begin(async (tx) => {
-      const [settings] = await tx<{ lockDate: string | null }[]>`select lock_date::text from settings where id`;
+      const settings = { lockDate: await applyMonthLock(tx) };
       for (const it of items) {
         const line = await loadLine(tx, it.lineId);
         const [taken] = await tx`select 1 from bank_matches where bank_line_id = ${line.id} limit 1`;

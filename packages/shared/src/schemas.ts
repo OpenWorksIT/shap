@@ -587,7 +587,7 @@ export const saleInput = z.object({
 });
 
 /** A sale made into an invoice afterwards: the client's details on it, the amounts as they were. */
-export const saleToInvoiceInput = z.object({ clientId: uuid });
+export const saleCustomerInput = z.object({ clientId: uuid });
 
 /**
  * Goods back on a sale or an invoice: a credit note for what's returned, the money paid out (a

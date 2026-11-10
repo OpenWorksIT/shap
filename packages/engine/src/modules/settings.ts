@@ -110,17 +110,13 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (entity(input.businessType).dividendsTax) input.features = { ...input.features, dividends: true };
     // Shap Pocket sells without keeping stock (inventory is full Shap's): it stays off here.
     if (input.features) input.features = { ...input.features, inventory: false };
-    // A year whose financial statements were approved and signed stays closed: the lock date can't
-    // move back into it until the statements are reopened (with a reason, in the audit log).
-    if (input.lockDate !== undefined && before.lockDate && (!input.lockDate || input.lockDate < String(before.lockDate))) {
-      const [signed] = await sql<{ fyEnd: string }[]>`
-        select fy_end::text as fy_end from financial_statements where status = 'approved' and fy_end > coalesce(${input.lockDate ?? null}::date, '0001-01-01'::date) order by fy_end desc limit 1`;
-      if (signed) throw badRequest(`The financial statements for the year ended ${signed.fyEnd} were approved and signed. Reopen them first (Accounts → Financial statements, with the reason), then move the lock date.`);
-    }
+    // The lock date isn't a setting: it's locked and reopened under Accounts → Locks (with the
+    // reason, in the audit log: periods.ts).
+    delete (input as { lockDate?: unknown }).lockDate;
     // Accepting the terms: when, and in the audit log (below).
     const accepted = input.termsVersion && input.termsVersion !== before.termsVersion ? input.termsVersion : null;
     await sql.begin(async (tx) => {
-      const row: Record<string, unknown> = { ...input, ...(accepted ? { termsAcceptedAt: new Date() } : {}), features: tx.json(input.features), logoLayout: tx.json(input.logoLayout), lockDate: input.lockDate, updatedAt: new Date() };
+      const row: Record<string, unknown> = { ...input, ...(accepted ? { termsAcceptedAt: new Date() } : {}), features: tx.json(input.features), logoLayout: tx.json(input.logoLayout), updatedAt: new Date() };
       for (const k of Object.keys(row)) if (row[k] === undefined) delete row[k];
       await tx`update settings set ${tx(row as never)} where id`;
       // Selling at the counter takes money into the till: its account is there from then on.

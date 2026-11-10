@@ -34,6 +34,7 @@ import { registerTimeRoutes } from './modules/timetrack.js';
 import { registerAccountantExportRoutes } from './modules/accountantExport.js';
 import { registerMoveInRoutes } from './modules/movein.js';
 import { registerSalesRoutes } from './modules/sales.js';
+import { registerPeriodRoutes } from './modules/periods.js';
 import { registerFinancialStatementRoutes } from './modules/financial-statements.js';
 
 export interface BuildOptions {
@@ -65,6 +66,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: App; ctx: Ctx
   registerVatRoutes(app, ctx);
   registerReportRoutes(app, ctx);
   registerYearEndRoutes(app, ctx);
+  registerPeriodRoutes(app, ctx);
   registerArchiveRoutes(app, ctx);
   registerTaxFormRoutes(app, ctx);
   registerTaxPackRoutes(app, ctx);

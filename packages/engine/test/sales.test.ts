@@ -49,8 +49,9 @@ describe('selling at the counter, VAT registered', () => {
         { description: 'Loyalty discount', qty: 1, unitPriceCents: -460 },
       ],
     });
-    expect(s.kind).toBe('sale');
-    expect(s.saleNumber).toMatch(/\d/);
+    // An invoice, with the next invoice number (no sale numbers of their own any more).
+    expect(s.doc).toMatchObject({ kind: 'invoice', counter: true, saleNumber: null });
+    expect(s.number).toMatch(/\d/);
     // R92 − R4.60 at 15% inclusive: VAT R11.40; bread R18 at 0%.
     expect(s.doc).toMatchObject({ totalCents: 10_540, vatCents: 1_140 });
     expect(await balance(env.sql, 'receivables')).toBe(0);
@@ -61,20 +62,19 @@ describe('selling at the counter, VAT registered', () => {
     expect(vat.fields).toMatchObject({ field1: 8_740, field2: 1_800, field4: 1_140 });
   });
 
-  it('wants the customer over R5 000, and makes a walk-in’s sale an invoice afterwards', async () => {
+  it('wants the customer over R5 000, and puts a walk-in’s details on their invoice afterwards', async () => {
     const big = { date: D, sourceId: bank, method: 'card', lines: [{ itemId: globe.id, description: 'LED globe (made up)', qty: 120, unitPriceCents: 4_600 }] };
     expect((await me.call({ method: 'POST', url: '/api/sales', payload: big })).statusCode).toBe(400);
     const inv = await me.post('/api/sales', { ...big, clientId: client.id });
-    expect(inv.kind).toBe('invoice');
-    expect(inv.doc.paymentState).toBe('paid');
+    expect(inv.doc).toMatchObject({ kind: 'invoice', counter: true, paymentState: 'paid' });
     const walkIn = await me.post('/api/sales', { date: D, sourceId: till, lines: [{ itemId: globe.id, description: 'LED globe (made up)', qty: 1, unitPriceCents: 4_600 }] });
-    const made = await me.post(`/api/sales/${walkIn.id}/invoice`, { clientId: client.id });
-    expect(made.doc).toMatchObject({ kind: 'invoice', totalCents: 4_600, vatCents: 600, saleNumber: walkIn.saleNumber });
+    const made = await me.post(`/api/sales/${walkIn.id}/customer`, { clientId: client.id });
+    expect(made.doc).toMatchObject({ kind: 'invoice', totalCents: 4_600, vatCents: 600, number: walkIn.number, clientId: client.id });
     expect(await balance(env.sql, 'receivables')).toBe(0);
   });
 
   it('refunds what came back, never more than was paid, and keeps every sale', async () => {
-    const [sale] = await env.sql<{ id: string }[]>`select id from documents where kind = 'sale' order by created_at limit 1`;
+    const [sale] = await env.sql<{ id: string }[]>`select id from documents where counter and client_id is null order by created_at limit 1`;
     const detail = await me.get(`/api/sales/${sale!.id}`);
     const globes = detail.lines.find((l: { description: string }) => l.description.startsWith('LED'));
     const r = await me.post(`/api/documents/${sale!.id}/refund`, { date: D, sourceId: till, reason: 'Wrong fitting (made up)', lines: [{ lineId: globes.id, qty: 1 }] });

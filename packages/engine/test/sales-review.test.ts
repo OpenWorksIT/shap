@@ -41,12 +41,12 @@ describe('Shap 1.22’s review fixes, in Shap Pocket', () => {
     expect(more.statusCode).toBe(400);
   });
 
-  it('makes a sale’s slip a slip: no terms, named a sale, never voided or paid again', async () => {
+  it('makes a sale an invoice paid at the counter: never voided or paid again', async () => {
     const s = await me.post('/api/sales', { date: D, sourceId: till, lines: [{ description: 'Key cut (made up)', qty: 1, unitPriceCents: 2_500, category: 'other' }] });
-    expect(s.doc.terms).toBe('');
+    expect(s.doc.terms).toMatch(/Paid in full/);
     expect((await me.call({ method: 'POST', url: `/api/documents/${s.id}/void`, payload: { reason: 'x' } })).statusCode).toBe(400);
     expect((await me.call({ method: 'POST', url: `/api/documents/${s.id}/receipts`, payload: { date: D, amountCents: 100, sourceId: bank } })).statusCode).toBe(400);
-    const inv = await me.post(`/api/sales/${s.id}/invoice`, { clientId: client.id });
+    const inv = await me.post(`/api/sales/${s.id}/customer`, { clientId: client.id });
     expect(inv.doc.terms).toMatch(/Paid in full/);
   });
 
@@ -80,10 +80,13 @@ describe('Shap 1.22’s review fixes, in Shap Pocket', () => {
     await me.post('/api/statements/2026-02-28/compiler-report', { attachmentId: file.id, compilerName: 'Fictional Accountant', date: '2026-04-01' });
     await me.post('/api/statements/2026-02-28/approve', { name: 'Fictional Owner', date: '2026-04-02' });
     const now = (await me.get('/api/reference')).settings;
-    expect((await me.call({ method: 'PUT', url: '/api/settings', payload: { ...now, lockDate: null } })).statusCode).toBe(400);
-    expect((await me.call({ method: 'POST', url: `/api/sales/${walkIn.id}/invoice`, payload: { clientId: client.id } })).statusCode).toBe(400);
-    await me.post('/api/statements/2026-02-28/reopen', { reason: 'A missed invoice (made up)' });
+    expect((await me.call({ method: 'POST', url: '/api/periods/reopen', payload: { to: null, reason: 'A missed invoice (made up)' } })).statusCode).toBe(400);
+    expect((await me.call({ method: 'POST', url: `/api/sales/${walkIn.id}/customer`, payload: { clientId: client.id } })).statusCode).toBe(400);
+    // Saving the settings doesn't move the lock (it's under Accounts → Locks).
     expect((await me.call({ method: 'PUT', url: '/api/settings', payload: { ...now, lockDate: null } })).statusCode).toBe(200);
+    expect((await me.get('/api/reference')).settings.lockDate).toBe('2026-02-28');
+    await me.post('/api/statements/2026-02-28/reopen', { reason: 'A missed invoice (made up)' });
+    expect((await me.call({ method: 'POST', url: '/api/periods/reopen', payload: { to: null, reason: 'A missed invoice (made up)' } })).statusCode).toBe(200);
   });
 });
 

@@ -144,7 +144,7 @@ export function BankRecon() {
       }
       return (
         [matched && `${matched} matched`, created && `${created} added`, skipped && `${skipped} not added: they look like costs already captured, so check the suggestions`,
-          locked && `${locked} left: they’re before the lock date (Settings)`]
+          locked && `${locked} left: they’re in a closed period (Accounts → Locks)`]
           .filter(Boolean)
           .join(', ') || 'Nothing to capture'
       );
