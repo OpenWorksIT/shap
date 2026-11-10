@@ -60,7 +60,8 @@ export const statementDetailsInput = z.object({
   eventsAfter: t(2000).default(''),
   goingConcern: t(2000).default(''),
   preparedBy: t(200).default(''),
-  compiler: compilerInput.default({}),
+  // prefault: an empty compiler is parsed, so each of its fields takes its own default.
+  compiler: compilerInput.prefault({}),
   accountantEmail: z.union([z.literal(''), z.string().trim().email('That email address doesn’t look right').max(200)]).default(''),
   /** For the public interest score: how many individuals hold shares (a CC's members); blank: one per director (member). */
   piHolders: z.number().int().min(0).max(1_000_000).nullable().default(null),
@@ -68,7 +69,8 @@ export const statementDetailsInput = z.object({
   piEmployees: z.number().min(0).max(1_000_000).nullable().default(null),
   /** Somebody in the business compiles the statements (not an independent accountant): it matters to the score's meaning. */
   internallyCompiled: z.boolean().default(false),
-  policies: z.record(z.enum(POLICY_KEYS), t(4000)).default({}),
+  // Only the policies changed from Shap's wording (a record over an enum wants every key).
+  policies: z.partialRecord(z.enum(POLICY_KEYS), t(4000)).default({}),
 });
 export type StatementDetailsInput = z.infer<typeof statementDetailsInput>;
 

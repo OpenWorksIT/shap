@@ -71,7 +71,7 @@ const feedbackInput = z.object({
       online: z.boolean().default(true),
       build: z.string().max(80).default(''),
     })
-    .default({}),
+    .prefault({}),
 });
 /** From outside: which app, which version, and (for another Shap) the role of whoever wrote it. */
 const collectedInput = feedbackInput.extend({
