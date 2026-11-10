@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { featureOn, type Feature, entity, payoutWord } from '@shap/shared';
+import { featureOn, type Feature, entity, payoutWord, type Task } from '@shap/shared';
 import { api, setNativeToken, setUnauthorizedHandler } from './api';
 import { setTone } from './words';
 import type { Reference, Settings, User } from './types';
@@ -123,13 +123,20 @@ export function useSession(): SessionValue {
 export function useAuthed() {
   const s = useSession();
   const settings = s.ref!.settings as Settings;
+  const u = s.user!;
+  const can = (t: Task) => u.role === 'owner' || (u.access ?? []).includes(t);
   return {
     ...s,
-    user: s.user!,
+    user: u,
     ref: s.ref!,
     settings,
-    isOwner: s.user!.role === 'owner',
-    seesMoney: s.user!.role !== 'capture',
+    /** The settings, the people who sign in, the year end and the statements' approval are the owner's alone. */
+    isOwner: u.role === 'owner',
+    /** May they do this task? (packages/shared/src/access.ts; the server checks the same.) */
+    can,
+    canAny: (...ts: Task[]) => ts.some(can),
+    /** Sees the books: the owner, the accountant, and staff who read the reports. */
+    seesBooks: u.role !== 'staff' || can('reports.view'),
     /** Is this part of the app switched on? */
     has: (f: Feature) => featureOn(settings.features, f),
     /** How to say the owners' accounts, the business and its payouts, for this kind of business (entities.ts). */

@@ -1,7 +1,7 @@
 /**
  * Wipe all data (POPIA's right to erasure, or starting over): every invoice, client, cost, slip,
  * worker, payroll record and setting goes, and the books start again from the first-run
- * questions. The people who sign in, their sessions and two-factor codes, and the audit log are
+ * questions. The people who sign in (and their profiles), their sessions and two-factor codes, and the audit log are
  * kept, so the owner can still sign in and there's a record that it happened. It takes the
  * owner's password and the business's name typed out, and runs in one transaction: it all
  * happens, or nothing does.
@@ -26,7 +26,8 @@ export async function wipeNames(db: Sql): Promise<string[]> {
   return names.length ? [...new Set(names)] : ['WIPE'];
 }
 
-const KEEP = ['users', 'sessions', 'recovery_codes', 'audit_log'] as const;
+/** Kept, in this order: the profiles before the people on them. */
+const KEEP = ['profiles', 'users', 'sessions', 'recovery_codes', 'audit_log'] as const;
 
 export async function wipeBooks(db: Sql): Promise<void> {
   const migrations = await migrationFiles();
@@ -39,7 +40,8 @@ export async function wipeBooks(db: Sql): Promise<void> {
       await tx.unsafe(m.body);
       await tx`insert into schema_migrations (name) values (${m.name})`;
     }
-    for (const t of KEEP) await tx.unsafe(`insert into public.${t} select * from wipe_keep.${t}`);
+    // (The migrations start the profiles again: the business's own replace them.)
+    for (const t of KEEP) await tx.unsafe(`delete from public.${t}; insert into public.${t} select * from wipe_keep.${t}`);
     await tx.unsafe(`select setval(pg_get_serial_sequence('audit_log', 'id'), coalesce((select max(id) from audit_log), 1))`);
     await tx.unsafe('drop schema wipe_keep cascade');
   });

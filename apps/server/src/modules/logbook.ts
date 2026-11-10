@@ -6,7 +6,7 @@
 import type { FastifyInstance } from 'fastify';
 import { financialYear, logbookYearInput, tripInput } from '@shap/shared';
 import { z } from 'zod';
-import { requireRole } from '../auth.js';
+import { requireAccess, requireRole } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { q, today, toCsv } from '../lib/books.js';
 import { notFound } from '../lib/errors.js';
@@ -17,10 +17,9 @@ const idParam = z.object({ id: z.string().uuid() });
 export function registerLogbookRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
   const owner = { preHandler: requireRole('owner') };
-  const readers = { preHandler: requireRole('owner', 'accountant') };
 
   /** A tax year's logbook (SARS's year: March to February), with totals. CSV with ?format=csv. */
-  app.get('/api/logbook', readers, async (req, reply) => {
+  app.get('/api/logbook', { preHandler: requireAccess('reports.view', 'logbook.trips') }, async (req, reply) => {
     const { yearEnd: ye, format } = q(req);
     const year = financialYear(ye && /^\d{4}-\d{2}-\d{2}$/.test(ye) ? ye : today(), 2);
     const trips = await sql<{ id: string; date: string; fromPlace: string; toPlace: string; reason: string; km: number; business: boolean; projectId: string | null; projectName: string | null; clientName: string | null }[]>`
@@ -56,7 +55,7 @@ export function registerLogbookRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { ...summary, trips };
   });
 
-  app.put('/api/logbook/:yearEnd', owner, async (req) => {
+  app.put('/api/logbook/:yearEnd', { preHandler: requireAccess('logbook.trips') }, async (req) => {
     const { yearEnd } = parse(z.object({ yearEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }), req.params);
     const input = parse(logbookYearInput, req.body);
     await sql`insert into logbook_years (year_end, vehicle, odometer_start, odometer_end) values (${yearEnd}, ${input.vehicle}, ${input.odometerStart}, ${input.odometerEnd})
@@ -64,25 +63,25 @@ export function registerLogbookRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { ok: true };
   });
 
-  app.post('/api/trips', owner, async (req) => {
+  app.post('/api/trips', { preHandler: requireAccess('logbook.trips') }, async (req) => {
     const input = parse(tripInput, req.body);
     const [row] = await sql`insert into trips ${sql({ ...input, projectId: input.projectId ?? null, clientId: input.clientId ?? null })} returning *`;
     return row;
   });
-  app.put('/api/trips/:id', owner, async (req) => {
+  app.put('/api/trips/:id', { preHandler: requireAccess('logbook.trips') }, async (req) => {
     const { id } = parse(idParam, req.params);
     const input = parse(tripInput, req.body);
     const [row] = await sql`update trips set ${sql({ ...input, projectId: input.projectId ?? null, clientId: input.clientId ?? null })} where id = ${id} returning *`;
     if (!row) throw notFound('Trip');
     return row;
   });
-  app.delete('/api/trips/:id', owner, async (req) => {
+  app.delete('/api/trips/:id', { preHandler: requireAccess('logbook.trips') }, async (req) => {
     const { id } = parse(idParam, req.params);
     await sql`delete from trips where id = ${id}`;
     return { ok: true };
   });
   /** Places used before, for quick picking. */
-  app.get('/api/trips/places', owner, async () => {
+  app.get('/api/trips/places', { preHandler: requireAccess('logbook.trips') }, async () => {
     const rows = await sql<{ place: string }[]>`
       select place from (select from_place as place, date from trips union all select to_place, date from trips) x
       where place <> '' group by place order by max(date) desc limit 30`;

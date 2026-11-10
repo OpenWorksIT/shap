@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
-import { accountInput, attachmentInput, brandInput, categoryInput, entity, industryProfile, settingsInput, settingsNumberProblem, sourceInput, TERMS_URL, tidyNumbers, userInput, vatRateOn, workTypeInput } from '@shap/shared';
+import { accountInput, attachmentInput, brandInput, categoryInput, entity, industryProfile, isTask, profileInput, settingsInput, settingsNumberProblem, sourceInput, TERMS_URL, tidyNumbers, tweaksFor, userInput, vatRateOn, withNeeds, workTypeInput, type Role } from '@shap/shared';
 import { z } from 'zod';
-import { checkNewPassword, confirmPassword, createUser, endOtherSessions, hashPassword, requireRole, seesMoney, sessionToken, userOrThrow } from '../auth.js';
+import { accessOf, canAny, checkNewPassword, confirmPassword, createUser, endOtherSessions, hashPassword, requireAccess, requireRole, seesBooks, sessionToken, userOrThrow, type AuthUser } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { pgCode, PG, type Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
@@ -85,16 +85,48 @@ async function postedInClosedYear(db: Db, query: () => PromiseLike<readonly unkn
   return (await query()).length > 0;
 }
 
+/** The whole of the company's settings: for those who see the books or make the quotes and invoices. */
+const fullReference = (u: AuthUser) => seesBooks(u) || canAny(u, 'documents.view', 'documents.edit');
+
+/** Only known tasks, with what they need. */
+const cleanAccess = (keys: readonly string[]) => withNeeds(keys.filter(isTask));
+
+/**
+ * Where someone stands: staff on a profile (or none) with what's changed for them, kept as what
+ * differs from the profile. Only staff have either.
+ */
+async function accessFields(db: Db, role: Role, profileId: string | null | undefined, access: readonly string[] | undefined) {
+  if (role !== 'staff') return { profileId: null, accessAdd: [] as string[], accessRemove: [] as string[] };
+  let base: string[] = [];
+  if (profileId) {
+    const [p] = await db<{ access: string[] }[]>`select access from profiles where id = ${profileId}`;
+    if (!p) throw badRequest('That profile isn’t there any more. Choose another.');
+    base = p.access;
+  }
+  const { add, remove } = tweaksFor(base, cleanAccess(access ?? base));
+  return { profileId: profileId ?? null, accessAdd: add as string[], accessRemove: remove as string[] };
+}
+
 export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
 
   app.get('/api/reference', { preHandler: requireRole() }, async (req) => {
     const user = userOrThrow(req);
-    const ref = await referenceData(sql, seesMoney(user));
-    if (!seesMoney(user)) {
-      // Site capture sees names and pickers, not the company's numbering or bank details.
+    const full = fullReference(user);
+    const ref = await referenceData(sql, seesBooks(user));
+    if (!full) {
+      // Staff who neither read the books nor make invoices see names, pickers and what's switched
+      // on, not the company's numbering, terms or bank details.
       const s = ref.settings;
-      return { ...ref, brands: ref.brands.map(({ bankDetails: _b, ...b }) => b), settings: { companyName: s.companyName, tradingName: s.tradingName, fyEndMonth: s.fyEndMonth, vatRegistered: s.vatRegistered, vatRateBp: s.vatRateBp, defaultCostSourceId: s.defaultCostSourceId, defaultWageSourceId: s.defaultWageSourceId, defaultReceiptSourceId: s.defaultReceiptSourceId, lockDate: s.lockDate } };
+      return {
+        ...ref,
+        brands: ref.brands.map(({ bankDetails: _b, ...b }) => b),
+        settings: {
+          companyName: s.companyName, tradingName: s.tradingName, fyEndMonth: s.fyEndMonth, vatRegistered: s.vatRegistered, vatRateBp: s.vatRateBp,
+          defaultCostSourceId: s.defaultCostSourceId, defaultWageSourceId: s.defaultWageSourceId, defaultReceiptSourceId: s.defaultReceiptSourceId, lockDate: s.lockDate,
+          features: s.features, businessType: s.businessType, industry: s.industry, setupDone: s.setupDone,
+        },
+      };
     }
     return { ...ref, emailOn: Boolean(ctx.config.SMTP_URL) };
   });
@@ -204,20 +236,26 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   // ---- files
-  app.post('/api/attachments', { preHandler: requireRole('owner', 'capture') }, async (req) => {
+  app.post('/api/attachments', { preHandler: requireAccess('costs.capture', 'costs.manage', 'stock.buy', 'bank.reconcile', 'books.adjust', 'documents.edit') }, async (req) => {
     const id = await saveAttachment(sql, parse(attachmentInput, req.body), userOrThrow(req).id);
     return { id };
   });
   app.get('/api/attachments/:id', { preHandler: requireRole() }, async (req, reply) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
-    // Site capture opens only the files it uploaded itself (its own slips); statements, logos and
-    // everyone else's slips are for the owner and accountant. Authorising by the uploader — not by
-    // "a cost points at this attachment" — stops capture granting itself access by pointing one of
-    // its own costs at someone else's attachment id.
-    const [row] = seesMoney(user)
+    // Staff open the files they uploaded themselves (their own slips); statements, logos and
+    // everyone else's slips are for those who see the books. Authorising by the uploader — not by
+    // "a cost points at this attachment" — stops anyone granting themselves access by pointing one
+    // of their own costs at someone else's attachment id. Staff who see all the costs open the slips
+    // on them too, but never a file that's also a bank statement, a logo or the financial statements.
+    const slips = canAny(user, 'costs.view', 'costs.manage');
+    const [row] = seesBooks(user)
       ? await sql<{ filename: string; mime: string; bytes: Buffer }[]>`select filename, mime, bytes from attachments where id = ${id}`
-      : await sql<{ filename: string; mime: string; bytes: Buffer }[]>`select filename, mime, bytes from attachments where id = ${id} and created_by = ${user.id}`;
+      : await sql<{ filename: string; mime: string; bytes: Buffer }[]>`
+          select filename, mime, bytes from attachments a where a.id = ${id} and (a.created_by = ${user.id} or (${slips} and exists (select 1 from costs c where c.receipt_id = a.id)
+            and not exists (select 1 from statement_files f where f.attachment_id = a.id) and not exists (select 1 from brands b where b.logo_id = a.id)
+            and not exists (select 1 from settings st where st.logo_id = a.id)
+            and not exists (select 1 from financial_statements fs where a.id in (fs.compiler_report_id, fs.final_pdf_id))))`;
     if (!row) throw notFound('File');
     // Only the kinds of file Shap takes in are served as themselves: anything else (from a doctored
     // backup, say) is handed over as plain bytes to save, never opened as a page.
@@ -307,7 +345,12 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   // ---- users
   app.get('/api/users', { preHandler: requireRole('owner') }, async () => {
-    return sql`select id, name, email, role, active, last_login_at, totp_enabled_at is not null as mfa from users order by name`;
+    const rows = await sql<{ role: Role; profileAccess: string[] | null; accessAdd: string[]; accessRemove: string[] }[]>`
+      select u.id, u.name, u.email, u.role, u.active, u.last_login_at, u.totp_enabled_at is not null as mfa,
+        u.profile_id, p.name as profile_name, p.access as profile_access, u.access_add, u.access_remove
+      from users u left join profiles p on p.id = u.profile_id order by u.name`;
+    // What each can do now: their profile's, changed for them.
+    return rows.map((r) => ({ ...r, access: accessOf(r) }));
   });
   app.post('/api/users', { preHandler: requireRole('owner') }, async (req) => {
     const me = userOrThrow(req);
@@ -317,9 +360,10 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     // Creating another owner is a takeover-grade action, so it takes the acting owner's password:
     // a session left open on a phone can't be used to mint a rival owner without it.
     if (input.role === 'owner') await confirmPassword(sql, me.id, input.currentPassword, req.ip);
+    const access = await accessFields(sql, input.role, input.profileId, input.access);
     try {
-      const u = await createUser(sql, { name: input.name, email: input.email, password: input.password, role: input.role });
-      await audit(sql, { userId: me.id, action: 'create', entity: 'user', entityId: u.id, ip: req.ip, details: { role: input.role } });
+      const u = await createUser(sql, { name: input.name, email: input.email, password: input.password, role: input.role, ...access });
+      await audit(sql, { userId: me.id, action: 'create', entity: 'user', entityId: u.id, ip: req.ip, details: { role: input.role, profileId: access.profileId, add: access.accessAdd, remove: access.accessRemove } });
       return u;
     } catch (err) {
       if (pgCode(err) === PG.uniqueViolation) throw conflict('Someone already signs in with that email');
@@ -341,18 +385,61 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
       (id !== me.id && (Boolean(input.password) || input.role === 'owner' || target.role === 'owner'));
     if (stepUp) await confirmPassword(sql, me.id, input.currentPassword, req.ip);
     if (input.password) checkNewPassword(input.password, input);
+    const access = await accessFields(sql, input.role, input.profileId, input.access);
     await sql.begin(async (tx) => {
       // An omitted `active` leaves it unchanged (so a PUT that doesn't resend active:false can't
       // silently re-enable a disabled sign-in).
-      await tx`update users set name = ${input.name}, email = ${input.email}, role = ${input.role}, active = coalesce(${input.active ?? null}, active) where id = ${id}`;
+      await tx`update users set name = ${input.name}, email = ${input.email}, role = ${input.role}, active = coalesce(${input.active ?? null}, active),
+        profile_id = ${access.profileId}, access_add = ${access.accessAdd}, access_remove = ${access.accessRemove} where id = ${id}`;
       if (input.password) {
         await tx`update users set password_hash = ${await hashPassword(input.password)} where id = ${id}`;
         // Everyone signed in as them is signed out (you stay signed in, if it's yours).
         await endOtherSessions(tx, id, id === me.id ? sessionToken(req) : undefined);
       }
       if (input.active === false) await tx`delete from sessions where user_id = ${id}`;
-      await audit(tx, { userId: me.id, action: 'update', entity: 'user', entityId: id, ip: req.ip, details: { role: input.role, passwordReset: Boolean(input.password) } });
+      await audit(tx, { userId: me.id, action: 'update', entity: 'user', entityId: id, ip: req.ip, details: { role: input.role, profileId: access.profileId, add: access.accessAdd, remove: access.accessRemove, passwordReset: Boolean(input.password) } });
     });
+    return { ok: true };
+  });
+
+  // ---- profiles: the jobs a kind of staff does, given to each person on it
+  app.get('/api/profiles', { preHandler: requireRole('owner') }, async () =>
+    sql`select p.id, p.name, p.access, (select count(*)::int from users u where u.profile_id = p.id) as people from profiles p order by lower(p.name)`);
+  app.post('/api/profiles', { preHandler: requireRole('owner') }, async (req) => {
+    const me = userOrThrow(req);
+    const input = parse(profileInput, req.body);
+    try {
+      const [row] = await sql<{ id: string }[]>`insert into profiles (name, access) values (${input.name}, ${cleanAccess(input.access)}) returning id, name, access`;
+      await audit(sql, { userId: me.id, action: 'create', entity: 'profile', entityId: row!.id, ip: req.ip, details: { name: input.name, access: cleanAccess(input.access) } });
+      return row;
+    } catch (err) {
+      if (pgCode(err) === PG.uniqueViolation) throw conflict('There’s already a profile with that name');
+      throw err;
+    }
+  });
+  app.put('/api/profiles/:id', { preHandler: requireRole('owner') }, async (req) => {
+    const me = userOrThrow(req);
+    const { id } = parse(idParam, req.params);
+    const input = parse(profileInput, req.body);
+    try {
+      // Everyone on it gets the change at once (their own changes stay as they were).
+      const [row] = await sql<{ id: string }[]>`update profiles set name = ${input.name}, access = ${cleanAccess(input.access)}, updated_at = now() where id = ${id} returning id, name, access`;
+      if (!row) throw notFound('Profile');
+      await audit(sql, { userId: me.id, action: 'update', entity: 'profile', entityId: id, ip: req.ip, details: { name: input.name, access: cleanAccess(input.access) } });
+      return row;
+    } catch (err) {
+      if (pgCode(err) === PG.uniqueViolation) throw conflict('There’s already a profile with that name');
+      throw err;
+    }
+  });
+  app.delete('/api/profiles/:id', { preHandler: requireRole('owner') }, async (req) => {
+    const me = userOrThrow(req);
+    const { id } = parse(idParam, req.params);
+    const [used] = await sql<{ n: number }[]>`select count(*)::int as n from users where profile_id = ${id}`;
+    if (used!.n) throw badRequest(`${used!.n === 1 ? 'Someone is' : `${used!.n} people are`} on this profile: give them another first.`);
+    const [row] = await sql`delete from profiles where id = ${id} returning name`;
+    if (!row) throw notFound('Profile');
+    await audit(sql, { userId: me.id, action: 'delete', entity: 'profile', entityId: id, ip: req.ip, details: { name: row.name } });
     return { ok: true };
   });
   app.post('/api/users/:id/reset-mfa', { preHandler: requireRole('owner') }, async (req) => {

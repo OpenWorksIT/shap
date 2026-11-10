@@ -34,8 +34,12 @@ The name is the shaka: thumb and pinky out, *shap, all good*.
   needs, tick them off as you buy them, and turn the plan into a quote with your mark-up.
 - **Workers.** Day rate and allowance per worker. Days, wages, allowances, earned, paid and
   saved/(advance) by month and year, plus a per-job breakdown. **Savings** you hold for a worker
-  are kept as a memo, separate from the company's money. A *site capture* login logs days at the
-  worker's rate without seeing any money.
+  are kept as a memo, separate from the company's money. Staff on the *Site staff* profile log
+  days at the worker's rate without seeing any money.
+- **People who sign in.** Everyone signs in as themselves: the owner, the accountant (read only),
+  or staff who do only the jobs ticked for them, from a profile (Teller, Admin, Site staff, or one
+  you make) changed for them if need be. Change a profile and everyone on it has the change at
+  once. See docs/PEOPLE.md.
 - **Quotes and invoices.** You can change them at any time, even after sending. Lines are
   labour, materials, demo or other. *Charge job costs* adds what a job has cost and not yet been
   invoiced, plus your mark-up. A quote becomes an invoice in one tap. PDFs can be shared to
@@ -141,7 +145,8 @@ npm run dev                                     # API on :8080, web app on :5173
 ```
 
 Demo logins use the password `demo-shap-1`: `owner@example.co.za`, `site@example.co.za`
-(site capture) and `accountant@example.co.za` (read only).
+(staff on the Site staff profile), `teller@example.co.za` (staff on the Teller profile) and
+`accountant@example.co.za` (read only).
 
 ```bash
 createdb shap_test

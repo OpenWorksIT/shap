@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Mailer } from '../lib/mailer.js';
 import { addDays, documentInput, documentTotals, featureOn, quoteStatusInput, receiptInput, vatRateOn, writeOffInput, type DocKind } from '@shap/shared';
 import { z } from 'zod';
-import { requireRole, userOrThrow, type AuthUser } from '../auth.js';
+import { can, requireAccess, type AuthUser, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { pgCode, PG, type Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
@@ -361,7 +361,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   // The things this business usually charges for, with what it charged last time: offered when
   // adding a line, so a regular "Cut and blow-dry" is one tap with the right price.
-  app.get('/api/documents/usual-lines', { preHandler: requireRole('owner') }, async () => {
+  app.get('/api/documents/usual-lines', { preHandler: requireAccess('documents.edit') }, async () => {
     return sql`
       select distinct on (lower(l.description)) l.description, l.category, l.unit, l.unit_price_cents,
              count(*) over (partition by lower(l.description))::int as uses, d.issue_date
@@ -380,7 +380,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     });
   });
 
-  app.get('/api/documents', { preHandler: requireRole('owner', 'accountant') }, async (req) => {
+  app.get('/api/documents', { preHandler: requireAccess('documents.view') }, async (req) => {
     const { kind, status, client, project, search, state } = q(req);
     const s = search?.trim() || null;
     const rows = await sql.unsafe(
@@ -402,12 +402,12 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     return state ? rows.filter((r) => (state === 'owing' ? ['unpaid', 'part_paid', 'overdue'].includes(r.paymentState as string) : r.paymentState === state)) : rows;
   });
 
-  app.get('/api/documents/:id', { preHandler: requireRole('owner', 'accountant') }, async (req) => {
+  app.get('/api/documents/:id', { preHandler: requireAccess('documents.view') }, async (req) => {
     const { id } = parse(idParam, req.params);
     return loadDocument(sql, id);
   });
 
-  app.post('/api/documents', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/documents', { preHandler: requireAccess('documents.edit') }, async (req) => {
     const user = userOrThrow(req);
     const { kind, ...rest } = parse(z.object({ kind: z.enum(['quote', 'invoice', 'credit_note']) }).passthrough(), req.body);
     const input = parse(documentInput, rest);
@@ -418,7 +418,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** Change a quote or invoice at any time, even after it was sent. Voided invoices stay as they were. */
-  app.put('/api/documents/:id', { preHandler: requireRole('owner') }, async (req) => {
+  app.put('/api/documents/:id', { preHandler: requireAccess('documents.edit') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const input = parse(documentInput, req.body);
@@ -494,7 +494,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     return loadDocument(sql, id);
   });
 
-  app.post('/api/documents/:id/issue', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/documents/:id/issue', { preHandler: requireAccess('documents.edit') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const [doc] = await sql<{ kind: string; status: string; issueDate: string; totalCents: number; number: string; creditedInvoiceId: string | null }[]>`select * from documents where id = ${id}`;
@@ -541,7 +541,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     return loadDocument(sql, id);
   });
 
-  app.post('/api/documents/:id/status', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/documents/:id/status', { preHandler: requireAccess('documents.edit') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const { status } = parse(quoteStatusInput, req.body);
@@ -559,7 +559,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     return loadDocument(sql, id);
   });
 
-  app.post('/api/documents/:id/void', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/documents/:id/void', { preHandler: requireAccess('documents.edit') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const { reason } = parse(z.object({ reason: z.string().trim().min(2, 'Give a reason').max(300) }), req.body);
@@ -596,7 +596,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     return loadDocument(sql, id);
   });
 
-  app.delete('/api/documents/:id', { preHandler: requireRole('owner') }, async (req) => {
+  app.delete('/api/documents/:id', { preHandler: requireAccess('documents.edit') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const [doc] = await sql<{ kind: string; status: string; number: string; issueDate: string; totalCents: number; clientName: string | null; proforma: boolean }[]>`
@@ -615,7 +615,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** Quote → draft invoice with the same lines; the quote is marked accepted. */
-  app.post('/api/documents/:id/convert', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/documents/:id/convert', { preHandler: requireAccess('documents.edit') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const { doc, lines } = await loadDocument(sql, id);
@@ -645,7 +645,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** A draft credit note for an invoice: all of what's still owed, line by line (change it before issuing). */
-  app.post('/api/documents/:id/credit-note', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/documents/:id/credit-note', { preHandler: requireAccess('documents.edit') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const { doc, lines } = await loadDocument(sql, id);
@@ -669,13 +669,13 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** A payment reminder was sent (from the phone's share sheet, or emailed). */
-  app.post('/api/documents/:id/reminded', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/documents/:id/reminded', { preHandler: requireAccess('documents.edit') }, async (req) => {
     const { id } = parse(idParam, req.params);
     await sql`update documents set reminded_at = now(), reminders = reminders + 1 where id = ${id} and kind = 'invoice'`;
     return { ok: true };
   });
 
-  app.post('/api/documents/:id/duplicate', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/documents/:id/duplicate', { preHandler: requireAccess('documents.edit') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const { kind } = parse(z.object({ kind: z.enum(['quote', 'invoice']).optional() }), req.body);
@@ -700,7 +700,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   // ---- delinquent: write off what's left
-  app.post('/api/documents/:id/write-off', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/documents/:id/write-off', { preHandler: requireAccess('documents.paid') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const input = parse(writeOffInput, req.body);
@@ -719,7 +719,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     return loadDocument(sql, id);
   });
 
-  app.delete('/api/documents/:id/write-off', { preHandler: requireRole('owner') }, async (req) => {
+  app.delete('/api/documents/:id/write-off', { preHandler: requireAccess('documents.paid') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const [doc] = await sql<{ writtenOffOn: string | null }[]>`select written_off_on from documents where id = ${id}`;
@@ -732,7 +732,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   // ---- payments received
-  app.post('/api/documents/:id/receipts', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/documents/:id/receipts', { preHandler: requireAccess('documents.paid') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const input = parse(receiptInput, req.body);
@@ -753,7 +753,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     return loadDocument(sql, id);
   });
 
-  app.delete('/api/receipts/:id', { preHandler: requireRole('owner') }, async (req) => {
+  app.delete('/api/receipts/:id', { preHandler: requireAccess('documents.paid') }, async (req) => {
     {
       const { id: rid } = parse(idParam, req.params);
       const [cr] = await sql`select 1 from receipts where id = ${rid} and method = 'credit'`;
@@ -777,8 +777,19 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
   // ---- PDF and email
   const pdfFor = (id: string) => documentPdf(sql, id);
 
-  app.get('/api/documents/:id/pdf', { preHandler: requireRole('owner', 'accountant') }, async (req, reply) => {
+  app.get('/api/documents/:id/pdf', { preHandler: requireAccess('documents.view', 'sales.view', 'sales.sell') }, async (req, reply) => {
+    const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
+    if (!can(user, 'documents.view')) {
+      // From the counter: a sale's slip (or its refund's credit note), as the sale itself may be opened.
+      const [d] = await sql<{ kind: string; saleNumber: string | null; createdBy: string | null; credited: { kind: string; saleNumber: string | null; createdBy: string | null } | null }[]>`
+        select d.kind, d.sale_number, d.created_by,
+          (select json_build_object('kind', s.kind, 'saleNumber', s.sale_number, 'createdBy', s.created_by) from documents s where s.id = d.credited_invoice_id) as credited
+        from documents d where d.id = ${id}`;
+      if (!d) throw notFound('Document');
+      const sale = d.kind === 'credit_note' ? d.credited : d;
+      if (!sale?.saleNumber || !(can(user, 'sales.view') || sale.createdBy === user.id || d.createdBy === user.id)) throw notFound('Document');
+    }
     // A draft invoice shows the VAT it will be issued with.
     await refreshDraftVat(sql, id);
     const { pdf, filename } = await pdfFor(id);
@@ -787,7 +798,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     return reply.send(pdf);
   });
 
-  app.post('/api/documents/:id/shared', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/documents/:id/shared', { preHandler: requireAccess('documents.edit') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const kind = await markShared(sql, id);
@@ -796,7 +807,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { ok: true };
   });
 
-  app.post('/api/documents/:id/email', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/documents/:id/email', { preHandler: requireAccess('documents.edit') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const input = parse(z.object({ to: z.string().trim().email('Enter the client’s email'), message: z.string().max(4000).default('') }), req.body);

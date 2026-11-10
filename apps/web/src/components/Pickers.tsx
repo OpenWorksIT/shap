@@ -27,7 +27,9 @@ export function ProjectSelect({
   'aria-invalid'?: boolean;
   'aria-describedby'?: string;
 }) {
-  const { seesMoney } = useAuthed();
+  const { can } = useAuthed();
+  // Finished jobs are for those who see the jobs' money; everyone else picks from the open ones.
+  const seesMoney = can('jobs.money');
   const [all, setAll] = useState(false);
   const open = useApi<MiniProject[]>('/api/projects?status=open');
   // A finished job isn't in the open list: load all jobs so its name shows.

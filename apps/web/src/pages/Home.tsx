@@ -11,6 +11,7 @@ import { hoursLabel, minutesSince } from '../lib/time';
 import { MarketNote } from '../components/MarketShare';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
+import { screensFor } from '../lib/screens';
 import { greeting, say } from '../lib/words';
 import type { ProjectRow } from '../lib/types';
 
@@ -49,27 +50,39 @@ interface CaptureDashboard {
 }
 
 export default function HomePage() {
-  const { seesMoney, user } = useAuthed();
-  if (!seesMoney) return <CaptureHome name={user.name} />;
+  const { seesBooks, user } = useAuthed();
+  if (!seesBooks) return <StaffHome name={user.name} />;
   return <OwnerHome />;
 }
 
-function CaptureHome({ name }: { name: string }) {
+/** Home for staff who don't see the books: their jobs, one tap away. */
+function StaffHome({ name }: { name: string }) {
+  const { user, can, canAny, has, settings } = useAuthed();
+  const may = screensFor(user, can, has, settings.businessType);
+  const logsDays = has('workers') && canAny('labour.log', 'workers.manage');
   const { data } = useApi<CaptureDashboard>('/api/dashboard');
+  const quick = [
+    may['/sales'] && can('sales.sell') && { to: '/sales', icon: 'till' as const, label: 'Sell' },
+    logsDays && { to: '/log?tab=labour', icon: 'workers' as const, label: 'Day’s work' },
+    canAny('costs.capture', 'costs.manage') && { to: '/log?tab=cost', icon: 'camera' as const, label: 'Cost & slip' },
+    may['/inventory'] && { to: '/inventory', icon: 'box' as const, label: can('stock.count') ? 'Stock & counts' : 'Stock' },
+    may['/documents'] && { to: '/documents', icon: 'docs' as const, label: has('quotes') ? 'Quotes & invoices' : 'Invoices' },
+    may['/jobs'] && { to: '/jobs', icon: 'jobs' as const, label: 'Jobs' },
+  ].filter(Boolean) as { to: string; icon: 'till'; label: string }[];
   return (
     <div className="narrow stack-lg">
-      <PageHead title={`Howzit, ${name.split(' ')[0]}`} sub="What are you logging?" />
-      <div className="quick-actions">
-        <Link to="/log?tab=labour" className="quick">
-          <Icon name="workers" size={26} />
-          Day’s work
-        </Link>
-        <Link to="/log?tab=cost" className="quick">
-          <Icon name="camera" size={26} />
-          Cost & slip
-        </Link>
-      </div>
-      <section className="panel">
+      <PageHead title={`Howzit, ${name.split(' ')[0]}`} sub={quick.length ? 'What’s next?' : 'The owner hasn’t given you anything to do in Shap yet.'} />
+      {quick.length > 0 && (
+        <div className="quick-actions">
+          {quick.map((q) => (
+            <Link key={q.to} to={q.to} className="quick">
+              <Icon name={q.icon} size={26} />
+              {q.label}
+            </Link>
+          ))}
+        </div>
+      )}
+      {logsDays && <section className="panel">
         <div className="panel-head strong">What you logged lately</div>
         {data?.recentLabour.length ? (
           <ul className="list">
@@ -85,13 +98,16 @@ function CaptureHome({ name }: { name: string }) {
         ) : (
           <Empty title="Nothing yet">Days you log show up here.</Empty>
         )}
-      </section>
+      </section>}
     </div>
   );
 }
 
 function OwnerHome() {
-  const { settings, isOwner, has } = useAuthed();
+  const { settings, can, has, user } = useAuthed();
+  // Reminders and new quotes are for whoever makes the invoices.
+  const isOwner = can('documents.edit');
+  const logs = screensFor(user, can, has, settings.businessType)['/log'];
   const { data, error, reload } = useApi<Dashboard>('/api/dashboard');
   const toast = useToast();
   useMinuteTick();
@@ -288,15 +304,19 @@ function OwnerHome() {
         title={greeting()}
         sub={`${settings.tradingName || settings.companyName} · ${data.financialYear.label} (${formatDate(data.financialYear.start)} to ${formatDate(data.financialYear.end)})`}
         actions={
-          isOwner && (
+          (logs || isOwner) && (
             <>
-              <Link to="/log" className="btn primary">
-                <Icon name="plus" size={18} />
-                Log
-              </Link>
-              <Link to="/documents/new?kind=quote" className="btn">
-                New quote
-              </Link>
+              {logs && (
+                <Link to="/log" className="btn primary">
+                  <Icon name="plus" size={18} />
+                  Log
+                </Link>
+              )}
+              {isOwner && (
+                <Link to={has('quotes') ? '/documents/new?kind=quote' : '/documents/new?kind=invoice'} className="btn">
+                  {has('quotes') ? 'New quote' : 'New invoice'}
+                </Link>
+              )}
             </>
           )
         }

@@ -60,4 +60,6 @@ so later starts don't load the demo again (until `--reset`).
 - **The books**: Accounts → Income statement → *By month*, then the balance sheet, then a
   balance check.
 - **Site login**: sign in as `site@example.co.za` on the phone. It can log days and costs but sees
-  no money.
+  no money (the Site staff profile).
+- **Teller login**: `teller@example.co.za` (the Teller profile) sells at the counter and sees the
+  stock, but not what it cost, nor anyone else's sales.

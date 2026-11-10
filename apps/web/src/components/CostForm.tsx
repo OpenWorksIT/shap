@@ -49,7 +49,9 @@ export function costDraftFrom(c: CostRow): CostDraft {
 
 /** Add or change a cost. On a phone: amount first, a photo of the slip, then the details. */
 export function CostForm({ initial, projectId, plannedItem, onSaved, onDeleted }: { initial?: CostDraft; projectId?: string; plannedItem?: PlannedItem; onSaved?: () => void; onDeleted?: () => void }) {
-  const { ref, settings, isOwner, has } = useAuthed();
+  const { ref, settings, can, has } = useAuthed();
+  // Capturing slips (not managing the costs): no VAT claimed, no bills, no tidying.
+  const isOwner = can('costs.manage');
   const profile = industryProfile(settings.industry);
   const toast = useToast();
   const suppliers = useApi<string[]>('/api/costs/suppliers');

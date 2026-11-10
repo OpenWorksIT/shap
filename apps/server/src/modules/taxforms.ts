@@ -6,7 +6,7 @@
 import type { FastifyInstance } from 'fastify';
 import { addMonths, financialYear, lastBusinessDay, monthEnd, monthsBetween, turnoverTax, turnoverTaxLimit, turnoverTaxTable, vat201Due, vatPeriod, entity, splitByShares } from '@shap/shared';
 import { z } from 'zod';
-import { requireRole } from '../auth.js';
+import { requireAccess } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { freshTotals, getSettings, today } from '../lib/books.js';
 import { badRequest } from '../lib/errors.js';
@@ -73,10 +73,9 @@ export async function vat201(db: Db, start: string, end: string) {
 
 export function registerTaxFormRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
-  const readers = { preHandler: requireRole('owner', 'accountant') };
 
   /** The VAT201 for the period ending in (or the period containing) `on`; recent periods to pick from. */
-  app.get('/api/vat/return', readers, async (req) => {
+  app.get('/api/vat/return', { preHandler: requireAccess('reports.view') }, async (req) => {
     const settings = await getSettings(sql);
     const { on } = parse(z.object({ on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }), req.query);
     const cat = settings.vatCategory;
@@ -94,7 +93,7 @@ export function registerTaxFormRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** Turnover tax for a year of assessment: turnover so far, the year projected, the two interim payments. */
-  app.get('/api/reports/turnover-tax', readers, async (req) => {
+  app.get('/api/reports/turnover-tax', { preHandler: requireAccess('reports.view') }, async (req) => {
     const settings = await getSettings(sql);
     const { fyEnd } = parse(z.object({ fyEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }), req.query);
     const fy = financialYear(fyEnd ?? today(), settings.fyEndMonth);

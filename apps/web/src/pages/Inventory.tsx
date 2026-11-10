@@ -56,7 +56,11 @@ interface Take {
 }
 
 export default function InventoryPage() {
-  const { isOwner } = useAuthed();
+  const { can } = useAuthed();
+  // Buying, counting, and seeing what it cost are each someone's job (Settings → People who sign in).
+  const buys = can('stock.buy');
+  const counts = can('stock.count');
+  const costs = can('stock.costs');
   const [tab, setTab] = useState<Tab>('stock');
   const items = useApi<Item[]>('/api/items?stocked=1');
   const [open, setOpen] = useState<{ kind: 'item' | 'purchase' | 'take' | 'sale'; id: string } | null>(null);
@@ -73,17 +77,21 @@ export default function InventoryPage() {
     <div className="stack-lg">
       <PageHead
         title="Inventory"
-        sub={items.data ? <>Stock on hand at average cost: <Money cents={value} /></> : undefined}
+        sub={items.data && costs ? <>Stock on hand at average cost: <Money cents={value} /></> : undefined}
         actions={
-          isOwner && (
+          (buys || counts) && (
             <>
-              <button className="btn primary" onClick={() => setForm('purchase')}>
-                <Icon name="plus" size={18} />
-                Supplier invoice
-              </button>
-              <button className="btn" onClick={() => setForm('take')}>
-                Count stock
-              </button>
+              {buys && (
+                <button className="btn primary" onClick={() => setForm('purchase')}>
+                  <Icon name="plus" size={18} />
+                  Supplier invoice
+                </button>
+              )}
+              {counts && (
+                <button className="btn" onClick={() => setForm('take')}>
+                  Count stock
+                </button>
+              )}
             </>
           )
         }
@@ -99,17 +107,21 @@ export default function InventoryPage() {
         onChange={setTab}
         tabs={[
           { value: 'stock', label: 'Stock' },
-          { value: 'purchases', label: 'Supplier invoices' },
-          { value: 'claims', label: 'Returns and claims' },
+          ...(costs
+            ? [
+                { value: 'purchases' as Tab, label: 'Supplier invoices' },
+                { value: 'claims' as Tab, label: 'Returns and claims' },
+              ]
+            : []),
           { value: 'takes', label: 'Stock takes' },
-          { value: 'value', label: 'Valuation' },
+          ...(costs ? [{ value: 'value' as Tab, label: 'Valuation' }] : []),
         ]}
       />
       {tab === 'stock' && <StockList items={items} onOpen={(id) => setOpen({ kind: 'item', id })} />}
-      {tab === 'purchases' && <Purchases onOpen={(id) => setOpen({ kind: 'purchase', id })} />}
-      {tab === 'claims' && <Claims onReturn={() => setForm('return')} onCredit={() => setForm('credit')} onOpenItem={(id) => setOpen({ kind: 'item', id })} />}
+      {tab === 'purchases' && costs && <Purchases onOpen={(id) => setOpen({ kind: 'purchase', id })} />}
+      {tab === 'claims' && costs && <Claims onReturn={() => setForm('return')} onCredit={() => setForm('credit')} onOpenItem={(id) => setOpen({ kind: 'item', id })} />}
       {tab === 'takes' && <Takes onOpen={(id) => setOpen({ kind: 'take', id })} onNew={() => setForm('take')} />}
-      {tab === 'value' && <Valuation onOpen={(id) => setOpen({ kind: 'item', id })} />}
+      {tab === 'value' && costs && <Valuation onOpen={(id) => setOpen({ kind: 'item', id })} />}
 
       {open?.kind === 'item' && <ItemHistory id={open.id} onClose={() => setOpen(null)} onOpen={setOpen} onChanged={() => void items.reload()} />}
       {open?.kind === 'purchase' && <PurchaseDetail id={open.id} onClose={() => setOpen(null)} />}
@@ -131,6 +143,7 @@ function supplierSources(sources: { id: string; name: string; role?: string | nu
 /* ------------------------------------------------------------------ stock */
 
 function StockList({ items, onOpen }: { items: ReturnType<typeof useApi<Item[]>>; onOpen: (id: string) => void }) {
+  const costs = useAuthed().can('stock.costs');
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | 'in' | 'low' | 'out'>('all');
   const needle = search.trim().toLowerCase();
@@ -172,8 +185,8 @@ function StockList({ items, onOpen }: { items: ReturnType<typeof useApi<Item[]>>
               <tr>
                 <th>Item</th>
                 <th className="num">On hand</th>
-                <th className="num">Average cost</th>
-                <th className="num">Value</th>
+                {costs && <th className="num">Average cost</th>}
+                {costs && <th className="num">Value</th>}
                 <th>Last moved</th>
               </tr>
             </thead>
@@ -191,10 +204,12 @@ function StockList({ items, onOpen }: { items: ReturnType<typeof useApi<Item[]>>
                       {reorder && q >= 0 && <div className="xs warn-text">Reorder: down to {qtyText(q)}</div>}
                     </td>
                     <td className={`num ${q < 0 ? 'stock-neg' : ''}`}>{qtyText(q)}</td>
-                    <td className="num">{i.averageCostCents != null ? <Money cents={i.averageCostCents} /> : <span className="muted">–</span>}</td>
-                    <td className="num">
-                      <Money cents={i.stockValueCents} />
-                    </td>
+                    {costs && <td className="num">{i.averageCostCents != null ? <Money cents={i.averageCostCents} /> : <span className="muted">–</span>}</td>}
+                    {costs && (
+                      <td className="num">
+                        <Money cents={i.stockValueCents} />
+                      </td>
+                    )}
                     <td className="small muted nowrap">{i.lastMoved ? formatDate(i.lastMoved) : 'Never'}</td>
                   </tr>
                 );
@@ -215,7 +230,9 @@ function StockList({ items, onOpen }: { items: ReturnType<typeof useApi<Item[]>>
 
 /** One item's whole story: every movement, what caused it (linked), and the stock after each. */
 function ItemHistory({ id, onClose, onOpen, onChanged }: { id: string; onClose: () => void; onOpen: (o: { kind: 'item' | 'purchase' | 'take' | 'sale'; id: string }) => void; onChanged: () => void }) {
-  const { isOwner, settings } = useAuthed();
+  const { can, settings } = useAuthed();
+  const isOwner = can('stock.buy') || can('items.edit');
+  const costs = can('stock.costs');
   const { data, error, loading, reload } = useApi<{
     item: Item;
     moves: StockMove[];
@@ -267,17 +284,19 @@ function ItemHistory({ id, onClose, onOpen, onChanged }: { id: string; onClose: 
         <div className="stack">
           <div className="kpis compact">
             <Kpi label="On hand" value={qtyText(it.qtyOnHand)} tone={Number(it.qtyOnHand) < 0 ? 'bad' : undefined} />
-            <Kpi label="Value at cost" value={<Money cents={it.stockValueCents} />} />
-            <Kpi label="Average cost" value={it.averageCostCents != null ? <Money cents={it.averageCostCents} /> : '–'} sub={Number(it.lastCostCents) ? <>Last bought at <Money cents={it.lastCostCents} /></> : undefined} />
-            <Kpi label="Selling (excl. VAT)" value={<Money cents={netPriceCents(it, vatRate)} />} tone={it.averageCostCents != null && Number(it.averageCostCents) > netPriceCents(it, vatRate) ? 'bad' : undefined} sub={it.averageCostCents != null && Number(it.averageCostCents) > netPriceCents(it, vatRate) ? 'Below cost: worth writing down at the count' : undefined} />
+            {costs && <Kpi label="Value at cost" value={<Money cents={it.stockValueCents} />} />}
+            {costs && <Kpi label="Average cost" value={it.averageCostCents != null ? <Money cents={it.averageCostCents} /> : '–'} sub={Number(it.lastCostCents) ? <>Last bought at <Money cents={it.lastCostCents} /></> : undefined} />}
+            <Kpi label="Selling (excl. VAT)" value={<Money cents={netPriceCents(it, vatRate)} />} tone={costs && it.averageCostCents != null && Number(it.averageCostCents) > netPriceCents(it, vatRate) ? 'bad' : undefined} sub={costs && it.averageCostCents != null && Number(it.averageCostCents) > netPriceCents(it, vatRate) ? 'Below cost: worth writing down at the count' : undefined} />
           </div>
           {isOwner && (
             <div className="row wrap">
-              <button className="btn small" onClick={() => setEdit(true)}>
-                <Icon name="edit" size={16} />
-                Change the item
-              </button>
-              {data.moves.length === 0 && (
+              {can('items.edit') && (
+                <button className="btn small" onClick={() => setEdit(true)}>
+                  <Icon name="edit" size={16} />
+                  Change the item
+                </button>
+              )}
+              {data.moves.length === 0 && can('stock.buy') && (
                 <button className="btn small" onClick={() => setOpening(true)}>
                   Stock already on hand
                 </button>
@@ -297,9 +316,9 @@ function ItemHistory({ id, onClose, onOpen, onChanged }: { id: string; onClose: 
                     <th>Date</th>
                     <th>What</th>
                     <th className="num">Qty</th>
-                    <th className="num">At cost</th>
+                    {costs && <th className="num">At cost</th>}
                     <th className="num">On hand after</th>
-                    <th className="num">Value after</th>
+                    {costs && <th className="num">Value after</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -319,20 +338,24 @@ function ItemHistory({ id, onClose, onOpen, onChanged }: { id: string; onClose: 
                         {Number(m.qty) > 0 ? '+' : ''}
                         {qtyText(m.qty)}
                       </td>
-                      <td className="num">
-                        <Money cents={m.valueCents} />
-                      </td>
+                      {costs && (
+                        <td className="num">
+                          <Money cents={m.valueCents} />
+                        </td>
+                      )}
                       <td className={`num ${Number(m.qtyAfter) < 0 ? 'stock-neg' : ''}`}>{qtyText(m.qtyAfter)}</td>
-                      <td className="num">
-                        <Money cents={m.valueAfterCents} />
-                      </td>
+                      {costs && (
+                        <td className="num">
+                          <Money cents={m.valueAfterCents} />
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           ) : (
-            <p className="small muted">No movements yet. Stock comes in on a supplier invoice{isOwner ? ', or as stock already on hand' : ''}.</p>
+            <p className="small muted">No movements yet. Stock comes in on a supplier invoice{can('stock.buy') ? ', or as stock already on hand' : ''}.</p>
           )}
           {data.changes.length > 0 && (
             <details>
@@ -782,7 +805,7 @@ function PurchaseForm({ items, onClose, onDone, onNewItem }: { items: Item[]; on
 /* ------------------------------------------------------------------ returns and claims */
 
 function Claims({ onReturn, onCredit, onOpenItem }: { onReturn: () => void; onCredit: () => void; onOpenItem: (id: string) => void }) {
-  const { isOwner } = useAuthed();
+  const isOwner = useAuthed().can('stock.buy');
   const [state, setState] = useState<'open' | 'all'>('open');
   const { data, error, loading, reload } = useApi<Claim[]>(`/api/stock/claims?state=${state}`);
   const [writeOff, setWriteOff] = useState<Claim | null>(null);
@@ -1095,7 +1118,9 @@ function CreditForm({ onClose, onDone }: { onClose: () => void; onDone: () => vo
 /* ------------------------------------------------------------------ stock takes */
 
 function Takes({ onOpen, onNew }: { onOpen: (id: string) => void; onNew: () => void }) {
-  const { isOwner } = useAuthed();
+  const { can } = useAuthed();
+  const isOwner = can('stock.count');
+  const costs = can('stock.costs');
   const { data, error, loading, reload } = useApi<Take[]>('/api/stock/takes');
   return (
     <div className="stack">
@@ -1112,7 +1137,7 @@ function Takes({ onOpen, onNew }: { onOpen: (id: string) => void; onNew: () => v
                 <th>Counted by</th>
                 <th className="num">Items</th>
                 <th className="num">Corrected</th>
-                <th className="num">Gain (loss)</th>
+                {costs && <th className="num">Gain (loss)</th>}
               </tr>
             </thead>
             <tbody>
@@ -1127,9 +1152,11 @@ function Takes({ onOpen, onNew }: { onOpen: (id: string) => void; onNew: () => v
                   <td className="small">{t.byName}</td>
                   <td className="num">{t.items}</td>
                   <td className="num">{t.corrected}</td>
-                  <td className="num">
-                    <Money cents={t.valueCents} />
-                  </td>
+                  {costs && (
+                    <td className="num">
+                      <Money cents={t.valueCents} />
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -1151,6 +1178,7 @@ function Takes({ onOpen, onNew }: { onOpen: (id: string) => void; onNew: () => v
 }
 
 function TakeDetail({ id, onClose }: { id: string; onClose: () => void }) {
+  const costs = useAuthed().can('stock.costs');
   const { data, error, loading, reload } = useApi<{
     take: Take;
     lines: { id: string; itemId: string; description: string; unit: string; systemQty: number; countedQty: number; reason: string; valueCents: number | null }[];
@@ -1171,7 +1199,7 @@ function TakeDetail({ id, onClose }: { id: string; onClose: () => void }) {
                   <th className="num">Shap had</th>
                   <th className="num">Counted</th>
                   <th className="num">Difference</th>
-                  <th className="num">At cost</th>
+                  {costs && <th className="num">At cost</th>}
                 </tr>
               </thead>
               <tbody>
@@ -1186,7 +1214,7 @@ function TakeDetail({ id, onClose }: { id: string; onClose: () => void }) {
                       <td className="num">{qtyText(l.systemQty)}</td>
                       <td className="num">{qtyText(l.countedQty)}</td>
                       <td className={`num ${diff < 0 ? 'warn-text' : ''}`}>{diff === 0 ? '–' : `${diff > 0 ? '+' : ''}${qtyText(diff)}`}</td>
-                      <td className="num">{l.valueCents != null ? <Money cents={l.valueCents} /> : ''}</td>
+                      {costs && <td className="num">{l.valueCents != null ? <Money cents={l.valueCents} /> : ''}</td>}
                     </tr>
                   );
                 })}
@@ -1224,7 +1252,7 @@ function TakeForm({ items, onClose, onDone }: { items: Item[]; onClose: () => vo
       const r = await api<{ corrected: number; valueCents: number }>('/api/stock/takes', {
         body: { date, note, lines: entered.map((i) => ({ itemId: i.id, countedQty: toQty(counts[i.id]!.qty), reason: counts[i.id]!.reason })) },
       });
-      toast(r.corrected ? `${r.corrected} corrected: ${formatZar(r.valueCents)} to stock ${r.valueCents < 0 ? 'losses' : 'gains'}` : 'Counted: everything agrees');
+      toast(r.corrected ? (r.valueCents == null ? `${r.corrected} corrected` : `${r.corrected} corrected: ${formatZar(r.valueCents)} to stock ${r.valueCents < 0 ? 'losses' : 'gains'}`) : 'Counted: everything agrees');
       onDone();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Couldn’t save the count');

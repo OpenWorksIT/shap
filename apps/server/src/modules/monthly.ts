@@ -11,7 +11,7 @@
 import type { FastifyInstance } from 'fastify';
 import { addMonths, monthEnd } from '@shap/shared';
 import { z } from 'zod';
-import { requireRole, userOrThrow } from '../auth.js';
+import { requireAccess, requireRole, userOrThrow } from '../auth.js';
 import { checkInUsage } from './feedback.js';
 import { shareMarketRates } from './market.js';
 import type { Ctx } from '../context.js';
@@ -243,17 +243,17 @@ export function registerMonthlyRoutes(app: FastifyInstance, ctx: Ctx): void {
       }),
     );
 
-  app.get('/api/monthly-invoices', { preHandler: requireRole('owner', 'accountant') }, async () => withNext(await list()));
+  app.get('/api/monthly-invoices', { preHandler: requireAccess('documents.view') }, async () => withNext(await list()));
 
   /** The monthly schedule this invoice belongs to, if any. */
-  app.get('/api/documents/:id/monthly', { preHandler: requireRole('owner', 'accountant') }, async (req) => {
+  app.get('/api/documents/:id/monthly', { preHandler: requireAccess('documents.view') }, async (req) => {
     const { id } = parse(z.object({ id: z.string().uuid() }), req.params);
     const [row] = await withNext(await list({ documentId: id }));
     return { schedule: row ?? null, emailOn: Boolean(ctx.config.SMTP_URL) };
   });
 
   /** Make this invoice monthly (or, if it's already in a series, change the series and copy this one from now on). */
-  app.post('/api/documents/:id/monthly', owner, async (req) => {
+  app.post('/api/documents/:id/monthly', { preHandler: requireAccess('documents.edit') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(z.object({ id: z.string().uuid() }), req.params);
     const input = parse(scheduleInput, req.body);
@@ -280,7 +280,7 @@ export function registerMonthlyRoutes(app: FastifyInstance, ctx: Ctx): void {
     return row;
   });
 
-  app.put('/api/monthly-invoices/:id', owner, async (req) => {
+  app.put('/api/monthly-invoices/:id', { preHandler: requireAccess('documents.edit') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(z.object({ id: z.string().uuid() }), req.params);
     const input = parse(scheduleInput.extend({ active: z.boolean().default(true) }), req.body);
@@ -295,7 +295,7 @@ export function registerMonthlyRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** Do what's due now, rather than waiting for the next check (also retries after a problem). */
-  app.post('/api/monthly-invoices/:id/run', owner, async (req) => {
+  app.post('/api/monthly-invoices/:id/run', { preHandler: requireAccess('documents.edit') }, async (req) => {
     const { id } = parse(z.object({ id: z.string().uuid() }), req.params);
     await sql`update monthly_invoices set last_error = null where id = ${id}`;
     return runMonthly(sql, ctx.mailer, { emailOn: Boolean(ctx.config.SMTP_URL), only: id, resend: true });

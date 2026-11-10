@@ -15,7 +15,8 @@ import type { CostRow } from '../lib/types';
 type Period = 'month' | 'last' | 'fy' | 'lastfy' | 'all';
 
 export default function CostsPage() {
-  const { ref, settings, isOwner, has } = useAuthed();
+  const { ref, settings, has, can } = useAuthed();
+  const isOwner = can('costs.manage');
   const [params, setParams] = useSearchParams();
   const period = (params.get('period') as Period) || (params.get('kind') || params.get('source') === 'none' ? 'all' : 'month');
   const category = params.get('category') ?? '';
@@ -115,16 +116,18 @@ export default function CostsPage() {
             <button className="btn" onClick={() => setParam('kind', 'recurring')}>
               Monthly costs
             </button>
-            {isOwner && (
+            {can('bank.reconcile') && has('bank') && (
               <Link className="btn" to="/accounts?tab=bank">
                 <Icon name="upload" size={18} />
                 Bank statement
               </Link>
             )}
-            <a className="btn" href={apiUrl(`/api/export/costs?${qs}`)}>
-              <Icon name="download" size={18} />
-              CSV
-            </a>
+            {can('reports.view') && (
+              <a className="btn" href={apiUrl(`/api/export/costs?${qs}`)}>
+                <Icon name="download" size={18} />
+                CSV
+              </a>
+            )}
             {isOwner && (
               <button className="btn primary" onClick={() => setDrawer('new')}>
                 <Icon name="plus" size={18} />
@@ -362,7 +365,7 @@ export default function CostsPage() {
               }}
               onDeleted={() => (setDrawer(null), void reload())}
             />
-            {drawer !== 'new' && isOwner && <AssetFromCost cost={drawer} onDone={() => (setDrawer(null), void reload())} />}
+            {drawer !== 'new' && isOwner && can('books.adjust') && <AssetFromCost cost={drawer} onDone={() => (setDrawer(null), void reload())} />}
           </div>
         </Drawer>
       )}

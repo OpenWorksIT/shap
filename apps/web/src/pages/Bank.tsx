@@ -57,7 +57,8 @@ type View = 'todo' | 'matched' | 'ignored' | 'all';
  * lines off (personal spending).
  */
 export function BankRecon() {
-  const { ref, isOwner } = useAuthed();
+  const { ref, can } = useAuthed();
+  const isOwner = can('bank.reconcile');
   const toast = useToast();
   const [params, setParams] = useSearchParams();
   const sources = ref.sources.filter((s) => s.active && s.kind !== 'cash' && !s.role);

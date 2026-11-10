@@ -26,7 +26,9 @@ type Tab = 'labour' | 'costs' | 'plan' | 'docs' | 'time';
 
 export default function ProjectPage() {
   const { id } = useParams<{ id: string }>();
-  const { isOwner, seesMoney, user, has, settings } = useAuthed();
+  const { can, canAny, has, settings } = useAuthed();
+  const seesMoney = can('jobs.money');
+  const isOwner = can('jobs.edit');
   const navigate = useNavigate();
   const toast = useToast();
   const { data, error, loading, reload } = useApi<ProjectDetail>(`/api/projects/${id}`);
@@ -63,37 +65,41 @@ export default function ProjectPage() {
         sub={
           <span className="row wrap" style={{ gap: 8 }}>
             <ProjectChip status={p.status} />
-            {p.clientName && (seesMoney ? <Link to={`/clients/${p.clientId}`}>{p.clientName}</Link> : <span>{p.clientName}</span>)}
+            {p.clientName && (canAny('documents.view', 'clients.edit', 'reports.view') ? <Link to={`/clients/${p.clientId}`}>{p.clientName}</Link> : <span>{p.clientName}</span>)}
             {p.siteAddress && <span className="muted">· {p.siteAddress}</span>}
             {p.startDate && <span className="muted">· started {formatDate(p.startDate)}</span>}
           </span>
         }
         actions={
           <>
-            {user.role !== 'accountant' && (
+            {has('workers') && canAny('labour.log', 'workers.manage') && (
+              <button className="btn" onClick={() => setDrawer({ kind: 'labour' })}>
+                <Icon name="workers" size={18} />
+                Log day
+              </button>
+            )}
+            {canAny('costs.capture', 'costs.manage') && (
+              <button className="btn" onClick={() => setDrawer({ kind: 'cost' })}>
+                <Icon name="costs" size={18} />
+                Add cost
+              </button>
+            )}
+            {can('documents.edit') && (
               <>
-                <button className="btn" onClick={() => setDrawer({ kind: 'labour' })}>
-                  <Icon name="workers" size={18} />
-                  Log day
-                </button>
-                <button className="btn" onClick={() => setDrawer({ kind: 'cost' })}>
-                  <Icon name="costs" size={18} />
-                  Add cost
+                {has('quotes') && (
+                  <button className="btn" onClick={() => newDoc('quote')}>
+                    Quote
+                  </button>
+                )}
+                <button className="btn primary" onClick={() => newDoc('invoice')}>
+                  Invoice
                 </button>
               </>
             )}
             {isOwner && (
-              <>
-                <button className="btn" onClick={() => newDoc('quote')}>
-                  Quote
-                </button>
-                <button className="btn primary" onClick={() => newDoc('invoice')}>
-                  Invoice
-                </button>
-                <button className="btn quiet" onClick={() => setEditing(true)} aria-label="Edit job">
-                  <Icon name="edit" size={18} />
-                </button>
-              </>
+              <button className="btn quiet" onClick={() => setEditing(true)} aria-label="Edit job">
+                <Icon name="edit" size={18} />
+              </button>
             )}
           </>
         }
@@ -113,7 +119,7 @@ export default function ProjectPage() {
             : []),
           { value: 'plan', label: 'Parts plan', count: data.planned.length },
           ...(seesMoney ? [{ value: 'docs' as Tab, label: 'Quotes & invoices', count: data.documents?.length }] : []),
-          ...(isOwner && has('timeTracker') ? [{ value: 'time' as Tab, label: 'Time' }] : []),
+          ...(can('time.track') && has('timeTracker') ? [{ value: 'time' as Tab, label: 'Time' }] : []),
         ]}
       />
 
@@ -132,7 +138,7 @@ export default function ProjectPage() {
                 </thead>
                 <tbody>
                   {data.labour.map((e) => (
-                    <tr key={e.id} className={isOwner ? 'clickable' : ''} onClick={() => isOwner && setDrawer({ kind: 'entry', entry: e })}>
+                    <tr key={e.id} className={can('workers.manage') ? 'clickable' : ''} onClick={() => can('workers.manage') && setDrawer({ kind: 'entry', entry: e })}>
                       <td className="nowrap">{formatDate(e.date)}</td>
                       <td>
                         {e.workerName}
@@ -182,7 +188,7 @@ export default function ProjectPage() {
               </thead>
               <tbody>
                 {data.costs.map((c) => (
-                  <tr key={c.id} className={isOwner ? 'clickable' : ''} onClick={() => isOwner && setDrawer({ kind: 'cost', cost: c })}>
+                  <tr key={c.id} className={can('costs.manage') ? 'clickable' : ''} onClick={() => can('costs.manage') && setDrawer({ kind: 'cost', cost: c })}>
                     <td className="nowrap">{formatDate(c.date)}</td>
                     <td>
                       {c.description}
@@ -209,10 +215,10 @@ export default function ProjectPage() {
       )}
 
       {tab === 'plan' && (
-        <PartsPlan projectId={p.id} items={data.planned} canEdit={isOwner} onChange={reload} onBuy={(item) => setDrawer({ kind: 'cost', planned: item })} onQuote={() => void fromPlan()} />
+        <PartsPlan projectId={p.id} items={data.planned} canEdit={isOwner} onChange={reload} onBuy={(item) => setDrawer({ kind: 'cost', planned: item })} onQuote={can('documents.edit') ? () => void fromPlan() : undefined} />
       )}
 
-      {tab === 'time' && <JobTime projectId={p.id} rateCents={Number(p.hourlyRateCents || settings.hourlyRateCents || 0)} canEdit={isOwner} />}
+      {tab === 'time' && <JobTime projectId={p.id} rateCents={Number(p.hourlyRateCents || settings.hourlyRateCents || 0)} canEdit={can('time.track')} />}
 
       {tab === 'docs' && data.documents && (
         <section className="panel">
@@ -350,7 +356,7 @@ function Breakdown({ s }: { s: ProjectRow }) {
   );
 }
 
-function PartsPlan({ projectId, items, canEdit, onChange, onBuy, onQuote }: { projectId: string; items: PlannedItem[]; canEdit: boolean; onChange: () => void; onBuy: (i: PlannedItem) => void; onQuote: () => void }) {
+function PartsPlan({ projectId, items, canEdit, onChange, onBuy, onQuote }: { projectId: string; items: PlannedItem[]; canEdit: boolean; onChange: () => void; onBuy: (i: PlannedItem) => void; onQuote?: () => void }) {
   const { settings } = useAuthed();
   const toast = useToast();
   const blank = { description: '', qty: 1, unit: '', unitCostCents: null as number | null, supplier: '', category: 'materials' as 'materials' | 'demo', note: '' };
@@ -384,7 +390,7 @@ function PartsPlan({ projectId, items, canEdit, onChange, onBuy, onQuote }: { pr
           <strong>Parts to buy</strong>
           <span className="small muted"> · planned {formatZar(total)} · bought {formatZar(bought)}</span>
         </span>
-        {canEdit && items.length > 0 && (
+        {canEdit && onQuote && items.length > 0 && (
           <button className="btn small" onClick={onQuote}>
             Make a quote from this
           </button>

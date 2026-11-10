@@ -95,7 +95,7 @@ describe('breaking in', () => {
 
   it('won’t take an obvious password for anyone', async () => {
     for (const pw of ['password1234', 'qwertyuiop', 'aaaaaaaaaaaa', 'thandi12345', 'springboks']) {
-      const r = await owner.call({ method: 'POST', url: '/api/users', payload: { name: 'Thandi Two', email: 'thandi2@example.co.za', role: 'capture', password: pw } });
+      const r = await owner.call({ method: 'POST', url: '/api/users', payload: { name: 'Thandi Two', email: 'thandi2@example.co.za', role: 'staff', password: pw } });
       expect(r.statusCode, pw).toBe(400);
     }
   });
@@ -204,7 +204,7 @@ describe('breaking in', () => {
     const routes = new Set(env.routes);
     const open = new Set(['GET /api/health', 'GET /api/demo/status', 'POST /api/auth/login', 'POST /api/auth/mfa/verify', 'POST /api/auth/mfa/enrol', 'POST /api/auth/logout', 'POST /api/demo/leave']);
     // What site staff may do besides read their pickers: log days and costs, attach slips, look after their own sign-in.
-    const siteMay = new Set(['POST /api/costs', 'PUT /api/costs/:id', 'POST /api/labour', 'PUT /api/labour/:id', 'POST /api/attachments', 'POST /api/auth/mfa/setup', 'POST /api/auth/mfa/disable', 'POST /api/auth/mfa/recovery-codes', 'POST /api/auth/password', 'POST /api/feedback']);
+    const siteMay = new Set(['POST /api/costs', 'PUT /api/costs/:id', 'POST /api/labour', 'PUT /api/labour/:id', 'DELETE /api/labour/:id', 'POST /api/attachments', 'POST /api/auth/mfa/setup', 'POST /api/auth/mfa/disable', 'POST /api/auth/mfa/recovery-codes', 'POST /api/auth/password', 'POST /api/feedback']);
     // Money site staff may never read (the same list as the penetration test's).
     const siteNeverReads = /^\/api\/(reports|vat|payroll|sales|stock|statements|pay-runs|audit|system|users|year-ends|journals|bank|tax|accounts\/|dividends|documents\/[^/]+\/pdf|export)/;
     // Everyone signed in can send feedback.

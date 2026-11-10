@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { clientInput, compact, keptNumber } from '@shap/shared';
 import { z } from 'zod';
-import { requireRole, userOrThrow } from '../auth.js';
+import { canAny, requireAccess, requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { paymentStateSql } from './documents.js';
 import { pgCode, PG } from '../db/index.js';
@@ -43,7 +43,8 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.get('/api/clients', { preHandler: requireRole() }, async (req) => {
     const user = userOrThrow(req);
-    if (user.role === 'capture') return sql`select id, code, name from clients where active order by name`;
+    // Without the invoices, a client is a name to choose.
+    if (!canAny(user, 'documents.view', 'clients.edit', 'reports.view')) return sql`select id, code, name from clients where active order by name`;
     return sql.unsafe(`
       select c.*, s.invoiced_cents, s.outstanding_cents, s.labour_cost_cents, s.other_cost_cents, s.project_count, s.last_invoice,
              (s.invoiced_cents - s.labour_cost_cents - s.other_cost_cents)::bigint as gross_profit_cents
@@ -52,7 +53,7 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx): void {
     `);
   });
 
-  app.get('/api/clients/:id', { preHandler: requireRole('owner', 'accountant') }, async (req) => {
+  app.get('/api/clients/:id', { preHandler: requireAccess('documents.view', 'clients.edit', 'reports.view') }, async (req) => {
     const { id } = parse(idParam, req.params);
     const [client] = await sql`select * from clients where id = ${id}`;
     if (!client) throw notFound('Client');
@@ -68,7 +69,7 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { client, stats, projects, documents };
   });
 
-  app.post('/api/clients', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/clients', { preHandler: requireAccess('clients.edit', 'documents.edit', 'sales.sell') }, async (req) => {
     const user = userOrThrow(req);
     const input = parse(clientInput, req.body);
     try {
@@ -81,7 +82,7 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx): void {
     }
   });
 
-  app.put('/api/clients/:id', { preHandler: requireRole('owner') }, async (req) => {
+  app.put('/api/clients/:id', { preHandler: requireAccess('clients.edit') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     // A VAT number already on file that isn't being changed is kept as it is.
@@ -103,7 +104,7 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx): void {
    * Fill in client details from a CSV (an Invoice Ninja client export, or any CSV with a Name
    * column). Step 1 suggests which existing client each row is; step 2 applies what you confirm.
    */
-  app.post('/api/clients/import-csv/preview', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/clients/import-csv/preview', { preHandler: requireAccess('clients.edit') }, async (req) => {
     const { csv } = parse(z.object({ csv: z.string().min(5).max(5_000_000) }), req.body);
     const rows = readClientCsv(csv);
     const clients = await sql<MatchClient[]>`
@@ -120,7 +121,7 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { rows: matched, clients: clients.map((c) => ({ id: c.id, code: c.code, name: c.name, projects: c.projects.slice(0, 4) })), jobsWithoutClient: jobs };
   });
 
-  app.post('/api/clients/import-csv', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/clients/import-csv', { preHandler: requireAccess('clients.edit') }, async (req) => {
     const user = userOrThrow(req);
     const input = parse(
       z.object({

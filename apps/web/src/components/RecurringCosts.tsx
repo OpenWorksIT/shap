@@ -43,7 +43,8 @@ const dayIn = (month: string, day: number) => {
  * for that month, or marked as stopped.
  */
 export function RecurringCosts() {
-  const { isOwner } = useAuthed();
+  const { can } = useAuthed();
+  const isOwner = can('costs.manage');
   const toast = useToast();
   const { data, error, loading, reload } = useApi<Recurring[]>('/api/costs/recurring');
   const [adding, setAdding] = useState<{ r: Recurring; month: string } | null>(null);

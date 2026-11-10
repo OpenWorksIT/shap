@@ -33,7 +33,8 @@ type Tab = 'months' | 'days' | 'payments' | 'jobs' | 'savings';
 
 export default function WorkerPage() {
   const { id } = useParams<{ id: string }>();
-  const { isOwner } = useAuthed();
+  const { can } = useAuthed();
+  const isOwner = can('workers.manage');
   const toast = useToast();
   const { data, error, loading, reload } = useApi<WorkerDetail>(`/api/workers/${id}`);
   const [tab, setTab] = useState<Tab>('months');

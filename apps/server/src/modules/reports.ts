@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { ACCOUNT_TYPE_LABELS, assetInput, balanceCheckInput, financialYear, journalInput, monthLabel, monthsBetween, vatIncluded, vatOn, type AccountType, entity, equityHeading } from '@shap/shared';
 import { z } from 'zod';
-import { requireRole, userOrThrow } from '../auth.js';
+import { requireAccess, requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
@@ -164,10 +164,9 @@ const MADE_BY_APP: Record<string, string> = { payroll: 'a pay run (Payroll)', di
 
 export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
-  const readers = { preHandler: requireRole('owner', 'accountant') };
   const owner = { preHandler: requireRole('owner') };
 
-  app.get('/api/reports/trial-balance', readers, async (req, reply) => {
+  app.get('/api/reports/trial-balance', { preHandler: requireAccess('reports.view') }, async (req, reply) => {
     const { date, format } = q(req);
     const tb = await trialBalance(sql, isIsoDate(date) ? date : today());
     if (format === 'csv') {
@@ -179,7 +178,7 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
     return tb;
   });
 
-  app.get('/api/reports/income-statement', readers, async (req, reply) => {
+  app.get('/api/reports/income-statement', { preHandler: requireAccess('reports.view') }, async (req, reply) => {
     const settings = await getSettings(sql);
     const { from, to, by, format } = q(req);
     // Up to a day given (today by default), from the start of that day's financial year unless said.
@@ -206,7 +205,7 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
     return is;
   });
 
-  app.get('/api/reports/balance-sheet', readers, async (req, reply) => {
+  app.get('/api/reports/balance-sheet', { preHandler: requireAccess('reports.view') }, async (req, reply) => {
     const { date, format } = q(req);
     const bs = await balanceSheet(sql, isIsoDate(date) ? date : today());
     const settings = await getSettings(sql);
@@ -228,7 +227,7 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** One account's postings with a running balance. */
-  app.get('/api/reports/ledger', readers, async (req, reply) => {
+  app.get('/api/reports/ledger', { preHandler: requireAccess('reports.view') }, async (req, reply) => {
     const { account, from, to, format } = q(req);
     const acc = z.string().uuid().safeParse(account);
     if (!acc.success) throw badRequest('Choose an account');
@@ -262,13 +261,13 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   // ---- journals
-  app.get('/api/journals', readers, async () => {
+  app.get('/api/journals', { preHandler: requireAccess('reports.view') }, async () => {
     return sql`
       select j.*, coalesce(sum(jl.debit_cents), 0)::bigint as total_cents, count(jl.id)::int as line_count
       from journals j left join journal_lines jl on jl.journal_id = j.id
       group by j.id order by j.date desc, j.created_at desc`;
   });
-  app.get('/api/journals/:id', readers, async (req) => {
+  app.get('/api/journals/:id', { preHandler: requireAccess('reports.view') }, async (req) => {
     const { id } = parse(idParam, req.params);
     const [journal] = await sql`select * from journals where id = ${id}`;
     if (!journal) throw notFound('Journal');
@@ -282,7 +281,7 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
     const c = input.lines.reduce((s, l) => s + l.creditCents, 0);
     if (d !== c) throw badRequest(`Debits and credits must be equal (out by R ${((d - c) / 100).toFixed(2)})`);
   };
-  app.post('/api/journals', owner, async (req) => {
+  app.post('/api/journals', { preHandler: requireAccess('books.adjust') }, async (req) => {
     const user = userOrThrow(req);
     const input = parse(journalInput, req.body);
     checkJournal(input);
@@ -295,7 +294,7 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
     });
     return { id };
   });
-  app.put('/api/journals/:id', owner, async (req) => {
+  app.put('/api/journals/:id', { preHandler: requireAccess('books.adjust') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const input = parse(journalInput, req.body);
@@ -312,7 +311,7 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
     });
     return { id };
   });
-  app.delete('/api/journals/:id', owner, async (req) => {
+  app.delete('/api/journals/:id', { preHandler: requireAccess('books.adjust') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const [old] = await sql<{ date: string; kind: string }[]>`select date, kind from journals where id = ${id}`;
@@ -327,7 +326,7 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   // ---- statement balance checks (bank, cards, the owner's loan)
-  app.get('/api/balance-checks', readers, async () => {
+  app.get('/api/balance-checks', { preHandler: requireAccess('reports.view') }, async () => {
     await freshTotals(sql);
     return sql`
       select b.*, a.code, a.name as account_name, a.type as account_type,
@@ -335,12 +334,12 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
           * (select coalesce(sum(l.amount_cents), 0) from ledger_totals l where l.account_id = b.account_id and l.date <= b.date))::bigint as books_cents
       from balance_checks b join accounts a on a.id = b.account_id order by b.date desc, a.code`;
   });
-  app.post('/api/balance-checks', owner, async (req) => {
+  app.post('/api/balance-checks', { preHandler: requireAccess('books.adjust') }, async (req) => {
     const input = parse(balanceCheckInput, req.body);
     const [row] = await sql`insert into balance_checks ${sql(input)} returning *`;
     return row;
   });
-  app.delete('/api/balance-checks/:id', owner, async (req) => {
+  app.delete('/api/balance-checks/:id', { preHandler: requireAccess('books.adjust') }, async (req) => {
     const { id } = parse(idParam, req.params);
     await sql`delete from balance_checks where id = ${id}`;
     return { ok: true };
@@ -349,7 +348,7 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
    * Make the books agree with a statement: posts the difference against another account
    * (often the owner's loan for card and cash spending, or suspense to investigate).
    */
-  app.post('/api/balance-checks/:id/adjust', owner, async (req) => {
+  app.post('/api/balance-checks/:id/adjust', { preHandler: requireAccess('books.adjust') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const { againstAccountId } = parse(z.object({ againstAccountId: z.string().uuid() }), req.body);
@@ -395,7 +394,7 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
   };
 
   // ---- asset register
-  app.get('/api/assets', readers, async (req) => {
+  app.get('/api/assets', { preHandler: requireAccess('reports.view') }, async (req) => {
     const d = q(req).date;
     const at = isIsoDate(d) ? d : today();
     return sql`
@@ -409,7 +408,7 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
       from assets a left join payment_sources s on s.id = a.source_id left join costs c on c.id = a.cost_id
       order by a.disposed_on nulls first, a.purchase_date desc`;
   });
-  app.post('/api/assets', owner, async (req) => {
+  app.post('/api/assets', { preHandler: requireAccess('books.adjust') }, async (req) => {
     const user = userOrThrow(req);
     const input = parse(assetInput, req.body);
     if (!input.costId && !input.sourceId) throw badRequest('Say how it was paid for');
@@ -425,7 +424,7 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
     await audit(sql, { userId: user.id, action: 'create', entity: 'asset', entityId: row!.id, ip: req.ip });
     return row;
   });
-  app.put('/api/assets/:id', owner, async (req) => {
+  app.put('/api/assets/:id', { preHandler: requireAccess('books.adjust') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const input = parse(assetInput, req.body);
@@ -445,7 +444,7 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
     await audit(sql, { userId: user.id, action: 'update', entity: 'asset', entityId: id, ip: req.ip });
     return row;
   });
-  app.delete('/api/assets/:id', owner, async (req) => {
+  app.delete('/api/assets/:id', { preHandler: requireAccess('books.adjust') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const [old] = await sql<{ purchaseDate: string }[]>`select purchase_date from assets where id = ${id}`;
@@ -457,7 +456,7 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   // ---- raw exports for the accountant
-  app.get('/api/export/:what', readers, async (req, reply) => {
+  app.get('/api/export/:what', { preHandler: requireAccess('reports.view') }, async (req, reply) => {
     const { what } = parse(z.object({ what: z.enum(['costs', 'labour', 'invoices', 'receipts', 'wage-payments', 'ledger']) }), req.params);
     const settings = await getSettings(sql);
     const { from, to } = q(req);

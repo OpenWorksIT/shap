@@ -15,20 +15,18 @@
 import type { FastifyInstance } from 'fastify';
 import { claimWriteOffInput, stockPurchaseInput, stockReturnInput, stockTakeInput, supplierCreditInput, vatIncluded, vatRateOn } from '@shap/shared';
 import { z } from 'zod';
-import { requireRole, userOrThrow, type AuthUser } from '../auth.js';
+import { can, requireAccess, type AuthUser, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
 import { assertOpen, getSettings, q, today } from '../lib/books.js';
 import { badRequest, notFound } from '../lib/errors.js';
-import { milli, moveStock } from '../lib/stock.js';
+import { hideCosts, milli, moveStock } from '../lib/stock.js';
 import { parse } from '../lib/validate.js';
 import { requireFeature } from './sales.js';
 import { applyBillCredit, bills } from './bills.js';
 
 const idParam = z.object({ id: z.string().uuid() });
-const readers = { preHandler: requireRole('owner', 'accountant') };
-const owner = { preHandler: requireRole('owner') };
 
 async function stockCategory(db: Db): Promise<string> {
   const [c] = await db<{ id: string }[]>`select id from cost_categories where kind = 'stock' limit 1`;
@@ -262,13 +260,13 @@ export function registerStockRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
   const on = () => requireFeature(sql, 'inventory', 'Inventory');
 
-  app.post('/api/stock/purchases', owner, async (req) => {
+  app.post('/api/stock/purchases', { preHandler: requireAccess('stock.buy') }, async (req) => {
     const user = userOrThrow(req);
     await on();
     return sql.begin((tx) => recordPurchase(tx, user, req.body));
   });
 
-  app.get('/api/stock/purchases', readers, async (req) => {
+  app.get('/api/stock/purchases', { preHandler: requireAccess('stock.costs') }, async (req) => {
     const { from, to } = q(req);
     const rows = await sql`
       select c.id, c.date, c.supplier, c.bill_number as reference, c.amount_cents, c.vat_cents, c.description, s.name as source_name, s.role as source_role,
@@ -279,7 +277,7 @@ export function registerStockRoutes(app: FastifyInstance, ctx: Ctx): void {
     return rows;
   });
 
-  app.get('/api/stock/purchases/:id', readers, async (req) => {
+  app.get('/api/stock/purchases/:id', { preHandler: requireAccess('stock.costs') }, async (req) => {
     const { id } = parse(idParam, req.params);
     const [cost] = await sql`select c.*, s.name as source_name from costs c join payment_sources s on s.id = c.source_id where c.id = ${id}`;
     if (!cost) throw notFound('Purchase');
@@ -289,19 +287,19 @@ export function registerStockRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { cost, lines, claims, settlements };
   });
 
-  app.post('/api/stock/returns', owner, async (req) => {
+  app.post('/api/stock/returns', { preHandler: requireAccess('stock.buy') }, async (req) => {
     const user = userOrThrow(req);
     await on();
     return sql.begin((tx) => recordReturn(tx, user, req.body));
   });
 
-  app.post('/api/stock/credits', owner, async (req) => {
+  app.post('/api/stock/credits', { preHandler: requireAccess('stock.buy') }, async (req) => {
     const user = userOrThrow(req);
     await on();
     return sql.begin((tx) => recordSupplierCredit(tx, user, req.body));
   });
 
-  app.get('/api/stock/claims', readers, async (req) => {
+  app.get('/api/stock/claims', { preHandler: requireAccess('stock.costs') }, async (req) => {
     const { state } = q(req);
     const rows = await openClaims(sql);
     const settlements = await sql`select x.*, cs.bill_number as credit_reference from stock_claim_settlements x left join costs cs on cs.id = x.cost_id where x.claim_id is not null order by x.date`;
@@ -309,7 +307,7 @@ export function registerStockRoutes(app: FastifyInstance, ctx: Ctx): void {
     return state === 'all' ? all : all.filter((r) => Number(r.leftCents) > 0);
   });
 
-  app.post('/api/stock/claims/:id/write-off', owner, async (req) => {
+  app.post('/api/stock/claims/:id/write-off', { preHandler: requireAccess('stock.buy') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const input = parse(claimWriteOffInput, req.body);
@@ -326,22 +324,27 @@ export function registerStockRoutes(app: FastifyInstance, ctx: Ctx): void {
     });
   });
 
-  app.post('/api/stock/takes', owner, async (req) => {
+  app.post('/api/stock/takes', { preHandler: requireAccess('stock.count') }, async (req) => {
     const user = userOrThrow(req);
     await on();
-    return sql.begin((tx) => recordStockTake(tx, user, req.body));
+    const r = await sql.begin((tx) => recordStockTake(tx, user, req.body));
+    // What the differences came to is for those who see what stock cost.
+    return can(user, 'stock.costs') ? r : hideCosts(r);
   });
 
-  app.get('/api/stock/takes', readers, async () => {
-    return sql`
+  app.get('/api/stock/takes', { preHandler: requireAccess('stock.view') }, async (req) => {
+    const user = userOrThrow(req);
+    const rows = await sql`
       select t.*, u.name as by_name,
         (select count(*)::int from stock_take_lines l where l.stock_take_id = t.id) as items,
         (select count(*)::int from stock_moves m where m.stock_take_id = t.id) as corrected,
         (select coalesce(sum(value_cents), 0)::bigint from stock_moves m where m.stock_take_id = t.id) as value_cents
       from stock_takes t left join users u on u.id = t.created_by order by t.date desc, t.created_at desc limit 500`;
+    return can(user, 'stock.costs') ? rows : rows.map(hideCosts);
   });
 
-  app.get('/api/stock/takes/:id', readers, async (req) => {
+  app.get('/api/stock/takes/:id', { preHandler: requireAccess('stock.view') }, async (req) => {
+    const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const [take] = await sql`select t.*, u.name as by_name from stock_takes t left join users u on u.id = t.created_by where t.id = ${id}`;
     if (!take) throw notFound('Stock take');
@@ -349,10 +352,10 @@ export function registerStockRoutes(app: FastifyInstance, ctx: Ctx): void {
       select l.*, i.description, i.unit, m.value_cents from stock_take_lines l join items i on i.id = l.item_id
       left join stock_moves m on m.stock_take_id = l.stock_take_id and m.item_id = l.item_id and m.kind = 'count'
       where l.stock_take_id = ${id} order by i.description`;
-    return { take, lines };
+    return { take, lines: can(user, 'stock.costs') ? lines : lines.map(hideCosts) };
   });
 
-  app.get('/api/stock/valuation', readers, async (req) => {
+  app.get('/api/stock/valuation', { preHandler: requireAccess('stock.costs') }, async (req) => {
     const { date } = q(req);
     const at = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : today();
     const rows = await stockValuation(sql, at);

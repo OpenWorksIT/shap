@@ -26,19 +26,17 @@ import {
   type Feature,
 } from '@shap/shared';
 import { z } from 'zod';
-import { requireRole, userOrThrow, type AuthUser } from '../auth.js';
+import { can, requireAccess, type AuthUser, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { pgCode, PG, type Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
 import { assertOpen, getSettings, q, today } from '../lib/books.js';
-import { badRequest, conflict, notFound } from '../lib/errors.js';
-import { milli, moveStock, stockOutForDocument, unitCostOut } from '../lib/stock.js';
+import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
+import { hideCosts, milli, moveStock, stockOutForDocument, unitCostOut } from '../lib/stock.js';
 import { parse } from '../lib/validate.js';
 import { assertTaxDocument, createDocument, defaultBrand, FULL_TAX_INVOICE_CENTS, loadDocument, nextNumber } from './documents.js';
 
 const idParam = z.object({ id: z.string().uuid() });
-const readers = { preHandler: requireRole('owner', 'accountant') };
-const owner = { preHandler: requireRole('owner') };
 
 /** A part of the app switched off in Settings: its changes are refused (what's recorded stays readable). */
 export async function requireFeature(db: Db, f: Feature, label: string): Promise<void> {
@@ -255,14 +253,28 @@ export async function refundDocument(tx: Db, user: AuthUser, id: string, raw: un
   return { id: cn.id, number: cn.number, amountCents: amount };
 }
 
+
+/**
+ * Who may open a sale (or an invoice) from the counter: an invoice that wasn't a sale is the
+ * invoices' (“See quotes and invoices”); someone selling without “See all sales and takings” opens
+ * only their own sales.
+ */
+export function mayOpenSale(user: AuthUser, doc: { kind: string; saleNumber: string | null; createdBy: string | null }): void {
+  const ok = !doc.saleNumber
+    ? can(user, 'documents.view')
+    : can(user, 'sales.view') || doc.createdBy === user.id || (doc.kind !== 'sale' && can(user, 'documents.view'));
+  if (!ok) throw notFound('Sale');
+}
+
 export function registerSalesRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
 
   // ---- items: the price list (and, stocked, what's on the shelf)
-  app.get('/api/items', readers, async (req) => {
+  app.get('/api/items', { preHandler: requireAccess('sales.sell', 'sales.view', 'items.edit', 'stock.view') }, async (req) => {
+    const user = userOrThrow(req);
     const { search, stocked, active } = q(req);
     const s = search?.trim() || null;
-    return sql`
+    const rows = await sql`
       select i.*, case when i.qty_on_hand > 0 then round(i.stock_value_cents / i.qty_on_hand) else null end as average_cost_cents,
         (select max(date) from stock_moves m where m.item_id = i.id) as last_moved
       from items i
@@ -270,9 +282,10 @@ export function registerSalesRoutes(app: FastifyInstance, ctx: Ctx): void {
         and (${stocked ?? null}::text is null or i.stocked = (${stocked ?? null} = '1'))
         and (${active ?? null}::text is null or i.active = (${active ?? null} = '1'))
       order by i.active desc, i.description limit 2000`;
+    return can(user, 'stock.costs') ? rows : rows.map(hideCosts);
   });
 
-  app.post('/api/items', owner, async (req) => {
+  app.post('/api/items', { preHandler: requireAccess('items.edit') }, async (req) => {
     const user = userOrThrow(req);
     const input = parse(itemInput, req.body);
     if (input.stocked) await requireFeature(sql, 'inventory', 'Inventory');
@@ -289,7 +302,7 @@ export function registerSalesRoutes(app: FastifyInstance, ctx: Ctx): void {
     }
   });
 
-  app.put('/api/items/:id', owner, async (req) => {
+  app.put('/api/items/:id', { preHandler: requireAccess('items.edit') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const input = parse(itemInput, req.body);
@@ -315,7 +328,7 @@ export function registerSalesRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** Stock already on hand when an item starts being tracked: its first movement. */
-  app.post('/api/items/:id/opening', owner, async (req) => {
+  app.post('/api/items/:id/opening', { preHandler: requireAccess('stock.buy') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const input = parse(openingStockInput, req.body);
@@ -340,7 +353,8 @@ export function registerSalesRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** An item's whole story: every movement with what caused it, and the stock after each. */
-  app.get('/api/items/:id/history', readers, async (req) => {
+  app.get('/api/items/:id/history', { preHandler: requireAccess('stock.view') }, async (req) => {
+    const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const [item] = await sql`select * from items where id = ${id}`;
     if (!item) throw notFound('Item');
@@ -363,13 +377,17 @@ export function registerSalesRoutes(app: FastifyInstance, ctx: Ctx): void {
     const audits = await sql`
       select a.at, a.action, a.details, u.name as by_name from audit_log a left join users u on u.id = a.user_id
       where a.entity = 'item' and a.entity_id = ${id} order by a.at desc limit 200`;
+    if (!can(user, 'stock.costs')) return { item: hideCosts(item), moves: moves.map(hideCosts), documents: sold, changes: audits.map((a) => ({ ...a, details: hideCosts(a.details ?? {}) })) };
     return { item, moves, documents: sold, changes: audits };
   });
 
   // ---- sales
-  app.get('/api/sales', readers, async (req) => {
+  app.get('/api/sales', { preHandler: requireAccess('sales.sell', 'sales.view') }, async (req) => {
+    const user = userOrThrow(req);
     const { from, to, search } = q(req);
     const s = search?.trim() || null;
+    // Selling without “See all sales”: your own.
+    const mine = can(user, 'sales.view') ? null : user.id;
     return sql`
       select d.id, d.kind, d.number, d.sale_number, d.issue_date, d.total_cents, d.vat_cents, d.customer_name, d.invoiced_at,
         c.name as client_name, r.method, src.name as source_name,
@@ -378,7 +396,7 @@ export function registerSalesRoutes(app: FastifyInstance, ctx: Ctx): void {
       left join clients c on c.id = d.client_id
       left join receipts r on r.id = d.sale_receipt_id
       left join payment_sources src on src.id = r.source_id
-      where d.sale_number is not null
+      where d.sale_number is not null and (${mine}::uuid is null or d.created_by = ${mine}::uuid)
         and (${from ?? null}::date is null or d.issue_date >= ${from ?? null}::date)
         and (${to ?? null}::date is null or d.issue_date <= ${to ?? null}::date)
         and (${s}::text is null or d.sale_number ilike '%' || ${s} || '%' or d.number ilike '%' || ${s} || '%' or d.customer_name ilike '%' || ${s} || '%'
@@ -387,48 +405,60 @@ export function registerSalesRoutes(app: FastifyInstance, ctx: Ctx): void {
       order by d.issue_date desc, d.created_at desc limit 1000`;
   });
 
-  app.get('/api/sales/:id', readers, async (req) => {
+  app.get('/api/sales/:id', { preHandler: requireAccess('sales.sell', 'sales.view', 'documents.view') }, async (req) => {
+    const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const data = await loadDocument(sql, id);
     // A sale, or an invoice (its returns and refunds are taken the same way).
-    const kind = (data.doc as { kind: string }).kind;
-    if (!(kind === 'sale' || kind === 'invoice')) throw notFound('Sale');
+    const doc = data.doc as unknown as { kind: string; saleNumber: string | null; createdBy: string | null };
+    if (!(doc.kind === 'sale' || doc.kind === 'invoice')) throw notFound('Sale');
+    mayOpenSale(user, doc);
     const lines = await linesWithCredits(sql, id);
     const refunds = await sql`
       select rf.*, cn.number as credit_note_number, cn.credit_reason, s.name as source_name
       from refunds rf join documents cn on cn.id = rf.credit_note_id join payment_sources s on s.id = rf.source_id
       where cn.credited_invoice_id = ${id} order by rf.date, rf.created_at`;
     const stock = await sql`select m.*, i.description from stock_moves m join items i on i.id = m.item_id where m.document_id = ${id} order by m.seq`;
-    return { ...data, lines, refunds, stock };
+    return { ...data, lines, refunds, stock: can(user, 'stock.costs') ? stock : stock.map(hideCosts) };
   });
 
-  app.post('/api/sales', owner, async (req) => {
+  app.post('/api/sales', { preHandler: requireAccess('sales.sell') }, async (req) => {
     const user = userOrThrow(req);
     const made = await sql.begin((tx) => makeSale(tx, user, req.body));
     return { ...made, ...(await loadDocument(sql, made.id)) };
   });
 
-  app.post('/api/sales/:id/invoice', owner, async (req) => {
+  app.post('/api/sales/:id/invoice', { preHandler: requireAccess('sales.sell') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
+    const [doc] = await sql<{ kind: string; saleNumber: string | null; createdBy: string | null }[]>`select kind, sale_number, created_by from documents where id = ${id}`;
+    if (!doc) throw notFound('Sale');
+    mayOpenSale(user, doc);
     await sql.begin((tx) => saleToInvoice(tx, user, id, req.body));
     return loadDocument(sql, id);
   });
 
-  app.post('/api/documents/:id/refund', owner, async (req) => {
+  app.post('/api/documents/:id/refund', { preHandler: requireAccess('sales.refund', 'documents.edit') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
+    // A sale's refund is the counter's (“Refund”); goods back on an invoice are the invoices'.
+    const [doc] = await sql<{ saleNumber: string | null }[]>`select sale_number from documents where id = ${id}`;
+    if (!doc) throw notFound('Sale');
+    if (!can(user, doc.saleNumber ? 'sales.refund' : 'documents.edit')) throw forbidden(doc.saleNumber ? 'Refunds take “Refund” under Selling' : 'Goods back on an invoice take “Make and change them” under Quotes & invoices');
     return sql.begin((tx) => refundDocument(tx, user, id, req.body));
   });
 
   // Today's takings, for the top of the Sales screen.
-  app.get('/api/sales-today', readers, async () => {
+  app.get('/api/sales-today', { preHandler: requireAccess('sales.sell', 'sales.view') }, async (req) => {
+    const user = userOrThrow(req);
     const t = today();
+    // The day's takings; selling without “See all sales and takings”, your own.
+    const mine = can(user, 'sales.view') ? null : user.id;
     const [r] = await sql<{ count: number; total: string; refunded: string }[]>`
       select count(*)::int as count, coalesce(sum(total_cents), 0) as total,
         coalesce((select sum(rf.amount_cents) from refunds rf join documents cn on cn.id = rf.credit_note_id join documents s on s.id = cn.credited_invoice_id
-                  where rf.date = ${t}::date and s.sale_number is not null), 0) as refunded
-      from documents where sale_number is not null and issue_date = ${t}::date`;
-    return { date: t, count: r!.count, totalCents: Number(r!.total), refundedCents: Number(r!.refunded) };
+                  where rf.date = ${t}::date and s.sale_number is not null and (${mine}::uuid is null or rf.created_by = ${mine}::uuid)), 0) as refunded
+      from documents where sale_number is not null and issue_date = ${t}::date and (${mine}::uuid is null or created_by = ${mine}::uuid)`;
+    return { date: t, count: r!.count, totalCents: Number(r!.total), refundedCents: Number(r!.refunded), mine: Boolean(mine) };
   });
 }

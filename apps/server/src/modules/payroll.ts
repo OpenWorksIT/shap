@@ -16,7 +16,7 @@
 import { compact, keptNumber, uifSarsRefFor, payeRefProblem, taxNumberProblem, idNumberProblem, sdlRefFor, dividendInput, dividendTax, financialYear, microDividendTax, dwtDue, emp201Due, employeeInput, payLine, payLineInput, payRunInput, sarsPaymentInput, taxYearEnd, type AgeBand, entity, paysOutProfit, payoutWord } from '@shap/shared';
 import PDFDocument from 'pdfkit';
 import { z } from 'zod';
-import { requireRole, userOrThrow } from '../auth.js';
+import { requireAccess, requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db, Tx } from '../db/index.js';
 import type { FastifyInstance } from 'fastify';
@@ -244,12 +244,11 @@ export async function emp501(db: Db, taxYear: number, kind: 'interim' | 'annual'
 export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
   const owner = { preHandler: requireRole('owner') };
-  const readers = { preHandler: requireRole('owner', 'accountant') };
 
   // ---------------------------------------------------------------- employees
-  app.get('/api/employees', readers, async () => sql`select * from employees order by active desc, name`);
+  app.get('/api/employees', { preHandler: requireAccess('payroll.view') }, async () => sql`select * from employees order by active desc, name`);
 
-  app.post('/api/employees', owner, async (req) => {
+  app.post('/api/employees', { preHandler: requireAccess('payroll.run') }, async (req) => {
     const user = userOrThrow(req);
     const input = parse(employeeInput, req.body);
     const [row] = await sql<{ id: string }[]>`insert into employees ${sql(input as never)} returning id`;
@@ -257,7 +256,7 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
     return row;
   });
 
-  app.put('/api/employees/:id', owner, async (req) => {
+  app.put('/api/employees/:id', { preHandler: requireAccess('payroll.run') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     // ID and tax numbers already on file that aren't being changed are kept as they are (the
@@ -277,11 +276,11 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   // ---------------------------------------------------------------- pay runs
-  app.get('/api/pay-runs', readers, async () =>
+  app.get('/api/pay-runs', { preHandler: requireAccess('payroll.view') }, async () =>
     sql.unsafe(`select r.id, r.period, r.pay_date, r.status, r.source_id, ${runTotals} from pay_runs r left join pay_lines l on l.run_id = r.id group by r.id order by r.period desc`),
   );
 
-  app.post('/api/pay-runs', owner, async (req) => {
+  app.post('/api/pay-runs', { preHandler: requireAccess('payroll.run') }, async (req) => {
     const user = userOrThrow(req);
     const input = parse(payRunInput, req.body);
     await sourceAccount(sql, input.sourceId);
@@ -313,7 +312,7 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { run, lines };
   };
 
-  app.get('/api/pay-runs/:id', readers, async (req) => loadRun(sql, parse(idParam, req.params).id));
+  app.get('/api/pay-runs/:id', { preHandler: requireAccess('payroll.view') }, async (req) => loadRun(sql, parse(idParam, req.params).id));
 
   const draft = async (db: Db, id: string) => {
     const [r] = await db<{ status: string }[]>`select status from pay_runs where id = ${id}`;
@@ -321,7 +320,7 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (r.status !== 'draft') throw badRequest('This pay run is final. Reopen it to change it.');
   };
 
-  app.put('/api/pay-runs/:id', owner, async (req) => {
+  app.put('/api/pay-runs/:id', { preHandler: requireAccess('payroll.run') }, async (req) => {
     const { id } = parse(idParam, req.params);
     const input = parse(payRunInput.omit({ period: true }), req.body);
     await draft(sql, id);
@@ -333,7 +332,7 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
     return loadRun(sql, id);
   });
 
-  app.put('/api/pay-runs/:id/lines/:employeeId', owner, async (req) => {
+  app.put('/api/pay-runs/:id/lines/:employeeId', { preHandler: requireAccess('payroll.run') }, async (req) => {
     const { id, employeeId } = parse(z.object({ id: z.string().uuid(), employeeId: z.string().uuid() }), req.params);
     const input = parse(payLineInput, req.body);
     await draft(sql, id);
@@ -345,14 +344,14 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
     return loadRun(sql, id);
   });
 
-  app.delete('/api/pay-runs/:id/lines/:employeeId', owner, async (req) => {
+  app.delete('/api/pay-runs/:id/lines/:employeeId', { preHandler: requireAccess('payroll.run') }, async (req) => {
     const { id, employeeId } = parse(z.object({ id: z.string().uuid(), employeeId: z.string().uuid() }), req.params);
     await draft(sql, id);
     await sql`delete from pay_lines where run_id = ${id} and employee_id = ${employeeId}`;
     return loadRun(sql, id);
   });
 
-  app.post('/api/pay-runs/:id/finalise', owner, async (req) => {
+  app.post('/api/pay-runs/:id/finalise', { preHandler: requireAccess('payroll.run') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     await draft(sql, id);
@@ -384,7 +383,7 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
     return loadRun(sql, id);
   });
 
-  app.post('/api/pay-runs/:id/reopen', owner, async (req) => {
+  app.post('/api/pay-runs/:id/reopen', { preHandler: requireAccess('payroll.run') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const { run } = await loadRun(sql, id);
@@ -398,14 +397,14 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
     return loadRun(sql, id);
   });
 
-  app.delete('/api/pay-runs/:id', owner, async (req) => {
+  app.delete('/api/pay-runs/:id', { preHandler: requireAccess('payroll.run') }, async (req) => {
     const { id } = parse(idParam, req.params);
     await draft(sql, id);
     await sql`delete from pay_runs where id = ${id}`;
     return { ok: true };
   });
 
-  app.get('/api/pay-runs/:id/payslip/:employeeId', readers, async (req, reply) => {
+  app.get('/api/pay-runs/:id/payslip/:employeeId', { preHandler: requireAccess('payroll.view') }, async (req, reply) => {
     const { id, employeeId } = parse(z.object({ id: z.string().uuid(), employeeId: z.string().uuid() }), req.params);
     const { run, lines } = await loadRun(sql, id);
     const line = lines.find((l) => l.employeeId === employeeId);
@@ -425,9 +424,9 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   // ---------------------------------------------------------------- SARS
-  app.get('/api/payroll/sars', readers, async () => sarsSummary(sql));
+  app.get('/api/payroll/sars', { preHandler: requireAccess('payroll.view') }, async () => sarsSummary(sql));
 
-  app.post('/api/sars-payments', owner, async (req) => {
+  app.post('/api/sars-payments', { preHandler: requireAccess('payroll.run') }, async (req) => {
     const user = userOrThrow(req);
     const input = parse(sarsPaymentInput, req.body);
     await assertOpen(sql, input.date);
@@ -468,9 +467,9 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { id };
   });
 
-  app.get('/api/sars-payments', readers, async () => sql`select p.*, s.name as source_name from sars_payments p join payment_sources s on s.id = p.source_id order by p.date desc`);
+  app.get('/api/sars-payments', { preHandler: requireAccess('payroll.view') }, async () => sql`select p.*, s.name as source_name from sars_payments p join payment_sources s on s.id = p.source_id order by p.date desc`);
 
-  app.delete('/api/sars-payments/:id', owner, async (req) => {
+  app.delete('/api/sars-payments/:id', { preHandler: requireAccess('payroll.run') }, async (req) => {
     const { id } = parse(idParam, req.params);
     const [p] = await sql<{ date: string }[]>`select date::text from sars_payments where id = ${id}`;
     if (!p) throw notFound('Payment');
@@ -483,7 +482,7 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** A tax year's totals per employee: what goes on their IRP5 and the EMP501 reconciliation. */
-  app.get('/api/payroll/year', readers, async (req, reply) => {
+  app.get('/api/payroll/year', { preHandler: requireAccess('payroll.view') }, async (req, reply) => {
     const yearEnd = taxYearEnd(q(req).date ?? today());
     const yearStart = `${Number(yearEnd.slice(0, 4)) - 1}-03-01`;
     const rows = await sql<{ name: string; idNumber: string; taxNumber: string; salary: number; overtime: number; commission: number; bonus: number; gross: number; paye: number; uifEmployee: number; uifEmployer: number; sdl: number; net: number; months: number }[]>`
@@ -508,7 +507,7 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** The EMP501 reconciliation for a tax year (the year ending in February of `year`), interim or annual. */
-  app.get('/api/payroll/emp501', readers, async (req, reply) => {
+  app.get('/api/payroll/emp501', { preHandler: requireAccess('payroll.view') }, async (req, reply) => {
     const qy = parse(z.object({ year: z.coerce.number().int().min(2000).max(2100).optional(), kind: z.enum(['interim', 'annual']).default('annual'), format: z.enum(['json', 'csv']).default('json') }), req.query);
     const year = qy.year ?? Number(taxYearEnd(today()).slice(0, 4));
     const r = await emp501(sql, year, qy.kind);
@@ -526,7 +525,7 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   // ---------------------------------------------------------------- dividends
-  app.get('/api/dividends', readers, async () => ({
+  app.get('/api/dividends', { preHandler: requireAccess('reports.view') }, async () => ({
     dividends: await sql`select d.*, s.name as source_name from dividends d left join payment_sources s on s.id = d.source_id order by d.declared_on desc, d.created_at desc`,
     availableCents: await distributable(sql),
   }));

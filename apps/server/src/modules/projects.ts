@@ -1,12 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { lineTotal, plannedItemInput, projectInput, PROJECT_STATUSES } from '@shap/shared';
 import { z } from 'zod';
-import { requireRole, seesMoney, userOrThrow } from '../auth.js';
+import { can, requireAccess, requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { paymentStateSql } from './documents.js';
 import { audit } from '../lib/audit.js';
 import { getSettings, q, today } from '../lib/books.js';
-import { badRequest, notFound } from '../lib/errors.js';
+import { badRequest, forbidden, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 import { createDocument } from './documents.js';
 
@@ -122,7 +122,8 @@ export function registerProjectRoutes(app: FastifyInstance, ctx: Ctx): void {
     const user = userOrThrow(req);
     const { status, client, search } = q(req);
     const statuses = status === 'open' ? ['lead', 'quoted', 'active', 'invoiced'] : status && (PROJECT_STATUSES as readonly string[]).includes(status) ? [status] : null;
-    if (!seesMoney(user)) {
+    // Without the jobs' money, a job is a name to log against (open ones only).
+    if (!can(user, 'jobs.money')) {
       return sql`
         select p.id, p.number, p.name, p.status, c.name as client_name
         from projects p left join clients c on c.id = p.client_id
@@ -152,8 +153,8 @@ export function registerProjectRoutes(app: FastifyInstance, ctx: Ctx): void {
         (select coalesce(sum(c.amount_cents), 0) from costs c where c.planned_item_id = i.id)::bigint as bought_cents
       from planned_items i where i.project_id = ${id} order by i.sort, i.created_at
     `;
-    if (!seesMoney(user)) {
-      // Site capture sees the job and its parts list — not what it was quoted for, its billing
+    if (!can(user, 'jobs.money')) {
+      // Without the money: the job and its parts list — not what it was quoted for, its billing
       // rate, or what the parts were priced/bought at.
       const { estLabourCents: _l, estMaterialsCents: _m, estDemoCents: _d, hourlyRateCents: _h, ...site } = project as Record<string, unknown>;
       const parts = (planned as Record<string, unknown>[]).map(({ unitCostCents: _u, totalCents: _t, boughtCents: _b, ...rest }) => rest);
@@ -178,7 +179,7 @@ export function registerProjectRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { project, summary: { ...summary, ...totals(summary as unknown as ProjectSummary) }, planned, labour, costs, documents, workers };
   });
 
-  app.post('/api/projects', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/projects', { preHandler: requireAccess('jobs.edit') }, async (req) => {
     const user = userOrThrow(req);
     const input = parse(projectInput, req.body);
     const [next] = await sql<{ n: number }[]>`select coalesce(max(number), 0) + 1 as n from projects`;
@@ -190,7 +191,7 @@ export function registerProjectRoutes(app: FastifyInstance, ctx: Ctx): void {
     return row;
   });
 
-  app.put('/api/projects/:id', { preHandler: requireRole('owner') }, async (req) => {
+  app.put('/api/projects/:id', { preHandler: requireAccess('jobs.edit') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const input = parse(projectInput, req.body);
@@ -200,7 +201,7 @@ export function registerProjectRoutes(app: FastifyInstance, ctx: Ctx): void {
     return row;
   });
 
-  app.delete('/api/projects/:id', { preHandler: requireRole('owner') }, async (req) => {
+  app.delete('/api/projects/:id', { preHandler: requireAccess('jobs.edit') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const [used] = await sql<{ n: number }[]>`
@@ -213,30 +214,31 @@ export function registerProjectRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   // ---- planned parts
-  app.post('/api/projects/:id/planned', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/projects/:id/planned', { preHandler: requireAccess('jobs.edit') }, async (req) => {
     const { id } = parse(idParam, req.params);
     const input = parse(plannedItemInput, req.body);
     const [next] = await sql<{ n: number }[]>`select coalesce(max(sort), 0) + 1 as n from planned_items where project_id = ${id}`;
     const [row] = await sql`insert into planned_items ${sql({ ...input, projectId: id, sort: next!.n })} returning *`;
     return row;
   });
-  app.put('/api/planned/:id', { preHandler: requireRole('owner') }, async (req) => {
+  app.put('/api/planned/:id', { preHandler: requireAccess('jobs.edit') }, async (req) => {
     const { id } = parse(idParam, req.params);
     const input = parse(plannedItemInput, req.body);
     const [row] = await sql`update planned_items set ${sql(input)} where id = ${id} returning *`;
     if (!row) throw notFound('Item');
     return row;
   });
-  app.delete('/api/planned/:id', { preHandler: requireRole('owner') }, async (req) => {
+  app.delete('/api/planned/:id', { preHandler: requireAccess('jobs.edit') }, async (req) => {
     const { id } = parse(idParam, req.params);
     await sql`delete from planned_items where id = ${id}`;
     return { ok: true };
   });
 
   /** Draft a quote from the job's planned parts (with mark-up) and its labour estimate. */
-  app.post('/api/projects/:id/quote-from-plan', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/projects/:id/quote-from-plan', { preHandler: requireAccess('jobs.edit') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
+    if (!can(user, 'documents.edit')) throw forbidden('Making the quote takes “Make and change them” under Quotes & invoices');
     const { markupBp } = parse(z.object({ markupBp: z.number().int().min(0).max(100000).optional() }), req.body);
     const [project] = await sql<{ id: string; name: string; clientId: string | null; estLabourCents: number; estDemoCents: number }[]>`select * from projects where id = ${id}`;
     if (!project) throw notFound('Job');

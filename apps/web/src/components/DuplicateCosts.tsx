@@ -66,7 +66,8 @@ interface Merge {
  * the other; every merge can be undone from the list below.
  */
 export function DuplicateCosts() {
-  const { isOwner } = useAuthed();
+  const { can } = useAuthed();
+  const isOwner = can('costs.manage');
   const toast = useToast();
   const { data, error, loading, reload } = useApi<Pair[]>('/api/costs/duplicates');
   const merges = useApi<Merge[]>('/api/costs/merges');

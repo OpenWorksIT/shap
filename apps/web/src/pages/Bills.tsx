@@ -23,7 +23,8 @@ interface Bill {
 }
 
 export default function BillsPage() {
-  const { isOwner } = useAuthed();
+  const { can } = useAuthed();
+  const isOwner = can('bills.pay');
   const [state, setState] = useState<'open' | 'paid'>('open');
   const { data, error, loading, reload } = useApi<Bill[]>(`/api/bills?state=${state}`);
   const [paying, setPaying] = useState<Bill | null>(null);
@@ -149,7 +150,8 @@ function PayBill({ bill, onClose, onDone }: { bill: Bill; onClose: () => void; o
 
 /** Suppliers' credit notes on account not yet taken off a bill: each one taken off one of their bills. */
 function Credits({ bills, onDone }: { bills: Bill[]; onDone: () => void }) {
-  const { isOwner } = useAuthed();
+  const { can } = useAuthed();
+  const isOwner = can('bills.pay');
   const { data, reload } = useApi<Bill[]>('/api/bills?state=credits');
   const [using, setUsing] = useState<Bill | null>(null);
   if (!data?.length) return null;

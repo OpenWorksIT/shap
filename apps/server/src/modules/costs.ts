@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { assignSourceInput, costInput, PURCHASE_VAT, vatIncluded, vatRateOn, type PurchaseVatCode } from '@shap/shared';
 import { z } from 'zod';
-import { requireRole, seesMoney, userOrThrow } from '../auth.js';
+import { can, canAny, requireAccess, requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
@@ -72,9 +72,9 @@ export function splitVat(vatCents: number, amountCents: number, partCents: numbe
 export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
 
-  // Site capture logs a slip's basics; it must not reach into the money machinery. It can't claim
+  // Capturing slips (not managing the costs) logs a slip's basics; it must not reach into the money machinery. It can't claim
   // input VAT, post a negative (credit-note) amount, raise a supplier bill to pay later, or pay
-  // from an internal (role) account — those stay owner-only, so the parsed cost is pinned here.
+  // from an internal (role) account — those take “Capture and change any cost”, so the parsed cost is pinned here.
   const limitCaptureCost = async (input: z.infer<typeof costInput>): Promise<z.infer<typeof costInput>> => {
     if (input.amountCents < 0) throw badRequest('A cost can’t be a negative amount');
     if (input.sourceId) {
@@ -84,7 +84,7 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { ...input, vatCents: 0, vatCode: input.vatCode === 'standard' ? 'no_vat' : input.vatCode, billNumber: '', dueDate: null };
   };
 
-  app.get('/api/costs', { preHandler: requireRole('owner', 'accountant') }, async (req) => {
+  app.get('/api/costs', { preHandler: requireAccess('costs.view') }, async (req) => {
     const { from, to, category, project, source, search, kind } = q(req);
     const f = isIsoDate(from) ? from : null;
     const t = isIsoDate(to) ? to : null;
@@ -111,7 +111,7 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
    * Tidy several costs at once: put them on a job, mark them as not for a job (parts for the
    * yard, say), or change their type (advertising captured as parts).
    */
-  app.post('/api/costs/bulk', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/costs/bulk', { preHandler: requireAccess('costs.manage') }, async (req) => {
     const user = userOrThrow(req);
     const input = parse(
       z
@@ -136,11 +136,11 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { updated: res.count };
   });
 
-  /** Suppliers you've used, most used first, for the picker on the phone. Site capture sees only
-   *  the suppliers on its own entries, not the owner's full (sometimes sensitive) supplier list. */
+  /** Suppliers you've used, most used first, for the picker on the phone. Capturing slips, you see only
+   *  the suppliers on your own entries, not the owner's full (sometimes sensitive) supplier list. */
   app.get('/api/costs/suppliers', { preHandler: requireRole() }, async (req) => {
     const user = userOrThrow(req);
-    const rows = seesMoney(user)
+    const rows = canAny(user, 'costs.view', 'costs.manage')
       ? await sql<{ supplier: string }[]>`select supplier from costs where supplier <> '' group by supplier order by count(*) desc, supplier limit 200`
       : await sql<{ supplier: string }[]>`select supplier from costs where supplier <> '' and created_by = ${user.id} group by supplier order by count(*) desc, supplier limit 200`;
     return rows.map((r) => r.supplier);
@@ -150,14 +150,14 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const [row] = await sql`select c.*, a.id as asset_id from costs c left join assets a on a.cost_id = c.id
-      where c.id = ${id} and (${seesMoney(user)} or c.created_by = ${user.id})`;
+      where c.id = ${id} and (${canAny(user, 'costs.view', 'costs.manage')} or c.created_by = ${user.id})`;
     if (!row) throw notFound('Cost');
     return row;
   });
 
-  app.post('/api/costs', { preHandler: requireRole('owner', 'capture') }, async (req) => {
+  app.post('/api/costs', { preHandler: requireAccess('costs.capture', 'costs.manage') }, async (req) => {
     const user = userOrThrow(req);
-    const input = user.role === 'owner' ? parse(costInput, req.body) : await limitCaptureCost(parse(costInput, req.body));
+    const input = can(user, 'costs.manage') ? parse(costInput, req.body) : await limitCaptureCost(parse(costInput, req.body));
     await assertOpen(sql, input.date);
     await refuseStock(sql, input);
     const vat = await claimableVat(sql, input);
@@ -168,13 +168,14 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
     return row;
   });
 
-  app.put('/api/costs/:id', { preHandler: requireRole('owner', 'capture') }, async (req) => {
+  app.put('/api/costs/:id', { preHandler: requireAccess('costs.capture', 'costs.manage') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
-    const input = user.role === 'owner' ? parse(costInput, req.body) : await limitCaptureCost(parse(costInput, req.body));
+    const input = can(user, 'costs.manage') ? parse(costInput, req.body) : await limitCaptureCost(parse(costInput, req.body));
     const [old] = await sql<{ date: string; createdBy: string | null; createdAt: Date }[]>`select date, created_by, created_at from costs where id = ${id}`;
     if (!old) throw notFound('Cost');
-    if (user.role !== 'owner' && (old.createdBy !== user.id || Date.now() - old.createdAt.getTime() > 24 * 3600_000)) throw forbidden('Ask the owner to change this cost');
+    // Capturing slips, you can fix your own for a day; then they're for whoever manages the costs.
+    if (!can(user, 'costs.manage') && (old.createdBy !== user.id || Date.now() - old.createdAt.getTime() > 24 * 3600_000)) throw forbidden('Ask the owner to change this cost');
     await refuseStock(sql, input, [id]);
     await assertOpen(sql, old.date, input.date);
     const vat = await claimableVat(sql, input);
@@ -202,7 +203,7 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
    * one per payment, each saying which account paid it. Everything else (job, type, supplier,
    * slip) is the same on each part; VAT is shared out in proportion.
    */
-  app.post('/api/costs/:id/split', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/costs/:id/split', { preHandler: requireAccess('costs.manage') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const { parts } = parse(
@@ -247,7 +248,7 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { ids };
   });
 
-  app.delete('/api/costs/:id', { preHandler: requireRole('owner') }, async (req) => {
+  app.delete('/api/costs/:id', { preHandler: requireAccess('costs.manage') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const [old] = await sql<{ date: string }[]>`select date from costs where id = ${id}`;
@@ -266,7 +267,7 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** Say which account or card paid a batch of costs that weren't captured yet. */
-  app.post('/api/costs/assign-source', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/costs/assign-source', { preHandler: requireAccess('costs.manage') }, async (req) => {
     const user = userOrThrow(req);
     const input = parse(assignSourceInput, req.body);
     const dates = await sql<{ date: string }[]>`select date from costs where id = any(${input.ids}::uuid[])`;

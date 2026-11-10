@@ -15,7 +15,7 @@
 import { addMonths, entity, financialYear, splitByShares } from '@shap/shared';
 import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
-import { requireRole, userOrThrow } from '../auth.js';
+import { requireAccess, requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db, Tx } from '../db/index.js';
 import { audit } from '../lib/audit.js';
@@ -83,7 +83,6 @@ async function yearProfit(db: Db, from: string, to: string): Promise<number> {
 
 export function registerPartnerRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
-  const readers = { preHandler: requireRole('owner', 'accountant') };
   const owner = { preHandler: requireRole('owner') };
   const mustBePartnership = async () => {
     const s = await getSettings(sql);
@@ -91,7 +90,7 @@ export function registerPartnerRoutes(app: FastifyInstance, ctx: Ctx): void {
     return s;
   };
 
-  app.get('/api/partners', readers, async () => ({ partners: await listPartners(sql) }));
+  app.get('/api/partners', { preHandler: requireAccess('reports.view') }, async () => ({ partners: await listPartners(sql) }));
 
   app.post('/api/partners', owner, async (req) => {
     const user = userOrThrow(req);
@@ -135,7 +134,7 @@ export function registerPartnerRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** A year's profit, how it would be (or was) shared, and whether it has been. */
-  app.get('/api/partners/profit-share', readers, async (req) => {
+  app.get('/api/partners/profit-share', { preHandler: requireAccess('reports.view') }, async (req) => {
     const s = await getSettings(sql);
     const fy = yearFor(s.fyEndMonth, (req.query as { fyEnd?: string }).fyEnd);
     const partners = (await listPartners(sql)).filter((p) => p.active);

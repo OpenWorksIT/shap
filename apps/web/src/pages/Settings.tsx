@@ -28,16 +28,11 @@ import {
   vatNumberProblem,
   formatZar,
   monthLabel,
-  passwordProblem,
-  ROLE_HINTS,
-  ROLE_LABELS,
   SHAP_LINE,
-  ROLES,
   SOURCE_KIND_LABELS,
   SOURCE_KINDS,
   type AccountType,
   type CategoryKind,
-  type Role,
   type SourceKind, PAYMENT_DAYS, QUOTE_VALID_DAYS, dayLabel, withPaymentTerm, withQuoteValidity } from '@shap/shared';
 import { PageHead } from '../components/Shell';
 import { Drawer, ErrorBox, Field, Icon, Loading, MoneyInput, Tabs, useToast } from '../components/ui';
@@ -61,6 +56,7 @@ import { SupportShap } from '../components/Support';
 import { MarketWhat } from '../components/MarketShare';
 import { ShowDemoButton } from '../components/Demo';
 import { usePasswordPrompt } from '../components/PasswordPrompt';
+import { People } from '../components/People';
 
 type Tab = 'company' | 'invoicing' | 'sections' | 'lists' | 'users' | 'import' | 'system' | 'feedback' | 'audit';
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -101,7 +97,7 @@ export default function SettingsPage() {
       {tab === 'feedback' && <FeedbackInbox />}
       {tab === 'audit' && <AuditLog />}
       {tab === 'lists' && <Lists />}
-      {tab === 'users' && <Users />}
+      {tab === 'users' && <People />}
       {tab === 'system' && (
         <>
           <SystemSettings />
@@ -665,154 +661,6 @@ function ListDrawer({ kind, row, onClose, onSaved }: { kind: ListKind; row: Reco
 }
 
 /* ---------------------------------------------------------------- users */
-interface UserRow {
-  id: string;
-  name: string;
-  email: string;
-  role: Role;
-  active: boolean;
-  lastLoginAt: string | null;
-  mfa: boolean;
-}
-
-function Users() {
-  const { user } = useAuthed();
-  const { data, error, reload } = useApi<UserRow[]>('/api/users');
-  const [edit, setEdit] = useState<UserRow | 'new' | null>(null);
-  return (
-    <div className="stack">
-      <div className="spread">
-        <p className="small muted">Give your foreman a site login to log days and costs, and your accountant a read-only one.</p>
-        <button className="btn primary" onClick={() => setEdit('new')}>
-          <Icon name="plus" size={18} />
-          Add someone
-        </button>
-      </div>
-      <ErrorBox error={error} />
-      {!data ? (
-        <Loading />
-      ) : (
-        <section className="panel table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Access</th>
-                <th className="hide-sm">Two-factor</th>
-                <th className="hide-sm">Last signed in</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((u) => (
-                <tr key={u.id} className={`clickable ${u.active ? '' : 'inactive'}`} onClick={() => setEdit(u)}>
-                  <td>
-                    <strong>{u.name}</strong>
-                    {u.id === user.id && <span className="muted"> (you)</span>}
-                    <div className="xs muted">{u.email}</div>
-                  </td>
-                  <td>{ROLE_LABELS[u.role]}</td>
-                  <td className="hide-sm">{u.mfa ? 'On' : 'Off'}</td>
-                  <td className="hide-sm">{u.lastLoginAt ? formatDate(u.lastLoginAt.slice(0, 10)) : 'Never'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      )}
-      {edit && <UserDrawer user={edit === 'new' ? null : edit} onClose={() => setEdit(null)} onSaved={reload} />}
-    </div>
-  );
-}
-
-function UserDrawer({ user, onClose, onSaved }: { user: UserRow | null; onClose: () => void; onSaved: () => void }) {
-  const toast = useToast();
-  const { user: me } = useAuthed();
-  const [f, setF] = useState({ name: user?.name ?? '', email: user?.email ?? '', role: (user?.role ?? 'capture') as Role, password: '', active: user?.active ?? true, currentPassword: '' });
-  const [error, setError] = useState('');
-  const [passwordPrompt, askPassword] = usePasswordPrompt();
-  const isMe = user?.id === me.id;
-  // The acting owner re-enters their password for the high-impact moves (matching the server): your
-  // own email/password, resetting someone else's password, making someone an owner, or editing an
-  // existing owner — so a session left open on a phone can't take over or lock someone out.
-  const resettingOther = Boolean(user) && !isMe && Boolean(f.password);
-  const makingOwner = f.role === 'owner' && (!user || user.role !== 'owner');
-  const editingOwner = Boolean(user) && !isMe && user?.role === 'owner';
-  const needsCurrent =
-    (isMe && (Boolean(f.password) || f.email.trim().toLowerCase() !== user?.email)) || resettingOther || makingOwner || editingOwner;
-  const problem = f.password ? passwordProblem(f.password, f) : null;
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    try {
-      const body = { ...f, password: f.password || undefined, currentPassword: needsCurrent ? f.currentPassword : undefined };
-      if (user) await api(`/api/users/${user.id}`, { method: 'PUT', body });
-      else await api('/api/users', { body });
-      toast('Saved');
-      onSaved();
-      onClose();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Couldn’t save');
-    }
-  };
-  return (
-    <Drawer title={user ? user.name : 'Add someone'} onClose={onClose}>
-      <form className="stack" onSubmit={submit}>
-        <Field label="Name">{(p) => <input {...p} className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required />}</Field>
-        <Field label="Email (they sign in with this)">{(p) => <input {...p} className="input" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} required />}</Field>
-        <div className="field">
-          <span className="label">Access</span>
-          {ROLES.map((r) => (
-            <label key={r} className="check">
-              <input type="radio" name="role" checked={f.role === r} onChange={() => setF({ ...f, role: r })} />
-              <span>
-                {ROLE_LABELS[r]}
-                <div className="xs muted">{ROLE_HINTS[r]}</div>
-              </span>
-            </label>
-          ))}
-        </div>
-        <Field label={user ? 'New password (leave blank to keep)' : 'Starting password'} hint={problem ?? (isMe ? 'At least 10 characters.' : 'At least 10 characters. They can change it under their name, top right.')} error={problem ?? undefined}>
-          {(p) => <input {...p} className="input" type="text" autoComplete="new-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} required={!user} minLength={user ? undefined : 10} />}
-        </Field>
-        {needsCurrent && (
-          <Field label="Your current password" hint="Enter your password to confirm this change.">
-            {(p) => <input {...p} className="input" type="password" autoComplete="current-password" value={f.currentPassword} onChange={(e) => setF({ ...f, currentPassword: e.target.value })} required />}
-          </Field>
-        )}
-        {user && (
-          <label className="check">
-            <input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} />
-            Can sign in
-          </label>
-        )}
-        {error && <div className="banner alert small">{error}</div>}
-        <div className="row wrap">
-          <button className="btn primary">Save</button>
-          {user?.mfa && (
-            <button
-              type="button"
-              className="btn"
-              onClick={async () => {
-                const password = await askPassword('Reset two-factor', isMe ? 'Enter your password to reset your own two-factor sign-in.' : 'Enter your password to reset this person’s two-factor sign-in.');
-                if (!password) return;
-                try {
-                  await api(`/api/users/${user.id}/reset-mfa`, { body: { password } });
-                  toast('Two-factor reset; they set it up again at next sign-in');
-                  onSaved();
-                } catch (err) {
-                  setError(err instanceof ApiError ? err.message : 'Couldn’t reset it');
-                }
-              }}
-            >
-              Reset two-factor (lost phone)
-            </button>
-          )}
-        </div>
-      </form>
-      {passwordPrompt}
-    </Drawer>
-  );
-}
-
 /* ---------------------------------------------------------------- tracker import */
 interface Preview {
   clients: number;

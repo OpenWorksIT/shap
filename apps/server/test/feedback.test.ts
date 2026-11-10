@@ -20,7 +20,7 @@ describe('feedback and the collector', () => {
     expect(r.id).toMatch(/^FB-/);
     const owner = await login(env.app, 'owner@example.co.za');
     const list = await owner.get('/api/feedback');
-    expect(list[0]).toMatchObject({ source: 'here', who: 'Site (capture)', kind: 'dislike' });
+    expect(list[0]).toMatchObject({ source: 'here', who: 'Site (staff)', kind: 'dislike' });
     expect((await site.call({ method: 'GET', url: '/api/feedback' })).statusCode).toBe(403);
   });
 

@@ -38,7 +38,8 @@ interface Logbook {
 const km = (n: number | null) => (n == null ? '–' : `${Math.round(n * 10) / 10} km`);
 
 export default function LogbookPage() {
-  const { has, isOwner } = useAuthed();
+  const { has, can } = useAuthed();
+  const isOwner = can('logbook.trips');
   const toast = useToast();
   const thisYear = financialYear(todayIso(), 2);
   const years = [0, 1, 2].map((n) => financialYear(addMonths(thisYear.start, -12 * n), 2));

@@ -1,7 +1,7 @@
 /** Is a business that isn't registered for VAT getting near the point where it must? */
 import { addMonths, monthEnd, monthStart, vatThresholds, vatWatch } from '@shap/shared';
 import type { FastifyInstance } from 'fastify';
-import { requireRole } from '../auth.js';
+import { requireAccess } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db } from '../db/index.js';
 import { getSettings, today, freshTotals } from '../lib/books.js';
@@ -60,5 +60,5 @@ export async function vatStatus(db: Db, on = today()) {
 }
 
 export function registerVatRoutes(app: FastifyInstance, ctx: Ctx): void {
-  app.get('/api/vat/threshold', { preHandler: requireRole('owner', 'accountant') }, async () => vatStatus(ctx.sql));
+  app.get('/api/vat/threshold', { preHandler: requireAccess('reports.view') }, async () => vatStatus(ctx.sql));
 }

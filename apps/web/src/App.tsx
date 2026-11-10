@@ -2,7 +2,8 @@ import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { FeedbackButton } from './components/Feedback';
 import { Shell } from './components/Shell';
-import { featureOn, paysOutProfit, TERMS_VERSION } from '@shap/shared';
+import { featureOn, TERMS_VERSION, type Task } from '@shap/shared';
+import { screensFor } from './lib/screens';
 import { TermsGate } from './components/Terms';
 import type { Settings } from './lib/types';
 import { Loading } from './components/ui';
@@ -53,45 +54,41 @@ function Authed() {
       </Routes>
     );
   }
-  const money = user.role !== 'capture';
   const settings = ref.settings as Settings;
   const has = (f: Parameters<typeof featureOn>[1]) => featureOn(settings.features, f);
+  const can = (t: Task) => user.role === 'owner' || (user.access ?? []).includes(t);
+  const may = screensFor(user, can, has, settings.businessType);
   // New books: the owner answers the first-run questions; everyone else waits for that.
   if (!settings.setupDone && user.role === 'owner') return <WelcomePage canRestore={false} />;
   // The terms of use, accepted at the end of setup: again whenever the published terms change.
   if (user.role === 'owner' && settings.termsVersion !== TERMS_VERSION) return <TermsGate />;
-  const pays = has('payroll') || (paysOutProfit(settings.businessType) && has('dividends'));
   return (
     <Shell>
       <FeedbackButton />
       <Suspense fallback={<Loading />}>
         <Routes>
           <Route path="/" element={<HomePage />} />
-          {user.role !== 'accountant' && <Route path="/log" element={<LogPage />} />}
-          {has('jobs') && <Route path="/jobs" element={<ProjectsPage />} />}
-          {has('jobs') && <Route path="/jobs/:id" element={<ProjectPage />} />}
-          {money && (
-            <>
-              {has('workers') && <Route path="/workers" element={<WorkersPage />} />}
-              {has('workers') && <Route path="/workers/:id" element={<WorkerPage />} />}
-              {pays && <Route path="/payroll" element={<PayrollPage />} />}
-              {has('sales') && <Route path="/sales" element={<SalesPage />} />}
-              {has('inventory') && <Route path="/inventory" element={<InventoryPage />} />}
-              <Route path="/costs" element={<CostsPage />} />
-              <Route path="/documents" element={<DocumentsPage />} />
-              <Route path="/documents/new" element={<DocumentPage />} />
-              <Route path="/documents/:id" element={<DocumentPage />} />
-              <Route path="/clients" element={<ClientsPage />} />
-              <Route path="/clients/:id" element={<ClientPage />} />
-              <Route path="/accounts" element={<AccountsPage />} />
-              {has('bills') && <Route path="/bills" element={<BillsPage />} />}
-              {has('logbook') && <Route path="/logbook" element={<LogbookPage />} />}
-              {has('guides') && <Route path="/guides" element={<GuidesPage />} />}
-              {has('guides') && <Route path="/guides/:topic" element={<GuidesPage />} />}
-            </>
-          )}
-          {user.role === 'owner' && <Route path="/settings" element={<SettingsPage />} />}
-          {user.role === 'owner' && <Route path="/move-in" element={<MoveInPage />} />}
+          {may['/log'] && <Route path="/log" element={<LogPage />} />}
+          {may['/jobs'] && <Route path="/jobs" element={<ProjectsPage />} />}
+          {may['/jobs'] && <Route path="/jobs/:id" element={<ProjectPage />} />}
+          {may['/workers'] && <Route path="/workers" element={<WorkersPage />} />}
+          {may['/workers'] && <Route path="/workers/:id" element={<WorkerPage />} />}
+          {may['/payroll'] && <Route path="/payroll" element={<PayrollPage />} />}
+          {may['/sales'] && <Route path="/sales" element={<SalesPage />} />}
+          {may['/inventory'] && <Route path="/inventory" element={<InventoryPage />} />}
+          {may['/costs'] && <Route path="/costs" element={<CostsPage />} />}
+          {may['/documents'] && <Route path="/documents" element={<DocumentsPage />} />}
+          {can('documents.edit') && <Route path="/documents/new" element={<DocumentPage />} />}
+          {may['/documents'] && <Route path="/documents/:id" element={<DocumentPage />} />}
+          {may['/clients'] && <Route path="/clients" element={<ClientsPage />} />}
+          {may['/clients'] && <Route path="/clients/:id" element={<ClientPage />} />}
+          {may['/accounts'] && <Route path="/accounts" element={<AccountsPage />} />}
+          {may['/bills'] && <Route path="/bills" element={<BillsPage />} />}
+          {may['/logbook'] && <Route path="/logbook" element={<LogbookPage />} />}
+          {may['/guides'] && <Route path="/guides" element={<GuidesPage />} />}
+          {may['/guides'] && <Route path="/guides/:topic" element={<GuidesPage />} />}
+          {may['/settings'] && <Route path="/settings" element={<SettingsPage />} />}
+          {may['/move-in'] && <Route path="/move-in" element={<MoveInPage />} />}
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -7,7 +7,7 @@
 import type { FastifyInstance } from 'fastify';
 import { billCreditInput, billPaymentInput } from '@shap/shared';
 import { z } from 'zod';
-import { requireRole, userOrThrow } from '../auth.js';
+import { requireAccess, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db as AnyDb } from '../db/index.js';
 import { audit } from '../lib/audit.js';
@@ -77,7 +77,7 @@ export async function applyBillCredit(tx: AnyDb, userId: string, billId: string,
 export function registerBillRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
 
-  app.get('/api/bills', { preHandler: requireRole('owner', 'accountant') }, async (req) => {
+  app.get('/api/bills', { preHandler: requireAccess('bills.pay', 'costs.view') }, async (req) => {
     const state = (q(req).state as 'open' | 'paid' | 'all' | undefined) ?? 'open';
     const list = await bills(sql, state);
     const payments = await sql`
@@ -86,7 +86,7 @@ export function registerBillRoutes(app: FastifyInstance, ctx: Ctx): void {
     return list.map((b) => ({ ...b, payments: payments.filter((p) => p.costId === b.id) }));
   });
 
-  app.post('/api/costs/:id/bill-payments', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/costs/:id/bill-payments', { preHandler: requireAccess('bills.pay') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const input = parse(billPaymentInput, req.body);
@@ -102,13 +102,13 @@ export function registerBillRoutes(app: FastifyInstance, ctx: Ctx): void {
     return row;
   });
 
-  app.post('/api/costs/:id/bill-credits', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/costs/:id/bill-credits', { preHandler: requireAccess('bills.pay') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     return sql.begin((tx) => applyBillCredit(tx, user.id, id, req.body));
   });
 
-  app.delete('/api/bill-payments/:id', { preHandler: requireRole('owner') }, async (req) => {
+  app.delete('/api/bill-payments/:id', { preHandler: requireAccess('bills.pay') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const [p] = await sql<{ date: string; costId: string }[]>`select date, cost_id from bill_payments where id = ${id}`;

@@ -5,7 +5,7 @@
 import type { FastifyInstance } from 'fastify';
 import { addMonths, financialYear, statementFileInput } from '@shap/shared';
 import { z } from 'zod';
-import { requireRole, userOrThrow } from '../auth.js';
+import { requireAccess, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
@@ -41,14 +41,14 @@ export async function missingStatements(db: Db): Promise<{ sourceId: string; sou
 export function registerStatementRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
 
-  app.get('/api/statement-files', { preHandler: requireRole('owner', 'accountant') }, async () => {
+  app.get('/api/statement-files', { preHandler: requireAccess('bank.reconcile', 'reports.view') }, async () => {
     const files = await sql`
       select f.id, f.source_id, s.name as source_name, to_char(f.month, 'YYYY-MM') as month, f.filename, f.attachment_id, f.created_at
       from statement_files f join payment_sources s on s.id = f.source_id order by f.month desc, s.name`;
     return { files, missing: await missingStatements(sql) };
   });
 
-  app.post('/api/statement-files', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/statement-files', { preHandler: requireAccess('bank.reconcile') }, async (req) => {
     const user = userOrThrow(req);
     const input = parse(statementFileInput, req.body);
     const bytes = Buffer.from(input.dataBase64.slice(0, 16), 'base64');
@@ -66,7 +66,7 @@ export function registerStatementRoutes(app: FastifyInstance, ctx: Ctx): void {
     return row;
   });
 
-  app.delete('/api/statement-files/:id', { preHandler: requireRole('owner') }, async (req) => {
+  app.delete('/api/statement-files/:id', { preHandler: requireAccess('bank.reconcile') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(z.object({ id: z.string().uuid() }), req.params);
     const [f] = await sql<{ attachmentId: string }[]>`delete from statement_files where id = ${id} returning attachment_id`;

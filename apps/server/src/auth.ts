@@ -1,7 +1,7 @@
 import { hash, verify } from '@node-rs/argon2';
 import { inDemo } from './db/routing.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { loginInput, passwordProblem, type Role } from '@shap/shared';
+import { ACCOUNTANT_TASKS, loginInput, passwordProblem, personAccess, TASK_KEYS, type Role, type Task } from '@shap/shared';
 import { z } from 'zod';
 import type { Ctx } from './context.js';
 import type { Db, Sql } from './db/index.js';
@@ -21,6 +21,27 @@ export interface AuthUser {
   name: string;
   email: string;
   role: Role;
+  /** What they may do (packages/shared/src/access.ts): all of it for the owner. */
+  access: Task[];
+  /** Staff: the profile they're on (its name), if any. */
+  profile: string | null;
+}
+
+/** The tasks someone has: the owner all, the accountant the reading ones, staff their profile's changed for them. */
+export function accessOf(u: { role: Role; profileAccess?: string[] | null; accessAdd?: string[] | null; accessRemove?: string[] | null }): Task[] {
+  if (u.role === 'owner') return [...TASK_KEYS];
+  if (u.role === 'accountant') return [...ACCOUNTANT_TASKS];
+  return personAccess(u.profileAccess ?? [], u.accessAdd ?? [], u.accessRemove ?? []);
+}
+
+type UserRow = Omit<AuthUser, 'access'> & { profileAccess: string[] | null; accessAdd: string[]; accessRemove: string[] };
+const toAuthUser = ({ profileAccess, accessAdd, accessRemove, ...u }: UserRow): AuthUser => ({ ...u, access: accessOf({ role: u.role, profileAccess, accessAdd, accessRemove }) });
+/** Someone who signs in, with what they may do. Only an active sign-in. */
+export async function loadUser(db: Db, id: string): Promise<AuthUser | null> {
+  const [row] = await db<UserRow[]>`
+    select u.id, u.name, u.email, u.role, p.name as profile, p.access as profile_access, u.access_add, u.access_remove
+    from users u left join profiles p on p.id = u.profile_id where u.id = ${id} and u.active`;
+  return row ? toAuthUser(row) : null;
 }
 
 declare module 'fastify' {
@@ -117,15 +138,16 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
     const token = tokenFrom(req);
     if (!token) return;
 
-    const rows = await sql<(AuthUser & { lastSeenAt: Date })[]>`
-      select u.id, u.name, u.email, u.role, s.last_seen_at
-      from sessions s join users u on u.id = s.user_id
+    // What they may do is read afresh each time: a change to their profile or their ticks counts at once.
+    const rows = await sql<(UserRow & { lastSeenAt: Date })[]>`
+      select u.id, u.name, u.email, u.role, p.name as profile, p.access as profile_access, u.access_add, u.access_remove, s.last_seen_at
+      from sessions s join users u on u.id = s.user_id left join profiles p on p.id = u.profile_id
       where s.token_hash = ${sha256(token)} and s.expires_at > now() and u.active
     `;
     const row = rows[0];
     if (!row) return;
     const { lastSeenAt, ...user } = row;
-    req.user = user;
+    req.user = toAuthUser(user);
     // Sliding expiry, but only touch the row once a minute.
     if (Date.now() - lastSeenAt.getTime() > 60_000) {
       await sql`
@@ -137,7 +159,9 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
   };
 
   /** Create a session and set the cookie. Returns the token too, for native clients. */
-  const startSession = async (req: FastifyRequest, reply: FastifyReply, user: AuthUser, method: string) => {
+  const startSession = async (req: FastifyRequest, reply: FastifyReply, who: { id: string }, method: string) => {
+    const user = await loadUser(sql, who.id);
+    if (!user) throw unauthorized();
     const token = newToken();
     await sql`
       insert into sessions (token_hash, user_id, expires_at, user_agent, ip)
@@ -156,7 +180,7 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
     return { user, token };
   };
 
-  const enrolChallenge = (user: AuthUser, passwordHash: string) => {
+  const enrolChallenge = (user: { id: string; email: string }, passwordHash: string) => {
     const secret = newTotpSecret();
     return {
       challenge: secrets.signToken('mfa-enrol', { uid: user.id, s: secrets.seal(secret), pw: pwTag(passwordHash) }, 15 * 60),
@@ -179,7 +203,7 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
         await verify(await getDummyHash(), input.password).catch(() => false);
         return { kind: 'too_many' as const };
       }
-      const [row] = await tx<(AuthUser & { passwordHash: string; active: boolean; totpEnabledAt: Date | null })[]>`
+      const [row] = await tx<({ id: string; name: string; email: string; role: Role } & { passwordHash: string; active: boolean; totpEnabledAt: Date | null })[]>`
         select id, name, email, role, password_hash, active, totp_enabled_at from users where email = ${input.email}
       `;
       // Always run a verify so response time does not reveal whether the email exists.
@@ -213,7 +237,7 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
     // can't be redeemed more than once by racing requests.
     const outcome = await sql.begin(async (tx) => {
       await tx`select pg_advisory_xact_lock(hashtext(${`mfa:${p.uid}`}))`;
-      const [row] = await tx<(AuthUser & { passwordHash: string; totpSecretEnc: string | null; totpLastStep: string | null })[]>`
+      const [row] = await tx<({ id: string; name: string; email: string; role: Role } & { passwordHash: string; totpSecretEnc: string | null; totpLastStep: string | null })[]>`
         select id, name, email, role, password_hash, totp_secret_enc, totp_last_step from users where id = ${p.uid} and active
       `;
       if (!row?.totpSecretEnc) return { kind: 'resignin' as const };
@@ -288,7 +312,7 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
 
     const codes = newRecoveryCodes();
     const user = await sql.begin(async (tx) => {
-      const [u] = await tx<AuthUser[]>`
+      const [u] = await tx<{ id: string }[]>`
         update users set totp_secret_enc = ${secrets.seal(secret)}, totp_enabled_at = now(), totp_last_step = ${step}
         where id = ${p.uid} and active returning id, name, email, role
       `;
@@ -405,12 +429,41 @@ function getDummyHash(): Promise<string> {
   return dummyHash;
 }
 
-/** Route guard: `preHandler: requireRole('owner')`. No roles = any signed-in user. */
+/**
+ * Route guard for what's only some people's: `preHandler: requireRole('owner')` (the settings,
+ * the people who sign in, the year end…). No roles = anyone signed in. What can be given to staff
+ * is guarded by the task instead (requireAccess).
+ */
 export function requireRole(...roles: Role[]) {
-  return async (req: FastifyRequest, _reply: FastifyReply) => {
+  const guard = async (req: FastifyRequest, _reply: FastifyReply) => {
     if (!req.user) throw unauthorized();
     if (roles.length && !roles.includes(req.user.role)) throw forbidden();
   };
+  return Object.assign(guard, { door: { roles } as Door });
+}
+
+/** May they do this task? The owner may do everything. */
+export const can = (u: AuthUser, task: Task): boolean => u.role === 'owner' || u.access.includes(task);
+export const canAny = (u: AuthUser, ...tasks: Task[]): boolean => tasks.some((t) => can(u, t));
+
+/** Route guard for a task: `preHandler: requireAccess('sales.sell')`. Any of the tasks opens it. */
+export function requireAccess(...tasks: Task[]) {
+  if (!tasks.length) throw new Error('requireAccess needs at least one task');
+  const guard = async (req: FastifyRequest, _reply: FastifyReply) => {
+    if (!req.user) throw unauthorized();
+    if (!canAny(req.user, ...tasks)) throw forbidden();
+  };
+  return Object.assign(guard, { door: { tasks } as Door });
+}
+
+/**
+ * Who a route lets in, as its guard says: the roles (none: anyone signed in), or the tasks. A route
+ * with no guard checks inside (signing in, the health check). The security tests try each door.
+ */
+export type Door = { roles?: Role[]; tasks?: Task[] } | null;
+export function doorOf(preHandler: unknown): Door {
+  const guards = [preHandler].flat().filter(Boolean) as { door?: Door }[];
+  return guards.find((g) => g.door)?.door ?? null;
 }
 
 export function userOrThrow(req: FastifyRequest): AuthUser {
@@ -418,16 +471,19 @@ export function userOrThrow(req: FastifyRequest): AuthUser {
   return req.user;
 }
 
-export async function createUser(db: Db, u: { name: string; email: string; password: string; role: Role }): Promise<{ id: string }> {
+export async function createUser(
+  db: Db,
+  u: { name: string; email: string; password: string; role: Role; profileId?: string | null; accessAdd?: string[]; accessRemove?: string[] },
+): Promise<{ id: string }> {
   const passwordHash = await hashPassword(u.password);
+  const staff = u.role === 'staff';
   const [row] = await db<{ id: string }[]>`
-    insert into users (name, email, password_hash, role)
-    values (${u.name}, ${u.email}, ${passwordHash}, ${u.role})
+    insert into users (name, email, password_hash, role, profile_id, access_add, access_remove)
+    values (${u.name}, ${u.email}, ${passwordHash}, ${u.role}, ${staff ? (u.profileId ?? null) : null}, ${staff ? (u.accessAdd ?? []) : []}, ${staff ? (u.accessRemove ?? []) : []})
     returning id
   `;
   return row!;
 }
 
-/** Owners change things; site capture logs labour and costs; accountants only read. */
-export const canWrite = (u: AuthUser) => u.role === 'owner';
-export const seesMoney = (u: AuthUser) => u.role !== 'capture';
+/** Sees the books: the owner, the accountant, and staff who read the reports. */
+export const seesBooks = (u: AuthUser) => u.role !== 'staff' || can(u, 'reports.view');

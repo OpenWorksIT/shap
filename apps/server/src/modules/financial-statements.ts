@@ -27,7 +27,7 @@ import {
   type StatementStatus,
 } from '@shap/shared';
 import { z } from 'zod';
-import { requireRole, userOrThrow } from '../auth.js';
+import { requireAccess, requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
@@ -114,7 +114,7 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
   const { sql } = ctx;
   const on = () => requireFeature(sql, 'statements', 'Financial statements');
 
-  app.get('/api/statements/details', readers, async () => loadDetails(sql));
+  app.get('/api/statements/details', { preHandler: requireAccess('reports.view') }, async () => loadDetails(sql));
 
   // The owner, or the accountant (who words the policies and notes, and is the compiler).
   app.put('/api/statements/details', readers, async (req) => {
@@ -126,7 +126,7 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
   });
 
   /** The years that have ended, newest first, each with where its statements are. */
-  app.get('/api/statements', readers, async () => {
+  app.get('/api/statements', { preHandler: requireAccess('reports.view') }, async () => {
     const s = await getSettings(sql);
     await freshTotals(sql);
     const [first] = await sql<{ d: string | null }[]>`select min(date)::text as d from ledger_totals where amount_cents <> 0`;
@@ -144,7 +144,7 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
     return years;
   });
 
-  app.get('/api/statements/:fyEnd', readers, async (req) => {
+  app.get('/api/statements/:fyEnd', { preHandler: requireAccess('reports.view') }, async (req) => {
     const { fyEnd } = parse(fyParam, req.params);
     await checkYear(sql, fyEnd);
     const { statements, row: r } = await currentStatements(sql, fyEnd);
@@ -155,7 +155,7 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
     return { statements, status: r?.status ?? 'draft', row: r ? { ...r, snapshot: undefined } : null, changedSince, audit };
   });
 
-  app.get('/api/statements/:fyEnd/pdf', readers, async (req, reply) => {
+  app.get('/api/statements/:fyEnd/pdf', { preHandler: requireAccess('reports.view') }, async (req, reply) => {
     const { fyEnd } = parse(fyParam, req.params);
     await checkYear(sql, fyEnd);
     const r = await row(sql, fyEnd);
@@ -251,7 +251,7 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
     return { ok: true };
   });
 
-  app.get('/api/statements/:fyEnd/compiler-report', readers, async (req, reply) => {
+  app.get('/api/statements/:fyEnd/compiler-report', { preHandler: requireAccess('reports.view') }, async (req, reply) => {
     const { fyEnd } = parse(fyParam, req.params);
     const r = await row(sql, fyEnd);
     if (!r?.compilerReportId) throw notFound('Signed report');

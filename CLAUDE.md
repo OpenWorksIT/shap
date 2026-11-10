@@ -11,7 +11,9 @@ Shap holds a business's books and its people's details. Every change goes throug
   by a separate agent that didn't write it (security, privacy, accounting and SARS rules, data
   safety on upgrade), its findings fixed with tests before pushing.
 - **New routes** are covered by the security tests and the penetration test automatically (they
-  read the routes from the code). Say which roles may use it (`requireRole`).
+  read the routes from the code). Say who may use it: `requireAccess('task')` for what staff can be
+  given (a task in `packages/shared/src/access.ts`, docs/PEOPLE.md), `requireRole('owner')` for what
+  is only the owner's. `test/access.test.ts` tries every route for every task.
 - **New outside addresses** (anything the app sends requests to, or links) go on
   `.github/hosts.json`, saying what goes there and on whose say-so. Nothing personal leaves the
   server without the owner's yes (`test/privacy.test.ts`).

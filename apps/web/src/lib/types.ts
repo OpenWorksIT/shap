@@ -1,4 +1,4 @@
-import type { StatementLineKey } from '@shap/shared';
+import type { StatementLineKey, Task } from '@shap/shared';
 import type { SaleVatCode, AccountType, CategoryKind, LineCategory, ProjectStatus, Role, SourceKind, WorkerKind, BusinessType } from '@shap/shared';
 
 export interface User {
@@ -6,6 +6,10 @@ export interface User {
   name: string;
   email: string;
   role: Role;
+  /** What they may do (all of it for the owner). */
+  access: Task[];
+  /** Staff: the profile they're on, if any. */
+  profile: string | null;
 }
 
 export interface Settings {

@@ -27,6 +27,9 @@ describe('wipe all data', () => {
   });
 
   it('wipes the books but keeps who signs in', async () => {
+    // The business's own profiles stay, with the people on them.
+    const teller = (await me.get('/api/profiles')).find((p: { name: string }) => p.name === 'Teller');
+    await me.post(`/api/profiles/${teller.id}`, { name: 'Counter (made up)', access: ['sales.sell', 'sales.view'] }, 'PUT');
     const { names } = await me.get('/api/wipe');
     const r = await me.call({ method: 'POST', url: '/api/wipe', payload: { password: 'test-password-1', name: names[0].toUpperCase() } });
     expect(r.statusCode).toBe(200);
@@ -39,6 +42,10 @@ describe('wipe all data', () => {
     expect(accounts.length).toBeGreaterThan(10);
     const [row] = await env.sql`select count(*)::int as n from audit_log where action = 'wipe_all_data'`;
     expect(row!.n).toBe(1);
+    const profiles = await again.get('/api/profiles');
+    expect(profiles.map((p: { name: string }) => p.name).sort()).toEqual(['Admin', 'Counter (made up)', 'Site staff']);
+    expect(profiles.find((p: { name: string }) => p.name === 'Counter (made up)').access).toEqual(['sales.sell', 'sales.view']);
+    expect((await login(env.app, 'site@example.co.za').then((s) => s.get('/api/auth/me'))).user.access).toEqual(['jobs.view', 'labour.log', 'costs.capture']);
     // The books work again straight away.
     const inv = await again.post('/api/documents', { kind: 'invoice', issueDate: '2026-11-01', lines: [{ category: 'labour', description: 'Fresh start', qty: 1, unitPriceCents: 5000 }] });
     expect(inv.number).toBeTruthy();

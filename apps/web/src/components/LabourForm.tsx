@@ -18,7 +18,10 @@ interface Pick {
  * workers who were there. Rates fill in from each worker; the owner can change them.
  */
 export function LabourForm({ projectId: fixedProject, onSaved }: { projectId?: string; onSaved?: () => void }) {
-  const { isOwner, seesMoney, ref } = useAuthed();
+  const { can, canAny, ref } = useAuthed();
+  // Logging days (not managing the workers): each worker's rate, set by the owner.
+  const isOwner = can('workers.manage');
+  const seesMoney = canAny('labour.view', 'workers.manage');
   const toast = useToast();
   const workers = useWorkers();
   const [date, setDate] = useState(todayIso());
@@ -178,9 +181,10 @@ export function LabourForm({ projectId: fixedProject, onSaved }: { projectId?: s
   );
 }
 
-/** Edit one labour entry (owner, or site capture on its own entries for a day). */
+/** Edit one labour entry (whoever manages the workers, or whoever logged it, for a day). */
 export function LabourEntryForm({ entry, onSaved, onDeleted }: { entry: LabourEntry; onSaved: () => void; onDeleted: () => void }) {
-  const { ref, isOwner } = useAuthed();
+  const { ref, can } = useAuthed();
+  const isOwner = can('workers.manage');
   const toast = useToast();
   const workers = useWorkers();
   const [form, setForm] = useState({ ...entry });

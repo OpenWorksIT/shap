@@ -14,7 +14,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { requireRole, userOrThrow } from '../auth.js';
+import { requireAccess, requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
@@ -333,9 +333,9 @@ export function registerDuplicateRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
   const uuid = z.string().uuid();
 
-  app.get('/api/costs/duplicates', { preHandler: requireRole('owner', 'accountant') }, async () => findDuplicates(sql));
+  app.get('/api/costs/duplicates', { preHandler: requireAccess('costs.view') }, async () => findDuplicates(sql));
 
-  app.post('/api/costs/merge', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/costs/merge', { preHandler: requireAccess('costs.manage') }, async (req) => {
     const user = userOrThrow(req);
     const { pairs, byHand } = parse(
       z.object({ pairs: z.array(z.object({ removeId: uuid, keepId: uuid.nullable() })).min(1).max(1000), byHand: z.boolean().default(false) }),
@@ -363,7 +363,7 @@ export function registerDuplicateRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** "Not the same": these pairs are two purchases and aren't suggested again. */
-  app.post('/api/costs/duplicates/reject', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/costs/duplicates/reject', { preHandler: requireAccess('costs.manage') }, async (req) => {
     const user = userOrThrow(req);
     const { pairs } = parse(z.object({ pairs: z.array(z.object({ removeId: uuid, keepId: uuid.nullable() })).min(1).max(1000) }), req.body);
     await sql.begin(async (tx) => {
@@ -377,7 +377,7 @@ export function registerDuplicateRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** The pairs marked "not the same", to bring one back. */
-  app.get('/api/costs/duplicates/rejected', { preHandler: requireRole('owner', 'accountant') }, async () => {
+  app.get('/api/costs/duplicates/rejected', { preHandler: requireAccess('costs.view') }, async () => {
     return sql`
       select r.id, r.at, a.id as a_id, a.date::text as a_date, a.description as a_description, a.amount_cents as a_amount_cents,
         b.id as b_id, b.date::text as b_date, b.description as b_description, b.amount_cents as b_amount_cents
@@ -388,14 +388,14 @@ export function registerDuplicateRoutes(app: FastifyInstance, ctx: Ctx): void {
       order by r.at desc limit 300`;
   });
 
-  app.delete('/api/costs/duplicates/rejected/:id', { preHandler: requireRole('owner') }, async (req) => {
+  app.delete('/api/costs/duplicates/rejected/:id', { preHandler: requireAccess('costs.manage') }, async (req) => {
     const { id } = parse(z.object({ id: uuid }), req.params);
     const r = await sql`delete from rejected_suggestions where id = ${id} and kind = 'duplicate'`;
     if (!r.count) throw notFound('That pair');
     return { ok: true };
   });
 
-  app.get('/api/costs/merges', { preHandler: requireRole('owner', 'accountant') }, async () => {
+  app.get('/api/costs/merges', { preHandler: requireAccess('costs.view') }, async () => {
     return sql`
       select m.id, m.at, m.undone_at, m.kept_id, m.removed->>'date' as date, (m.removed->>'amount_cents')::bigint as amount_cents,
         m.removed->>'description' as description, m.removed->>'supplier' as supplier, jsonb_array_length(m.lines) as lines_dropped,
@@ -404,7 +404,7 @@ export function registerDuplicateRoutes(app: FastifyInstance, ctx: Ctx): void {
       order by m.at desc limit 300`;
   });
 
-  app.post('/api/costs/merges/:id/undo', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/costs/merges/:id/undo', { preHandler: requireAccess('costs.manage') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(z.object({ id: uuid }), req.params);
     await sql.begin(async (tx) => {
@@ -415,7 +415,7 @@ export function registerDuplicateRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** Costs that could be this one counted twice: about the same amount, within a fortnight. */
-  app.get('/api/costs/:id/twins', { preHandler: requireRole('owner') }, async (req) => {
+  app.get('/api/costs/:id/twins', { preHandler: requireAccess('costs.manage') }, async (req) => {
     const { id } = parse(z.object({ id: uuid }), req.params);
     return sql`
       select o.id, o.date::text, o.amount_cents, o.description, o.supplier, k.name as category_name, s.name as source_name,

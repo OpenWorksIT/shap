@@ -12,7 +12,8 @@ import type { LabourEntry, WorkerRow } from '../lib/types';
 type Tab = 'people' | 'allocate';
 
 export default function WorkersPage() {
-  const { isOwner } = useAuthed();
+  const { can } = useAuthed();
+  const isOwner = can('workers.manage');
   const [params, setParams] = useSearchParams();
   const tab = (params.get('tab') as Tab) || 'people';
   const workers = useApi<WorkerRow[]>('/api/workers');

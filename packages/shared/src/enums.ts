@@ -1,14 +1,15 @@
-export const ROLES = ['owner', 'capture', 'accountant'] as const;
+/** Staff do what's ticked for them (access.ts): from a profile, changed for them if need be. */
+export const ROLES = ['owner', 'staff', 'accountant'] as const;
 export type Role = (typeof ROLES)[number];
 export const ROLE_LABELS: Record<Role, string> = {
   owner: 'Owner',
-  capture: 'Site capture',
+  staff: 'Staff',
   accountant: 'Accountant (read only)',
 };
 export const ROLE_HINTS: Record<Role, string> = {
-  owner: 'Everything, including settings and users.',
-  capture: 'Logs labour and costs, sees projects. No money reports.',
-  accountant: 'Sees and exports everything, changes nothing.',
+  owner: 'Everything, including settings and the people who sign in.',
+  staff: 'What’s ticked for them: a profile’s jobs, changed for them if need be.',
+  accountant: 'Sees and exports everything, changes nothing, and compiles the financial statements.',
 };
 
 export const PROJECT_STATUSES = ['lead', 'quoted', 'active', 'invoiced', 'done', 'cancelled'] as const;

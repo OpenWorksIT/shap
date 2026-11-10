@@ -12,7 +12,8 @@ import type { DocRow } from '../lib/types';
 type Kind = 'invoice' | 'quote' | 'credit_note';
 
 export default function DocumentsPage() {
-  const { isOwner, ref, has } = useAuthed();
+  const { ref, has, can } = useAuthed();
+  const isOwner = can('documents.edit');
   const brands = ref.brands.filter((b) => b.active);
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -47,10 +48,12 @@ export default function DocumentsPage() {
         sub={kind === 'invoice' && data ? `Still owed on these: ${formatZar(owing)}` : undefined}
         actions={
           <>
-            <FileButton path="/api/export/invoices?from=2000-01-01" title="Invoices (CSV)">
-              <Icon name="share" size={18} />
-              CSV
-            </FileButton>
+            {can('reports.view') && (
+              <FileButton path="/api/export/invoices?from=2000-01-01" title="Invoices (CSV)">
+                <Icon name="share" size={18} />
+                CSV
+              </FileButton>
+            )}
             {isOwner && (
               <>
                 {has('quotes') && (

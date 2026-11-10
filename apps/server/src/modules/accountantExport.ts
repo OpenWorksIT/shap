@@ -21,7 +21,7 @@ import {
   type ExportRow,
 } from '@shap/shared';
 import { z } from 'zod';
-import { requireRole } from '../auth.js';
+import { requireAccess } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db } from '../db/index.js';
 import { getSettings, isIsoDate, today, type SettingsRow } from '../lib/books.js';
@@ -308,13 +308,12 @@ async function debtors(db: Db, q: Query) {
 
 export function registerAccountantExportRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
-  const readers = { preHandler: requireRole('owner', 'accountant') };
 
   /**
    * ?dataset=journal&from=…&to=…&options={json}: the CSV file; with &preview=1, the first rows
    * as they'll appear, the row count and the figure to check after importing.
    */
-  app.get('/api/accountant-export', readers, async (req, reply) => {
+  app.get('/api/accountant-export', { preHandler: requireAccess('reports.view') }, async (req, reply) => {
     const raw = req.query as Record<string, string | undefined>;
     const dataset = z.enum(EXPORT_DATASET_KEYS as [ExportDataset, ...ExportDataset[]]).parse(raw.dataset ?? 'journal');
     let options: ExportOptions;

@@ -36,9 +36,11 @@ import { sharePdf } from '../lib/share-pdf';
 type Tab = 'sell' | 'sales' | 'items';
 
 export default function SalesPage() {
-  const { isOwner, has } = useAuthed();
-  const [tab, setTab] = useState<Tab>(isOwner ? 'sell' : 'sales');
-  const today = useApi<{ count: number; totalCents: number; refundedCents: number }>('/api/sales-today');
+  const { can, canAny, has } = useAuthed();
+  const sells = can('sales.sell');
+  const seesSales = canAny('sales.sell', 'sales.view');
+  const [tab, setTab] = useState<Tab>(sells ? 'sell' : seesSales ? 'sales' : 'items');
+  const today = useApi<{ count: number; totalCents: number; refundedCents: number; mine?: boolean }>(seesSales ? '/api/sales-today' : null);
   const [open, setOpen] = useState<string | null>(null);
   return (
     <div className="stack-lg">
@@ -47,7 +49,7 @@ export default function SalesPage() {
         sub={
           today.data ? (
             <>
-              Today: {today.data.count} sale{today.data.count === 1 ? '' : 's'}, <Money cents={today.data.totalCents} />
+              {today.data.mine ? 'Your sales today' : 'Today'}: {today.data.count} sale{today.data.count === 1 ? '' : 's'}, <Money cents={today.data.totalCents} />
               {today.data.refundedCents > 0 && (
                 <>
                   {' '}
@@ -61,10 +63,14 @@ export default function SalesPage() {
       <Tabs
         value={tab}
         onChange={setTab}
-        tabs={[...(isOwner ? [{ value: 'sell' as const, label: 'Sell' }] : []), { value: 'sales' as const, label: 'Sales' }, { value: 'items' as const, label: has('inventory') ? 'Items and prices' : 'Items' }]}
+        tabs={[
+          ...(sells ? [{ value: 'sell' as const, label: 'Sell' }] : []),
+          ...(seesSales ? [{ value: 'sales' as const, label: can('sales.view') ? 'Sales' : 'Your sales' }] : []),
+          { value: 'items' as const, label: has('inventory') ? 'Items and prices' : 'Items' },
+        ]}
       />
-      {tab === 'sell' && isOwner && <Till onSold={(id) => (void today.reload(), setOpen(id))} />}
-      {tab === 'sales' && <SalesList onOpen={setOpen} />}
+      {tab === 'sell' && sells && <Till onSold={(id) => (void today.reload(), setOpen(id))} />}
+      {tab === 'sales' && seesSales && <SalesList onOpen={setOpen} />}
       {tab === 'items' && <ItemList />}
       {open && <SaleDrawer id={open} onClose={() => setOpen(null)} onChanged={() => void today.reload()} />}
     </div>
@@ -614,7 +620,7 @@ function SalesList({ onOpen }: { onOpen: (id: string) => void }) {
 
 /** One sale: what was sold, how it was paid, its refunds; make it an invoice, or refund it. */
 export function SaleDrawer({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged?: () => void }) {
-  const { isOwner } = useAuthed();
+  const { can } = useAuthed();
   const { data, error, loading, reload } = useApi<SaleDetail>(`/api/sales/${id}`, { fresh: true });
   const [mode, setMode] = useState<'view' | 'invoice' | 'refund'>('view');
   const [preview, setPreview] = useState<{ id: string; title: string } | null>(null);
@@ -642,17 +648,17 @@ export function SaleDrawer({ id, onClose, onChanged }: { id: string; onClose: ()
                   <Icon name="print" size={16} />
                   {d.kind === 'invoice' ? 'Invoice PDF' : 'Slip'}
                 </button>
-                {isOwner && d.kind === 'sale' && (
+                {can('sales.sell') && d.kind === 'sale' && (
                   <button type="button" className="btn small" onClick={() => setMode('invoice')}>
                     Make it an invoice
                   </button>
                 )}
-                {isOwner && left.length > 0 && (
+                {can(d.saleNumber ? 'sales.refund' : 'documents.edit') && left.length > 0 && (
                   <button type="button" className="btn small" onClick={() => setMode('refund')}>
                     {d.kind === 'invoice' && !d.saleNumber ? 'Goods returned' : 'Refund'}
                   </button>
                 )}
-                {d.kind === 'invoice' && d.saleNumber && (
+                {d.kind === 'invoice' && d.saleNumber && can('documents.view') && (
                   <Link className="btn small quiet" to={`/documents/${d.id}`}>
                     Open the invoice
                   </Link>
@@ -748,7 +754,13 @@ export function SaleDrawer({ id, onClose, onChanged }: { id: string; onClose: ()
                   {data.stock.map((m) => (
                     <div key={m.id} className="xs muted">
                       {m.description}: {Number(m.qty) > 0 ? '+' : ''}
-                      {qtyText(m.qty)} at <Money cents={Math.abs(Number(m.valueCents))} /> cost
+                      {qtyText(m.qty)}
+                      {can('stock.costs') && (
+                        <>
+                          {' '}
+                          at <Money cents={Math.abs(Number(m.valueCents))} /> cost
+                        </>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -910,7 +922,8 @@ function RefundForm({ sale, onCancel, onDone }: { sale: SaleDetail; onCancel: ()
 /* ------------------------------------------------------------------ the items */
 
 function ItemList() {
-  const { isOwner, has, settings } = useAuthed();
+  const { can, has, settings } = useAuthed();
+  const isOwner = can('items.edit');
   const [search, setSearch] = useState('');
   const [state, setState] = useState<'1' | '0'>('1');
   const { data, error, loading, reload } = useApi<Item[]>(`/api/items?active=${state}`);

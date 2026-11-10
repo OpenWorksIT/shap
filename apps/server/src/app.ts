@@ -4,7 +4,7 @@ import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { registerAuth } from './auth.js';
+import { doorOf, registerAuth, type Door } from './auth.js';
 import type { Config } from './config.js';
 import type { Ctx } from './context.js';
 import { pgCode, PG, type Sql } from './db/index.js';
@@ -88,7 +88,7 @@ try {
   /* Helvetica */
 }
 
-export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstance; ctx: Ctx; routes: string[] }> {
+export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstance; ctx: Ctx; routes: string[]; doors: Record<string, Door> }> {
   const { config } = opts;
   const sql = routedDb(opts.sql, opts.demoSql ?? null);
   const app = Fastify({
@@ -102,8 +102,13 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   // Every route as Fastify has it: the security tests check each one, and that the penetration
   // test's own reading of the code (deploy/test/routes.mjs) finds the same.
   const routes: string[] = [];
+  const doors: Record<string, Door> = {};
   app.addHook('onRoute', (r) => {
-    for (const m of [r.method].flat()) if (m !== 'HEAD' && r.url.startsWith('/api/')) routes.push(`${m} ${r.url}`);
+    for (const m of [r.method].flat()) {
+      if (m === 'HEAD' || !r.url.startsWith('/api/')) continue;
+      routes.push(`${m} ${r.url}`);
+      doors[`${m} ${r.url}`] = doorOf(r.preHandler);
+    }
   });
 
   const realMailer = opts.mailer ?? createMailer(config.SMTP_URL, config.MAIL_FROM, app.log);
@@ -276,5 +281,5 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
     app.setNotFoundHandler((_req, reply) => reply.code(404).send({ error: 'Not found', code: 'not_found' }));
   }
 
-  return { app, ctx, routes };
+  return { app, ctx, routes, doors };
 }

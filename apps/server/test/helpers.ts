@@ -1,7 +1,7 @@
 import { appVersion } from '../src/modules/system.js';
 import type { FastifyInstance, InjectOptions } from 'fastify';
 import { buildApp } from '../src/app.js';
-import { createUser } from '../src/auth.js';
+import { createUser, type Door } from '../src/auth.js';
 import { loadConfig } from '../src/config.js';
 import { createDb, type Sql } from '../src/db/index.js';
 import { migrate } from '../src/db/migrate.js';
@@ -17,6 +17,8 @@ export interface TestEnv {
   mails: Mail[];
   /** Every route, as Fastify has it ("GET /api/clients/:id"). */
   routes: string[];
+  /** Who each route lets in, as its guard says (auth.ts doorOf). */
+  doors: Record<string, Door>;
   close: () => Promise<void>;
 }
 
@@ -29,7 +31,9 @@ export async function setup(opts: { demo?: boolean; env?: Record<string, string>
     await sql.unsafe('drop schema public cascade; create schema public;');
     await migrate(sql);
     await createUser(sql, { name: 'Owner', email: 'owner@example.co.za', password: 'test-password-1', role: 'owner' });
-    await createUser(sql, { name: 'Site', email: 'site@example.co.za', password: 'test-password-1', role: 'capture' });
+    // Site staff: the profile site capture became (log days and slips, see the jobs).
+    const [site] = await sql<{ id: string }[]>`select id from profiles where name = 'Site staff'`;
+    await createUser(sql, { name: 'Site', email: 'site@example.co.za', password: 'test-password-1', role: 'staff', profileId: site!.id });
     await createUser(sql, { name: 'Accountant', email: 'accountant@example.co.za', password: 'test-password-1', role: 'accountant' });
     // Set up as a company that's been using Shap: the letterhead as its first trading name,
     // casual workers and trading names switched on.
@@ -40,7 +44,7 @@ export async function setup(opts: { demo?: boolean; env?: Record<string, string>
     await sql`update settings set default_brand_id = (select id from brands limit 1)`;
   }
   const mails: Mail[] = [];
-  const { app, ctx, routes } = await buildApp({ config, sql, mailer: { send: async (m) => void mails.push(m) } });
+  const { app, ctx, routes, doors } = await buildApp({ config, sql, mailer: { send: async (m) => void mails.push(m) } });
   await app.ready();
   return {
     app,
@@ -48,6 +52,7 @@ export async function setup(opts: { demo?: boolean; env?: Record<string, string>
     sql,
     mails,
     routes,
+    doors,
     close: async () => {
       await app.close();
       await sql.end();
@@ -63,6 +68,31 @@ export async function login(app: FastifyInstance, email: string) {
   // As the web app does: it says which version it is.
   const call = (opts: InjectOptions) =>
     app.inject({ ...opts, headers: { 'x-shap-version': appVersion(), ...(opts.headers ?? {}) }, cookies: { ...(opts.cookies ?? {}), shap_session: cookie } });
+  const get = async <T = any>(url: string): Promise<T> => {
+    const r = await call({ method: 'GET', url });
+    if (r.statusCode >= 400) throw new Error(`GET ${url} → ${r.statusCode} ${r.body}`);
+    return r.json() as T;
+  };
+  const post = async <T = any>(url: string, payload: unknown = {}, method: 'POST' | 'PUT' | 'DELETE' = 'POST'): Promise<T> => {
+    const r = await call({ method, url, payload: payload as never });
+    if (r.statusCode >= 400) throw new Error(`${method} ${url} → ${r.statusCode} ${r.body}`);
+    return r.json() as T;
+  };
+  return { call, get, post };
+}
+
+/**
+ * Signed in as someone without the sign-in form, as signing in leaves it (a session): for tests
+ * that sign in more people than sign-in's rate limit allows in a minute.
+ */
+export async function sessionFor(env: Pick<TestEnv, 'app' | 'sql'>, email: string) {
+  const { newToken, sha256 } = await import('../src/lib/tokens.js');
+  const token = newToken();
+  const [u] = await env.sql<{ id: string }[]>`select id from users where email = ${email} and active`;
+  if (!u) throw new Error(`no one signs in as ${email}`);
+  await env.sql`insert into sessions (token_hash, user_id, expires_at) values (${sha256(token)}, ${u.id}, now() + interval '1 hour')`;
+  const call = (opts: InjectOptions) =>
+    env.app.inject({ ...opts, headers: { 'x-shap-version': appVersion(), ...(opts.headers ?? {}) }, cookies: { ...(opts.cookies ?? {}), shap_session: token } });
   const get = async <T = any>(url: string): Promise<T> => {
     const r = await call({ method: 'GET', url });
     if (r.statusCode >= 400) throw new Error(`GET ${url} → ${r.statusCode} ${r.body}`);

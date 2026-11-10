@@ -49,10 +49,19 @@ export const userInput = z.object({
   name: text(100).min(1, 'Name is needed'),
   email: z.string().trim().toLowerCase().email('Enter a valid email'),
   role: z.enum(ROLES),
+  /** Staff: the profile they're on (none: only what's ticked for them). */
+  profileId: z.string().uuid().nullable().optional(),
+  /** Staff: everything they should be able to do (the profile's, changed for them). Stored as what differs from the profile. */
+  access: z.array(z.string().max(40)).max(100).optional(),
   password: z.string().min(10, 'At least 10 characters').max(200).optional(),
   active: z.boolean().optional(),
   /** Changing your own email or password: your current password, in case someone else has your session. */
   currentPassword: z.string().max(200).optional(),
+});
+
+export const profileInput = z.object({
+  name: text(60).min(1, 'Give the profile a name'),
+  access: z.array(z.string().max(40)).max(100).default([]),
 });
 
 export const settingsInput = z.object({

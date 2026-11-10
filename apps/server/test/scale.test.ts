@@ -85,7 +85,7 @@ describe.skipIf(!on)('Shap at scale', () => {
     const [db] = await sql<{ s: string }[]>`select pg_size_pretty(pg_database_size(current_database())) as s`;
     sizes.load_seconds = Math.round((Date.now() - t0) / 1000);
     rows.push({ what: 'Database size', ms: 0, note: db!.s });
-    for (let i = 1; i <= 5; i++) await createUser(sql, { name: `Person ${i}`, email: `p${i}@example.co.za`, password: 'test-password-1', role: i === 1 ? 'owner' : 'capture' });
+    for (let i = 1; i <= 5; i++) await createUser(sql, { name: `Person ${i}`, email: `p${i}@example.co.za`, password: 'test-password-1', role: i === 1 ? 'owner' : 'staff' });
   }, 600_000);
 
   afterAll(async () => {

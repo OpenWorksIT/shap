@@ -551,7 +551,8 @@ interface JournalLine {
 }
 
 function Journals() {
-  const { isOwner } = useAuthed();
+  const { can } = useAuthed();
+  const isOwner = can('books.adjust');
   const [params] = useSearchParams();
   const { data, error, reload } = useApi<JournalRow[]>('/api/journals');
   const [open, setOpen] = useState<string | 'new' | null>(params.get('journal'));
@@ -600,7 +601,8 @@ function Journals() {
 }
 
 function JournalDrawer({ id, onClose, onSaved }: { id: string | null; onClose: () => void; onSaved: () => void }) {
-  const { ref, isOwner } = useAuthed();
+  const { ref, can } = useAuthed();
+  const isOwner = can('books.adjust');
   const toast = useToast();
   const existing = useApi<{ journal: JournalRow; lines: (JournalLine & { code: string; name: string })[] }>(id ? `/api/journals/${id}` : null);
   const [f, setF] = useState<{ date: string; description: string; reference: string; lines: JournalLine[] } | null>(id ? null : { date: todayIso(), description: '', reference: '', lines: [blankLine(), blankLine()] });
@@ -725,7 +727,8 @@ interface AssetRow {
 }
 
 function Assets() {
-  const { isOwner, words } = useAuthed();
+  const { words, can } = useAuthed();
+  const isOwner = can('books.adjust');
   const { data, error, reload } = useApi<AssetRow[]>('/api/assets');
   const [open, setOpen] = useState<AssetRow | 'new' | null>(null);
   const totals = (data ?? []).filter((a) => !a.disposedOn).reduce((t, a) => ({ cost: t.cost + a.costCents, acc: t.acc + a.accumulatedCents }), { cost: 0, acc: 0 });
@@ -812,7 +815,8 @@ function Assets() {
 }
 
 function AssetDrawer({ asset, onClose, onSaved }: { asset: AssetRow | null; onClose: () => void; onSaved: () => void }) {
-  const { ref, isOwner, words, settings } = useAuthed();
+  const { ref, words, settings, can } = useAuthed();
+  const isOwner = can('books.adjust');
   const vat = settings.vatRegistered;
   const toast = useToast();
   const [f, setF] = useState({
@@ -968,7 +972,8 @@ interface Check {
 }
 
 function BalanceChecks() {
-  const { ref, isOwner, words } = useAuthed();
+  const { ref, words, can } = useAuthed();
+  const isOwner = can('books.adjust');
   const toast = useToast();
   const { data, error, reload } = useApi<Check[]>('/api/balance-checks');
   const checkable = ref.accounts.filter((a) => a.type === 'asset' || a.type === 'liability' || a.systemKey === 'owner_loan');

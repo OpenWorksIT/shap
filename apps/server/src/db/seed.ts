@@ -17,7 +17,8 @@ import { buildDemoTracker } from './demo-tracker.js';
 
 export const DEMO_USERS = [
   { email: 'owner@example.co.za', name: 'Demo Owner', role: 'owner' as const },
-  { email: 'site@example.co.za', name: 'Sipho (site)', role: 'capture' as const },
+  { email: 'site@example.co.za', name: 'Sipho (site)', role: 'staff' as const, profile: 'Site staff' },
+  { email: 'teller@example.co.za', name: 'Thandeka (counter)', role: 'staff' as const, profile: 'Teller' },
   { email: 'accountant@example.co.za', name: 'Accountant', role: 'accountant' as const },
 ];
 
@@ -29,7 +30,10 @@ export async function seed(sql: Sql, opts: { reset?: boolean; password?: string 
   const [users] = await sql<{ n: number }[]>`select count(*)::int as n from users`;
   if (users!.n > 0) throw new Error('This database already has users. Run with --reset to wipe it and load the demo company.');
   const password = opts.password ?? 'demo-shap-1';
-  for (const u of DEMO_USERS) await createUser(sql, { ...u, password });
+  for (const { profile, ...u } of DEMO_USERS as { email: string; name: string; role: 'owner' | 'staff' | 'accountant'; profile?: string }[]) {
+    const [p] = profile ? await sql<{ id: string }[]>`select id from profiles where name = ${profile}` : [];
+    await createUser(sql, { ...u, password, profileId: p?.id ?? null });
+  }
   await sql`update settings set company_name = 'Demo Builders (Pty) Ltd', trading_name = 'Demo Builders', reg_number = '2024/000000/07',
     address = ${'12 Example Street\nGqeberha 6001'}, phone = '041 000 0000', email = 'accounts@example.co.za',
     bank_details = ${'Example Bank · Business cheque account\nAccount 000 000 0000 · Branch 250655'},

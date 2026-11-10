@@ -48,6 +48,12 @@ export interface Moved {
 
 /** Thousandths of a unit, exactly. */
 export const milli = (q: number | string): number => Math.round(Number(q) * 1000);
+
+/** What stock cost and is worth (cost prices, values): kept from staff without “See what stock cost”. */
+const COST_FIELD = /(cost|value)(After|Amount)?Cents$/i;
+export function hideCosts<T extends object>(row: T): T {
+  return Object.fromEntries(Object.entries(row).filter(([k]) => !COST_FIELD.test(k))) as T;
+}
 const units = (m: number) => m / 1000;
 
 interface ItemState {

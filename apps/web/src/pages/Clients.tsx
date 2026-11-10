@@ -10,7 +10,8 @@ import { useAuthed } from '../lib/session';
 import type { ClientRow, DocRow, ProjectRow } from '../lib/types';
 
 export default function ClientsPage() {
-  const { isOwner } = useAuthed();
+  const { can } = useAuthed();
+  const isOwner = can('clients.edit');
   const { data, error, loading, reload } = useApi<ClientRow[]>('/api/clients');
   const [search, setSearch] = useState('');
   const [drawer, setDrawer] = useState<null | 'new' | 'import'>(null);
@@ -115,7 +116,8 @@ export default function ClientsPage() {
 
 export function ClientPage() {
   const { id } = useParams<{ id: string }>();
-  const { isOwner } = useAuthed();
+  const { can } = useAuthed();
+  const isOwner = can('clients.edit');
   const { data, error, loading, reload } = useApi<{ client: ClientRow; stats: ClientRow; projects: ProjectRow[]; documents: DocRow[] }>(`/api/clients/${id}`);
   const [editing, setEditing] = useState(false);
   if (loading && !data) return <Loading />;

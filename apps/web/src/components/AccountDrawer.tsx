@@ -40,7 +40,7 @@ export function AccountDrawer({ onClose }: { onClose: () => void }) {
 
   const s = status.data;
   return (
-    <Drawer title={user.name} sub={`${ROLE_LABELS[user.role]} · ${user.email}`} onClose={onClose} footer={<button className="btn" onClick={() => void logout()}>Sign out</button>}>
+    <Drawer title={user.name} sub={`${user.role === 'staff' && user.profile ? user.profile : ROLE_LABELS[user.role]} · ${user.email}`} onClose={onClose} footer={<button className="btn" onClick={() => void logout()}>Sign out</button>}>
       <div className="stack-lg">
         <section className="stack">
           <h3>Two-factor sign-in</h3>

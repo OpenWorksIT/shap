@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { allocateInput, labourBatchInput, labourEntryInput, savingsInput, wagePaymentInput, workerInput } from '@shap/shared';
 import { z } from 'zod';
-import { requireRole, seesMoney, userOrThrow, type AuthUser } from '../auth.js';
+import { can, canAny, requireAccess, requireRole, type AuthUser, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { pgCode, PG, type Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
@@ -11,7 +11,7 @@ import { parse } from '../lib/validate.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 
-/** Site capture logs days; the wage comes from the worker's rates, never from the phone. */
+/** Logging days (not managing the workers): the wage comes from the worker's rates, never from the phone. */
 async function ratesFor(db: Db, workerIds: string[]) {
   const rows = await db<{ id: string; dayRateCents: number; allowanceCents: number }[]>`
     select id, day_rate_cents, allowance_cents from workers where id = any(${workerIds}::uuid[])`;
@@ -30,7 +30,8 @@ export function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.get('/api/workers', { preHandler: requireRole() }, async (req) => {
     const user = userOrThrow(req);
-    if (!seesMoney(user)) return sql`select id, name, kind, active from workers order by active desc, name`;
+    // Without the wages, a worker is a name to log days against.
+    if (!canAny(user, 'labour.view', 'workers.manage')) return sql`select id, name, kind, active from workers order by active desc, name`;
     return sql`
       select w.*,
         coalesce(e.earned, 0)::bigint as earned_cents,
@@ -49,7 +50,7 @@ export function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** The tracker's Wages Breakdown for one worker: per month days, wages, allowances, paid, saved/(advance). */
-  app.get('/api/workers/:id', { preHandler: requireRole('owner', 'accountant') }, async (req) => {
+  app.get('/api/workers/:id', { preHandler: requireAccess('labour.view') }, async (req) => {
     const { id } = parse(idParam, req.params);
     const [worker] = await sql`select * from workers where id = ${id}`;
     if (!worker) throw notFound('Worker');
@@ -80,7 +81,7 @@ export function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { worker, months, entries, payments, savings, byProject };
   });
 
-  app.post('/api/workers', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/workers', { preHandler: requireAccess('workers.manage') }, async (req) => {
     const user = userOrThrow(req);
     const input = parse(workerInput, req.body);
     try {
@@ -93,7 +94,7 @@ export function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx): void {
     }
   });
 
-  app.put('/api/workers/:id', { preHandler: requireRole('owner') }, async (req) => {
+  app.put('/api/workers/:id', { preHandler: requireAccess('workers.manage') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const input = parse(workerInput, req.body);
@@ -109,7 +110,7 @@ export function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   // ---- labour
-  app.get('/api/labour', { preHandler: requireRole('owner', 'accountant') }, async (req) => {
+  app.get('/api/labour', { preHandler: requireAccess('labour.view') }, async (req) => {
     const { from, to, worker, project, unallocated } = q(req);
     return sql`
       select e.*, w.name as worker_name, p.name as project_name, p.number as project_number, wt.name as work_type_name
@@ -125,7 +126,7 @@ export function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** Labour with no job and no general-work type: the hours that used to fall through the cracks. */
-  app.get('/api/labour/unallocated', { preHandler: requireRole('owner', 'accountant') }, async () => {
+  app.get('/api/labour/unallocated', { preHandler: requireAccess('labour.view') }, async () => {
     const rows = await sql`
       select e.*, w.name as worker_name from labour_entries e join workers w on w.id = e.worker_id
       where e.project_id is null and e.work_type_id is null order by e.date desc, w.name
@@ -134,12 +135,13 @@ export function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** Log a day for one or more workers. */
-  app.post('/api/labour', { preHandler: requireRole('owner', 'capture') }, async (req) => {
+  app.post('/api/labour', { preHandler: requireAccess('labour.log', 'workers.manage') }, async (req) => {
     const user = userOrThrow(req);
     const input = parse(labourBatchInput, req.body);
     checkTarget(input.projectId, input.workTypeId);
     await assertOpen(sql, input.date);
-    if (user.role === 'capture') {
+    const limited = !can(user, 'workers.manage');
+    if (limited) {
       // A worker is about one day per calendar day. Allow a split across jobs or a correction, but
       // not days piling up (repeating this call would otherwise run the wages-payable liability up
       // without limit). The owner, who is trusted, can still batch many days in one go.
@@ -154,7 +156,7 @@ export function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx): void {
         if ((have.get(wid) ?? 0) + d > CAP) throw badRequest('That’s more days than a worker can be logged for on that date. Ask the owner.');
       }
     }
-    const rates = user.role === 'capture' ? await ratesFor(sql, input.entries.map((e) => e.workerId)) : null;
+    const rates = limited ? await ratesFor(sql, input.entries.map((e) => e.workerId)) : null;
     if (rates && input.entries.some((e) => !rates.has(e.workerId))) throw notFound('Worker');
     const ids = await sql.begin(async (tx) => {
       const out: string[] = [];
@@ -174,24 +176,25 @@ export function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { ids };
   });
 
-  const ownEntryOrOwner = async (user: AuthUser, table: 'labour_entries' | 'costs', id: string) => {
-    if (user.role === 'owner') return;
+  const ownEntryOrManager = async (user: AuthUser, table: 'labour_entries' | 'costs', id: string) => {
+    if (can(user, 'workers.manage')) return;
     const [row] = await sql<{ createdBy: string | null; createdAt: Date }[]>`select created_by, created_at from ${sql(table)} where id = ${id}`;
-    // Site capture can fix its own entries for a day, then they're the owner's to change.
-    if (!row || row.createdBy !== user.id || Date.now() - row.createdAt.getTime() > 24 * 3600_000) throw forbidden('Ask the owner to change this entry');
+    // Logging days, you can fix your own entries for a day; then they're for whoever manages the workers.
+    if (!row) throw notFound(table === 'costs' ? 'Cost' : 'Labour entry');
+    if (row.createdBy !== user.id || Date.now() - row.createdAt.getTime() > 24 * 3600_000) throw forbidden('Ask the owner to change this entry');
   };
 
-  app.put('/api/labour/:id', { preHandler: requireRole('owner', 'capture') }, async (req) => {
+  app.put('/api/labour/:id', { preHandler: requireAccess('labour.log', 'workers.manage') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const input = parse(labourEntryInput, req.body);
     checkTarget(input.projectId, input.workTypeId);
-    await ownEntryOrOwner(user, 'labour_entries', id);
+    await ownEntryOrManager(user, 'labour_entries', id);
     const [old] = await sql<{ date: string }[]>`select date from labour_entries where id = ${id}`;
     if (!old) throw notFound('Labour entry');
     await assertOpen(sql, old.date, input.date);
     let { wageCents, allowanceCents } = input;
-    if (user.role === 'capture') {
+    if (!can(user, 'workers.manage')) {
       // The same limit as logging: about a day per worker per date, this entry included.
       const [have] = await sql<{ days: number }[]>`
         select coalesce(sum(days), 0)::float8 as days from labour_entries
@@ -211,10 +214,10 @@ export function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx): void {
     return row;
   });
 
-  app.delete('/api/labour/:id', { preHandler: requireRole('owner', 'capture') }, async (req) => {
+  app.delete('/api/labour/:id', { preHandler: requireAccess('labour.log', 'workers.manage') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
-    await ownEntryOrOwner(user, 'labour_entries', id);
+    await ownEntryOrManager(user, 'labour_entries', id);
     const [old] = await sql<{ date: string }[]>`select date from labour_entries where id = ${id}`;
     if (!old) throw notFound('Labour entry');
     await assertOpen(sql, old.date);
@@ -223,7 +226,7 @@ export function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { ok: true };
   });
 
-  app.post('/api/labour/allocate', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/labour/allocate', { preHandler: requireAccess('workers.manage') }, async (req) => {
     const user = userOrThrow(req);
     const input = parse(allocateInput, req.body);
     checkTarget(input.projectId, input.workTypeId);
@@ -238,7 +241,7 @@ export function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   // ---- wage payments
-  app.post('/api/wage-payments', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/wage-payments', { preHandler: requireAccess('workers.manage') }, async (req) => {
     const user = userOrThrow(req);
     const input = parse(wagePaymentInput, req.body);
     await assertOpen(sql, input.date);
@@ -246,7 +249,7 @@ export function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx): void {
     await audit(sql, { userId: user.id, action: 'create', entity: 'wage_payment', entityId: row!.id, ip: req.ip });
     return row;
   });
-  app.put('/api/wage-payments/:id', { preHandler: requireRole('owner') }, async (req) => {
+  app.put('/api/wage-payments/:id', { preHandler: requireAccess('workers.manage') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const input = parse(wagePaymentInput, req.body);
@@ -257,7 +260,7 @@ export function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx): void {
     await audit(sql, { userId: user.id, action: 'update', entity: 'wage_payment', entityId: id, ip: req.ip });
     return row;
   });
-  app.delete('/api/wage-payments/:id', { preHandler: requireRole('owner') }, async (req) => {
+  app.delete('/api/wage-payments/:id', { preHandler: requireAccess('workers.manage') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const [old] = await sql<{ date: string }[]>`select date from wage_payments where id = ${id}`;
@@ -269,12 +272,12 @@ export function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   // ---- savings held for a worker
-  app.post('/api/savings', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/savings', { preHandler: requireAccess('workers.manage') }, async (req) => {
     const input = parse(savingsInput, req.body);
     const [row] = await sql`insert into worker_savings ${sql(input)} returning *`;
     return row;
   });
-  app.delete('/api/savings/:id', { preHandler: requireRole('owner') }, async (req) => {
+  app.delete('/api/savings/:id', { preHandler: requireAccess('workers.manage') }, async (req) => {
     const { id } = parse(idParam, req.params);
     await sql`delete from worker_savings where id = ${id}`;
     return { ok: true };

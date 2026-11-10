@@ -77,7 +77,10 @@ export default function DocumentPage() {
 }
 
 function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: DocDetail | null; kind: Kind; proforma: boolean; projectFromUrl: string | null; reload: () => Promise<void> }) {
-  const { settings, isOwner, has, ref } = useAuthed();
+  const { settings, can, has, ref } = useAuthed();
+  // Making and changing them; recording what's paid on them is a job of its own.
+  const isOwner = can('documents.edit');
+  const takesPay = can('documents.paid');
   const toast = useToast();
   const navigate = useNavigate();
   const clients = useApi<ClientRow[]>(isOwner ? '/api/clients' : null);
@@ -158,7 +161,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
   );
 
   // A new document for a job: take the job's client and name.
-  const project = useApi<{ project: ProjectRow; summary: ProjectRow }>(d.projectId && isOwner ? `/api/projects/${d.projectId}` : null);
+  const project = useApi<{ project: ProjectRow; summary: ProjectRow }>(d.projectId && isOwner && can('jobs.money') ? `/api/projects/${d.projectId}` : null);
   useEffect(() => {
     const p = project.data?.project;
     if (!p) return;
@@ -693,7 +696,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
               <div className="banner alert small">
                 <strong>Delinquent.</strong> {formatZar(doc.writtenOffCents)} written off on {formatDate(doc.writtenOffOn)}
                 {doc.writtenOffReason ? ` (${doc.writtenOffReason})` : ''}: no longer expected, and booked as a bad debt.
-                {isOwner && (
+                {takesPay && (
                   <div style={{ marginTop: 6 }}>
                     <button type="button" className="btn small" onClick={() => void action('write-off', null, 'Write-off undone', 'DELETE')}>
                       Undo (they’re paying after all)
@@ -708,25 +711,25 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                 {busy ? 'Saving…' : doc ? (dirty ? 'Save changes' : 'Saved') : 'Save draft'}
               </button>
             )}
-            {doc && isOwner && (
+            {doc && (isOwner || takesPay) && (
               <div className="stack" style={{ gap: 8 }}>
-                {doc.kind === 'invoice' && doc.status === 'draft' && (
+                {isOwner && doc.kind === 'invoice' && doc.status === 'draft' && (
                   <button type="button" className="btn block" disabled={busy} onClick={() => void action('issue', {}, `Invoice ${doc.number} issued`)}>
                     Issue invoice (counts in the books)
                   </button>
                 )}
-                {credit && doc.status === 'draft' && (
+                {isOwner && credit && doc.status === 'draft' && (
                   <button type="button" className="btn primary block" disabled={busy || total <= 0} onClick={() => void action('issue', {}, `Credit note ${doc.number} issued`)}>
                     Issue credit note (takes it off the invoice)
                   </button>
                 )}
-                {doc.kind === 'invoice' && doc.status === 'issued' && !doc.writtenOffOn && (
+                {takesPay && doc.kind === 'invoice' && doc.status === 'issued' && !doc.writtenOffOn && (
                   <button type="button" className="btn block" onClick={() => setDrawer('pay')}>
                     <Icon name="money" size={18} />
                     Record a payment
                   </button>
                 )}
-                {doc.kind === 'invoice' && doc.status === 'issued' && !doc.writtenOffOn && has('reminders') && total - paid > 0 && (
+                {isOwner && doc.kind === 'invoice' && doc.status === 'issued' && !doc.writtenOffOn && has('reminders') && total - paid > 0 && (
                   <button type="button" className="btn block" disabled={busy} onClick={() => void run(async () => {
                     const inv = { ...doc, totalCents: total, paidCents: paid, payLink: d.payLink };
                     const how = await sendReminder(inv, settings, { payshap: has('payshap'), emailOn: Boolean(ref.emailOn) });
@@ -740,12 +743,12 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                     {doc.reminders ? <span className="xs muted"> (last {formatDate(String(doc.remindedAt).slice(0, 10))})</span> : null}
                   </button>
                 )}
-                {doc.kind === 'invoice' && doc.status === 'issued' && has('sales') && (
+                {isOwner && doc.kind === 'invoice' && doc.status === 'issued' && has('sales') && (
                   <button type="button" className="btn block" disabled={busy} onClick={() => setReturns(true)}>
                     Goods returned…
                   </button>
                 )}
-                {doc.kind === 'invoice' && doc.status === 'issued' && has('creditNotes') && (
+                {isOwner && doc.kind === 'invoice' && doc.status === 'issued' && has('creditNotes') && (
                   <button type="button" className="btn block" disabled={busy} onClick={() => void run(async () => {
                     const r = await api<{ id: string }>(`/api/documents/${doc.id}/credit-note`, { body: {} });
                     toast('Draft credit note made: change it to what’s being taken back');
@@ -754,7 +757,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                     Credit note…
                   </button>
                 )}
-                {doc.kind === 'quote' && (
+                {isOwner && doc.kind === 'quote' && (
                   <>
                     <button type="button" className="btn primary block" disabled={busy} onClick={() => void run(async () => {
                       if (dirty) await api(`/api/documents/${doc.id}`, { method: 'PUT', body: body() });
@@ -772,7 +775,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                   </>
                 )}
                 <div className="row wrap">
-                  {!credit && (
+                  {isOwner && !credit && (
                     <button type="button" className="btn quiet small" onClick={() => void run(async () => {
                       const r = await api<{ id: string }>(`/api/documents/${doc.id}/duplicate`, { body: {} });
                       toast('Copy made');
@@ -782,7 +785,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                       Duplicate
                     </button>
                   )}
-                  {credit && doc.status === 'issued' && (
+                  {isOwner && credit && doc.status === 'issued' && (
                     <button type="button" className="btn quiet small danger" onClick={() => {
                       const reason = prompt('Why is this credit note being voided?');
                       if (reason) void action('void', { reason }, `Credit note ${doc.number} voided`);
@@ -790,12 +793,12 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                       Void
                     </button>
                   )}
-                  {doc.kind === 'invoice' && doc.status === 'issued' && !doc.writtenOffOn && total - paid > 0 && (
+                  {takesPay && doc.kind === 'invoice' && doc.status === 'issued' && !doc.writtenOffOn && total - paid > 0 && (
                     <button type="button" className="btn quiet small" onClick={() => setDrawer('writeoff')}>
                       Mark delinquent…
                     </button>
                   )}
-                  {doc.kind === 'invoice' && doc.status === 'issued' && !paid && !doc.writtenOffOn && !(detail?.creditNotes ?? []).some((c) => c.status === 'issued') && (
+                  {isOwner && doc.kind === 'invoice' && doc.status === 'issued' && !paid && !doc.writtenOffOn && !(detail?.creditNotes ?? []).some((c) => c.status === 'issued') && (
                     <button type="button" className="btn quiet small danger" onClick={() => {
                       const reason = prompt('Why is this invoice being voided?');
                       if (reason) void action('void', { reason }, `Invoice ${doc.number} voided`);
@@ -803,7 +806,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                       Void
                     </button>
                   )}
-                  {(doc.kind === 'quote' || doc.status === 'draft') && (
+                  {isOwner && (doc.kind === 'quote' || doc.status === 'draft') && (
                     <button type="button" className="btn quiet small danger" onClick={() => setDeleting(true)}>
                       <Icon name="trash" size={16} />
                       Delete
@@ -825,7 +828,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                       {r.reference && <div className="xs muted">{r.reference}</div>}
                     </span>
                     <Money cents={r.amountCents} />
-                    {isOwner && r.method !== 'credit' && (
+                    {takesPay && r.method !== 'credit' && (
                       <button type="button" className="btn quiet small" aria-label="Remove payment" onClick={() => {
                         if (confirm('Remove this payment?')) void run(async () => {
                           await api(`/api/receipts/${r.id}`, { method: 'DELETE' });

@@ -5,10 +5,10 @@
 import type { FastifyInstance } from 'fastify';
 import { timeEntryInput } from '@shap/shared';
 import { z } from 'zod';
-import { requireRole, userOrThrow } from '../auth.js';
+import { can, requireAccess, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { q } from '../lib/books.js';
-import { badRequest, notFound } from '../lib/errors.js';
+import { badRequest, forbidden, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 
 const idParam = z.object({ id: z.string().uuid() });
@@ -16,10 +16,9 @@ const minutesBetween = (a: string | Date, b: string | Date) => Math.max(0, Math.
 
 export function registerTimeRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
-  const owner = { preHandler: requireRole('owner') };
 
   /** Time entries (a job's, or all), newest first, and the clock if one is running. */
-  app.get('/api/time', owner, async (req) => {
+  app.get('/api/time', { preHandler: requireAccess('time.track') }, async (req) => {
     const user = userOrThrow(req);
     const { project, unbilled } = q(req);
     const rows = await sql`
@@ -34,7 +33,7 @@ export function registerTimeRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** Starts the clock for a job (stopping any other that's running). */
-  app.post('/api/time/start', owner, async (req) => {
+  app.post('/api/time/start', { preHandler: requireAccess('time.track') }, async (req) => {
     const user = userOrThrow(req);
     const { projectId, note } = parse(z.object({ projectId: z.string().uuid().nullable().default(null), note: z.string().max(300).default('') }), req.body);
     return sql.begin(async (tx) => {
@@ -44,7 +43,7 @@ export function registerTimeRoutes(app: FastifyInstance, ctx: Ctx): void {
     });
   });
 
-  app.post('/api/time/stop', owner, async (req) => {
+  app.post('/api/time/stop', { preHandler: requireAccess('time.track') }, async (req) => {
     const user = userOrThrow(req);
     const [row] = await sql`
       update time_entries set ended_at = now(), minutes = greatest(0, round(extract(epoch from now() - started_at) / 60))::int
@@ -54,14 +53,14 @@ export function registerTimeRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** Time added or corrected by hand. */
-  app.post('/api/time', owner, async (req) => {
+  app.post('/api/time', { preHandler: requireAccess('time.track') }, async (req) => {
     const input = parse(timeEntryInput, req.body);
     if (!input.endedAt) throw badRequest('Give the end time');
     const minutes = minutesBetween(input.startedAt, input.endedAt);
     const [row] = await sql`insert into time_entries (project_id, started_at, ended_at, minutes, note, user_id) values (${input.projectId ?? null}, ${input.startedAt}, ${input.endedAt}, ${minutes}, ${input.note}, ${userOrThrow(req).id}) returning *`;
     return row;
   });
-  app.put('/api/time/:id', owner, async (req) => {
+  app.put('/api/time/:id', { preHandler: requireAccess('time.track') }, async (req) => {
     const { id } = parse(idParam, req.params);
     const input = parse(timeEntryInput, req.body);
     const minutes = input.endedAt ? minutesBetween(input.startedAt, input.endedAt) : null;
@@ -71,7 +70,7 @@ export function registerTimeRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!row) throw badRequest('That time is already on an invoice');
     return row;
   });
-  app.delete('/api/time/:id', owner, async (req) => {
+  app.delete('/api/time/:id', { preHandler: requireAccess('time.track') }, async (req) => {
     const { id } = parse(idParam, req.params);
     const [row] = await sql`delete from time_entries where id = ${id} and billed_document_id is null returning id`;
     if (!row) throw notFound('Time');
@@ -79,7 +78,8 @@ export function registerTimeRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** Puts unbilled time on an invoice or quote as lines (one per job at its rate); the time is marked billed. */
-  app.post('/api/time/bill', owner, async (req) => {
+  app.post('/api/time/bill', { preHandler: requireAccess('time.track') }, async (req) => {
+    if (!can(userOrThrow(req), 'documents.edit')) throw forbidden('Putting time on an invoice takes “Make and change them” under Quotes & invoices');
     const { documentId, ids } = parse(z.object({ documentId: z.string().uuid(), ids: z.array(z.string().uuid()).min(1).max(500) }), req.body);
     const [doc] = await sql<{ status: string; kind: string }[]>`select status, kind from documents where id = ${documentId}`;
     if (!doc || doc.status === 'void' || doc.kind === 'credit_note') throw badRequest('Choose an invoice or quote that can still be changed');

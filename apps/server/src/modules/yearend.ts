@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { addMonths, companyTax, estimateTax, provisionalPayable, financialYear, isoDate, monthEnd, monthsBetween, taxEstimateInput, yearEndInput, type AccountType, entity } from '@shap/shared';
 import { z } from 'zod';
-import { requireRole, userOrThrow } from '../auth.js';
+import { requireAccess, requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
@@ -62,11 +62,10 @@ export async function agreeYear(
 
 export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
-  const readers = { preHandler: requireRole('owner', 'accountant') };
   const owner = { preHandler: requireRole('owner') };
 
   // ---------------------------------------------------------------- agreed year ends
-  app.get('/api/year-ends', readers, async () => {
+  app.get('/api/year-ends', { preHandler: requireAccess('reports.view') }, async () => {
     await freshTotals(sql);
     return sql`
       select y.fy_end, y.note, y.created_at, count(f.account_id) filter (where f.amount_cents <> 0)::int as figures,
@@ -78,7 +77,7 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
    * One row per account for a year end: what Shap's detail says (before this year's adjustment),
    * and the accountant's figure if one has been entered. Amounts in natural signs.
    */
-  app.get('/api/year-ends/form', readers, async (req) => {
+  app.get('/api/year-ends/form', { preHandler: requireAccess('reports.view') }, async (req) => {
     const fyEnd = q(req).fyEnd;
     if (!isIsoDate(fyEnd)) throw badRequest('Choose a year end');
     const settings = await getSettings(sql);
@@ -153,7 +152,7 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
    * The figures for a provisional tax estimate (IRP6): this year's income statement to date,
    * projected to a full year at the same monthly rate, next to last year's actual figures.
    */
-  app.get('/api/reports/provisional-tax', readers, async (req) => {
+  app.get('/api/reports/provisional-tax', { preHandler: requireAccess('reports.view') }, async (req) => {
     const settings = await getSettings(sql);
     const { fyEnd: fyParam, asAt: asAtParam } = q(req);
     const fy = financialYear(isIsoDate(fyParam) ? fyParam : today(), settings.fyEndMonth);
@@ -231,7 +230,7 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { id: row!.id, taxableCents: taxable, taxCents: tax, payableCents: payable };
   });
 
-  app.get('/api/tax-estimates/:id', readers, async (req) => {
+  app.get('/api/tax-estimates/:id', { preHandler: requireAccess('reports.view') }, async (req) => {
     const { id } = parse(z.object({ id: z.string().uuid() }), req.params);
     const [row] = await sql`select * from tax_estimates where id = ${id}`;
     if (!row) throw notFound('Estimate');

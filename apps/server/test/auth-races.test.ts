@@ -33,7 +33,7 @@ describe('auth limits hold under concurrency', () => {
   // otherwise exhaust) stays out of the way and these tests exercise only the per-account guards.
   const ipHeaders = (ip: string) => ({ ...V, 'x-forwarded-for': ip });
   const enrol = async (email: string, password: string, ip: string) => {
-    await owner.post('/api/users', { name: email.split('@')[0], email, role: 'capture', password });
+    await owner.post('/api/users', { name: email.split('@')[0], email, role: 'staff', password });
     const r = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email, password }, headers: ipHeaders(ip) });
     const cookie = r.cookies.find((c) => c.name === 'shap_session')!.value;
     const as = (url: string, payload: unknown = {}) => app.inject({ method: 'POST', url, payload: payload as never, headers: ipHeaders(ip), cookies: { shap_session: cookie } });
@@ -50,7 +50,7 @@ describe('auth limits hold under concurrency', () => {
   it('a burst of wrong passwords for one account can’t all slip past the limit', async () => {
     const email = 'race-pw@example.co.za';
     const password = 'harbor-candle-ferry-6';
-    await owner.post('/api/users', { name: 'Race PW', email, role: 'capture', password });
+    await owner.post('/api/users', { name: 'Race PW', email, role: 'staff', password });
     const tries = await Promise.all(
       Array.from({ length: 24 }, (_, i) =>
         app.inject({ method: 'POST', url: '/api/auth/login', payload: { email, password: `wrong-guess-${i}` }, headers: { ...V, 'x-forwarded-for': `100.64.0.${i}` } }),

@@ -17,7 +17,8 @@ interface Files {
  * who can download them from here. Which accounts need them is set under Settings → Lists.
  */
 export function StatementFiles() {
-  const { ref, isOwner } = useAuthed();
+  const { ref, can } = useAuthed();
+  const isOwner = can('bank.reconcile');
   const toast = useToast();
   const [params] = useSearchParams();
   const { data, error, reload } = useApi<Files>('/api/statement-files');

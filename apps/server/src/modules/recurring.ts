@@ -11,7 +11,7 @@
 import type { FastifyInstance } from 'fastify';
 import { addMonths, todayIso } from '@shap/shared';
 import { z } from 'zod';
-import { requireRole, userOrThrow } from '../auth.js';
+import { requireAccess, requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
@@ -150,10 +150,10 @@ export function registerRecurringRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
   const mark = z.object({ key: z.string().min(3).max(200), month: z.string().regex(/^\d{4}-\d{2}$/).optional() });
 
-  app.get('/api/costs/recurring', { preHandler: requireRole('owner', 'accountant') }, async () => findRecurring(sql));
+  app.get('/api/costs/recurring', { preHandler: requireAccess('costs.view') }, async () => findRecurring(sql));
 
   /** "Stopped on purpose" (no month) or "skip this month" (a month). */
-  app.post('/api/costs/recurring/mark', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/costs/recurring/mark', { preHandler: requireAccess('costs.manage') }, async (req) => {
     const user = userOrThrow(req);
     const { key, month } = parse(mark, req.body);
     await sql`insert into recurring_marks (key, month, kind, user_id) values (${key}, ${month ?? ''}, ${month ? 'skipped' : 'stopped'}, ${user.id})
@@ -163,7 +163,7 @@ export function registerRecurringRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** Watch it again (no month), or un-skip a month. */
-  app.post('/api/costs/recurring/unmark', { preHandler: requireRole('owner') }, async (req) => {
+  app.post('/api/costs/recurring/unmark', { preHandler: requireAccess('costs.manage') }, async (req) => {
     const { key, month } = parse(mark, req.body);
     await sql`delete from recurring_marks where key = ${key} and month = ${month ?? ''}`;
     return { ok: true };

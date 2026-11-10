@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { requireRole, userOrThrow } from '../../auth.js';
+import { requireAccess, requireRole, userOrThrow } from '../../auth.js';
 import type { Ctx } from '../../context.js';
 import type { Db } from '../../db/index.js';
 import { audit } from '../../lib/audit.js';
@@ -278,7 +278,6 @@ async function alreadyElsewhere(db: Db, sourceId: string, rows: { date: string; 
 
 export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
-  const readers = { preHandler: requireRole('owner', 'accountant') };
   const owner = { preHandler: requireRole('owner') };
 
   const loadLine = async (db: Db, id: string): Promise<LineRow> => {
@@ -305,7 +304,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
     }
   };
 
-  app.post('/api/bank/preview', owner, async (req) => {
+  app.post('/api/bank/preview', { preHandler: requireAccess('bank.reconcile') }, async (req) => {
     const input = parse(importInput, req.body);
     const parsed = read(input.csv, input.flip);
     const keys = fingerprints(parsed.rows);
@@ -330,7 +329,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
     };
   });
 
-  app.post('/api/bank/statements', owner, async (req) => {
+  app.post('/api/bank/statements', { preHandler: requireAccess('bank.reconcile') }, async (req) => {
     const user = userOrThrow(req);
     const input = parse(importInput, req.body);
     const parsed = read(input.csv, input.flip);
@@ -367,7 +366,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { ...result, autoMatched: auto };
   });
 
-  app.get('/api/bank/statements', readers, async () => {
+  app.get('/api/bank/statements', { preHandler: requireAccess('bank.reconcile', 'reports.view') }, async () => {
     return sql`
       select s.id, s.source_id, ps.name as source_name, s.filename, s.from_date::text, s.to_date::text, s.closing_balance_cents, s.created_at, s.elsewhere_ok,
         (select count(*)::int from bank_lines l where l.statement_id = s.id) as line_count,
@@ -389,7 +388,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
    * With removeAdded, what was added from it goes too (costs, invoice payments, transfers and
    * income entries created from its lines): as if it had never been imported.
    */
-  app.delete('/api/bank/statements/:id', owner, async (req) => {
+  app.delete('/api/bank/statements/:id', { preHandler: requireAccess('bank.reconcile') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(z.object({ id: uuid }), req.params);
     const { removeAdded } = parse(z.object({ removeAdded: z.enum(['true', 'false']).default('false') }), req.query);
@@ -433,7 +432,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
    * whichever copy is matched stays. A transfer that would now be from the account to itself
    * is undone, and its line waits to be done again.
    */
-  app.post('/api/bank/statements/:id/move', owner, async (req) => {
+  app.post('/api/bank/statements/:id/move', { preHandler: requireAccess('bank.reconcile') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(z.object({ id: uuid }), req.params);
     const { sourceId } = parse(z.object({ sourceId: uuid }), req.body);
@@ -554,7 +553,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
     return n;
   };
 
-  app.get('/api/bank/recon', readers, async (req) => {
+  app.get('/api/bank/recon', { preHandler: requireAccess('bank.reconcile', 'reports.view') }, async (req) => {
     const { sourceId, statementId } = q(req);
     if (!sourceId || !uuid.safeParse(sourceId).success) throw badRequest('Choose an account');
     const { lines, matched, suggestions, rejectedCount } = await recon(sourceId, statementId && uuid.safeParse(statementId).success ? statementId : null);
@@ -594,7 +593,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** "Not this": the suggestion is wrong for this line and isn't offered again (the next best is). */
-  app.post('/api/bank/lines/:id/reject', owner, async (req) => {
+  app.post('/api/bank/lines/:id/reject', { preHandler: requireAccess('bank.reconcile') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(z.object({ id: uuid }), req.params);
     const s = parse(z.object({ kind: z.enum(['cost', 'receipt', 'wage_payment', 'invoice']), ids: z.array(uuid).min(1).max(50) }), req.body);
@@ -605,14 +604,14 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** Brings back the suggestions turned down for a line. */
-  app.delete('/api/bank/lines/:id/reject', owner, async (req) => {
+  app.delete('/api/bank/lines/:id/reject', { preHandler: requireAccess('bank.reconcile') }, async (req) => {
     const { id } = parse(z.object({ id: uuid }), req.params);
     const r = await sql`delete from rejected_suggestions where kind = 'bank' and subject = ${id}`;
     return { ok: true, restored: r.count };
   });
 
   /** A statement flagged as also on another account, looked at and fine (or flag it again). */
-  app.post('/api/bank/statements/:id/elsewhere-ok', owner, async (req) => {
+  app.post('/api/bank/statements/:id/elsewhere-ok', { preHandler: requireAccess('bank.reconcile') }, async (req) => {
     const { id } = parse(z.object({ id: uuid }), req.params);
     const { ok } = parse(z.object({ ok: z.boolean().default(true) }), req.body);
     const r = await sql`update bank_statements set elsewhere_ok = ${ok} where id = ${id}`;
@@ -620,12 +619,12 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { ok: true };
   });
 
-  app.post('/api/bank/accept', owner, async (req) => {
+  app.post('/api/bank/accept', { preHandler: requireAccess('bank.reconcile') }, async (req) => {
     const { sourceId, lineIds } = parse(z.object({ sourceId: uuid, lineIds: z.array(uuid).min(1).max(2000) }), req.body);
     return { matched: await applySuggestions(sourceId, lineIds) };
   });
 
-  app.post('/api/bank/lines/ignore', owner, async (req) => {
+  app.post('/api/bank/lines/ignore', { preHandler: requireAccess('bank.reconcile') }, async (req) => {
     const { lineIds, ignored } = parse(z.object({ lineIds: z.array(uuid).min(1).max(2000), ignored: z.boolean() }), req.body);
     const r = await sql`update bank_lines set ignored = ${ignored} where id = any(${lineIds}::uuid[])
       and not exists (select 1 from bank_matches m where m.bank_line_id = bank_lines.id)`;
@@ -633,7 +632,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** Match a line by hand: the chosen records must add up to the statement amount. */
-  app.post('/api/bank/lines/:id/match', owner, async (req) => {
+  app.post('/api/bank/lines/:id/match', { preHandler: requireAccess('bank.reconcile') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(z.object({ id: uuid }), req.params);
     const { items } = parse(z.object({ items: z.array(z.object({ kind: z.enum(KINDS), id: uuid })).min(1).max(50) }), req.body);
@@ -663,7 +662,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { ok: true };
   });
 
-  app.delete('/api/bank/lines/:id/match', owner, async (req) => {
+  app.delete('/api/bank/lines/:id/match', { preHandler: requireAccess('bank.reconcile') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(z.object({ id: uuid }), req.params);
     await sql.begin(async (tx) => {
@@ -674,7 +673,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** Records near a line that it could be matched to by hand. */
-  app.get('/api/bank/lines/:id/candidates', readers, async (req) => {
+  app.get('/api/bank/lines/:id/candidates', { preHandler: requireAccess('bank.reconcile', 'reports.view') }, async (req) => {
     const { id } = parse(z.object({ id: uuid }), req.params);
     const line = await loadLine(sql, id);
     if (line.amountCents < 0) {
@@ -739,7 +738,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   // ---------------------------------------------------------------- new records from the statement
   /** Debit orders, bank fees and the like that were never captured: costs straight from the lines. */
-  app.post('/api/bank/lines/create-costs', owner, async (req) => {
+  app.post('/api/bank/lines/create-costs', { preHandler: requireAccess('bank.reconcile') }, async (req) => {
     const user = userOrThrow(req);
     const { items } = parse(
       z.object({
@@ -818,7 +817,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** Money in that pays an invoice. */
-  app.post('/api/bank/lines/:id/receipt', owner, async (req) => {
+  app.post('/api/bank/lines/:id/receipt', { preHandler: requireAccess('bank.reconcile') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(z.object({ id: uuid }), req.params);
     const { invoiceId } = parse(z.object({ invoiceId: uuid }), req.body);
@@ -839,7 +838,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** Money moved between two of your own accounts (a card repayment, money to or from your loan account). */
-  app.post('/api/bank/lines/:id/transfer', owner, async (req) => {
+  app.post('/api/bank/lines/:id/transfer', { preHandler: requireAccess('bank.reconcile') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(z.object({ id: uuid }), req.params);
     const { otherSourceId, description } = parse(z.object({ otherSourceId: uuid, description: z.string().trim().max(200).default('') }), req.body);

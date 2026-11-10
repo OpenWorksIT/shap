@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation } from 'react-router-dom';
+import { useAuthed } from '../lib/session';
 import { Icon } from './ui';
 
 export type ClipKey = 'home' | 'clients' | 'quotes' | 'invoices' | 'costs' | 'jobs' | 'payroll' | 'accounts' | 'settings' | 'backup';
@@ -224,6 +225,8 @@ export function clipFor(pathname: string, search: string): ClipKey | null {
 /** In the shell, above each list screen. */
 export function ScreenClip() {
   const { pathname, search } = useLocation();
-  const clip = clipFor(pathname, search);
+  const { seesBooks } = useAuthed();
+  // Home's clip shows the owner's figures: staff who don't see the books have a home of their own.
+  const clip = pathname === '/' && !seesBooks ? null : clipFor(pathname, search);
   return clip ? <HowItWorks key={clip} clip={clip} /> : null;
 }

@@ -12,7 +12,9 @@ import { SpendBar } from './Home';
 type Filter = 'open' | 'all' | 'done';
 
 export default function ProjectsPage() {
-  const { isOwner, seesMoney } = useAuthed();
+  const { can } = useAuthed();
+  const isOwner = can('jobs.edit');
+  const seesMoney = can('jobs.money');
   const [params, setParams] = useSearchParams();
   const filter = (params.get('show') as Filter) || 'open';
   const [search, setSearch] = useState('');

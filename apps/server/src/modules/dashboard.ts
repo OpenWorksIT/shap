@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { addDays, addMonths, featureOn, financialYear, lastBusinessDay, monthEnd, monthLabel, monthStart, monthsBetween, vat201Due, vatPeriod } from '@shap/shared';
-import { requireRole, seesMoney, userOrThrow } from '../auth.js';
+import { requireRole, seesBooks, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { getSettings, today, freshTotals } from '../lib/books.js';
 import { paymentStateSql } from './documents.js';
@@ -19,12 +19,13 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/dashboard', { preHandler: requireRole() }, async (req) => {
     const user = userOrThrow(req);
     const now = today();
-    if (!seesMoney(user)) {
+    // Home's figures are the books': staff who don't read the reports see what they've logged.
+    if (!seesBooks(user)) {
       const recent = await sql`
         select e.date, w.name as worker_name, coalesce(p.name, wt.name, 'Not allocated') as job, e.days
         from labour_entries e join workers w on w.id = e.worker_id left join projects p on p.id = e.project_id
         left join work_types wt on wt.id = e.work_type_id where e.created_by = ${user.id} order by e.created_at desc limit 20`;
-      return { role: user.role, recentLabour: recent };
+      return { role: user.role, limited: true, recentLabour: recent };
     }
     const settings = await getSettings(sql);
     const fy = financialYear(now, settings.fyEndMonth);
