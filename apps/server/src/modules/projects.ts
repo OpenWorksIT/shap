@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { lineTotal, plannedItemInput, projectInput, PROJECT_STATUSES } from '@shap/shared';
 import { z } from 'zod';
-import { can, requireAccess, requireRole, userOrThrow } from '../auth.js';
+import { can, requireAccess, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { paymentStateSql } from './documents.js';
 import { audit } from '../lib/audit.js';
@@ -118,7 +118,10 @@ export function totals(s: ProjectSummary) {
 export function registerProjectRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
 
-  app.get('/api/projects', { preHandler: requireRole() }, async (req) => {
+  // The jobs to choose from (open ones, by name, without the money) are for whoever logs, captures
+  // or invoices against a job; a job itself (its site, notes and parts) takes “See jobs”.
+  const PICKS_JOBS = ['jobs.view', 'labour.log', 'labour.view', 'workers.manage', 'costs.capture', 'costs.view', 'costs.manage', 'bank.reconcile', 'documents.view', 'documents.edit', 'logbook.trips', 'reports.view'] as const;
+  app.get('/api/projects', { preHandler: requireAccess(...PICKS_JOBS) }, async (req) => {
     const user = userOrThrow(req);
     const { status, client, search } = q(req);
     const statuses = status === 'open' ? ['lead', 'quoted', 'active', 'invoiced'] : status && (PROJECT_STATUSES as readonly string[]).includes(status) ? [status] : null;
@@ -142,7 +145,7 @@ export function registerProjectRoutes(app: FastifyInstance, ctx: Ctx): void {
     return rows.map((r) => ({ ...r, ...totals(r as unknown as ProjectSummary) }));
   });
 
-  app.get('/api/projects/:id', { preHandler: requireRole() }, async (req) => {
+  app.get('/api/projects/:id', { preHandler: requireAccess('jobs.view') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const [project] = await sql`select p.*, c.name as client_name from projects p left join clients c on c.id = p.client_id where p.id = ${id}`;

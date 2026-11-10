@@ -45,7 +45,9 @@ const n = (v: unknown) => Number(v ?? 0);
 const few = (xs: string[], max = 5) => (xs.length > max ? `${xs.slice(0, max).join(', ')} and ${xs.length - max} more` : xs.join(', '));
 
 /** The whole audit, in order. `on`: the day it's run for (today by default). */
-export async function auditBooks(db: Db, on = today()): Promise<AuditItem[]> {
+export async function auditBooks(db: Db, on = today(), o: { people?: boolean } = {}): Promise<AuditItem[]> {
+  /** Name employees (for those who may see payroll), or only count them. */
+  const people = o.people ?? true;
   const items: AuditItem[] = [];
   let section = '';
   const ok = (text: string) => items.push({ level: 'ok', section, text });
@@ -281,7 +283,7 @@ export async function auditBooks(db: Db, on = today()): Promise<AuditItem[]> {
     select distinct e.name from employees e join pay_lines l on l.employee_id = e.id join pay_runs r on r.id = l.run_id
     where r.status = 'final' and r.pay_date >= ${taxYearStart}::date and (trim(e.tax_number) = '' or trim(e.id_number) = '')`;
   if (!unnumbered.length) ok('everyone paid this tax year has an ID (or passport) and tax number for their IRP5');
-  else warn(`paid this tax year without an ID or tax number (SARS rejects the EMP501 without them): ${few(unnumbered.map((u) => u.name))}`);
+  else warn(`paid this tax year without an ID or tax number (SARS rejects the EMP501 without them): ${people ? few(unnumbered.map((u) => u.name)) : `${unnumbered.length} ${unnumbered.length === 1 ? 'employee' : 'employees'} (Payroll names them)`}`);
 
   // ---------------------------------------------------------------- sales and stock
   await salesAndStock(db, on, settings, { ok, warn, fail, setSection: (t) => (section = t), posted });

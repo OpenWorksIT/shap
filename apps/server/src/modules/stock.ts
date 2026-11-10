@@ -347,6 +347,11 @@ export function registerStockRoutes(app: FastifyInstance, ctx: Ctx): void {
       for (const l of input.lines) {
         const [it] = await tx<{ description: string; qtyOnHand: string; stockValueCents: string }[]>`select description, qty_on_hand, stock_value_cents from items where id = ${l.itemId} and stocked for update`;
         if (!it) throw notFound('Item');
+        // The average cost is worked out in the order stock moves: a write-down is of what's on hand
+        // now, so it can't be dated before the item last moved (that's a journal at that date).
+        const [lastMove] = await tx<{ date: string | null }[]>`select max(date)::text as date from stock_moves where item_id = ${l.itemId}`;
+        if (lastMove?.date && input.date < lastMove.date)
+          throw badRequest(`${it.description} moved on ${lastMove.date}, after ${input.date}: write it down on or after ${lastMove.date}, or ask your accountant for a journal at ${input.date}`);
         const qM = milli(it.qtyOnHand);
         if (qM <= 0) throw badRequest(`${it.description}: nothing on hand to write down`);
         const target = Math.round((qM * l.unitValueCents) / 1000);

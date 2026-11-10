@@ -12,7 +12,6 @@
  *             give exactly the signed figures, agrees the year at them, closes it, and keeps the
  *             signed set. Reopening is the owner's, with a reason, in the audit log.
  */
-import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import {
   addDays,
@@ -22,12 +21,13 @@ import {
   financialYear,
   isoDate,
   reopenStatementsInput,
+  sha256Hex,
   sendStatementsInput,
   statementDetailsInput,
   type StatementStatus,
 } from '@shap/shared';
 import { z } from 'zod';
-import { requireAccess, requireRole, userOrThrow } from '../auth.js';
+import { can, requireAccess, requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
@@ -61,11 +61,31 @@ interface Row {
   finalPdfId: string | null;
 }
 
-/** The figures of a set (what's signed): its statements and notes, not the wording around them. */
+/**
+ * The fingerprint of a set (what's signed): from 1.23 (builder 2), of the books it was drawn from
+ * (each account's figures, both years); before, of its statements and notes as they were drawn.
+ */
 export const figuresHash = (s: Statements) =>
-  createHash('sha256')
-    .update(JSON.stringify({ sfp: s.sfp, sci: s.sci, soce: s.soce, scf: s.scf, notes: s.notes.map((n) => n.tables), detailed: s.detailed }))
-    .digest('hex');
+  sha256Hex(
+    (s.builder ?? 1) >= 2
+      ? JSON.stringify({ builder: s.builder, books: s.books })
+      : JSON.stringify({ sfp: s.sfp, sci: s.sci, soce: s.soce, scf: s.scf, notes: s.notes.map((n) => n.tables), detailed: s.detailed }),
+  );
+
+/** JSON with every object's keys in order (a snapshot comes back from jsonb in its own order). */
+const canonical = (v: unknown): string =>
+  Array.isArray(v) ? `[${v.map(canonical).join(',')}]` : v && typeof v === 'object' ? `{${Object.keys(v).filter((k) => (v as Record<string, unknown>)[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${canonical((v as Record<string, unknown>)[k])}`).join(',')}}` : JSON.stringify(v ?? null);
+
+/**
+ * Whether the books still give a signed set's figures. A set signed on 1.22 or before is compared
+ * by its four statements as drawn now (1.23 draws the cash flows and some notes differently from
+ * the same books, which isn't the books changing).
+ */
+export function stillSigned(signed: { snapshot: Statements; snapshotHash: string | null }, now: Statements): boolean {
+  if ((signed.snapshot.builder ?? 1) >= 2) return figuresHash(now) === signed.snapshotHash;
+  const four = (s: Statements) => canonical({ sfp: s.sfp, sci: s.sci, soce: s.soce, detailed: s.detailed });
+  return four(signed.snapshot) === four(now);
+}
 
 async function row(db: Db, fyEnd: string): Promise<Row | null> {
   const [r] = await db<Row[]>`select *, fy_end::text as fy_end, compiled_on::text as compiled_on, approved_on::text as approved_on from financial_statements where fy_end = ${fyEnd}::date`;
@@ -152,8 +172,8 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
     const { statements, row: r } = await currentStatements(sql, fyEnd);
     // A signed set whose books have since moved: say so (it stays as signed).
     let changedSince = false;
-    if (r?.snapshotHash && (r.status === 'compiled' || r.status === 'approved')) changedSince = figuresHash(await buildStatements(sql, fyEnd, statements.details)) !== r.snapshotHash;
-    const audit = (await auditBooks(sql, fyEnd)).filter((i) => i.level !== 'ok');
+    if (r?.snapshot && r.snapshotHash && (r.status === 'compiled' || r.status === 'approved')) changedSince = !stillSigned(r as { snapshot: Statements; snapshotHash: string }, await buildStatements(sql, fyEnd, statements.details));
+    const audit = (await auditBooks(sql, fyEnd, { people: can(userOrThrow(req), 'payroll.view') })).filter((i) => i.level !== 'ok');
     return { statements, status: r?.status ?? 'draft', row: r ? { ...r, snapshot: undefined } : null, changedSince, audit };
   });
 
@@ -276,7 +296,7 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
     if (!r || r.status !== 'compiled' || !r.snapshot) throw badRequest('The statements are approved once the accountant has compiled them');
     if (input.date < (r.compiledOn ?? fyEnd)) throw badRequest('They’re approved on or after the day they were compiled');
     const now = await buildStatements(sql, fyEnd, r.snapshot.details);
-    if (figuresHash(now) !== r.snapshotHash) throw badRequest('The books have changed since the statements were compiled, so they no longer give the signed figures. Send them to your accountant again.');
+    if (!stillSigned(r as { snapshot: Statements; snapshotHash: string | null }, now)) throw badRequest('The books have changed since the statements were compiled, so they no longer give the signed figures. Send them to your accountant again.');
     const sig: Signatures = { compiler: r.compiler, approved: { name: input.name, date: input.date } };
     const pdf = await renderStatementsPdf(r.snapshot, sig);
     const settings = await getSettings(sql);
@@ -286,7 +306,7 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
       if (!agreed) await agreeYear(tx, { fyEnd, fyStart: yearStartOf(fyEnd), note: `Financial statements approved by ${input.name} on ${input.date}`, lock: true, figures: [], keepImport: true });
       else await tx`update settings set lock_date = greatest(coalesce(lock_date, ${fyEnd}::date), ${fyEnd}::date) where id`;
       // The year is closed at exactly the figures signed, or not at all.
-      if (figuresHash(await buildStatements(tx, fyEnd, r.snapshot!.details)) !== r.snapshotHash) {
+      if (!stillSigned(r as { snapshot: Statements; snapshotHash: string | null }, await buildStatements(tx, fyEnd, r.snapshot!.details))) {
         throw badRequest('Closing the year would change the signed figures, so it wasn’t closed. Reopen the statements and send them to your accountant again.');
       }
       const [f] = await tx<{ id: string }[]>`

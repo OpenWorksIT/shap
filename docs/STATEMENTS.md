@@ -88,8 +88,10 @@ as drawings, provide no income tax, and are prepared on the basis of accounting 
 compiler's report then names. A company's tax note explains the tax expense against the profit at
 the company rate.
 
-When compiled, the figures are **frozen**: the set is kept exactly as signed, with a hash of its
-figures, and the PDF says FOR APPROVAL until it's approved (DRAFT before it's compiled). Approving checks that the books still give exactly those figures (if anything dated in
+When compiled, the figures are **frozen**: the set is kept exactly as signed, with a fingerprint
+of the books it was drawn from (each account's figures for both years: from 1.23, so a later Shap
+that draws the same books differently doesn't make a signed set look changed; a set signed before
+1.23 is compared by its four statements), and the PDF says FOR APPROVAL until it's approved (DRAFT before it's compiled). Approving checks that the books still give exactly those figures (if anything dated in
 the year changed since, it's refused: reopen and send it again). Approving **agrees the year end**
 at those figures (Accounts → Year end), **closes the year** (nothing more can be posted into it),
 and keeps the signed PDF on file. Each step is in the audit log.

@@ -13,9 +13,9 @@ import type { FastifyInstance } from 'fastify';
 import PDFDocument from 'pdfkit';
 import { entity, ESTIMATE_NOTE, ESTIMATE_SHORT, estimateTax, featureOn, financialYear, formatAmount, formatDate, vat201Due, vatPeriod, addMonths, monthsBetween } from '@shap/shared';
 import { z } from 'zod';
-import { requireAccess } from '../auth.js';
+import { requireAccess, can, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
-import { freshTotals, getSettings, today } from '../lib/books.js';
+import { assessedLossBefore, freshTotals, getSettings, today } from '../lib/books.js';
 import { parse } from '../lib/validate.js';
 import { usePdfFonts } from './pdf.js';
 import { vat201 } from './taxforms.js';
@@ -28,8 +28,12 @@ const INK = '#1d262c';
 const MUTED = '#66737b';
 const amt = (c: number | null | undefined) => (c == null ? '' : c === 0 ? '–' : formatAmount(c));
 
-/** The figures for a year's tax pack. */
-export async function taxPack(db: Db, fyEnd: string) {
+/**
+ * The figures for a year's tax pack. `people`: each employee's pay and certificate (EMP501), for
+ * someone who may see payroll; without it the pack keeps the monthly totals (EMP201) only.
+ */
+export async function taxPack(db: Db, fyEnd: string, o: { people?: boolean } = {}) {
+  const people = o.people ?? true;
   const s = await getSettings(db);
   const fy = financialYear(fyEnd, s.fyEndMonth);
   const kind = taxKind(s.businessType);
@@ -42,10 +46,7 @@ export async function taxPack(db: Db, fyEnd: string) {
   const income = shown.filter((a) => a.type === 'income').reduce((t, a) => t + a.cents, 0);
   const costs = shown.filter((a) => a.type !== 'income' && !a.isTax).reduce((t, a) => t + a.cents, 0);
   const profitBeforeTax = income - costs;
-  const [loss] = await db<{ t: string }[]>`
-    select coalesce(sum(l.amount_cents), 0)::bigint as t from ledger_totals l join accounts a on a.id = l.account_id
-    where a.type in ('income', 'cost_of_sales', 'expense') and coalesce(a.system_key, '') <> 'income_tax' and l.date < ${fy.start}::date`;
-  const assessedLossCents = kind === 'partners' ? 0 : Math.max(0, Number(loss!.t));
+  const assessedLossCents = await assessedLossBefore(db, fy.start, s.fyEndMonth, kind);
   const extra = await taxFigures(db, s.businessType, fy);
   const estimates = await db<{ period: number; asAt: string; taxableIncomeCents: string; taxCents: string; payableCents: string; note: string; createdAt: Date; lines: { sbc?: boolean } }[]>`
     select period, as_at::text as as_at, taxable_income_cents, tax_cents, payable_cents, note, created_at, lines from tax_estimates where fy_end = ${fy.end}::date order by period, created_at`;
@@ -68,7 +69,10 @@ export async function taxPack(db: Db, fyEnd: string) {
   const runs = await db<{ n: number }[]>`select count(*)::int as n from pay_runs where status = 'final' and pay_date between ${fy.start}::date and ${fy.end}::date`;
   const taxYears = runs[0]!.n ? [...new Set(monthsBetween(fy.start, fy.end).map((m) => (Number(m.slice(5, 7)) >= 3 ? Number(m.slice(0, 4)) + 1 : Number(m.slice(0, 4)))))] : [];
   const payroll = [];
-  for (const y of taxYears) payroll.push(await emp501(db, y, `${y}-02-28` <= today() ? 'annual' : 'interim'));
+  for (const y of taxYears) {
+    const r = await emp501(db, y, `${y}-02-28` <= today() ? 'annual' : 'interim');
+    payroll.push(people ? { ...r, peopleLeftOut: false } : { ...r, employees: [], peopleLeftOut: true });
+  }
   const dividends = await db<{ declaredOn: string; shareholder: string; grossCents: string; dwtCents: string; exempt: boolean }[]>`
     select declared_on::text as declared_on, shareholder, gross_cents, dwt_cents, exempt from dividends where declared_on between ${fy.start}::date and ${fy.end}::date order by declared_on`;
   const assets = await db<{ name: string; category: string; purchaseDate: string; costCents: string; disposedOn: string | null; proceedsCents: string | null }[]>`
@@ -229,11 +233,13 @@ export function renderTaxPack(t: Awaited<ReturnType<typeof taxPack>>): Promise<B
       p.months.map((m) => [m.period, Number(m.payeCents), Number(m.uifCents), Number(m.sdlCents), m.totalCents, Number(m.paidCents)]),
       [90, (W - 90) / 5, (W - 90) / 5, (W - 90) / 5, (W - 90) / 5, (W - 90) / 5],
     );
-    table(
-      ['Employee (certificate)', 'Gross (3699)', 'PAYE (4102)', 'UIF (4141)', 'SDL (4142)'],
-      p.employees.map((e) => [`${e.name} (${e.certificate})${e.problems.length ? `\n${e.problems.join('; ')}` : ''}`, e.codes[3699], e.codes[4102], e.codes[4141], e.codes[4142]]),
-      [W - 4 * 80, 80, 80, 80, 80],
-    );
+    if (p.peopleLeftOut) para('Each employee’s certificate (IRP5) is left out of this copy: it takes “See payroll” to see people’s pay. The owner’s copy has them.', 9);
+    else
+      table(
+        ['Employee (certificate)', 'Gross (3699)', 'PAYE (4102)', 'UIF (4141)', 'SDL (4142)'],
+        p.employees.map((e) => [`${e.name} (${e.certificate})${e.problems.length ? `\n${e.problems.join('; ')}` : ''}`, e.codes[3699], e.codes[4102], e.codes[4141], e.codes[4142]]),
+        [W - 4 * 80, 80, 80, 80, 80],
+      );
     if (p.differences.unpaidCents || p.differences.payeCents || p.differences.uifCents || p.differences.sdlCents)
       para(`Doesn’t reconcile yet: declared but unpaid R${amt(p.differences.unpaidCents)}; declared less certified PAYE R${amt(p.differences.payeCents)}, UIF R${amt(p.differences.uifCents)}, SDL R${amt(p.differences.sdlCents)}.`, 9);
   }
@@ -275,7 +281,7 @@ export function registerTaxPackRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { fyEnd } = parse(z.object({ fyEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }), req.query);
     // The last year that has ended, unless asked for another.
     const fy = financialYear(fyEnd ?? addMonths(financialYear(today(), s.fyEndMonth).start, -1), s.fyEndMonth);
-    const pack = await taxPack(ctx.sql, fy.end);
+    const pack = await taxPack(ctx.sql, fy.end, { people: can(userOrThrow(req), 'payroll.view') });
     const pdf = await renderTaxPack(pack);
     reply.header('content-type', 'application/pdf');
     reply.header('content-disposition', `attachment; filename="Tax pack ${fy.end}.pdf"`);

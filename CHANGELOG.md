@@ -37,6 +37,15 @@ Accounting Standard; and a tax pack for your accountant.
   assets bought and sold, in one PDF for your accountant.
 - Every figure Shap works out for tax or the law says it's an estimate: OpenWorks IT aren't
   accountants, and Shap isn't advice.
+- The assessed loss brought forward is worked out year by year (a profit before a loss doesn't use
+  it up), and a company's set-off is limited to the greater of R1 million and 80% of its taxable
+  income (years ending on or after 31 March 2023), in the IRP6, the statements and the tax pack.
+- Statements compiled or approved on 1.22 stay signed after the update: from now on a signed set
+  is fingerprinted by the books it came from, so a later Shap drawing them differently isn't a change.
+- Staff tracking time see and change their own; the jobs (and their site addresses and notes) are
+  for those who see the jobs; the tax pack and books audit leave people's pay out for staff who
+  don't see payroll. Reading the reports comes with seeing workers' wages (the ledger shows them),
+  and bank statements with capturing costs and payments (as reconciling does).
 
 ## 1.22.0 (10 November 2026)
 

@@ -6,15 +6,15 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import { requireAccess, requireRole } from '../auth.js';
+import { can, requireAccess, requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { auditBooks, tally } from '../audit/books.js';
 
 export function registerAuditRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
 
-  app.get('/api/audit/books', { preHandler: requireAccess('reports.view') }, async () => {
-    const items = await auditBooks(sql);
+  app.get('/api/audit/books', { preHandler: requireAccess('reports.view') }, async (req) => {
+    const items = await auditBooks(sql, undefined, { people: can(userOrThrow(req), 'payroll.view') });
     return { at: new Date().toISOString(), ...tally(items), items };
   });
 

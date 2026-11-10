@@ -203,6 +203,34 @@ Then the independent review (`apps/server/test/review-1.22/`), all fixed with te
   cost); a discount could take a VAT class below nothing.
 - `www.ifrs.org` was missing from the outside addresses, so CI's privacy check failed.
 
+### People who sign in, the IFRS check and the tax pack (1.23, before release)
+
+The independent review (`apps/server/test/review-1.23/`), all fixed with tests:
+
+- People's pay: the tax pack printed each employee's certificate (name, pay, PAYE) for staff who
+  read the reports but may not see payroll, and the books audit named them; logging days handed
+  the worker's wage back. Both now leave people out without "See payroll", and logging days
+  doesn't return wages. Reading the books comes with seeing workers' days and wages, since the
+  ledger names them; bank statements come with capturing costs and payments, which they do.
+- Time on jobs: staff tracking time saw everyone's, with the jobs' billing rates, and could
+  change or delete anyone's. Each person now keeps to their own (the owner sees all).
+- Saving an item returned its cost to someone who may change prices but not see what stock cost.
+- The jobs (client, site address, notes) were open to anyone signed in: a job takes "See jobs",
+  and the list to pick from is for those who log, capture or invoice against one.
+- A write-down could be dated before later stock movements while worked out from what's on hand
+  now: refused before the item last moved (a journal at the year end for the accountant).
+- Upgrading: statements compiled or approved on 1.22 no longer matched their fingerprint (1.23
+  draws the cash flows differently). From 1.23 the fingerprint is of the books themselves; a set
+  signed before is compared by its four statements, and a close corporation's keeps no accounting
+  officer's report it wasn't signed with.
+- Tax estimates: the assessed loss brought forward was the net of every earlier year (there's no
+  carry-back), and a company's set-off wasn't limited (the greater of R1 million and 80% of taxable
+  income, s20(1)(a)(ii)); a trust's estimate in the statements ignored what it gave its
+  beneficiaries. All three now worked out the same in the statements, the tax pack and the IRP6.
+- An asset's bill settled by the owner personally or with a supplier's credit note showed as cash
+  paid for it; subcontractors counted as employees in the public interest score; a reviewed close
+  corporation's accounting officer's report said no review was done.
+
 ### Code scanning (CodeQL), first run
 
 - The Accounts screen's download links carried the period's dates unencoded (flagged as text

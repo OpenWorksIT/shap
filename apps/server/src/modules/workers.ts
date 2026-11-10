@@ -211,6 +211,11 @@ export function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx): void {
         note = ${input.note}
       where id = ${id} returning *`;
     await audit(sql, { userId: user.id, action: 'update', entity: 'labour', entityId: id, ip: req.ip });
+    // Logging days doesn't show what a worker earns.
+    if (!can(user, 'labour.view')) {
+      const { wageCents: _w, allowanceCents: _a, ...rest } = row as Record<string, unknown>;
+      return rest;
+    }
     return row;
   });
 

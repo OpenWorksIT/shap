@@ -206,14 +206,16 @@ export function renderStatementsPdf(s: Statements, sig: Signatures = {}): Promis
   // ---------------------------------------------------------------- accounting officer's report (a CC)
   // Close Corporations Act s62(1)(c), in the words of SAICA's guide on close corporations (appendix
   // XII): the accounting officer signs it when they sign the statements in Shap, or it's uploaded.
-  if (s.company.businessType === 'cc') {
+  // A set signed before 1.23 (no builder) was signed without it, so it stays without it.
+  if (s.company.businessType === 'cc' && (s.builder ?? 1) >= 2) {
     newPage();
     heading('Report of the accounting officer', `To the members of ${s.company.name}`);
     const c = sig.compiler ?? null;
     const ao = c ?? { ...s.details.compiler, date: '' };
     para(`We have performed the duties of accounting officer to ${s.company.name} ${s.period}, as required by section 62 of the Close Corporations Act 69 of 1984.`);
     para('The annual financial statements set out on the pages that follow are the responsibility of the members.');
-    if (s.details.assurance !== 'audit')
+    // Not when the statements were audited or independently reviewed: that report goes with them.
+    if (s.details.assurance === 'compiled' || s.details.assurance === 'none')
       para('No audit or review is required to be carried out by the Act and no audit or review was conducted. Accordingly, we do not imply or express an opinion or any other form of assurance on the annual financial statements.');
     pdf.font(bold).fontSize(10).fillColor(INK).text('Duties of the accounting officer', L, pdf.y);
     pdf.moveDown(0.3);

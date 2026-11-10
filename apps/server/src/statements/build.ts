@@ -17,6 +17,7 @@ import {
   addDays,
   companyRate,
   estimateTax,
+  sha256Hex,
   PI_APPLIES,
   publicInterestScore,
   whatScoreMeans,
@@ -37,7 +38,7 @@ import {
   type StatementSection,
 } from '@shap/shared';
 import type { Db } from '../db/index.js';
-import { freshTotals, getSettings } from '../lib/books.js';
+import { assessedLossBefore, freshTotals, getSettings } from '../lib/books.js';
 import { defaultPolicies, directorsReport, governingFor, type StatementDetails, loadDetails } from './details.js';
 
 export interface Amounts {
@@ -62,7 +63,18 @@ export interface Note {
   tables: { head?: string[]; rows: { label: string; current: number | null; prior: number | null; bold?: boolean }[] }[];
 }
 
+/**
+ * How the statements are drawn: 2 from 1.23, whose fingerprint is of the books themselves (so a
+ * later Shap that draws the same books differently still finds signed statements unchanged).
+ * Snapshots without it were signed on 1.22 or before.
+ */
+export const BUILDER = 2;
+
 export interface Statements {
+  /** BUILDER when drawn (none on a snapshot from before 1.23). */
+  builder?: number;
+  /** A fingerprint of what the statements are drawn from: each account's figures for both years, and the kind of business. */
+  books?: string;
   fyEnd: string;
   fyStart: string;
   priorEnd: string;
@@ -202,6 +214,9 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
     byAcc.set(r.accountId, e);
   }
   const val = (a: Acc, c: Col) => byAcc.get(a.id)?.[c] ?? 0;
+  const books = sha256Hex(
+    JSON.stringify([bt, accounts.filter((a) => (['atBefore', 'atPrior', 'atEnd', 'mvPrior', 'mvCur'] as Col[]).some((c) => val(a, c) !== 0)).map((a) => [a.code, a.type, a.statementLine, val(a, 'atBefore'), val(a, 'atPrior'), val(a, 'atEnd'), val(a, 'mvPrior'), val(a, 'mvCur')])]),
+  );
   const src = (a: Acc, s: string, c: Col) => byAcc.get(a.id)?.bySource.get(s)?.[c] ?? 0;
   const label = (k: StatementLineKey) => statementLineLabel(k, bt);
   const isPL = (a: Acc) => PL.includes(a.type);
@@ -396,18 +411,18 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
   };
   for (const c of ['ppe', 'intangibles'] as const) {
     const n = nonCash.filter((x) => x.line === c);
-    const by = (k: 'owner' | 'loan' | 'bill') => ({ current: sum(n.filter((x) => x.via === k).map((x) => x.current)), prior: sum(n.filter((x) => x.via === k).map((x) => x.prior)) });
-    adjust(investing, c, total([by('owner'), by('loan'), by('bill')]), { key: c, label: c === 'ppe' ? 'Purchase of property, plant and equipment' : 'Purchase of intangible assets' });
-    adjust(financing, 'owner_loans', neg(by('owner')), { key: 'owner_loans', label: ownerLoansLabel });
-    adjust(financing, 'borrowings', neg(by('loan')), { key: 'borrowings', label: 'Movement in loans and borrowings' });
-    adjust(operating, 'wc_trade_payables', neg(by('bill')), { key: 'wc_trade_payables', label: 'Increase (decrease) in trade and other payables' });
+    const all = (k: 'investing' | 'payables' | 'owner' | 'loan') => total(n.map((x) => x[k]));
+    adjust(investing, c, all('investing'), { key: c, label: c === 'ppe' ? 'Purchase of property, plant and equipment' : 'Purchase of intangible assets' });
+    adjust(financing, 'owner_loans', neg(all('owner')), { key: 'owner_loans', label: ownerLoansLabel });
+    adjust(financing, 'borrowings', neg(all('loan')), { key: 'borrowings', label: 'Movement in loans and borrowings' });
+    adjust(operating, 'wc_trade_payables', neg(all('payables')), { key: 'wc_trade_payables', label: 'Increase (decrease) in trade and other payables' });
   }
   for (const ls of [operating, investing, financing]) for (let i = ls.length - 1; i >= 0; i--) if (!ls[i]!.current && !ls[i]!.prior) ls.splice(i, 1);
   const nonCashRows = (['owner', 'loan', 'bill'] as const)
     .map((k) => ({
       label: k === 'owner' ? `Assets paid for personally by the ${governingFor(bt).many} (on their loan accounts)` : k === 'loan' ? 'Assets financed by loans' : 'Assets bought on credit, unpaid at the year end',
-      current: sum(nonCash.filter((x) => x.via === k).map((x) => x.added.current)),
-      prior: hasPrior ? sum(nonCash.filter((x) => x.via === k).map((x) => x.added.prior)) : 0,
+      current: sum(nonCash.map((x) => x.noted[k]?.current ?? 0)),
+      prior: hasPrior ? sum(nonCash.map((x) => x.noted[k]?.prior ?? 0)) : 0,
     }))
     .filter((r) => r.current || r.prior);
 
@@ -662,13 +677,13 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
   let taxEstimate: Statements['taxEstimate'] = null;
   if ((kind.taxedAs === 'company' || kind.taxedAs === 'npc' || kind.taxedAs === 'trust') && !(bt === 'npc' && settings.approvedPbo)) {
     const pbt = profitBeforeTax.current;
-    const [lossRow] = await db<{ t: string }[]>`
-      select coalesce(sum(l.amount_cents), 0)::bigint as t from ledger_totals l join accounts a on a.id = l.account_id
-      where a.type in ('income', 'cost_of_sales', 'expense') and coalesce(a.system_key, '') <> 'income_tax' and l.date < ${fyStart}::date`;
-    const assessedLossCents = Math.max(0, Number(lossRow!.t));
+    const taxedAs = kind.taxedAs;
+    const assessedLossCents = await assessedLossBefore(db, fyStart, settings.fyEndMonth, taxedAs);
     const [est] = await db<{ lines: { sbc?: boolean } }[]>`select lines from tax_estimates where fy_end = ${fyEnd}::date order by created_at desc limit 1`;
-    const sbc = kind.taxedAs === 'company' && Boolean(est?.lines?.sbc);
-    const e = estimateTax({ kind: kind.taxedAs === 'company' ? 'company' : kind.taxedAs, profitCents: pbt, assessedLossCents, fyEnd, sbc, approvedPbo: settings.approvedPbo, distributedCents: 0 } as Parameters<typeof estimateTax>[0]);
+    const sbc = taxedAs === 'company' && Boolean(est?.lines?.sbc);
+    // A trust is taxed on what it keeps: what it gave its beneficiaries in the year is theirs.
+    const [given] = taxedAs === 'trust' ? await db<{ t: string }[]>`select coalesce(sum(gross_cents), 0)::bigint as t from dividends where conduit and declared_on between ${fyStart}::date and ${fyEnd}::date` : [{ t: '0' }];
+    const e = estimateTax({ kind: taxedAs, profitCents: pbt, assessedLossCents, fyEnd, sbc, approvedPbo: settings.approvedPbo, distributedCents: Number(given!.t) });
     if (incomeTax.current === 0 && e.taxCents > 0) taxEstimate = { profitCents: pbt, assessedLossCents, taxableCents: e.taxableCents, taxCents: e.taxCents, sbc };
     look(
       'The year’s income tax is in the books (IFRS for SMEs 29)',
@@ -691,7 +706,7 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
       const net = rate > 0 && i.vatCode === 'standard' && i.priceIncludesVat ? Math.round((Number(i.unitPriceCents) * 10000) / (10000 + rate)) : Number(i.unitPriceCents);
       return q > 0 && Number(i.valueCents) > Math.round(q * net);
     });
-    look('Stock is carried at no more than it will sell for (IFRS for SMEs 13.19, 27.2)', above.length === 0, above.length ? `${above.slice(0, 5).map((i) => i.description).join(', ')}${above.length > 5 ? ` and ${above.length - 5} more` : ''}: above the selling price at the year end. Write them down (Inventory → Valuation).` : 'none above its selling price');
+    look('Stock is carried at no more than it will sell for (IFRS for SMEs 13.19, 27.2)', above.length === 0, above.length ? `${above.slice(0, 5).map((i) => i.description).join(', ')}${above.length > 5 ? ` and ${above.length - 5} more` : ''}: above the selling price at the year end. Write them down (Inventory → Valuation), or, for stock that has moved since the year end, a journal at the year end.` : 'none above its selling price');
   }
   // Work in progress (13.14 of the 2015 edition; 23 for revenue): jobs' costs waiting for their invoice.
   const wipAcc = accounts.find((a) => a.systemKey === 'wip');
@@ -715,7 +730,8 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
       people as (
         select r.period as m, 'e' || pl.employee_id::text as who from pay_lines pl join pay_runs r on r.id = pl.run_id where r.status = 'final'
         union
-        select to_char(e.date, 'YYYY-MM'), 'w' || e.worker_id::text from labour_entries e where e.date between ${fyStart}::date and ${fyEnd}::date
+        select to_char(e.date, 'YYYY-MM'), 'w' || e.worker_id::text from labour_entries e join workers w on w.id = e.worker_id
+        where e.date between ${fyStart}::date and ${fyEnd}::date and w.kind <> 'subcontractor'
       )
       select coalesce(avg(n), 0)::float8 as avg from (select months.m, count(distinct p.who) as n from months left join people p on p.m = months.m group by months.m) x`;
     const employeesWorkedOut = Math.round(Number(emp!.avg) * 10) / 10;
@@ -757,6 +773,8 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
   });
   const title = bt === 'company' || bt === 'inc' || bt === 'cc' || bt === 'npc' || bt === 'coop' ? 'Annual Financial Statements' : 'Financial Statements';
   return {
+    builder: BUILDER,
+    books,
     fyEnd,
     fyStart,
     priorEnd,
@@ -837,30 +855,57 @@ async function nonCashAssets(db: Db, p: { priorStart: string; priorEnd: string; 
     from assets a left join payment_sources s on s.id = a.source_id left join accounts sa on sa.id = s.account_id
     where a.cost_id is null and a.purchase_date <= ${p.fyEnd}::date`;
   const billIds = bought.filter((b) => b.role === 'bills' && b.costId).map((b) => b.costId!);
-  const paid = billIds.length ? await db<{ costId: string; date: string; amountCents: string }[]>`select cost_id, date::text as date, amount_cents from bill_payments where cost_id = any(${billIds}::uuid[])` : [];
-  const out: { line: 'ppe' | 'intangibles'; via: 'owner' | 'loan' | 'bill'; current: number; prior: number; added: Amounts }[] = [];
+  // What settled each bill: money (a cash flow when it's paid), an owner paying it personally or a
+  // loan (the debt moves to them: no cash), or nothing here for a supplier's credit note (the credit
+  // note is a bill of its own, negative, so it already takes its part off).
+  const settled = billIds.length
+    ? await db<{ costId: string; date: string; amountCents: string; sourceLine: StatementLineKey | null }[]>`
+        select bp.cost_id, bp.date::text as date, bp.amount_cents, sa.statement_line as source_line
+        from bill_payments bp left join payment_sources s on s.id = bp.source_id left join accounts sa on sa.id = s.account_id
+        where bp.cost_id = any(${billIds}::uuid[]) and bp.credit_cost_id is null`
+    : [];
+  const how = (l: StatementLineKey | null) => {
+    const c = l ? STATEMENT_LINES[l]?.cash : undefined;
+    return c === 'owner_loans' ? 'owner' : c === 'borrowings' ? 'loan' : 'cash';
+  };
+  type Via = 'owner' | 'loan' | 'bill';
+  /**
+   * Per asset: what comes back out of investing (`investing`), out of the payables movement
+   * (`payables`), out of the owners' loans or borrowings (`owner`, `loan`), and what the note tells
+   * (`noted`, by how it was bought or settled without cash).
+   */
+  const out: { line: 'ppe' | 'intangibles'; investing: Amounts; payables: Amounts; owner: Amounts; loan: Amounts; noted: Partial<Record<Via, Amounts>> }[] = [];
   const within = (d: string, from: string, to: string) => d >= from && d <= to;
+  const zero = (): Amounts => ({ current: 0, prior: 0 });
   for (const b of bought) {
     const asset = Number(b.assetCents);
     const cash = b.sourceLine ? STATEMENT_LINES[b.sourceLine]?.cash : undefined;
-    const via = b.role === 'bills' ? 'bill' : cash === 'owner_loans' ? 'owner' : cash === 'borrowings' ? 'loan' : null;
+    const via: Via | null = b.role === 'bills' ? 'bill' : cash === 'owner_loans' ? 'owner' : cash === 'borrowings' ? 'loan' : null;
     if (!via || !asset) continue;
     if (via !== 'bill') {
-      const cur = within(b.date, p.fyStart, p.fyEnd) ? asset : 0;
-      const pri = within(b.date, p.priorStart, p.priorEnd) ? asset : 0;
-      if (cur || pri) out.push({ line: b.line, via, current: cur, prior: pri, added: { current: cur, prior: pri } });
+      const a = { current: within(b.date, p.fyStart, p.fyEnd) ? asset : 0, prior: within(b.date, p.priorStart, p.priorEnd) ? asset : 0 };
+      if (a.current || a.prior) out.push({ line: b.line, investing: a, payables: zero(), owner: via === 'owner' ? a : zero(), loan: via === 'loan' ? a : zero(), noted: { [via]: a } });
       continue;
     }
     const whole = Number(b.billCents) || asset;
-    const unpaidAt = (d: string) => {
-      if (d < b.date) return 0;
-      const settled = paid.filter((x) => x.costId === b.costId && x.date <= d).reduce((t, x) => t + Number(x.amountCents), 0);
-      return Math.round((asset * Math.max(0, whole - settled)) / whole);
+    const share = (cents: number) => Math.round((asset * cents) / whole);
+    const mine = settled.filter((x) => x.costId === b.costId);
+    const settledBy = (kind: 'cash' | 'owner' | 'loan' | 'any', d: string) =>
+      mine.filter((x) => x.date <= d && (kind === 'any' || how(x.sourceLine) === kind)).reduce((t, x) => t + Number(x.amountCents), 0);
+    // Not yet paid in money (so not yet a cash outflow), and still owed to the supplier (a credit
+    // note, negative, the other way).
+    const left = (paidCents: number) => (whole >= 0 ? Math.max(0, whole - paidCents) : Math.min(0, whole + paidCents));
+    const notPaid = (d: string) => (d < b.date ? 0 : share(left(settledBy('cash', d))));
+    const owed = (d: string) => (d < b.date ? 0 : share(left(settledBy('any', d))));
+    const by = (kind: 'owner' | 'loan', d: string) => (d < b.date ? 0 : share(settledBy(kind, d)));
+    const moved = (f: (d: string) => number): Amounts => ({ current: f(p.fyEnd) - f(p.priorEnd), prior: f(p.priorEnd) - f(p.beforePrior) });
+    const e = { line: b.line, investing: moved(notPaid), payables: moved(owed), owner: moved((d) => by('owner', d)), loan: moved((d) => by('loan', d)) };
+    const noted = {
+      bill: { current: within(b.date, p.fyStart, p.fyEnd) ? owed(p.fyEnd) : 0, prior: within(b.date, p.priorStart, p.priorEnd) ? owed(p.priorEnd) : 0 },
+      owner: e.owner,
+      loan: e.loan,
     };
-    const cur = unpaidAt(p.fyEnd) - unpaidAt(p.priorEnd);
-    const pri = unpaidAt(p.priorEnd) - unpaidAt(p.beforePrior);
-    const added = { current: within(b.date, p.fyStart, p.fyEnd) ? unpaidAt(p.fyEnd) : 0, prior: within(b.date, p.priorStart, p.priorEnd) ? unpaidAt(p.priorEnd) : 0 };
-    if (cur || pri || added.current || added.prior) out.push({ line: b.line, via, current: cur, prior: pri, added });
+    if ([e.investing, e.payables, e.owner, e.loan, noted.bill].some((a) => a.current || a.prior)) out.push({ ...e, noted });
   }
   return out;
 }

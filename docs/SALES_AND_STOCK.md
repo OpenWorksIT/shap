@@ -61,7 +61,7 @@ refund, an invoice, a supplier invoice, a return, a count). Open an item to see 
 | Supplier's credit note | | a negative cost on Stock purchases (VAT back), settling the claims chosen; anything beyond them is a discount on stock bought (Cr Cost of sales). On account, it's taken off one of their bills (Bills to pay shows what's left of it until it is) |
 | Claim the supplier won't settle | | written off to **Stock losses** |
 | Stock take | corrected to what was counted, the reason kept | the difference at average cost to Stock losses (or a gain) |
-| Written down (Inventory → Valuation, for stock carried above its selling price) | its value down to the selling price before VAT (IFRS for SMEs 13.19, 27.2), quantity unchanged | the difference to Stock losses |
+| Written down (Inventory → Valuation, for stock carried above its selling price) | its value down to the selling price before VAT (IFRS for SMEs 13.19, 27.2), quantity unchanged; dated on or after the item last moved (what's on hand then; earlier is a journal) | the difference to Stock losses |
 
 **Selling what isn't in stock** takes the quantity below nothing (it's costed at the item's last
 cost). When stock next arrives, the item is revalued: its value becomes what's on hand at the new

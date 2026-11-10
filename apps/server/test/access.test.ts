@@ -20,6 +20,9 @@ describe('the tasks themselves', () => {
     expect(withNeeds(['sales.refund'])).toEqual(['sales.refund', 'sales.view']);
     expect(withNeeds(['stock.buy'])).toEqual(['stock.view', 'stock.costs', 'stock.buy']);
     expect(withNeeds(['made.up', 'jobs.view'])).toEqual(['jobs.view']);
+    // Reconciling the bank captures what isn't captured yet (costs, payments received), and the
+    // books it reads name each worker's wages: so each comes with what it does.
+    expect(withNeeds(['bank.reconcile'])).toEqual(['documents.view', 'documents.paid', 'labour.view', 'costs.view', 'costs.manage', 'reports.view', 'bank.reconcile']);
     // A teller who may also refund, but not see stock.
     const teller = ['sales.sell', 'stock.view'];
     const want = ['sales.sell', 'sales.refund'];
@@ -64,7 +67,7 @@ describe('every door, for every task', () => {
 
   // Open to anyone signed in, each narrowing what it shows inside (the tests below check what).
   const ANYONE = new Set([
-    'GET /api/reference', 'GET /api/live', 'GET /api/notice', 'GET /api/dashboard', 'GET /api/clients', 'GET /api/projects', 'GET /api/projects/:id',
+    'GET /api/reference', 'GET /api/live', 'GET /api/notice', 'GET /api/dashboard', 'GET /api/clients',
     'GET /api/workers', 'GET /api/costs/suppliers', 'GET /api/costs/:id', 'GET /api/costs/vat-in', 'GET /api/attachments/:id', 'POST /api/feedback',
   ]);
 
@@ -75,10 +78,10 @@ describe('every door, for every task', () => {
     expect(anyone.sort()).toEqual([...ANYONE].sort());
     // Staff are let in by tasks: no role-only door lets them in.
     expect(Object.entries(env.doors).filter(([, d]) => d?.roles?.includes('staff')).map(([r]) => r)).toEqual([]);
-    // Every task opens at least one door, but seeing the jobs (and their money): the jobs are
-    // everyone's to choose from, and what's shown of them depends on these (tested below).
+    // Every task opens at least one door, but seeing what jobs make: that changes what a job shows
+    // (tested below).
     const used = new Set(Object.values(env.doors).flatMap((d) => d?.tasks ?? []));
-    expect(TASK_KEYS.filter((t) => !used.has(t))).toEqual(['jobs.view', 'jobs.money']);
+    expect(TASK_KEYS.filter((t) => !used.has(t))).toEqual(['jobs.money']);
   });
 
   // Doors that take a second task inside: a quote from a job's plan, and time onto an invoice,

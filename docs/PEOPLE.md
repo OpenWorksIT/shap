@@ -42,7 +42,7 @@ the sales to be seen): ticking one ticks the other.
 | Jobs | See jobs (and their parts lists, without the money) | |
 | | See what jobs make | See jobs |
 | | Add and change jobs and their plans (a quote from the plan also needs Make and change quotes) | See what jobs make |
-| | Track time on jobs (time onto an invoice also needs Make and change invoices) | See jobs |
+| | Track time on jobs: their own time (the owner's, everyone's), with the billing rate only with See what jobs make or Make and change invoices; time onto an invoice also needs Make and change invoices | See jobs |
 | Casual workers | Log days worked (at each worker's rate; their own entries for a day) | |
 | | See days worked and wages | |
 | | Workers, rates and wages paid | See days worked and wages |
@@ -53,8 +53,8 @@ the sales to be seen): ticking one ticks the other.
 | | Log trips in the travel logbook | |
 | Payroll | See payroll and payslips | |
 | | Run payroll (employees, pay runs, SARS payments) | See payroll |
-| Accounts & reports | Reports, VAT201 and the ledger (every report and the books, read only, and the statements) | |
-| | Bank statements | Reports |
+| Accounts & reports | Reports, VAT201 and the ledger (every report and the books, read only, and the statements; the ledger names each worker's days and wages) | See days worked and wages |
+| | Bank statements (bring them in, tick off what's captured, and capture what isn't: costs, payments received) | Reports, Capture and change any cost, Record what's paid |
 | | Journals, assets and balance checks | Reports |
 
 **Always the owner's**: the settings, the people who sign in and their profiles, the year end, tax
@@ -78,7 +78,10 @@ reports see a home of their own (their jobs, one tap away), the company's names 
 its bank details, numbering or chart of accounts, and only the files they uploaded (or the slips on
 the costs, if they see all costs). Someone selling without "See all sales and takings" sees only
 their own sales and today's takings from them. Without "See what stock cost", stock is in
-quantities only.
+quantities only. A job (its client, site address, notes and parts) takes "See jobs"; logging days,
+capturing slips or invoicing against one gives the open jobs to pick by name. Time on jobs is
+each person's own. Without "See payroll", the tax pack and the books audit leave employees'
+names and pay out.
 
 ## How it's checked
 

@@ -1,5 +1,5 @@
 import type { FastifyRequest } from 'fastify';
-import { entity, financialYear, safeText, standardNames, todayIso, type BusinessType } from '@shap/shared';
+import { assessedLossCarried, entity, financialYear, safeText, standardNames, todayIso, type BusinessType, type TaxEstimateFigures } from '@shap/shared';
 import type { Db } from '../db/index.js';
 import { badRequest } from './errors.js';
 
@@ -78,6 +78,31 @@ export interface SettingsRow {
  */
 export async function freshTotals(db: Db): Promise<void> {
   await db`select fresh_ledger_totals()`;
+}
+
+/**
+ * The assessed loss carried into the year starting `fyStart`, from the books: each earlier
+ * financial year's result before income tax (a trust's less what it gave its beneficiaries),
+ * walked in order (assessedLossCarried: no carry-back, a company's set-off limited). Call
+ * freshTotals first. An estimate: SARS's assessments are what count.
+ */
+export async function assessedLossBefore(db: Db, fyStart: string, fyEndMonth: number, kind: TaxEstimateFigures['kind']): Promise<number> {
+  if (kind === 'partners') return 0;
+  const months = await db<{ m: string; cents: string }[]>`
+    select to_char(l.date, 'YYYY-MM') as m, sum(l.amount_cents)::bigint as cents from ledger_totals l join accounts a on a.id = l.account_id
+    where a.type in ('income', 'cost_of_sales', 'expense') and coalesce(a.system_key, '') <> 'income_tax' and l.date < ${fyStart}::date group by 1`;
+  const years = new Map<string, number>();
+  const add = (month: string, profit: number) => {
+    const end = financialYear(`${month}-01`, fyEndMonth).end;
+    years.set(end, (years.get(end) ?? 0) + profit);
+  };
+  for (const r of months) add(r.m, -Number(r.cents));
+  if (kind === 'trust') {
+    const given = await db<{ m: string; cents: string }[]>`
+      select to_char(declared_on, 'YYYY-MM') as m, sum(gross_cents)::bigint as cents from dividends where conduit and declared_on < ${fyStart}::date group by 1`;
+    for (const r of given) add(r.m, -Number(r.cents));
+  }
+  return assessedLossCarried(kind, [...years].map(([fyEnd, profitCents]) => ({ fyEnd, profitCents })));
 }
 
 export async function getSettings(db: Db): Promise<SettingsRow> {

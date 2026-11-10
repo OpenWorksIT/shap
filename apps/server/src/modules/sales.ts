@@ -295,7 +295,7 @@ export function registerSalesRoutes(app: FastifyInstance, ctx: Ctx): void {
         values (${input.description}, ${input.sku}, ${input.category}, ${input.unit}, ${input.unitPriceCents}, ${input.priceIncludesVat}, ${input.vatCode},
                 ${input.stocked}, ${input.reorderLevel}, ${input.active}, ${input.stocked ? new Date() : null}) returning *`;
       await audit(sql, { userId: user.id, action: 'create', entity: 'item', entityId: row!.id, ip: req.ip, details: { description: input.description, stocked: input.stocked } });
-      return row;
+      return can(user, 'stock.costs') ? row : hideCosts(row!);
     } catch (err) {
       if (pgCode(err) === PG.uniqueViolation) throw conflict('There’s already an item with that name or code');
       throw err;
@@ -320,7 +320,7 @@ export function registerSalesRoutes(app: FastifyInstance, ctx: Ctx): void {
           stocked_since = case when ${input.stocked} and not stocked then now() else stocked_since end
         where id = ${id} returning *`;
       await audit(sql, { userId: user.id, action: 'update', entity: 'item', entityId: id, ip: req.ip, details: { description: input.description, was: old.description, priceCents: input.unitPriceCents, wasPriceCents: Number(old.unitPriceCents), stocked: input.stocked } });
-      return row;
+      return can(user, 'stock.costs') ? row : hideCosts(row!);
     } catch (err) {
       if (pgCode(err) === PG.uniqueViolation) throw conflict('There’s already an item with that name or code');
       throw err;
