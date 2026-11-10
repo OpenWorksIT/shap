@@ -80,7 +80,7 @@ the costs, if they see all costs). Someone selling without "See all sales and ta
 their own sales and today's takings from them. Without "See what stock cost", stock is in
 quantities only. A job (its client, site address, notes and parts) takes "See jobs"; logging days,
 capturing slips or invoicing against one gives the open jobs to pick by name. Time on jobs is
-each person's own. Without "See payroll", the tax pack and the books audit leave employees'
+each person's own (whoever makes the invoices sees everyone's unbilled time, to put on them). Without "See payroll", the tax pack and the books audit leave employees'
 names and pay out.
 
 ## How it's checked

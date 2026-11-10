@@ -864,6 +864,12 @@ async function nonCashAssets(db: Db, p: { priorStart: string; priorEnd: string; 
         from bill_payments bp left join payment_sources s on s.id = bp.source_id left join accounts sa on sa.id = s.account_id
         where bp.cost_id = any(${billIds}::uuid[]) and bp.credit_cost_id is null`
     : [];
+  // Credit notes taken off bills (no money, no cash flow): only for what the note says is still owed.
+  const credits = billIds.length
+    ? await db<{ costId: string; creditCostId: string; date: string; amountCents: string }[]>`
+        select cost_id, credit_cost_id, date::text as date, amount_cents from bill_payments
+        where credit_cost_id is not null and (cost_id = any(${billIds}::uuid[]) or credit_cost_id = any(${billIds}::uuid[]))`
+    : [];
   const how = (l: StatementLineKey | null) => {
     const c = l ? STATEMENT_LINES[l]?.cash : undefined;
     return c === 'owner_loans' ? 'owner' : c === 'borrowings' ? 'loan' : 'cash';
@@ -890,18 +896,24 @@ async function nonCashAssets(db: Db, p: { priorStart: string; priorEnd: string; 
     const whole = Number(b.billCents) || asset;
     const share = (cents: number) => Math.round((asset * cents) / whole);
     const mine = settled.filter((x) => x.costId === b.costId);
-    const settledBy = (kind: 'cash' | 'owner' | 'loan' | 'any', d: string) =>
+    const settledBy = (kind: 'owner' | 'loan' | 'any', d: string) =>
       mine.filter((x) => x.date <= d && (kind === 'any' || how(x.sourceLine) === kind)).reduce((t, x) => t + Number(x.amountCents), 0);
-    // Not yet paid in money (so not yet a cash outflow), and still owed to the supplier (a credit
-    // note, negative, the other way).
+    // Still owed to the supplier (a credit note, negative, the other way), and settled by the owner
+    // or a loan; not yet paid in money (so not yet a cash outflow) is the three together, each
+    // rounded once so the cash flows still add up to the cent.
     const left = (paidCents: number) => (whole >= 0 ? Math.max(0, whole - paidCents) : Math.min(0, whole + paidCents));
-    const notPaid = (d: string) => (d < b.date ? 0 : share(left(settledBy('cash', d))));
     const owed = (d: string) => (d < b.date ? 0 : share(left(settledBy('any', d))));
     const by = (kind: 'owner' | 'loan', d: string) => (d < b.date ? 0 : share(settledBy(kind, d)));
+    const notPaid = (d: string) => owed(d) + by('owner', d) + by('loan', d);
+    // What the note tells as still owed: credit notes taken off count too (a credit note on another
+    // cost type isn't a bill here of its own to offset it).
+    const creditTaken = (d: string) => credits.filter((x) => x.costId === b.costId && x.date <= d).reduce((t, x) => t + Number(x.amountCents), 0);
+    const creditUsed = (d: string) => credits.filter((x) => x.creditCostId === b.costId && x.date <= d).reduce((t, x) => t + Number(x.amountCents), 0);
+    const stillOwed = (d: string) => (d < b.date ? 0 : share(whole >= 0 ? Math.max(0, whole - settledBy('any', d) - creditTaken(d)) : Math.min(0, whole + creditUsed(d))));
     const moved = (f: (d: string) => number): Amounts => ({ current: f(p.fyEnd) - f(p.priorEnd), prior: f(p.priorEnd) - f(p.beforePrior) });
     const e = { line: b.line, investing: moved(notPaid), payables: moved(owed), owner: moved((d) => by('owner', d)), loan: moved((d) => by('loan', d)) };
     const noted = {
-      bill: { current: within(b.date, p.fyStart, p.fyEnd) ? owed(p.fyEnd) : 0, prior: within(b.date, p.priorStart, p.priorEnd) ? owed(p.priorEnd) : 0 },
+      bill: { current: within(b.date, p.fyStart, p.fyEnd) ? stillOwed(p.fyEnd) : 0, prior: within(b.date, p.priorStart, p.priorEnd) ? stillOwed(p.priorEnd) : 0 },
       owner: e.owner,
       loan: e.loan,
     };

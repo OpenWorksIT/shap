@@ -38,11 +38,11 @@ export async function taxPack(db: Db, fyEnd: string, o: { people?: boolean } = {
   const fy = financialYear(fyEnd, s.fyEndMonth);
   const kind = taxKind(s.businessType);
   await freshTotals(db);
-  const accounts = await db<{ code: string; name: string; type: string; systemKey: string | null; cents: string }[]>`
-    select a.code, a.name, a.type, a.system_key, coalesce(sum(l.amount_cents), 0)::bigint as cents
+  const accounts = await db<{ code: string; name: string; type: string; systemKey: string | null; statementLine: string | null; cents: string }[]>`
+    select a.code, a.name, a.type, a.system_key, a.statement_line, coalesce(sum(l.amount_cents), 0)::bigint as cents
     from accounts a join ledger_totals l on l.account_id = a.id and l.date between ${fy.start}::date and ${fy.end}::date
     where a.type in ('income', 'cost_of_sales', 'expense') group by a.id having sum(l.amount_cents) <> 0 order by a.code`;
-  const shown = accounts.map((a) => ({ code: a.code, name: a.name, type: a.type, isTax: a.systemKey === 'income_tax', cents: a.type === 'income' ? -Number(a.cents) : Number(a.cents) }));
+  const shown = accounts.map((a) => ({ code: a.code, name: a.name, type: a.type, isTax: a.systemKey === 'income_tax' || a.statementLine === 'income_tax', cents: a.type === 'income' ? -Number(a.cents) : Number(a.cents) }));
   const income = shown.filter((a) => a.type === 'income').reduce((t, a) => t + a.cents, 0);
   const costs = shown.filter((a) => a.type !== 'income' && !a.isTax).reduce((t, a) => t + a.cents, 0);
   const profitBeforeTax = income - costs;

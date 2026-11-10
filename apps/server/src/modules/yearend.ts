@@ -168,7 +168,7 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
       select a.id, a.code, a.name, a.type, a.system_key,
         coalesce((select sum(l.amount_cents) from ledger_totals l where l.account_id = a.id and l.date between ${fy.start}::date and ${asAt}::date), 0)::bigint as actual,
         coalesce((select sum(l.amount_cents) from ledger_totals l where l.account_id = a.id and l.date between ${prev.start}::date and ${prev.end}::date), 0)::bigint as prior
-      from accounts a where a.type in ('income', 'cost_of_sales', 'expense') and coalesce(a.system_key, '') <> 'income_tax'
+      from accounts a where a.type in ('income', 'cost_of_sales', 'expense') and coalesce(a.system_key, '') <> 'income_tax' and coalesce(a.statement_line, '') <> 'income_tax'
       order by a.code`;
     // A sole proprietor or partner doesn't pay themselves a salary: what they take out is drawings, not a cost.
     const always = new Set(entity(settings.businessType).payout === 'drawings' ? ['depreciation'] : ['director_salary', 'depreciation']);

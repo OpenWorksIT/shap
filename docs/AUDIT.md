@@ -230,6 +230,19 @@ The independent review (`apps/server/test/review-1.23/`), all fixed with tests:
 - An asset's bill settled by the owner personally or with a supplier's credit note showed as cash
   paid for it; subcontractors counted as employees in the public interest score; a reviewed close
   corporation's accounting officer's report said no review was done.
+- Shap Pocket: the statements' fingerprint used node:crypto, an empty stand-in where the books run
+  in the app, so uploading the signed compiler's report or approving failed there (from 1.6).
+  SHA-256 in plain JavaScript now, in both, and Pocket's tests check the engine imports nothing
+  of Node's.
+
+The reviewer then checked the fixes (`review-1.23/second-*.test.ts`). All fixed with tests: an
+asset's bill split between the bank, the owner and still owed rounded its parts one by one, so
+the cash flows missed the cash by a cent and the statements couldn't be signed; a trust giving
+out more than the year's income made an assessed loss of it (s25B: only the year's income is the
+beneficiaries'); the non-cash note miscounted a supplier's credit note on another cost type; a set
+signed on 1.22 was compared by its statements but not its notes; a later builder would have made
+every set signed now look changed; and whoever makes the invoices could no longer put a
+colleague's time on one.
 
 ### Code scanning (CodeQL), first run
 

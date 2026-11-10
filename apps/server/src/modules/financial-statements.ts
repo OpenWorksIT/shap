@@ -63,12 +63,13 @@ interface Row {
 
 /**
  * The fingerprint of a set (what's signed): from 1.23 (builder 2), of the books it was drawn from
- * (each account's figures, both years); before, of its statements and notes as they were drawn.
+ * (each account's figures, both years: the same from a later Shap that draws them differently, as
+ * long as it works out `books` the same way); before, of its statements and notes as they were drawn.
  */
 export const figuresHash = (s: Statements) =>
   sha256Hex(
     (s.builder ?? 1) >= 2
-      ? JSON.stringify({ builder: s.builder, books: s.books })
+      ? JSON.stringify({ books: s.books })
       : JSON.stringify({ sfp: s.sfp, sci: s.sci, soce: s.soce, scf: s.scf, notes: s.notes.map((n) => n.tables), detailed: s.detailed }),
   );
 
@@ -78,13 +79,16 @@ const canonical = (v: unknown): string =>
 
 /**
  * Whether the books still give a signed set's figures. A set signed on 1.22 or before is compared
- * by its four statements as drawn now (1.23 draws the cash flows and some notes differently from
- * the same books, which isn't the books changing).
+ * by what it shows, drawn now: the four statements and each of its notes' tables (1.23 draws the
+ * cash flows differently from the same books and adds a note on non-cash transactions, which
+ * isn't the books changing).
  */
 export function stillSigned(signed: { snapshot: Statements; snapshotHash: string | null }, now: Statements): boolean {
-  if ((signed.snapshot.builder ?? 1) >= 2) return figuresHash(now) === signed.snapshotHash;
+  if ((signed.snapshot.builder ?? 1) >= 2) return Boolean(now.books) && now.books === signed.snapshot.books;
   const four = (s: Statements) => canonical({ sfp: s.sfp, sci: s.sci, soce: s.soce, detailed: s.detailed });
-  return four(signed.snapshot) === four(now);
+  if (four(signed.snapshot) !== four(now)) return false;
+  const notesNow = new Map(now.notes.map((n) => [n.key, canonical(n.tables)]));
+  return signed.snapshot.notes.filter((n) => n.key !== 'non_cash').every((n) => notesNow.get(n.key) === canonical(n.tables));
 }
 
 async function row(db: Db, fyEnd: string): Promise<Row | null> {

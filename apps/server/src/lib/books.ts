@@ -90,19 +90,23 @@ export async function assessedLossBefore(db: Db, fyStart: string, fyEndMonth: nu
   if (kind === 'partners') return 0;
   const months = await db<{ m: string; cents: string }[]>`
     select to_char(l.date, 'YYYY-MM') as m, sum(l.amount_cents)::bigint as cents from ledger_totals l join accounts a on a.id = l.account_id
-    where a.type in ('income', 'cost_of_sales', 'expense') and coalesce(a.system_key, '') <> 'income_tax' and l.date < ${fyStart}::date group by 1`;
-  const years = new Map<string, number>();
-  const add = (month: string, profit: number) => {
+    where a.type in ('income', 'cost_of_sales', 'expense') and coalesce(a.system_key, '') <> 'income_tax' and coalesce(a.statement_line, '') <> 'income_tax'
+      and l.date < ${fyStart}::date group by 1`;
+  const years = new Map<string, { profit: number; given: number }>();
+  const add = (month: string, k: 'profit' | 'given', cents: number) => {
     const end = financialYear(`${month}-01`, fyEndMonth).end;
-    years.set(end, (years.get(end) ?? 0) + profit);
+    const y = years.get(end) ?? { profit: 0, given: 0 };
+    y[k] += cents;
+    years.set(end, y);
   };
-  for (const r of months) add(r.m, -Number(r.cents));
+  for (const r of months) add(r.m, 'profit', -Number(r.cents));
   if (kind === 'trust') {
+    // Only the year's income can be the beneficiaries' (s25B): giving out more doesn't make a loss.
     const given = await db<{ m: string; cents: string }[]>`
       select to_char(declared_on, 'YYYY-MM') as m, sum(gross_cents)::bigint as cents from dividends where conduit and declared_on < ${fyStart}::date group by 1`;
-    for (const r of given) add(r.m, -Number(r.cents));
+    for (const r of given) add(r.m, 'given', Number(r.cents));
   }
-  return assessedLossCarried(kind, [...years].map(([fyEnd, profitCents]) => ({ fyEnd, profitCents })));
+  return assessedLossCarried(kind, [...years].map(([fyEnd, y]) => ({ fyEnd, profitCents: y.profit - Math.min(y.given, Math.max(0, y.profit)) })));
 }
 
 export async function getSettings(db: Db): Promise<SettingsRow> {
