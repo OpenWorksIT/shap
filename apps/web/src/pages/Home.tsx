@@ -40,6 +40,8 @@ interface Dashboard {
   billsDue?: { id: string; supplier: string; description: string; dueDate: string | null; date: string; owingCents: number }[];
   timer?: Running | null;
   taxDue?: { key: string; label: string; due: string; to: string }[];
+  /** This version's SARS tables were checked up to this year end, before the tax year we're in. */
+  sarsCheckedTo?: string | null;
   bankCents: number;
   ownerLoanCents: number;
   projects: ProjectRow[];
@@ -135,6 +137,16 @@ function OwnerHome() {
           Stop
         </button>
       </div>
+    ),
+    data.sarsCheckedTo && (
+      <Link key="sars-tables" to="/settings?tab=system" className="attention">
+        <Icon name="alert" size={18} />
+        <span className="grow">
+          <strong>SARS’s new tax year</strong>: this version of Shap has SARS’s tables up to the year ended {formatDate(data.sarsCheckedTo)}. Update Shap before you run payroll or estimate tax for the new year.
+        </span>
+        Updates
+        <Icon name="chevronRight" size={16} />
+      </Link>
     ),
     ...(data.taxDue ?? []).map((t) => (
       <Link key={t.key} to={t.to} className="attention">

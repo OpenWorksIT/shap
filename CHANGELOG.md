@@ -8,22 +8,32 @@ entries newer than the version you're running before you update.
 The tax and SARS rules checked again by an accountant, and every update now goes through four
 reviews (CPDAUDIT.md).
 
-- **Small business corporations**: say once whether the company qualifies (s12E: Settings → Tax,
-  VAT and the financial year, or on the financial statements or the provisional tax screen), and
-  the provisional tax estimate, the financial statements and the tax pack all go by it. Until
-  it's said, they show both figures (they used the flat 27% unless a provisional estimate for that
-  year said otherwise, so the statements' "income tax" item showed the wrong tax). Gross income
-  over R20 million rules the table out. The tax note shows the SBC rates' effect on its own line.
+- **Small business corporations**: say for each year whether the company qualifies (s12E), on the
+  financial statements or the provisional tax screen (the owner or the accountant); a year not
+  answered takes the last year's answer. The provisional tax estimate, the financial statements
+  and the tax pack all go by it. Until it's said, they show both figures (they used the flat 27%
+  unless a provisional estimate for that year said otherwise, so the statements' "income tax" item
+  showed the wrong tax). Gross income over R20 million rules the table out. Saving a provisional
+  estimate no longer answers the question. All estimates: your accountant confirms the tax.
 - The statements' income tax item compares the tax booked with the estimate (a provisional
-  payment booked as the expense no longer passes for the year's tax), and "Book the tax" is gone
-  from a year agreed with your accountant or closed, where it changed nothing.
-- **Provisional tax paid** (IRP6): record it from the provisional tax screen; it comes off what's
-  owed to SARS for the year's income tax.
+  payment booked as the expense no longer passes for the year's tax); nothing due on the SBC table
+  is nothing to book; "Book the tax" is gone from a year agreed with your accountant (or with a
+  later year agreed) or closed, where it changed nothing; a company on turnover tax isn't asked
+  for income tax.
+- The tax note: the SBC rates' effect on a line of its own when the tax booked is on that table,
+  both years' company rates when they differ, and an assessed loss carried forward. Statements
+  approved on 1.22 stay approved.
+- **Provisional tax paid** (IRP6): the owner records it from the provisional tax screen (only for a
+  business taxed on its own profit); it comes off what's owed to SARS for the year's income tax,
+  the screen lists what's been paid and takes it off what's still to pay, and the tax pack keeps
+  what was paid apart from the tax booked. Deleting any SARS payment is logged. The company file
+  carries the SBC answers.
 - The small business corporation tables back to 2021 (a year ending 31 March 2023 at 27% above
   R550 000), 2023's medical scheme credits, and **VAT categories D** (six-monthly) and **E**
   (yearly). The dividends tax return named with its DTR02.
 - Every SARS figure is listed with its source in docs/SARS.md, and from 1 March each year the
-  checks fail until the new tax year's figures are in.
+  checks fail until the new tax year's figures are in; the home page says when this version's SARS
+  tables end before the tax year you're in.
 
 ## 1.23.1 (10 November 2026)
 

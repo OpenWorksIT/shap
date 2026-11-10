@@ -87,8 +87,12 @@ export function stillSigned(signed: { snapshot: Statements; snapshotHash: string
   if ((signed.snapshot.builder ?? 1) >= 2) return Boolean(now.books) && now.books === signed.snapshot.books;
   const four = (s: Statements) => canonical({ sfp: s.sfp, sci: s.sci, soce: s.soce, detailed: s.detailed });
   if (four(signed.snapshot) !== four(now)) return false;
-  const notesNow = new Map(now.notes.map((n) => [n.key, canonical(n.tables)]));
-  return signed.snapshot.notes.filter((n) => n.key !== 'non_cash').every((n) => notesNow.get(n.key) === canonical(n.tables));
+  // The tax note by its current tax only: its reconciliation is worded and split differently from
+  // 1.23.2 (the small business corporation rates on a line of their own), from the same figures
+  // the income statement already compares.
+  const tablesOf = (n: Statements['notes'][number]) => canonical(n.key === 'tax' ? n.tables.slice(0, 1) : n.tables);
+  const notesNow = new Map(now.notes.map((n) => [n.key, tablesOf(n)]));
+  return signed.snapshot.notes.filter((n) => n.key !== 'non_cash').every((n) => notesNow.get(n.key) === tablesOf(n));
 }
 
 async function row(db: Db, fyEnd: string): Promise<Row | null> {
@@ -179,8 +183,9 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
     if (r?.snapshot && r.snapshotHash && (r.status === 'compiled' || r.status === 'approved')) changedSince = !stillSigned(r as { snapshot: Statements; snapshotHash: string }, await buildStatements(sql, fyEnd, statements.details));
     const audit = (await auditBooks(sql, fyEnd, { people: can(userOrThrow(req), 'payroll.view') })).filter((i) => i.level !== 'ok');
     // Agreed with the accountant (its accounts held at the agreed figures: a journal into it doesn't
-    // move them), or closed (nothing more is posted into it): the year's tax goes in another way.
-    const [agreed] = await sql`select 1 from year_ends where fy_end = ${fyEnd}::date`;
+    // move them), or a later year is (a journal here would move what it was agreed at), or closed
+    // (nothing more is posted into it): the year's tax goes in another way.
+    const [agreed] = await sql`select 1 from year_ends where fy_end >= ${fyEnd}::date limit 1`;
     const settings = await getSettings(sql);
     const yearClosed = Boolean(settings.lockDate && String(settings.lockDate) >= fyEnd);
     return { statements, status: r?.status ?? 'draft', row: r ? { ...r, snapshot: undefined } : null, changedSince, audit, yearAgreed: Boolean(agreed), yearClosed };

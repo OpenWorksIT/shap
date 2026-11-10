@@ -139,10 +139,11 @@ export function FinancialStatements() {
       toast(err instanceof ApiError ? err.message : 'Couldn’t book it', 'error');
     }
   };
-  // The small business corporation question (s12E), answered here for the statements, the tax pack and the IRP6.
+  // The small business corporation question (s12E) for the year, answered here for the statements, the tax pack and the IRP6.
   const answerSbc = async (sbc: boolean) => {
+    if (!s) return;
     try {
-      await api('/api/settings/sbc', { method: 'PUT', body: { sbc } });
+      await api('/api/tax/sbc', { method: 'PUT', body: { fyEnd: s.fyEnd, sbc } });
       toast(sbc ? 'On the small business corporation table' : 'At the company rate');
       await reload();
     } catch (err) {
@@ -289,7 +290,7 @@ export function FinancialStatements() {
                   {!c.ok && c.detail && <div className="xs">{c.detail}</div>}
                   {!c.ok && c.label.startsWith('The year’s income tax') && s.taxEstimate && (status === 'draft' || status === 'sent') && (
                     <div className="row wrap" style={{ marginTop: 6 }}>
-                      {s.taxEstimate.sbc === null && isOwner ? (
+                      {s.taxEstimate.sbc === null && (isOwner || accountant) ? (
                         <>
                           <button type="button" className="btn small" onClick={() => void answerSbc(true)}>
                             It qualifies: <Money cents={s.taxEstimate.sbcTaxCents ?? 0} />

@@ -85,8 +85,6 @@ export const settingsInput = z.object({
   businessType: z.enum(BUSINESS_TYPES).default('company'),
   /** A non-profit company that SARS has approved as a public benefit organisation (tax-exempt). */
   approvedPbo: z.boolean().default(false),
-  /** Qualifies as a small business corporation (s12E): yes, no, or not said (null). Left out, it stays as it is. */
-  sbc: z.boolean().nullable().optional(),
   features: z.record(z.string(), z.boolean()).default({}),
   /** Casual ("Howzit, lekker") or formal words in the app. */
   tone: z.enum(['casual', 'formal']).default('casual'),
@@ -524,7 +522,7 @@ export const dividendInput = z.object({
 export const sarsPaymentInput = z.object({
   /** EMP201 (PAYE, UIF, SDL), dividends tax, or provisional tax (IRP6: paid towards the year's income tax). */
   kind: z.enum(['emp201', 'dwt', 'irp6']),
-  period: z.string().regex(/^\d{4}-\d{2}$/),
+  period: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Choose the month'),
   date: isoDate,
   amountCents: positiveCents,
   sourceId: uuid,

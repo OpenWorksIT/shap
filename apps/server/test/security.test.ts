@@ -208,7 +208,7 @@ describe('breaking in', () => {
     // Money site staff may never read (the same list as the penetration test's).
     const siteNeverReads = /^\/api\/(reports|vat|payroll|sales|stock|statements|pay-runs|audit|system|users|year-ends|journals|bank|tax|accounts\/|dividends|documents\/[^/]+\/pdf|export)/;
     // Everyone signed in can send feedback.
-    const accountantMay = new Set(['POST /api/auth/mfa/setup', 'POST /api/auth/mfa/disable', 'POST /api/auth/mfa/recovery-codes', 'POST /api/auth/password', 'POST /api/feedback', 'PUT /api/statements/details', 'POST /api/statements/:fyEnd/compile']);
+    const accountantMay = new Set(['POST /api/auth/mfa/setup', 'POST /api/auth/mfa/disable', 'POST /api/auth/mfa/recovery-codes', 'POST /api/auth/password', 'POST /api/feedback', 'PUT /api/statements/details', 'POST /api/statements/:fyEnd/compile', 'PUT /api/tax/sbc']);
     const site = await login(env.app, 'site@example.co.za');
     const acc = await login(env.app, 'accountant@example.co.za');
     const id = '00000000-0000-4000-8000-000000000000';

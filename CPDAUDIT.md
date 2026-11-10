@@ -48,8 +48,11 @@ Then:
 ## 2. When SARS changes something: the standard update
 
 A Budget, a new table or rate, a new form or due date: anything in docs/SARS.md that changes.
-And every 1 March, CI fails until the new tax year's figures are checked (`SARS_CHECKED_TO`,
-`packages/shared/src/tax.ts`), so a year can't start on last year's tables unnoticed.
+And from 1 March, the tests fail until the new tax year's figures are checked (`SARS_CHECKED_TO`,
+`packages/shared/src/tax.ts`), so a year can't start on last year's tables unnoticed: CI runs on
+1 March and each Monday in March even with nothing pushed, and a server's home page tells the
+owner its tables end before the tax year it's in. When a Budget's figures are still a bill, say
+so in docs/SARS.md, and check them again once the Act is promulgated.
 
 1. The SARS review (section 1) on what changed, from SARS's own pages: each figure, the years it
    applies to (a table applies to years of assessment ending on or after its `from`; a year
@@ -315,9 +318,9 @@ with tests:
 - A company that qualifies as a small business corporation was estimated at 27% (R108 000 on
   R400 000 of profit, against R26 198 on SARS's table) unless a provisional estimate for that
   very year said otherwise, and the statements and the tax pack could pick different estimates.
-  The business now says once whether it qualifies (s12E, Settings, or on the statements and the
-  IRP6): every estimate goes by it, gross income over R20 million rules the table out, and not
-  said, both figures are shown. The tax note shows the SBC rates' effect on its own line.
+  The business now says whether it qualifies (s12E) on the statements or the IRP6 screen: every
+  estimate goes by it, gross income over R20 million rules the table out, and not said, both
+  figures are shown. The tax note shows the SBC rates' effect on its own line.
 - Any tax in the books hid the estimate (a provisional payment journalled to the expense made it
   look booked): the tax booked is now compared with the estimate. Provisional tax paid has its
   own SARS payment (off what's owed to SARS).
@@ -329,6 +332,35 @@ with tests:
   and E (yearly) were missing; the dividends tax return was named without its DTR02.
 - Each figure is now in docs/SARS.md with its source, and CI fails on 1 March until the new tax
   year's figures have been checked (`SARS_CHECKED_TO`).
+
+Then the four reviews of the fixes (each by a separate agent), all fixed with tests
+(`apps/server/test/review-1.23/sbc-and-sars.test.ts`, "the four reviews of 1.23.2"):
+
+- Security and privacy: provisional tax paid (the year's income tax, so the profit) could be
+  recorded, listed and deleted by staff given payroll: now the owner's, and listed only to those
+  who see the books. Deleting a SARS payment wasn't logged. Saving a provisional estimate answered
+  the SBC question for the business. A VAT201 for a date in the year 9999 was a server error. A
+  sole proprietor could record provisional tax (theirs is the owner's own), and for any month.
+- IFRS for SMEs and company law: the SBC answer was one for every year (SARS tests it each year
+  of assessment): now per year, carried forward until changed, and the accountant may give it.
+  The SBC line in the tax note went by the answer, not the tax booked (a wrong line when they
+  differ): now by the tax booked. Nothing due on the SBC table showed "Book R0,00". A company on
+  turnover tax was asked for income tax. A year was offered the tax booking when a later year was
+  agreed. The rate line didn't name both years' rates when they differ (29.41(d)), and an assessed
+  loss carried forward wasn't told. A set approved on 1.22 would have read as changed (the tax
+  note's reconciliation is drawn differently): compared by its current tax only. The docs claimed
+  a director's remuneration note Shap doesn't draw.
+- SARS and tax: the SBC tests are SARS's for each year of assessment (above); nothing told a
+  server's owner that its tables were behind the tax year (now the home page, and CI on 1 March and
+  each Monday in March); docs/SARS.md now says the 2026/27 figures are still a bill (B34—2026), with
+  SARS's own sources, the micro business dividend exemption and the trust's IT3(t), and what isn't
+  modelled (gross income is taken as the income accounts).
+- Accounting and arithmetic: the IRP6 screen ignored provisional tax already paid; the tax pack
+  took a payment and the tax booked on the same day as one; the migration inferred the SBC answer
+  from estimates saved with the box ticked by default (now nothing is inferred); the company file
+  left the answers out. The same figures everywhere (statements, tax pack, IRP6), checked by the
+  tests. Accepted: tax overpaid shows as a negative liability, not an asset; the accountant
+  reclassifies it where it matters.
 
 ### Code scanning (CodeQL), first run
 

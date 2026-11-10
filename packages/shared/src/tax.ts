@@ -320,9 +320,10 @@ export function estimateTax(f: TaxEstimateFigures): { taxableCents: number; reti
 /* ---------------------------------------------------------------- turnover tax (micro businesses) */
 
 /**
- * Turnover tax: a simple tax on turnover for micro businesses (turnover up to R2.3 million from
- * 1 April 2026). It replaces income tax, provisional tax, capital gains tax and dividends tax
- * (VAT stays optional). SARS: https://www.sars.gov.za/types-of-tax/turnover-tax/
+ * Turnover tax: a simple tax on turnover for micro businesses (turnover up to R2.3 million for
+ * years of assessment from 1 March 2026, as Budget 2026 proposes; R1 million before). It replaces
+ * income tax, provisional tax, capital gains tax and dividends tax (VAT stays optional).
+ * SARS: https://www.sars.gov.za/types-of-tax/turnover-tax/ (docs/SARS.md)
  * Bands in rand: [from, base tax, rate above from].
  */
 const TURNOVER_TABLES: { from: string; bands: [number, number, number][] }[] = [
@@ -350,11 +351,10 @@ export function turnoverTax(turnoverCents: number, yearEnd: string): number {
 
 /* ---------------------------------------------------------------- VAT201 periods */
 
-/** The VAT period (two months for categories A and B, one for C) ending in or before `on`'s month. */
 /**
  * SARS's VAT categories (tax periods): https://www.sars.gov.za/types-of-tax/value-added-tax/tax-periods-for-vat-vendors/
  * D is mainly for small farmers and micro businesses on turnover tax; E for some companies, trusts
- * and lessors (VAT 404, chapter 3).
+ * and lessors (VAT 404, chapter 3). `vatPeriod`: the period containing `on`.
  */
 export const VAT_CATEGORIES = ['A', 'B', 'C', 'D', 'E'] as const;
 export type VatCategory = (typeof VAT_CATEGORIES)[number];

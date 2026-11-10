@@ -17,6 +17,7 @@ import {
   addDays,
   companyRate,
   estimateTax,
+  assessedLossSetOff,
   SBC_GROSS_INCOME_LIMIT_CENTS,
   sbcApplies,
   sha256Hex,
@@ -40,7 +41,7 @@ import {
   type StatementSection,
 } from '@shap/shared';
 import type { Db } from '../db/index.js';
-import { assessedLossBefore, freshTotals, getSettings } from '../lib/books.js';
+import { assessedLossBefore, freshTotals, getSettings, sbcAnswer } from '../lib/books.js';
 import { defaultPolicies, directorsReport, governingFor, type StatementDetails, loadDetails } from './details.js';
 
 export interface Amounts {
@@ -443,23 +444,32 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
 
   // ---------------------------------------------------------------- the year's income tax, as estimated
   // Section 29: for the tax note and the look item below. A company on the small business
-  // corporation table if it says it qualifies (s12E, Settings) and its gross income is within the
-  // limit; not said, both figures are shown. An estimate: the accountant works out the tax.
+  // corporation table if it says it qualifies that year (s12E: sbc_years) and its gross income is
+  // within the limit; not said, both figures are shown. An estimate: the accountant works out the
+  // tax. A business on turnover tax pays that instead of income tax on its profit.
   const taxedAs = entity(bt).taxedAs;
-  const taxed = (taxedAs === 'company' || taxedAs === 'npc' || taxedAs === 'trust') && !(bt === 'npc' && settings.approvedPbo);
-  const taxYear = async (end: string, start: string, pbt: number, gross: number) => {
+  const taxed = (taxedAs === 'company' || taxedAs === 'npc' || taxedAs === 'trust') && !(bt === 'npc' && settings.approvedPbo) && !settings.turnoverTax;
+  const taxYear = async (end: string, start: string, pbt: number, gross: number, booked: number) => {
     const assessedLossCents = await assessedLossBefore(db, start, settings.fyEndMonth, taxedAs);
-    const sbc = taxedAs === 'company' && entity(bt).sbcPossible ? sbcApplies(settings.sbc, gross) : false;
+    const answer = taxedAs === 'company' ? await sbcAnswer(db, end, bt) : { sbc: false, said: false, from: null };
+    const sbc = taxedAs === 'company' && entity(bt).sbcPossible ? sbcApplies(answer.sbc, gross) : false;
     // A trust is taxed on what it keeps: what it gave its beneficiaries in the year is theirs.
     const [given] = taxedAs === 'trust' ? await db<{ t: string }[]>`select coalesce(sum(gross_cents), 0)::bigint as t from dividends where conduit and declared_on between ${start}::date and ${end}::date` : [{ t: '0' }];
     const est = (onSbc: boolean) => estimateTax({ kind: taxedAs, profitCents: pbt, assessedLossCents, fyEnd: end, sbc: onSbc, approvedPbo: settings.approvedPbo, distributedCents: Number(given!.t) });
     const standard = est(false);
     const onSbc = sbc === false ? standard : est(true);
-    return { assessedLossCents, sbc, gross, standard, onSbc, e: sbc === true ? onSbc : standard };
+    // Near enough: within 10% of the estimate (or R100), the accountant's own figure.
+    const near = (cents: number) => Math.abs(booked - cents) <= Math.max(10_000, Math.round(cents * 0.1));
+    // The tax booked is on the SBC table (for the tax note's line): unless said not to, near the
+    // SBC figure and not the flat rate's.
+    const bookedOnSbc = sbc !== false && booked !== 0 && onSbc.taxCents !== standard.taxCents && near(onSbc.taxCents) && Math.abs(booked - onSbc.taxCents) < Math.abs(booked - standard.taxCents);
+    // The assessed loss left to carry into the next year (unused tax losses, 29.41(f)).
+    const loss = pbt < 0 ? assessedLossCents - pbt : assessedLossCents - assessedLossSetOff(taxedAs, pbt, assessedLossCents, end);
+    return { assessedLossCents, sbc, answer, gross, standard, onSbc, booked, near, bookedOnSbc, lossCarriedCents: Math.max(0, loss), e: sbc === true ? onSbc : standard };
   };
   const grossIncome = (c: 'current' | 'prior') => sum([...revenue, ...otherIncome, ...financeIncome].map((l) => l[c]));
-  const taxNow = taxed ? await taxYear(fyEnd, fyStart, profitBeforeTax.current, grossIncome('current')) : null;
-  const taxBefore = taxed && hasPrior ? await taxYear(priorEnd, priorStart, profitBeforeTax.prior, grossIncome('prior')) : null;
+  const taxNow = taxed ? await taxYear(fyEnd, fyStart, profitBeforeTax.current, grossIncome('current'), -incomeTax.current) : null;
+  const taxBefore = taxed && hasPrior ? await taxYear(priorEnd, priorStart, profitBeforeTax.prior, grossIncome('prior'), -incomeTax.prior) : null;
 
   // ---------------------------------------------------------------- notes
   const notes: Note[] = [];
@@ -597,11 +607,17 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
     .filter((s) => s.current !== 0 || s.prior !== 0);
   if (stated.length) addNote({ key: 'operating_profit', title: 'Operating profit', paragraphs: ['Operating profit for the year is stated after:'], tables: [{ rows: stated }] });
   if (financeCosts.length) addNote({ key: 'finance_costs', title: 'Finance costs', paragraphs: [], tables: [plTable('finance_costs')] });
-  if (incomeTax.current !== 0 || incomeTax.prior !== 0 || lineTotals.has('current_tax_liability'))
+  if (incomeTax.current !== 0 || incomeTax.prior !== 0 || lineTotals.has('current_tax_liability') || (taxNow?.lossCarriedCents ?? 0) > 0)
     addNote({
       key: 'tax',
       title: 'Taxation',
-      paragraphs: [details.taxNote].filter(Boolean),
+      paragraphs: [
+        details.taxNote,
+        // Unused tax losses (29.41(f)): what Shap works out from the books, an estimate.
+        taxNow && taxNow.lossCarriedCents > 0
+          ? `The ${entity(bt).the.replace(/^the /, '')} has an estimated assessed loss of ${formatZar(taxNow.lossCarriedCents)} to carry forward against future taxable income (unused tax losses, worked out from the books: the assessment by SARS is what counts).`
+          : '',
+      ].filter(Boolean),
       tables: [
         { rows: [{ label: 'Current tax', current: -incomeTax.current, prior: -incomeTax.prior, bold: true }] },
         // How the tax expense relates to the profit: at the company rate, the small business
@@ -610,17 +626,25 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
           ? (() => {
               const rate = (end: string) => (end >= '2023-03-31' ? 27 : 28);
               const at = { current: Math.round((profitBeforeTax.current * rate(fyEnd)) / 100), prior: hasPrior ? Math.round((profitBeforeTax.prior * rate(priorEnd)) / 100) : 0 };
-              // The SBC rates' effect: the tax on the year's taxable income on the SBC table, less at the company rate.
-              const sbcEffect = (t: typeof taxNow) => (t?.sbc === true ? t.onSbc.taxCents - t.standard.taxCents : 0);
+              // The SBC rates' effect, for a year whose tax booked is on the SBC table: the tax on
+              // its taxable income on the table, less at the company rate. Otherwise in the last line.
+              const sbcEffect = (t: typeof taxNow) => (t?.bookedOnSbc ? t.onSbc.taxCents - t.standard.taxCents : 0);
               const effect = { current: sbcEffect(taxNow), prior: sbcEffect(taxBefore) };
+              const sbcLine = effect.current !== 0 || effect.prior !== 0;
+              // The rate changed between the years (28% to 27% for years ending from 31 March 2023): both named (29.41(d)).
+              const rates = hasPrior && rate(priorEnd) !== rate(fyEnd) ? `${rate(fyEnd)}%; the previous year ${rate(priorEnd)}%` : `${rate(fyEnd)}%`;
               return [
                 {
                   head: ['Reconciliation of the tax expense'],
                   rows: [
                     { label: 'Profit before taxation', current: profitBeforeTax.current, prior: hasPrior ? profitBeforeTax.prior : null },
-                    { label: `Tax at the company rate (${rate(fyEnd)}%)`, current: at.current, prior: hasPrior ? at.prior : null },
-                    ...(effect.current || effect.prior ? [{ label: 'Small business corporation rates (s12E)', current: effect.current, prior: hasPrior ? effect.prior : null }] : []),
-                    { label: 'Items not deductible or not taxable, losses, and other differences', current: -incomeTax.current - at.current - effect.current, prior: hasPrior ? -incomeTax.prior - at.prior - effect.prior : null },
+                    { label: `Tax at the company rate (${rates})`, current: at.current, prior: hasPrior ? at.prior : null },
+                    ...(sbcLine ? [{ label: 'Small business corporation rates (s12E)', current: effect.current, prior: hasPrior ? effect.prior : null }] : []),
+                    {
+                      label: sbcLine || !entity(bt).sbcPossible ? 'Items not deductible or not taxable, losses, and other differences' : 'Small business corporation rates, items not deductible or not taxable, and other differences',
+                      current: -incomeTax.current - at.current - effect.current,
+                      prior: hasPrior ? -incomeTax.prior - at.prior - effect.prior : null,
+                    },
                     { label: 'Tax expense', current: -incomeTax.current, prior: hasPrior ? -incomeTax.prior : null, bold: true },
                   ],
                 },
@@ -707,17 +731,16 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
   // Income tax (section 29): a business taxed on its own profit has the year's tax in the books.
   let taxEstimate: Statements['taxEstimate'] = null;
   if (taxNow) {
-    const { e, sbc, standard, onSbc, assessedLossCents } = taxNow;
-    const booked = -incomeTax.current;
+    const { e, sbc, standard, onSbc, assessedLossCents, near, booked, answer } = taxNow;
     const pct = Math.round(companyRate(fyEnd) * 100);
     const rates = sbc === true ? ' (small business corporation rates)' : taxedAs === 'company' ? ` (at ${pct}%${sbc === false && taxNow.gross > SBC_GROSS_INCOME_LIMIT_CENTS ? ': gross income over R20 million, so not the small business corporation table' : ''})` : '';
+    const said = answer.sbc !== null && !answer.said && answer.from ? ` (as said for the year to ${formatDate(answer.from)})` : '';
     const estimate =
       sbc === null && onSbc.taxCents !== standard.taxCents
-        ? `${formatZar(onSbc.taxCents)} at the small business corporation rates if the company qualifies (s12E), or ${formatZar(standard.taxCents)} at ${pct}% if it doesn't (say which on this screen, or in Settings under Tax, VAT and the financial year)`
-        : `${formatZar(e.taxCents)} on a taxable income of ${formatZar(e.taxableCents)}${rates}`;
-    // Near enough: within 10% of the estimate (or R100), the accountant's own figure.
-    const near = (cents: number) => Math.abs(booked - cents) <= Math.max(10_000, Math.round(cents * 0.1));
-    const nothingDue = standard.taxCents === 0 && onSbc.taxCents === 0;
+        ? `${formatZar(onSbc.taxCents)} at the small business corporation rates if the company qualifies this year (s12E), or ${formatZar(standard.taxCents)} at ${pct}% if it doesn't (say which on this screen, or on the provisional tax screen)`
+        : `${formatZar(e.taxCents)} on a taxable income of ${formatZar(e.taxableCents)}${rates}${sbc === true ? said : ''}`;
+    // Nothing due: on the answer given, or, not said, on either.
+    const nothingDue = sbc === null ? standard.taxCents === 0 && onSbc.taxCents === 0 : e.taxCents === 0;
     const ok = booked === 0 ? nothingDue : sbc === null ? near(onSbc.taxCents) || near(standard.taxCents) : near(e.taxCents);
     if (booked === 0 && !nothingDue)
       taxEstimate = { profitCents: profitBeforeTax.current, assessedLossCents, taxableCents: e.taxableCents, taxCents: e.taxCents, sbc, sbcTaxCents: onSbc.taxCents, standardTaxCents: standard.taxCents };

@@ -348,20 +348,6 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
                 </span>
               </label>
             )}
-            {kind.sbcPossible && (
-              <Field
-                label="A small business corporation (s12E)?"
-                hint="If it qualifies, its income tax is on SARS’s small business corporation table rather than the flat 27%: gross income up to R20 million, every shareholder a natural person holding no shares in another company (bar listed shares and a few others), no more than 20% of its income from investments and personal services, and not a personal service provider. Your accountant can tell you. Used for the provisional tax estimate, the financial statements and the tax pack."
-              >
-                {(p) => (
-                  <select {...p} className="select" value={f.sbc == null ? '' : f.sbc ? 'yes' : 'no'} onChange={(e) => set('sbc', e.target.value === '' ? null : e.target.value === 'yes')}>
-                    <option value="">Not sure yet (estimates show both)</option>
-                    <option value="yes">Yes, it qualifies</option>
-                    <option value="no">No: the flat company rate</option>
-                  </select>
-                )}
-              </Field>
-            )}
             <label className="check">
               <input type="checkbox" checked={f.vatRegistered} onChange={(e) => set('vatRegistered', e.target.checked)} />
               <span>

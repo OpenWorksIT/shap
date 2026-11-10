@@ -61,10 +61,13 @@ The draft is always built from the books as they are. Before it can be signed:
 **For your accountant to look at** (shown with the checks, never stopping the signing): what the
 standard asks that the books alone can't settle.
 
-- the year's income tax (a company, trust or taxed NPC): none booked, Shap shows its estimate
-  (the profit less any assessed loss, at the company rate, or the small business corporation rates
-  if the year's last provisional estimate said so) and books it with one tap, as a journal (income
-  tax against tax owed) the accountant can change;
+- the year's income tax (a company, trust or taxed NPC; not one on turnover tax): none booked, or
+  far from Shap's estimate (more than 10% and R100 apart), Shap shows its estimate (the profit less
+  any assessed loss, at the company rate, or the small business corporation rates if the business
+  said it qualifies for that year; not said yet, both figures and the question) and books it with
+  one tap, as a journal (income tax against tax owed) the accountant can change. Not where the
+  year, or a later one, is agreed with the accountant or the year is closed: the tax goes in
+  through them. Nothing due on the SBC table is nothing to book;
 - stock carried above what it will sell for (write it down: Inventory → Valuation);
 - work in progress at the year end (a job that will make a loss; work done but not invoiced);
 - invoices more than a year overdue (write them off if they won't be paid);
@@ -86,7 +89,9 @@ A sole proprietor's or partnership's statements say the owner's (partners') word
 as drawings, provide no income tax, and are prepared on the basis of accounting note 1 describes
 (the recognition and measurement principles of the IFRS for SMEs Accounting Standard), which the
 compiler's report then names. A company's tax note explains the tax expense against the profit at
-the company rate.
+the company rate (both years' rates when they differ), with the small business corporation rates on
+a line of their own when the tax booked is on that table, and tells of an assessed loss carried
+forward. An estimate only: the accountant confirms the tax, and deferred tax is their journal.
 
 When compiled, the figures are **frozen**: the set is kept exactly as signed, with a fingerprint
 of the books it was drawn from (each account's figures for both years: from 1.23, so a later Shap

@@ -15,7 +15,7 @@ import { entity, ESTIMATE_NOTE, ESTIMATE_SHORT, estimateTax, sbcApplies, feature
 import { z } from 'zod';
 import { requireAccess, can, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
-import { assessedLossBefore, freshTotals, getSettings, today } from '../lib/books.js';
+import { assessedLossBefore, freshTotals, getSettings, sbcAnswer, today } from '../lib/books.js';
 import { parse } from '../lib/validate.js';
 import { usePdfFonts } from './pdf.js';
 import { vat201 } from './taxforms.js';
@@ -50,16 +50,20 @@ export async function taxPack(db: Db, fyEnd: string, o: { people?: boolean } = {
   const extra = await taxFigures(db, s.businessType, fy);
   const estimates = await db<{ period: number; asAt: string; taxableIncomeCents: string; taxCents: string; payableCents: string; note: string; createdAt: Date; lines: { sbc?: boolean } }[]>`
     select period, as_at::text as as_at, taxable_income_cents, tax_cents, payable_cents, note, created_at, lines from tax_estimates where fy_end = ${fy.end}::date order by period, created_at`;
-  // The small business corporation table if the company says it qualifies (Settings) and its gross
-  // income is within the limit; not said, both figures (the company rate's as the estimate).
-  const sbc = kind === 'company' && entity(s.businessType).sbcPossible ? sbcApplies(s.sbc, income) : false;
+  // The small business corporation table if the company says it qualifies for the year and its
+  // gross income is within the limit; not said, both figures (the company rate's as the estimate).
+  const sbc = kind === 'company' && entity(s.businessType).sbcPossible ? sbcApplies((await sbcAnswer(db, fy.end, s.businessType)).sbc, income) : false;
   const est = (onSbc: boolean) => estimateTax({ kind, profitCents: profitBeforeTax, assessedLossCents, fyEnd: fy.end, sbc: onSbc, approvedPbo: s.approvedPbo, distributedCents: extra.distributedCents, partners: extra.partners } as Parameters<typeof estimateTax>[0]);
   const estimate = est(sbc === true);
   const sbcTaxCents = sbc === null ? est(true).taxCents : null;
+  // Paid to SARS: each payment off what's owed (posting by posting, not the day's net, which a
+  // payment and the year's tax booked on the same day would cancel). Booked: the year's income tax
+  // expense, as the statements show it.
   const [paidTax] = await db<{ paid: string; booked: string }[]>`
-    select coalesce(sum(l.amount_cents) filter (where l.amount_cents > 0), 0)::bigint as paid,
-           coalesce(-sum(l.amount_cents) filter (where l.amount_cents < 0), 0)::bigint as booked
-    from ledger_totals l join accounts a on a.id = l.account_id where a.system_key = 'income_tax_payable' and l.date between ${fy.start}::date and ${fy.end}::date`;
+    select coalesce((select sum(l.amount_cents) from ledger l join accounts a on a.id = l.account_id
+                     where a.system_key = 'income_tax_payable' and l.amount_cents > 0 and l.date between ${fy.start}::date and ${fy.end}::date), 0)::bigint as paid,
+           coalesce((select sum(l.amount_cents) from ledger l join accounts a on a.id = l.account_id
+                     where (a.system_key = 'income_tax' or a.statement_line = 'income_tax') and l.date between ${fy.start}::date and ${fy.end}::date), 0)::bigint as booked`;
   // VAT201s: each period that ends in the year.
   const vat: { start: string; end: string; due: string; fields: Awaited<ReturnType<typeof vat201>> }[] = [];
   if (s.vatRegistered) {
@@ -190,8 +194,8 @@ export function renderTaxPack(t: Awaited<ReturnType<typeof taxPack>>): Promise<B
   );
 
   // ---------------------------------------------------------------- income tax
-  heading('Income tax', 'Shap’s estimate from the year’s profit: what’s deductible and taxable differs from the books in ways only your tax practitioner settles (wear-and-tear, non-deductible costs, exempt income).');
-  table(
+  heading('Income tax', t.turnoverTax ? 'On turnover tax, which replaces income tax on the business’s profit: there’s no income tax estimate (turnover tax, below).' : 'Shap’s estimate from the year’s profit: what’s deductible and taxable differs from the books in ways only your tax practitioner settles (wear-and-tear, non-deductible costs, exempt income).');
+  if (!t.turnoverTax) table(
     ['', 'R'],
     [
       ['Profit (loss) before tax, from the books', t.profitBeforeTax],

@@ -16,13 +16,13 @@
 import { compact, keptNumber, uifSarsRefFor, payeRefProblem, taxNumberProblem, idNumberProblem, sdlRefFor, dividendInput, dividendTax, financialYear, microDividendTax, dwtDue, emp201Due, employeeInput, payLine, payLineInput, payRunInput, sarsPaymentInput, taxYearEnd, type AgeBand, entity, paysOutProfit, payoutWord } from '@shap/shared';
 import PDFDocument from 'pdfkit';
 import { z } from 'zod';
-import { requireAccess, requireRole, userOrThrow } from '../auth.js';
+import { can, requireAccess, requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db, Tx } from '../db/index.js';
 import type { FastifyInstance } from 'fastify';
 import { audit } from '../lib/audit.js';
 import { assertOpen, centsToCsv, getSettings, q, today, toCsv, freshTotals } from '../lib/books.js';
-import { badRequest, conflict, notFound } from '../lib/errors.js';
+import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 import { shapFooter, usePdfFonts } from './pdf.js';
 
@@ -429,6 +429,16 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/sars-payments', { preHandler: requireAccess('payroll.run') }, async (req) => {
     const user = userOrThrow(req);
     const input = parse(sarsPaymentInput, req.body);
+    if (input.kind === 'irp6') {
+      // Provisional tax is the company's income tax: the owner's (as the tax estimates are), and
+      // only for a business taxed on its own profit (a sole proprietor's is the owner's own: drawings).
+      if (user.role !== 'owner') throw forbidden('Provisional tax is the owner’s to record');
+      const settings = await getSettings(sql);
+      const taxedAs = entity(settings.businessType).taxedAs;
+      if (!(taxedAs === 'company' || taxedAs === 'trust' || (taxedAs === 'npc' && !settings.approvedPbo)) || settings.turnoverTax)
+        throw badRequest(`${entity(settings.businessType).label}${settings.turnoverTax ? ' on turnover tax' : ''} pays no income tax of its own: provisional tax paid is the owner’s (drawings)`);
+      if (Number(input.period.slice(5, 7)) !== settings.fyEndMonth) throw badRequest('Provisional tax is for a year: give the month the year ends in');
+    }
     await assertOpen(sql, input.date);
     const src = await sourceAccount(sql, input.sourceId);
     const s = await sarsSummary(sql);
@@ -474,17 +484,24 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { id };
   });
 
-  app.get('/api/sars-payments', { preHandler: requireAccess('payroll.view') }, async () => sql`select p.*, s.name as source_name from sars_payments p join payment_sources s on s.id = p.source_id order by p.date desc`);
+  app.get('/api/sars-payments', { preHandler: requireAccess('payroll.view') }, async (req) => {
+    // Provisional tax tells the year's income tax (and so the profit): for those who see the books.
+    const books = can(userOrThrow(req), 'reports.view');
+    return sql`select p.*, s.name as source_name from sars_payments p join payment_sources s on s.id = p.source_id where ${books} or p.kind <> 'irp6' order by p.date desc`;
+  });
 
   app.delete('/api/sars-payments/:id', { preHandler: requireAccess('payroll.run') }, async (req) => {
+    const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
-    const [p] = await sql<{ date: string }[]>`select date::text from sars_payments where id = ${id}`;
+    const [p] = await sql<{ date: string; kind: string; period: string; amountCents: string }[]>`select date::text, kind, period, amount_cents from sars_payments where id = ${id}`;
     if (!p) throw notFound('Payment');
+    if (p.kind === 'irp6' && user.role !== 'owner') throw forbidden('Provisional tax is the owner’s to change');
     await assertOpen(sql, p.date);
     await sql.begin(async (tx) => {
       await tx`delete from journals where kind = 'sars' and source_id = ${id}`;
       await tx`delete from sars_payments where id = ${id}`;
     });
+    await audit(sql, { userId: user.id, action: 'delete', entity: 'sars_payment', entityId: id, ip: req.ip, details: { kind: p.kind, period: p.period, amountCents: Number(p.amountCents) } });
     return { ok: true };
   });
 
