@@ -54,8 +54,21 @@ const VAT_RATES: { from: string; bp: number }[] = [
   { from: '2018-04-01', bp: 1500 },
   { from: '1993-04-07', bp: 1400 },
 ];
-/** A full tax invoice (over R5 000) names the recipient and their address: VAT Act s20(4)(c). Up to it, an abridged one (a till slip) will do. */
+/** A full tax invoice (over R5 000) names the recipient and their address: VAT Act s20(4)(c). Up to it, an abridged one will do (s20(5)). */
 export const FULL_TAX_INVOICE_CENTS = 5_000_00;
+/** Paid in money and R50 or less: no tax invoice is needed at all (s20(6)). */
+export const NO_TAX_INVOICE_CENTS = 50_00;
+
+/**
+ * Whether a tax invoice must be the full one, with the recipient's name and address (s20(4)):
+ * over R5 000, or anything zero-rated (the abridged form "shall not apply to a supply that is
+ * charged with tax under section 11", the proviso to s20(5); VAT 404 13.1), unless it's R50 or less
+ * (s20(6)). https://www.sars.gov.za/businesses-and-employers/tax-invoices/
+ */
+export function needsFullTaxInvoice(totalCents: number, zeroRated: boolean): boolean {
+  const t = Math.abs(totalCents);
+  return t > FULL_TAX_INVOICE_CENTS || (zeroRated && t > NO_TAX_INVOICE_CENTS);
+}
 
 export const vatRateOn = (date: string) => (VAT_RATES.find((r) => date >= r.from) ?? VAT_RATES[VAT_RATES.length - 1]!).bp;
 

@@ -742,6 +742,9 @@ export async function applyPlan(tx: Db, plan: Plan, o: ApplyOptions, userId: str
   const counts = { clients: 0, clientsMatched: 0, items: 0, invoices: 0, quotes: 0, payments: 0, costs: 0, opening: false, skipped: [] as string[] };
   const note = (s: string) => counts.skipped.push(s);
   const lock = settings.lockDate;
+  // A year whose financial statements were approved takes nothing more, opening date or not.
+  const [signedRow] = await tx<{ signed: string | null }[]>`select max(fy_end)::text as signed from financial_statements where status = 'approved'`;
+  const signed = signedRow?.signed ?? null;
 
   // Clients: by name (case doesn't matter); the list's details fill in what's blank.
   const existing = await tx<{ id: string; name: string; code: string | null }[]>`select id, name, code from clients`;
@@ -785,7 +788,7 @@ export async function applyPlan(tx: Db, plan: Plan, o: ApplyOptions, userId: str
       note(`${d.kind === 'invoice' ? 'Invoice' : 'Quote'} ${d.number} is already in Shap`);
       continue;
     }
-    if (d.kind === 'invoice' && d.status !== 'draft' && lock && d.date <= lock && !o.openingDate) {
+    if (d.kind === 'invoice' && d.status !== 'draft' && ((lock && d.date <= lock && !o.openingDate) || (signed && d.date <= signed))) {
       note(`Invoice ${d.number} is dated in a closed period (${formatDate(d.date)})`);
       continue;
     }
@@ -838,7 +841,7 @@ export async function applyPlan(tx: Db, plan: Plan, o: ApplyOptions, userId: str
     const [billSrc] = await tx<{ id: string }[]>`select id from payment_sources where role = 'bills'`;
     const paidFrom = o.costSourceId ?? settings.defaultCostSourceId;
     for (const c of plan.costs) {
-      if (lock && c.date <= lock && !o.openingDate) {
+      if ((lock && c.date <= lock && !o.openingDate) || (signed && c.date <= signed)) {
         note(`A cost on ${formatDate(c.date)} is in a closed period`);
         continue;
       }

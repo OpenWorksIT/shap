@@ -81,7 +81,8 @@ describe('Shap 1.22’s review fixes, in Shap Pocket', () => {
     await me.post('/api/statements/2026-02-28/approve', { name: 'Fictional Owner', date: '2026-04-02' });
     const now = (await me.get('/api/reference')).settings;
     expect((await me.call({ method: 'POST', url: '/api/periods/reopen', payload: { to: null, reason: 'A missed invoice (made up)' } })).statusCode).toBe(400);
-    expect((await me.call({ method: 'POST', url: `/api/sales/${walkIn.id}/customer`, payload: { clientId: client.id } })).statusCode).toBe(400);
+    // A walk-in's details still go on in a closed (and signed) year: nothing it charges changes.
+    expect((await me.call({ method: 'POST', url: `/api/sales/${walkIn.id}/customer`, payload: { clientId: client.id } })).statusCode).toBe(200);
     // Saving the settings doesn't move the lock (it's under Accounts → Locks).
     expect((await me.call({ method: 'PUT', url: '/api/settings', payload: { ...now, lockDate: null } })).statusCode).toBe(200);
     expect((await me.get('/api/reference')).settings.lockDate).toBe('2026-02-28');

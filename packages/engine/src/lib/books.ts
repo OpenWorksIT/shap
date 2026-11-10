@@ -153,7 +153,24 @@ export async function applyMonthLock(db: Db): Promise<string | null> {
   if (u && u.lockDate !== s.lockDate) {
     await audit(db, { actor: 'system', action: 'lock', entity: 'period', details: { through: u.lockDate, was: s.lockDate, by: 'month end, by itself' } });
   }
-  return u?.lockDate ?? s.lockDate;
+  if (u) return u.lockDate;
+  // Another request locked it first (this one waited on the row): the lock as it is now.
+  const [now] = await db<{ lockDate: string | null }[]>`select lock_date::text as lock_date from settings where id`;
+  return now?.lockDate ?? null;
+}
+
+/**
+ * The lock as it stands, month end's own lock included, without writing it: for what a screen
+ * shows (a look changes nothing; the next change made locks it: applyMonthLock).
+ */
+export async function effectiveLock(db: Db): Promise<string | null> {
+  const [s] = await db<{ lockDate: string | null; monthEndMode: string; monthEndDay: number; monthLockedThrough: string | null; features: Record<string, boolean> | null }[]>`
+    select lock_date::text as lock_date, month_end_mode, month_end_day, month_locked_through::text as month_locked_through, features from settings where id`;
+  if (!s) return null;
+  if (s.monthEndMode !== 'auto' || !featureOn(s.features, 'sales')) return s.lockDate;
+  const due = monthLockDue(today(), s.monthEndDay);
+  if (s.monthLockedThrough && s.monthLockedThrough >= due) return s.lockDate;
+  return !s.lockDate || s.lockDate < due ? due : s.lockDate;
 }
 
 /** Refuse changes dated on or before the lock date (a closed month or year). */

@@ -6,17 +6,24 @@ What changed in each version of Shap Pocket, newest first.
 
 Every sale is a tax invoice, and the books lock month by month (from Shap 1.24).
 
-- **No more cash receipts for sales** (your accountant's call). Every sale is an invoice, issued
-  and paid on the spot, with the next number in the same series as your other invoices; a
-  walk-in's is the abridged tax invoice (no details needed up to R5 000). Not registered for VAT:
-  "Invoice", not "Tax invoice". The separate sale numbers and the slip are gone.
-- **Add the customer's details** to a walk-in's invoice afterwards: the same invoice and number.
-- Sales made before are invoices now, each at the number it was issued under.
+- **No more cash receipts for sales** (on an accountant's advice to OpenWorks IT; not advice for
+  your business: check with your own accountant). Every sale is an invoice, issued and paid on the
+  spot, with the next number in the same series as your other invoices. A walk-in needs no details
+  where SARS allows the abridged tax invoice: up to R5 000, and for zero-rated goods only up to R50
+  (over that, or an export, the buyer's name and address go on it: VAT Act s20(5) and (6)). Not
+  registered for VAT: "Invoice", not "Tax invoice". The separate sale numbers and the slip are gone.
+- **Add the customer's details** to a walk-in's invoice afterwards, even in a closed month: the same
+  invoice and number, saying it replaces the abridged one; the first one still prints.
+- Sales made before are invoices now, each at the number it was issued under, reprinting as handed
+  over; an old sale number is never handed out again.
 - **Month end** (with Sales on): close each month yourself, or let it lock itself on a day of the
   next month; setup asks, and Accounts → Month end & locks shows each month's figures. Home
   reminds you while last month is open. Without sales, the year's lock as before.
-- A closed period is closed: reopen it with the reason (kept with the books), put it right, and
-  lock it again. The lock date is no longer a setting.
+- A closed period is closed: reopen it with the reason (kept with the books; it says which ended
+  VAT periods it opens), put it right, and lock it again. The lock date is no longer a setting.
+- Closed and signed years stay so: undoing a bank match, time on an issued invoice, a company
+  file's agreed year and a move-in into an approved year are refused; reopened approved statements
+  keep the signed set, with its PDF. Time goes on a quote or a draft invoice only, VAT by line.
 
 ## 1.7.2 (10 November 2026)
 

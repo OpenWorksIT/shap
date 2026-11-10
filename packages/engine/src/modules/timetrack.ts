@@ -7,7 +7,9 @@ import { timeEntryInput } from '@shap/shared';
 import { z } from 'zod';
 import { requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
+import { audit } from '../lib/audit.js';
 import { q } from '../lib/books.js';
+import { rewriteLines } from './documents.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 
@@ -80,9 +82,14 @@ export function registerTimeRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   /** Puts unbilled time on an invoice or quote as lines (one per job at its rate); the time is marked billed. */
   app.post('/api/time/bill', owner, async (req) => {
+    const user = userOrThrow(req);
     const { documentId, ids } = parse(z.object({ documentId: z.string().uuid(), ids: z.array(z.string().uuid()).min(1).max(500) }), req.body);
-    const [doc] = await sql<{ status: string; kind: string }[]>`select status, kind from documents where id = ${documentId}`;
-    if (!doc || doc.status === 'void' || doc.kind === 'credit_note') throw badRequest('Choose an invoice or quote that can still be changed');
+    const [doc] = await sql<{ status: string; kind: string; number: string }[]>`select status, kind, number from documents where id = ${documentId}`;
+    // A quote, or an invoice not yet issued: an issued one (a sale's too) says what was charged, and
+    // changes only by a credit note and a new invoice (and never in a closed period).
+    if (!doc || !(doc.kind === 'quote' ? doc.status !== 'declined' : doc.kind === 'invoice' && doc.status === 'draft')) {
+      throw badRequest('Time goes on a quote or a draft invoice: an issued invoice changes through a credit note and a new invoice');
+    }
     return sql.begin(async (tx) => {
       const rows = await tx<{ projectId: string | null; projectName: string | null; rate: number; minutes: number }[]>`
         select t.project_id, p.name as project_name, coalesce(nullif(p.hourly_rate_cents, 0), (select hourly_rate_cents from settings where id), 0)::bigint as rate, sum(t.minutes)::int as minutes
@@ -90,18 +97,15 @@ export function registerTimeRoutes(app: FastifyInstance, ctx: Ctx): void {
         where t.id = any(${ids}::uuid[]) and t.billed_document_id is null and t.ended_at is not null
         group by t.project_id, p.name, p.hourly_rate_cents`;
       if (!rows.length) throw badRequest('That time is already on an invoice');
-      const [n] = await tx<{ next: number }[]>`select coalesce(max(sort), -1) + 1 as next from document_lines where document_id = ${documentId}`;
-      let sort = n!.next;
-      for (const r of rows) {
-        const hours = Math.round((r.minutes / 60) * 100) / 100;
-        const total = Math.round(hours * Number(r.rate));
-        await tx`insert into document_lines (document_id, sort, category, description, qty, unit, unit_price_cents, line_total_cents)
-                 values (${documentId}, ${sort++}, 'labour', ${`Time${r.projectName ? `: ${r.projectName}` : ''}`}, ${hours}, 'hour', ${r.rate}, ${total})`;
-      }
+      // The time goes on after the lines there, and the totals are worked out again the way any
+      // change to the document works them out (each line's VAT class, prices with or without VAT).
+      const [d] = await tx<{ vatRateBp: number; pricesIncludeVat: boolean }[]>`select vat_rate_bp, prices_include_vat from documents where id = ${documentId} for update`;
+      const lines = await tx<{ category: string; description: string; qty: string; unit: string; unitPriceCents: string; vatCode: string; itemId: string | null }[]>`
+        select category, description, qty, unit, unit_price_cents, vat_code, item_id from document_lines where document_id = ${documentId} order by sort`;
+      const time = rows.map((r) => ({ category: 'labour', description: `Time${r.projectName ? `: ${r.projectName}` : ''}`, qty: String(Math.round((r.minutes / 60) * 100) / 100), unit: 'hour', unitPriceCents: String(r.rate), vatCode: 'standard', itemId: null }));
+      await rewriteLines(tx, documentId, [...lines, ...time].map((l) => ({ ...l, qty: Number(l.qty), unitPriceCents: Number(l.unitPriceCents) })) as never, Number(d!.vatRateBp), d!.pricesIncludeVat);
       await tx`update time_entries set billed_document_id = ${documentId} where id = any(${ids}::uuid[]) and billed_document_id is null`;
-      // Totals follow the lines (VAT at the document's rate).
-      await tx`update documents d set subtotal_cents = x.s, vat_cents = round(x.s * d.vat_rate_bp / 10000.0), total_cents = x.s + round(x.s * d.vat_rate_bp / 10000.0), updated_at = now()
-               from (select coalesce(sum(line_total_cents), 0)::bigint as s from document_lines where document_id = ${documentId}) x where d.id = ${documentId}`;
+      await audit(tx, { userId: user.id, action: 'bill_time', entity: doc.kind, entityId: documentId, ip: req.ip, details: { number: doc.number, lines: rows.length, minutes: rows.reduce((t, r) => t + Number(r.minutes), 0) } });
       return { lines: rows.length };
     });
   });

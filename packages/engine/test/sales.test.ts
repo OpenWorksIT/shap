@@ -39,10 +39,12 @@ describe('selling at the counter, VAT registered', () => {
   });
 
   it('takes a sale: paid into the till, VAT by line (standard, zero-rated), a discount line', async () => {
+    // Zero-rated bread on a sale over R50: the full tax invoice, so the customer's on it (VAT Act s20(5)).
     const s = await me.post('/api/sales', {
       date: D,
       sourceId: till,
       method: 'cash',
+      clientId: client.id,
       lines: [
         { itemId: globe.id, description: 'LED globe (made up)', qty: 2, unitPriceCents: 4_600 },
         { itemId: bread.id, description: 'Brown bread (made up)', qty: 1, unitPriceCents: 1_800, vatCode: 'zero' },
@@ -74,7 +76,7 @@ describe('selling at the counter, VAT registered', () => {
   });
 
   it('refunds what came back, never more than was paid, and keeps every sale', async () => {
-    const [sale] = await env.sql<{ id: string }[]>`select id from documents where counter and client_id is null order by created_at limit 1`;
+    const [sale] = await env.sql<{ id: string }[]>`select id from documents where counter order by created_at limit 1`;
     const detail = await me.get(`/api/sales/${sale!.id}`);
     const globes = detail.lines.find((l: { description: string }) => l.description.startsWith('LED'));
     const r = await me.post(`/api/documents/${sale!.id}/refund`, { date: D, sourceId: till, reason: 'Wrong fitting (made up)', lines: [{ lineId: globes.id, qty: 1 }] });

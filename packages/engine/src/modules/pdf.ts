@@ -34,6 +34,10 @@ export interface PdfDocument {
     creditedInvoiceNumber?: string | null;
     /** Sold at the counter: an invoice issued and paid on the spot. */
     counter?: boolean;
+    /** A sale from before 1.24 (its own kind then, on a slip): reprinted as it was handed over. */
+    legacySale?: boolean;
+    /** When a walk-in's details were added to their sale's invoice (the full tax invoice then). */
+    invoicedAt?: string | Date | null;
     /** Before 1.24, the sale number an invoice made from a sale was first issued under; and a walk-in's name. */
     saleNumber?: string | null;
     customerName?: string | null;
@@ -190,7 +194,8 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   // a vendor's invoice is a tax invoice even when everything on it is zero-rated (VAT Act s20(4)(a)),
   // and one from before registering still reprints as a plain invoice.
   const vatShown = doc.vatRateBp > 0;
-  const heading = isCredit ? 'Credit note' : isInvoice ? (vatShown ? 'Tax invoice' : 'Invoice') : isProforma ? 'Pro-forma invoice' : 'Quotation';
+  const legacy = isInvoice && Boolean(doc.legacySale);
+  const heading = isCredit ? 'Credit note' : legacy ? (vatShown ? 'Tax invoice' : 'Sale') : isInvoice ? (vatShown ? 'Tax invoice' : 'Invoice') : isProforma ? 'Pro-forma invoice' : 'Quotation';
   const balance = doc.totalCents - (isInvoice ? doc.paidCents : 0);
   const label = (text: string, x: number, at: number, opts: PDFKit.Mixins.TextOptions = {}) =>
     pdf.font(bold).fontSize(7.5).fillColor(MUTED).text(text.toUpperCase(), x, at, { characterSpacing: 0.9, ...opts });
@@ -218,14 +223,15 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   }
   pdf.font(bold).fontSize(26).fillColor(accent).text(heading, L, y, { width: contentW, align: 'right' });
   const meta: [string, string][] = [
-    [isCredit ? 'Credit note no.' : isInvoice ? 'Invoice no.' : isProforma ? 'Pro-forma no.' : 'Quote no.', doc.number],
+    [isCredit ? 'Credit note no.' : legacy ? 'Sale no.' : isInvoice ? 'Invoice no.' : isProforma ? 'Pro-forma no.' : 'Quote no.', doc.number],
     ['Date', formatDate(doc.issueDate)],
   ];
   // An invoice made from a sale before 1.24 says which sale it was first issued as.
-  if (doc.saleNumber && doc.saleNumber !== doc.number) meta.push(['Sale no.', doc.saleNumber]);
+  if (doc.saleNumber && doc.saleNumber !== doc.number) meta.push([legacy ? 'Issued as' : 'Sale no.', doc.saleNumber]);
   if (isCredit && doc.creditedInvoiceNumber) meta.push(['For invoice', doc.creditedInvoiceNumber]);
   if (isCredit && doc.creditedInvoiceDate) meta.push(['Invoice date', formatDate(doc.creditedInvoiceDate)]);
-  if (doc.dueDate && !isCredit && !isSale) meta.push([isInvoice || isProforma ? 'Due' : 'Valid until', formatDate(doc.dueDate)]);
+  // (A sale asks for nothing; one made an invoice before 1.24 had its due date, as it was issued.)
+  if (doc.dueDate && !isCredit && !legacy && !(isSale && !doc.saleNumber)) meta.push([isInvoice || isProforma ? 'Due' : 'Valid until', formatDate(doc.dueDate)]);
   if (doc.clientCode) meta.push(['Account', doc.clientCode]);
   if (doc.sourceQuoteNumber) meta.push(['Our quote', doc.sourceQuoteNumber]);
   let my = y + 36;
@@ -240,6 +246,11 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   } else if (doc.status === 'draft') {
     pdf.font(bold).fontSize(9).fillColor(MUTED).text('DRAFT', R - 200, my + 2, { width: 200, align: 'right' });
     my += 14;
+  }
+  const replaces = fullAfterwards(doc);
+  if (replaces) {
+    pdf.font(regular).fontSize(8.5).fillColor(MUTED).text(replaces, R - 260, my + 2, { width: 260, align: 'right' });
+    my = pdf.y + 4;
   }
   y = Math.max(logoBottom, my) + 22;
 
@@ -460,4 +471,14 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   }
   pdf.end();
   return done;
+}
+
+/**
+ * A walk-in's sale whose details were added afterwards: one tax invoice per supply (VAT Act s20(1)),
+ * so the full one says it replaces the abridged one of the same number, and when that was issued.
+ */
+export function fullAfterwards(doc: Pick<PdfDocument['doc'], 'counter' | 'invoicedAt' | 'clientName' | 'issueDate' | 'saleNumber' | 'vatRateBp'>): string | null {
+  if (!doc.counter || !doc.invoicedAt || !doc.clientName || doc.saleNumber) return null;
+  const tax = Number(doc.vatRateBp) > 0;
+  return `${tax ? 'Full tax invoice' : 'Invoice'} with the customer’s details, added ${formatDate(String(doc.invoicedAt instanceof Date ? doc.invoicedAt.toISOString() : doc.invoicedAt).slice(0, 10))}: it replaces the ${tax ? 'abridged tax invoice' : 'invoice'} of the same number issued on ${formatDate(doc.issueDate)}.`;
 }

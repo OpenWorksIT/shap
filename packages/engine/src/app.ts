@@ -6,6 +6,7 @@ import { deviceOwner } from './auth.js';
 import type { Ctx } from './context.js';
 import type { Sql } from './db/index.js';
 import { App, type Logger } from './http.js';
+import { applyMonthLock } from './lib/books.js';
 import { registerBankRoutes } from './modules/bank/routes.js';
 import { registerClientRoutes } from './modules/clients.js';
 import { registerCompanyFileRoutes } from './modules/company-file.js';
@@ -48,6 +49,12 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: App; ctx: Ctx
   const app = new App(opts.log);
   const ctx: Ctx = { sql: opts.sql, config: { UPLOAD_MB: opts.uploadMb ?? 15 } };
   app.user = await deviceOwner(opts.sql);
+  // Month end set to lock itself: the months due are locked before any change is made, so whatever
+  // reads the lock date (the database's own checks too) sees it (lib/books.ts applyMonthLock).
+  app.addHook('preHandler', async (req) => {
+    if (!req.url.startsWith('/api/') || req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return;
+    await applyMonthLock(opts.sql);
+  });
 
   app.get('/api/health', async () => {
     await opts.sql`select 1`;

@@ -104,6 +104,27 @@ export async function restoreCompanyFile(tx: Tx, raw: unknown) {
   const file = parse(fileSchema, raw, { maxItems: 500_000 });
   const done: Record<string, number> = {};
   const count = (k: string) => (done[k] = (done[k] ?? 0) + 1);
+  // An agreed year's figures don't go into a year already closed here (or signed): reopen it first.
+  // The same year at the same figures (the file loaded back into the books it came from) is left be.
+  const [before] = await tx<{ lockDate: string | null }[]>`select lock_date::text as lock_date from settings where id`;
+  const asAgreed = new Set<string>();
+  for (const y of file.yearEnds) {
+    const [signed] = await tx`select 1 from financial_statements where fy_end = ${y.fyEnd}::date and status = 'approved'`;
+    const closed = (before?.lockDate && y.fyEnd <= before.lockDate) || signed;
+    if (!closed) continue;
+    const here = await tx<{ code: string; cents: string }[]>`
+      select a.code, f.amount_cents as cents from year_end_figures f join accounts a on a.id = f.account_id where f.fy_end = ${y.fyEnd}::date and f.amount_cents <> 0`;
+    const [agreed] = await tx`select 1 from year_ends where fy_end = ${y.fyEnd}::date`;
+    const theirs = Object.entries(y.figures).filter(([, c]) => Number(c) !== 0);
+    const same = Boolean(agreed) && here.length === theirs.length && theirs.every(([code, c]) => here.some((h) => h.code === code && Number(h.cents) === Number(c)));
+    if (same) {
+      asAgreed.add(y.fyEnd);
+      continue;
+    }
+    if (signed) throw badRequest(`The financial statements for the year to ${y.fyEnd} were approved: reopen them first.`);
+    throw badRequest(`These books are closed up to ${before!.lockDate}: reopen them (Accounts → Locks) before bringing in the year to ${y.fyEnd}.`);
+  }
+
 
   // Company details
   for (const k of SETTINGS_KEYS) {
@@ -200,6 +221,10 @@ export async function restoreCompanyFile(tx: Tx, raw: unknown) {
 
   // Agreed year ends
   for (const y of file.yearEnds) {
+    if (asAgreed.has(y.fyEnd)) {
+      count('yearEnds');
+      continue;
+    }
     await tx`insert into year_ends (fy_end, note) values (${y.fyEnd}, ${y.note}) on conflict (fy_end) do update set note = excluded.note`;
     await tx`delete from year_end_figures where fy_end = ${y.fyEnd}`;
     // The tracker's own trial-balance journal is superseded by the accountant's figures.
@@ -211,6 +236,9 @@ export async function restoreCompanyFile(tx: Tx, raw: unknown) {
     await tx`update settings set lock_date = greatest(coalesce(lock_date, ${y.fyEnd}::date), ${y.fyEnd}::date) where id`;
     count('yearEnds');
   }
+  // The lock it moved (from the file's lock date and its agreed years), in the audit log as any lock is.
+  const [after] = await tx<{ lockDate: string | null }[]>`select lock_date::text as lock_date from settings where id`;
+  if (after?.lockDate && after.lockDate !== before?.lockDate) await audit(tx, { actor: 'system', action: 'lock', entity: 'period', details: { through: after.lockDate, was: before?.lockDate ?? null, by: 'the company file' } });
   for (const y of file.sbcYears) {
     await tx`insert into sbc_years (fy_end, sbc) values (${y.fyEnd}::date, ${y.sbc}) on conflict (fy_end) do update set sbc = excluded.sbc, updated_at = now()`;
     count('sbcYears');
