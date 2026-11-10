@@ -15,7 +15,7 @@ import { entity, ESTIMATE_NOTE, ESTIMATE_SHORT, estimateTax, featureOn, financia
 import { z } from 'zod';
 import { requireRole } from '../auth.js';
 import type { Ctx } from '../context.js';
-import { freshTotals, getSettings, today } from '../lib/books.js';
+import { assessedLossBefore, freshTotals, getSettings, today } from '../lib/books.js';
 import { parse } from '../lib/validate.js';
 import { usePdfFonts } from './pdf.js';
 import { vat201 } from './taxforms.js';
@@ -42,10 +42,7 @@ export async function taxPack(db: Db, fyEnd: string) {
   const income = shown.filter((a) => a.type === 'income').reduce((t, a) => t + a.cents, 0);
   const costs = shown.filter((a) => a.type !== 'income' && !a.isTax).reduce((t, a) => t + a.cents, 0);
   const profitBeforeTax = income - costs;
-  const [loss] = await db<{ t: string }[]>`
-    select coalesce(sum(l.amount_cents), 0)::bigint as t from ledger_totals l join accounts a on a.id = l.account_id
-    where a.type in ('income', 'cost_of_sales', 'expense') and coalesce(a.system_key, '') <> 'income_tax' and l.date < ${fy.start}::date`;
-  const assessedLossCents = kind === 'partners' ? 0 : Math.max(0, Number(loss!.t));
+  const assessedLossCents = await assessedLossBefore(db, fy.start, s.fyEndMonth, kind);
   const extra = await taxFigures(db, s.businessType, fy);
   const estimates = await db<{ period: number; asAt: string; taxableIncomeCents: string; taxCents: string; payableCents: string; note: string; createdAt: Date; lines: { sbc?: boolean } }[]>`
     select period, as_at::text as as_at, taxable_income_cents, tax_cents, payable_cents, note, created_at, lines from tax_estimates where fy_end = ${fy.end}::date order by period, created_at`;

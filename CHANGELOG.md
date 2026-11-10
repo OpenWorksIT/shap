@@ -23,6 +23,16 @@ your accountant, from Shap 1.23.
   one PDF to share with your accountant.
 - Every figure the app works out for tax or the law says it's an estimate: OpenWorks IT aren't
   accountants, and the app isn't advice.
+- The assessed loss brought forward is worked out year by year (a profit before a loss doesn't use
+  it up), and a company's set-off is limited to the greater of R1 million and 80% of its taxable
+  income (years ending on or after 31 March 2023); a trust's estimate leaves out what it gave its
+  beneficiaries.
+- Uploading the signed compiler's report, and approving, failed in the app (the statements'
+  fingerprint used something only a server has). Fixed, and statements uploaded on 1.6 stay signed
+  after the update: a signed set is now fingerprinted by the books it came from.
+- An asset's bill you paid personally, or that a supplier's credit note took off, isn't cash paid
+  for it in the cash flows; subcontractors don't count as employees in the public interest score;
+  a reviewed close corporation's accounting officer's report doesn't say no review was done.
 
 ## 1.6.0 (10 November 2026)
 

@@ -187,6 +187,35 @@ export function vatWatch(last12Cents: number, pace12Cents: number, on: string, l
   return { state, compulsoryCents: t.compulsoryCents, voluntaryCents: t.voluntaryCents };
 }
 
+// ---------------------------------------------------------------- the assessed loss
+/** Years ending on or after this limit a company's assessed loss (s20(1)(a)(ii)). */
+export const ASSESSED_LOSS_LIMIT_FROM = '2023-03-31';
+/**
+ * How much of an assessed loss a year's taxable income (before the loss) uses up: all of it up to
+ * that income, but a company's (a CC's, a co-op's, an NPC's) only up to the greater of R1 million
+ * and 80% of it, for years ending on or after 31 March 2023 (Income Tax Act s20(1)(a)(ii)).
+ * https://www.sars.gov.za/legal-intr-r-bgr-73-meaning-of-taxable-income-for-purposes-of-setting-off-the-balance-of-an-assessed-loss-by-a-company (BGR 73)
+ */
+export function assessedLossSetOff(kind: TaxEstimateFigures['kind'], incomeCents: number, lossCents: number, fyEnd: string): number {
+  if (incomeCents <= 0 || lossCents <= 0) return 0;
+  const limited = (kind === 'company' || kind === 'npc') && fyEnd >= ASSESSED_LOSS_LIMIT_FROM;
+  return Math.min(lossCents, limited ? Math.min(incomeCents, Math.max(100_000_000, Math.round(incomeCents * 0.8))) : incomeCents);
+}
+/**
+ * The assessed loss carried into a year, from the earlier years' results (profit positive): each
+ * year's loss adds to it, and only a later year's income uses it up (there's no carry-back), as
+ * far as the set-off allows. A partnership has none (each year's loss is the partners').
+ */
+export function assessedLossCarried(kind: TaxEstimateFigures['kind'], years: readonly { fyEnd: string; profitCents: number }[]): number {
+  if (kind === 'partners') return 0;
+  let loss = 0;
+  for (const y of [...years].sort((a, b) => (a.fyEnd < b.fyEnd ? -1 : a.fyEnd > b.fyEnd ? 1 : 0))) {
+    if (y.profitCents < 0) loss += -y.profitCents;
+    else loss -= assessedLossSetOff(kind, y.profitCents, loss, y.fyEnd);
+  }
+  return loss;
+}
+
 // ---------------------------------------------------------------- one estimate, either kind
 export interface TaxEstimateFigures {
   /**
@@ -223,15 +252,16 @@ export function estimateTax(f: TaxEstimateFigures): { taxableCents: number; reti
     return { taxableCents, retirementDeductionCents: 0, taxCents: partners.reduce((t, p) => t + p.taxCents, 0), partners };
   }
   if (f.kind === 'trust') {
-    const taxableCents = Math.max(0, f.profitCents - f.assessedLossCents - (f.distributedCents ?? 0));
+    const kept = f.profitCents - (f.distributedCents ?? 0);
+    const taxableCents = Math.max(0, kept - assessedLossSetOff('trust', kept, f.assessedLossCents, f.fyEnd));
     return { taxableCents, retirementDeductionCents: 0, taxCents: Math.round(taxableCents * 0.45) };
   }
   if (f.kind === 'npc') {
-    const taxableCents = f.approvedPbo ? 0 : Math.max(0, f.profitCents - f.assessedLossCents);
+    const taxableCents = f.approvedPbo ? 0 : Math.max(0, f.profitCents - assessedLossSetOff('npc', f.profitCents, f.assessedLossCents, f.fyEnd));
     return { taxableCents, retirementDeductionCents: 0, taxCents: companyTax(taxableCents, f.fyEnd, false) };
   }
   if (f.kind === 'company') {
-    const taxableCents = Math.max(0, f.profitCents - f.assessedLossCents);
+    const taxableCents = Math.max(0, f.profitCents - assessedLossSetOff('company', f.profitCents, f.assessedLossCents, f.fyEnd));
     return { taxableCents, retirementDeductionCents: 0, taxCents: companyTax(taxableCents, f.fyEnd, f.sbc ?? true) };
   }
   const before = f.profitCents + (f.otherIncomeCents ?? 0) - f.assessedLossCents;

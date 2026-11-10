@@ -5,7 +5,7 @@ import { requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
-import { assertOpen, getSettings, isIsoDate, q, today, freshTotals, noteShapFigures } from '../lib/books.js';
+import { assessedLossBefore, assertOpen, getSettings, isIsoDate, q, today, freshTotals, noteShapFigures } from '../lib/books.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 
@@ -189,10 +189,7 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
         };
       });
     // Assessed loss brought forward: earlier years' losses not yet used up by profits (from the books).
-    const [prior] = await sql<{ t: number }[]>`
-      select coalesce(sum(l.amount_cents), 0)::bigint as t from ledger_totals l join accounts a on a.id = l.account_id
-      where a.type in ('income', 'cost_of_sales', 'expense') and coalesce(a.system_key, '') <> 'income_tax' and l.date < ${fy.start}::date`;
-    const assessedLoss = Math.max(0, prior!.t); // debit-positive: a net loss is positive
+    const assessedLoss = await assessedLossBefore(sql, fy.start, settings.fyEndMonth, taxKind(settings.businessType));
     const saved = await sql`select id, period, as_at, taxable_income_cents, tax_cents, payable_cents, note, created_at from tax_estimates where fy_end = ${fy.end} order by created_at desc`;
     return {
       fy,
