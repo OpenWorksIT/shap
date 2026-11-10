@@ -16,21 +16,32 @@ in place.
 **Sell**: tap items from the quick list (search by name or code; with inventory, filter what's in
 stock or not: anything can be sold either way), or add a line that isn't on the list. Each line
 keeps its VAT class: standard, zero-rated, export or exempt. Prices are as on the shelf, VAT
-included. Take the money (cash into the till, card or EFT into the bank) and hand over the slip.
+included. Take the money (cash into the till, card or EFT into the bank) and hand over the invoice.
 
-- A walk-in needs no details: the slip is the **abridged tax invoice** (up to R5 000, VAT Act
+**Every sale is an invoice** (from 1.24; the accountant's call: no cash receipts), issued and paid
+on the spot, with the next number in the same series as the invoices from Quotes & invoices. It's
+in the invoice list with them, and the Sales tab lists the ones sold at the counter.
+
+- A walk-in needs no details: theirs is the **abridged tax invoice** (up to R5 000, VAT Act
   s20(5)). Over R5 000, or with anything exported, SARS wants a **full tax invoice** (s20(4)):
-  the sale asks for the customer, and becomes an invoice paid at once.
+  the sale asks for the customer, whose details go on it.
   https://www.sars.gov.za/businesses-and-employers/tax-invoices/
-- A business that isn't registered for VAT sells without VAT: the classes are ignored and the
-  slip isn't a tax invoice.
-- A sale posts like an invoice and its payment together: revenue and output VAT on its date
+- A business that isn't registered for VAT sells without VAT: the classes are ignored, and its
+  invoice says "Invoice", not "Tax invoice" (only a VAT vendor may issue a tax invoice).
+- A sale posts like any invoice and its payment together: revenue and output VAT on its date
   (the VAT201 for that period), the money in the till or bank, debtors untouched. Stocked items
   go out of stock at their weighted average cost, into cost of sales.
+- A sale's invoice is never changed, voided, paid again, credited on its own or written off: what
+  it charges, its date and customer stay as sold, and money back is a refund (below).
 
-**Make it an invoice** (afterwards, for a regular or a business customer): the customer is
-chosen, the sale gets the next invoice number (keeping its sale number), and every item, price
-and VAT class stays as sold. It stays paid.
+**Add the customer's details** (afterwards, when a walk-in asks for a full tax invoice): the
+customer is chosen and their details go on the same invoice, with the same number; every item,
+price and VAT class stays as sold. It stays paid.
+
+**Sales made before 1.24** had numbers of their own (SL00001…), on a slip. They're invoices now,
+each at the number it was issued under (the customer holds it, and SARS's record has to match).
+One made an invoice afterwards keeps its invoice number, and says which sale it was first issued
+as ("Sale no.").
 
 **Refund**: choose what came back. A credit note is issued for it at the prices and VAT classes it
 was sold at (with the reason on it, s21), and the money is paid out of the till or bank. Goods in
@@ -80,13 +91,14 @@ count. The count itself is kept, also where nothing differed: who counted, when,
 ## What the books audit checks (Sales and Stock)
 
 - every sale has its payment, for exactly its total, and every refund its credit note;
-- the credit clearing account is empty; sale numbers run without gaps;
+- the credit clearing account is empty; a sale's invoice is always issued (its number is checked
+  with the other invoice numbers, the old SL numbers included);
 - the **Inventory** account equals the sum of the movements and the items' values, and each item
   equals the sum of its own movements; no item has value with nothing on hand (or the reverse);
 - **Stock purchases** clearing is empty, and its purchases' lines add up to what was invoiced;
 - the **Supplier claims** account equals what's still owed back on the claims; old claims are
   flagged;
-- every stocked line on an issued invoice, sale or credit note moved stock by its quantity;
+- every stocked line on an issued invoice (a sale's too) or credit note moved stock by its quantity;
 - warnings: stock below nothing; an item carried above its selling price (write it down at a
   count, IFRS for SMEs 27.2); stocked items not counted in the last year; the opening stock
   account not cleared into the opening balances;

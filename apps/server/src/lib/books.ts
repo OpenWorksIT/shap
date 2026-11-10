@@ -1,6 +1,7 @@
 import type { FastifyRequest } from 'fastify';
-import { assessedLossCarried, entity, financialYear, safeText, standardNames, todayIso, type BusinessType, type TaxEstimateFigures, type VatCategory } from '@shap/shared';
+import { assessedLossCarried, entity, featureOn, financialYear, monthLockDue, safeText, standardNames, todayIso, type BusinessType, type TaxEstimateFigures, type VatCategory } from '@shap/shared';
 import type { Db } from '../db/index.js';
+import { audit } from './audit.js';
 import { badRequest } from './errors.js';
 
 export interface SettingsRow {
@@ -69,6 +70,12 @@ export interface SettingsRow {
   defaultWageSourceId: string | null;
   defaultCostSourceId: string | null;
   lockDate: string | null;
+  /** The lock date before the books were reopened (to lock them again at); null: not reopened. */
+  relockDate: string | null;
+  /** Month end (a business that sells): closed by hand, or locks itself on monthEndDay of the next month. */
+  monthEndMode: 'manual' | 'auto';
+  monthEndDay: number;
+  monthLockedThrough: string | null;
   timezone: string;
 }
 
@@ -126,13 +133,35 @@ export async function getSettings(db: Db): Promise<SettingsRow> {
   return s!;
 }
 
-/** Refuse changes dated on or before the lock date (a closed financial year). */
+/**
+ * Month end set to lock itself (a business that sells): the months due by today locked, once each
+ * (a month reopened isn't locked again until the next one's day). Returns the lock date.
+ */
+export async function applyMonthLock(db: Db): Promise<string | null> {
+  const [s] = await db<{ lockDate: string | null; monthEndMode: string; monthEndDay: number; monthLockedThrough: string | null; features: Record<string, boolean> | null }[]>`
+    select lock_date::text as lock_date, month_end_mode, month_end_day, month_locked_through::text as month_locked_through, features from settings where id`;
+  if (!s) return null;
+  if (s.monthEndMode !== 'auto' || !featureOn(s.features, 'sales')) return s.lockDate;
+  const due = monthLockDue(today(), s.monthEndDay);
+  if (s.monthLockedThrough && s.monthLockedThrough >= due) return s.lockDate;
+  const [u] = await db<{ lockDate: string }[]>`
+    update settings set lock_date = greatest(coalesce(lock_date, ${due}::date), ${due}::date),
+      relock_date = case when relock_date <= greatest(coalesce(lock_date, ${due}::date), ${due}::date) then null else relock_date end,
+      month_locked_through = ${due}::date
+    where id and (month_locked_through is null or month_locked_through < ${due}::date)
+    returning lock_date::text as lock_date`;
+  if (u && u.lockDate !== s.lockDate) {
+    await audit(db, { actor: 'system', action: 'lock', entity: 'period', details: { through: u.lockDate, was: s.lockDate, by: 'month end, by itself' } });
+  }
+  return u?.lockDate ?? s.lockDate;
+}
+
+/** Refuse changes dated on or before the lock date (a closed month or year). */
 export async function assertOpen(db: Db, ...dates: (string | null | undefined)[]): Promise<void> {
-  const [row] = await db<{ lockDate: string | null }[]>`select lock_date from settings where id`;
-  const lock = row?.lockDate;
+  const lock = await applyMonthLock(db);
   if (!lock) return;
   for (const d of dates) {
-    if (d && d <= lock) throw badRequest(`The books are closed up to ${lock}. Change the lock date in Settings to edit earlier entries.`);
+    if (d && d <= lock) throw badRequest(`The books are closed up to ${lock}. Someone who may close and reopen months and years can reopen them (Accounts → Locks), with the reason, to put this right.`);
   }
 }
 

@@ -61,7 +61,7 @@ export async function syncProjectOfDocument(db: Db, documentId: string): Promise
 
 export async function nextNumber(db: Db, kind: DocKind, proforma = false): Promise<string> {
   // Lock the settings row so two people can't take the same number.
-  const series = kind === 'invoice' ? 'invoice' : kind === 'credit_note' ? 'credit' : kind === 'sale' ? 'sale' : proforma ? 'proforma' : 'quote';
+  const series = kind === 'invoice' ? 'invoice' : kind === 'credit_note' ? 'credit' : proforma ? 'proforma' : 'quote';
   const [s] = await db<{ prefix: string; next: number; pad: number }[]>`
     select ${db.unsafe(`${series}_prefix`)} as prefix, ${db.unsafe(`${series}_next`)} as next,
            ${db.unsafe(series === 'proforma' ? 'quote_pad' : `${series}_pad`)} as pad
@@ -70,7 +70,7 @@ export async function nextNumber(db: Db, kind: DocKind, proforma = false): Promi
   let number = formatNumber(s!.prefix, n, s!.pad);
   // Skip numbers already used (e.g. typed by hand or imported).
   for (let i = 0; i < 1000; i++) {
-    const [taken] = kind === 'sale' ? await db`select 1 from documents where sale_number = ${number}` : await db`select 1 from documents where kind = ${kind} and number = ${number}`;
+    const [taken] = await db`select 1 from documents where kind = ${kind} and number = ${number}`;
     if (!taken) break;
     n++;
     number = formatNumber(s!.prefix, n, s!.pad);
@@ -132,14 +132,14 @@ export async function createDocument(tx: Db, user: AuthUser | null, kind: DocKin
   const proforma = kind === 'quote' && input.proforma;
   const number = input.number?.trim() || (await nextNumber(tx, kind, proforma));
   const due =
-    kind === 'credit_note' || kind === 'sale' ? null : (input.dueDate ?? (kind === 'invoice' || proforma ? addDays(input.issueDate, settings.paymentDays) : addDays(input.issueDate, settings.quoteValidDays)));
+    kind === 'credit_note' ? null : (input.dueDate ?? (kind === 'invoice' || proforma ? addDays(input.issueDate, settings.paymentDays) : addDays(input.issueDate, settings.quoteValidDays)));
   // The standard rate on the document's own date (vat.ts), for a VAT vendor.
   let vatRate = settings.vatRegistered ? vatRateOn(input.issueDate) : 0;
   let inclusive = input.pricesIncludeVat ?? false;
   if (kind === 'credit_note') {
     const [inv] = await tx<{ kind: string; status: string; clientId: string | null; vatRateBp: number; pricesIncludeVat: boolean }[]>`
       select kind, status, client_id, vat_rate_bp, prices_include_vat from documents where id = ${input.creditedInvoiceId ?? null}`;
-    if (!inv || !(inv.kind === 'invoice' || inv.kind === 'sale') || inv.status !== 'issued') throw badRequest('A credit note is made from an issued invoice or sale');
+    if (!inv || inv.kind !== 'invoice' || inv.status !== 'issued') throw badRequest('A credit note is made from an issued invoice');
     clientId = inv.clientId;
     // The VAT goes back at the rate the invoice charged, priced the way it was.
     vatRate = inv.vatRateBp;
@@ -152,13 +152,13 @@ export async function createDocument(tx: Db, user: AuthUser | null, kind: DocKin
                              deposit_bp, deposit_cents, deposit_show_balance, pay_link, proforma, credited_invoice_id, credit_reason, issued_at)
       values (${kind}, ${number}, ${opts.status ?? 'draft'}, ${input.projectId ?? null}, ${clientId}, ${input.issueDate}, ${due},
               ${input.title}, ${input.notes},
-              ${kind === 'credit_note' || kind === 'sale' ? input.terms : input.terms || (kind === 'invoice' || proforma ? settings.invoiceTerms : settings.quoteTerms)},
+              ${kind === 'credit_note' ? input.terms : input.terms || (kind === 'invoice' || proforma ? settings.invoiceTerms : settings.quoteTerms)},
               ${vatRate}, ${user?.id ?? null}, ${brandId}, ${input.depositBp}, ${input.depositCents}, ${input.depositShowBalance}, ${input.payLink ?? ''},
               ${proforma}, ${kind === 'credit_note' ? (input.creditedInvoiceId ?? null) : null}, ${input.creditReason},
               ${opts.status === 'issued' ? new Date() : null})
       returning id, number`;
   } catch (err) {
-    if (pgCode(err) === PG.uniqueViolation) throw conflict(`There is already ${kind === 'invoice' ? 'an invoice' : kind === 'credit_note' ? 'a credit note' : kind === 'sale' ? 'a sale' : 'a quote'} numbered ${number}`);
+    if (pgCode(err) === PG.uniqueViolation) throw conflict(`There is already ${kind === 'invoice' ? 'an invoice' : kind === 'credit_note' ? 'a credit note' : 'a quote'} numbered ${number}`);
     throw err;
   }
   await writeLines(tx, row!.id, input.lines ?? [], vatRate, inclusive);
@@ -205,7 +205,7 @@ export async function documentPdf(db: Db, id: string) {
   }
   const pdf = await renderDocumentPdf({ ...data, settings, brand, logo });
   const label =
-    data.doc.kind === 'invoice' ? (settings.vatRegistered ? 'Tax invoice' : 'Invoice') : data.doc.kind === 'credit_note' ? 'Credit note' : data.doc.kind === 'sale' ? 'Sale' : data.doc.proforma ? 'Pro-forma invoice' : 'Quote';
+    data.doc.kind === 'invoice' ? (Number(data.doc.vatRateBp) > 0 ? 'Tax invoice' : 'Invoice') : data.doc.kind === 'credit_note' ? 'Credit note' : data.doc.proforma ? 'Pro-forma invoice' : 'Quote';
   const filename = `${brand ? `${brand.name} ` : ''}${label} ${data.doc.number}${data.doc.clientName ? ` - ${data.doc.clientName}` : ''}.pdf`.replace(/[^\w.\- ]/g, '');
   return { pdf, filename, data, settings, brand };
 }
@@ -267,7 +267,7 @@ export async function assertTaxDocument(db: Db, id: string): Promise<void> {
     if (!d.creditedInvoiceId) throw badRequest('A credit note says which invoice it credits');
     if (!String(d.creditReason ?? '').trim()) throw badRequest('Say briefly why the credit note is issued (SARS requires the reason on it)');
   }
-  if (!(d.kind === 'invoice' || d.kind === 'credit_note' || d.kind === 'sale') || !(Number(d.vatRateBp) > 0)) return;
+  if (!(d.kind === 'invoice' || d.kind === 'credit_note') || !(Number(d.vatRateBp) > 0)) return;
   const what = d.kind === 'credit_note' ? 'credit note' : 'tax invoice';
   // A discount takes off what it discounts, in the same VAT class: never more, or the VAT201 would
   // show negative supplies (or VAT) of a kind that wasn't sold.
@@ -279,16 +279,14 @@ export async function assertTaxDocument(db: Db, id: string): Promise<void> {
   }
   if (!s.vatNumber.trim()) throw badRequest(`A ${what} must show your VAT number. Add it in Settings → Company first.`);
   if (!(d.brandAddress?.trim() || s.address.trim())) throw badRequest(`A ${what} must show your business address. Add it in Settings → Company first.`);
-  // A walk-in's slip is the short form (makeSale asks for the customer when it can't be).
-  if (d.kind === 'sale') return;
   // Whether the full form is needed: for a credit note, whether the invoice it credits needed it.
   const basis = d.kind === 'credit_note' ? d.creditedInvoiceId! : id;
-  const [f] = await db<{ kind: string; totalCents: number; zeroRated: boolean }[]>`
-    select d.kind, d.total_cents, exists (select 1 from document_lines l where l.document_id = d.id and l.vat_code in ('zero', 'export')) as zero_rated
+  const [f] = await db<{ kind: string; counter: boolean; clientId: string | null; totalCents: number; zeroRated: boolean }[]>`
+    select d.kind, d.counter, d.client_id, d.total_cents, exists (select 1 from document_lines l where l.document_id = d.id and l.vat_code in ('zero', 'export')) as zero_rated
     from documents d where d.id = ${basis}`;
-  // Money back on a walk-in's sale: its credit note is short like the slip was (a sale that
-  // needed the full form was made an invoice, with the customer on it).
-  if (f?.kind === 'sale') return;
+  // A walk-in's sale at the counter is the abridged tax invoice (makeSale asks for the customer
+  // when it can't be: over R5 000, or an export), and money back on it a credit note as short.
+  if (f?.counter && !f.clientId) return;
   const full = Math.abs(Number(f?.totalCents ?? d.totalCents)) > FULL_TAX_INVOICE_CENTS || Boolean(f?.zeroRated);
   if (full && (!d.clientName?.trim() || !d.clientAddress?.trim())) {
     const why = Math.abs(Number(f?.totalCents ?? d.totalCents)) > FULL_TAX_INVOICE_CENTS ? 'over R5 000' : 'with zero-rated or exported items';
@@ -392,7 +390,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
        left join lateral (select sum(amount_cents) as paid from receipts where invoice_id = d.id) r on true
        left join projects p on p.id = d.project_id left join clients c on c.id = d.client_id
        left join brands b on b.id = d.brand_id
-       where (($1::text is null and d.kind <> 'sale') or d.kind = $1) and ($2::text is null or d.status = $2)
+       where ($1::text is null or d.kind = $1) and ($2::text is null or d.status = $2)
          and ($3::uuid is null or d.client_id = $3::uuid) and ($4::uuid is null or d.project_id = $4::uuid)
          and ($5::text is null or d.number ilike '%' || $5 || '%' or d.title ilike '%' || $5 || '%'
               or c.name ilike '%' || $5 || '%' or p.name ilike '%' || $5 || '%')
@@ -429,7 +427,6 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
       throw new HttpError(409, 'Someone else changed this while you had it open. Reload to see their changes, then make yours again.', 'stale_record');
     }
     if (old.status === 'void') throw badRequest('This invoice was voided. Duplicate it to make a new one.');
-    if (old.kind === 'sale') throw badRequest('A sale can’t be changed. Refund what needs to come back, or make it an invoice to add the customer.');
     if (old.kind === 'credit_note' && old.status !== 'draft') throw badRequest('An issued credit note can’t be changed. Void it and make a new one.');
     if (old.kind === 'invoice' && old.status === 'issued') await assertOpen(sql, old.issueDate, input.issueDate);
     const settings = await getSettings(sql);
@@ -437,12 +434,12 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     // A credit note is priced the way its invoice was. Left out, how prices were typed stays as it was.
     const was = Boolean((old as { pricesIncludeVat?: boolean }).pricesIncludeVat);
     if (old.kind === 'invoice' && old.status === 'issued' && Number(old.vatRateBp) > 0) await assertTaxInvoiceUnchanged(sql, id, input);
-    // A sale made an invoice was paid when it was made, and goods taken back stand against an
-    // invoice's lines: either way, what it charges (and for a sale, its date and customer) stays.
+    // A sale was paid when it was made, and goods taken back stand against an invoice's lines:
+    // either way, what it charges (and for a sale, its date and customer) stays.
     if (old.kind === 'invoice' && old.status === 'issued') {
-      const o = old as unknown as { saleNumber: string | null; clientId: string | null };
-      if (o.saleNumber && (!(await linesUnchanged(sql, id, input.lines ?? [])) || input.issueDate !== String(old.issueDate) || (input.clientId ?? o.clientId) !== o.clientId)) {
-        throw badRequest('This invoice was a sale, paid when it was made: what it charges, its date and its customer stay as they are. Take anything back with Goods returned.');
+      const o = old as unknown as { counter: boolean; clientId: string | null };
+      if (o.counter && (!(await linesUnchanged(sql, id, input.lines ?? [])) || input.issueDate !== String(old.issueDate) || (input.clientId ?? o.clientId) !== o.clientId)) {
+        throw badRequest('This invoice was a sale, paid when it was made: what it charges, its date and its customer stay as they are. Take anything back with a refund (Sales), or add a walk-in’s details there.');
       }
       const [returned] = await sql`select 1 from document_lines cl join document_lines l on l.id = cl.credited_line_id join documents c on c.id = cl.document_id
         where l.document_id = ${id} and c.status <> 'void' limit 1`;
@@ -563,8 +560,8 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const { reason } = parse(z.object({ reason: z.string().trim().min(2, 'Give a reason').max(300) }), req.body);
-    const [doc] = await sql<{ kind: string; status: string; issueDate: string; writtenOffOn: string | null; creditReceiptId: string | null; creditedInvoiceId: string | null }[]>`select * from documents where id = ${id}`;
-    if (doc?.kind === 'sale') throw badRequest('A sale is never voided: refund what came back instead, so the record stays whole.');
+    const [doc] = await sql<{ kind: string; counter: boolean; status: string; issueDate: string; writtenOffOn: string | null; creditReceiptId: string | null; creditedInvoiceId: string | null }[]>`select * from documents where id = ${id}`;
+    if (doc?.counter) throw badRequest('A sale is never voided: refund what came back instead, so the record stays whole.');
     if (!doc || (doc.kind !== 'invoice' && doc.kind !== 'credit_note')) throw notFound('Invoice');
     await assertOpen(sql, doc.issueDate);
     if (doc.kind === 'credit_note') {
@@ -602,7 +599,6 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [doc] = await sql<{ kind: string; status: string; number: string; issueDate: string; totalCents: number; clientName: string | null; proforma: boolean }[]>`
       select d.kind, d.status, d.number, d.issue_date, d.total_cents, d.proforma, c.name as client_name from documents d left join clients c on c.id = d.client_id where d.id = ${id}`;
     if (!doc) throw notFound('Document');
-    if (doc.kind === 'sale') throw badRequest('A sale can’t be deleted. Refund it instead, so the record stays whole.');
     if ((doc.kind === 'invoice' || doc.kind === 'credit_note') && doc.status !== 'draft')
       throw badRequest(`Issued ${doc.kind === 'invoice' ? 'invoices' : 'credit notes'} can’t be deleted. Void it instead, so the number stays accounted for.`);
     await sql.begin(async (tx) => {
@@ -649,7 +645,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const { doc, lines } = await loadDocument(sql, id);
-    if (doc.kind === 'sale') throw badRequest('A sale is taken back with a refund (from the sale), not a credit note on its own');
+    if ((doc as { counter?: boolean }).counter) throw badRequest('A sale is taken back with a refund (from the sale, under Sales), not a credit note on its own');
     if (doc.kind !== 'invoice' || doc.status !== 'issued') throw badRequest('Credit notes are made from issued invoices');
     const created = await sql.begin((tx) =>
       createDocument(tx, user, 'credit_note', {
@@ -680,9 +676,9 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = parse(idParam, req.params);
     const { kind } = parse(z.object({ kind: z.enum(['quote', 'invoice']).optional() }), req.body);
     const { doc, lines } = await loadDocument(sql, id);
-    // (A sale copies into a draft invoice: a sale is only ever made at the counter.)
+    // (A sale copies into a draft invoice of the ordinary kind: a sale is only ever made at the counter.)
     return sql.begin((tx) =>
-      createDocument(tx, user, kind ?? (doc.kind === 'sale' ? 'invoice' : doc.kind), {
+      createDocument(tx, user, kind ?? doc.kind, {
         brandId: doc.brandId,
         projectId: doc.projectId,
         clientId: doc.clientId,
@@ -706,7 +702,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const input = parse(writeOffInput, req.body);
     const { doc } = await loadDocument(sql, id);
     if (doc.kind !== 'invoice') throw notFound('Invoice');
-    if ((doc as { saleNumber?: string | null }).saleNumber) throw badRequest('This invoice was a sale, paid when it was made: nothing is owed on it to write off');
+    if ((doc as { counter?: boolean }).counter) throw badRequest('This invoice was a sale, paid when it was made: nothing is owed on it to write off');
     if (doc.status !== 'issued') throw badRequest('Only issued invoices can be written off');
     if (doc.writtenOffOn) throw badRequest('This invoice is already written off');
     const left = doc.totalCents - doc.paidCents;
@@ -736,8 +732,8 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     const input = parse(receiptInput, req.body);
-    const [doc] = await sql<{ kind: string; status: string; writtenOffOn: string | null; saleNumber: string | null }[]>`select kind, status, written_off_on, sale_number from documents where id = ${id}`;
-    if (doc?.kind === 'sale' || doc?.saleNumber) throw badRequest('A sale was paid when it was made: money back on it is a refund (from the sale)');
+    const [doc] = await sql<{ kind: string; status: string; writtenOffOn: string | null; counter: boolean }[]>`select kind, status, written_off_on, counter from documents where id = ${id}`;
+    if (doc?.counter) throw badRequest('A sale was paid when it was made: money back on it is a refund (from the sale)');
     if (!doc || doc.kind !== 'invoice') throw notFound('Invoice');
     if (doc.status !== 'issued') throw badRequest(doc.status === 'draft' ? 'Issue the invoice before recording a payment' : 'This invoice is void');
     if (doc.writtenOffOn) throw badRequest('This invoice was written off as delinquent. Undo that first, then record the payment.');
@@ -781,14 +777,14 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
     if (!can(user, 'documents.view')) {
-      // From the counter: a sale's slip (or its refund's credit note), as the sale itself may be opened.
-      const [d] = await sql<{ kind: string; saleNumber: string | null; createdBy: string | null; credited: { kind: string; saleNumber: string | null; createdBy: string | null } | null }[]>`
-        select d.kind, d.sale_number, d.created_by,
-          (select json_build_object('kind', s.kind, 'saleNumber', s.sale_number, 'createdBy', s.created_by) from documents s where s.id = d.credited_invoice_id) as credited
+      // From the counter: a sale's invoice (or its refund's credit note), as the sale itself may be opened.
+      const [d] = await sql<{ kind: string; counter: boolean; createdBy: string | null; credited: { counter: boolean; createdBy: string | null } | null }[]>`
+        select d.kind, d.counter, d.created_by,
+          (select json_build_object('counter', s.counter, 'createdBy', s.created_by) from documents s where s.id = d.credited_invoice_id) as credited
         from documents d where d.id = ${id}`;
       if (!d) throw notFound('Document');
       const sale = d.kind === 'credit_note' ? d.credited : d;
-      if (!sale?.saleNumber || !(can(user, 'sales.view') || sale.createdBy === user.id || d.createdBy === user.id)) throw notFound('Document');
+      if (!sale?.counter || !(can(user, 'sales.view') || sale.createdBy === user.id || d.createdBy === user.id)) throw notFound('Document');
     }
     // A draft invoice shows the VAT it will be issued with.
     await refreshDraftVat(sql, id);

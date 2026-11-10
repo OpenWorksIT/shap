@@ -42,6 +42,8 @@ interface Dashboard {
   taxDue?: { key: string; label: string; due: string; to: string }[];
   /** This version's SARS tables were checked up to this year end, before the tax year we're in. */
   sarsCheckedTo?: string | null;
+  /** For whoever may lock the books: month end due (last month still open), or the books reopened. */
+  periods?: { monthDue: string | null; reopened: { relockDate: string; reason: string } | null; lockDate: string | null } | null;
   bankCents: number;
   ownerLoanCents: number;
   projects: ProjectRow[];
@@ -137,6 +139,27 @@ function OwnerHome() {
           Stop
         </button>
       </div>
+    ),
+    data.periods?.reopened && (
+      <Link key="reopened" to="/accounts?tab=locks" className="attention">
+        <Icon name="alert" size={18} />
+        <span className="grow">
+          <strong>The books are reopened</strong>
+          {data.periods.lockDate ? ` from ${formatDate(data.periods.lockDate)}` : ''} ({data.periods.reopened.reason}). Lock them again once it’s put right.
+        </span>
+        Locks
+        <Icon name="chevronRight" size={16} />
+      </Link>
+    ),
+    !data.periods?.reopened && data.periods?.monthDue && (
+      <Link key="month-end" to="/accounts?tab=locks" className="attention">
+        <Icon name="calendar" size={18} />
+        <span className="grow">
+          <strong>Month end</strong>: {monthLabel(data.periods.monthDue.slice(0, 7))} is still open. Check it over and close it.
+        </span>
+        Month end
+        <Icon name="chevronRight" size={16} />
+      </Link>
     ),
     data.sarsCheckedTo && (
       <Link key="sars-tables" to="/settings?tab=system" className="attention">

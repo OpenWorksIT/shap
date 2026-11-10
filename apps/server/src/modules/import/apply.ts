@@ -58,7 +58,7 @@ export async function applyTracker(sql: Sql, plan: TrackerPlan, opts: ImportOpti
     if (!(await isCompanyEmpty(tx))) {
       if (!opts.replace) throw badRequest('Shap already has jobs or costs in it. Tick “Replace what’s there” to import over them.');
       // Sales, refunds and stock records are never deleted, so books with any can't be replaced.
-      const [kept] = await tx`select 1 from documents where sale_number is not null union all select 1 from stock_moves union all select 1 from refunds limit 1`;
+      const [kept] = await tx`select 1 from documents where counter union all select 1 from stock_moves union all select 1 from refunds limit 1`;
       if (kept) throw badRequest('These books have sales or stock records, which are never deleted, so they can’t be replaced by an import. Import into new books instead (or bring the tracker in before selling).');
       for (const t of OPERATIONAL_TABLES) await tx`delete from ${tx(t)}`;
       await tx`delete from journals where kind = 'import'`;

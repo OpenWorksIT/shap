@@ -29,7 +29,7 @@ describe('a sale that became an invoice', () => {
 
   it('non-VAT: its lines can’t be changed after the counter payment', async () => {
     const s = await me.post('/api/sales', { date: D, sourceId: till, clientId: client.id, lines: [{ description: 'Made-up service', qty: 1, unitPriceCents: 20_000, category: 'labour' }] });
-    expect(s.kind).toBe('invoice');
+    expect(s.doc.kind).toBe('invoice');
     const res = await me.call({ method: 'PUT', url: `/api/documents/${s.id}`, payload: { clientId: client.id, issueDate: D, lines: [{ category: 'labour', description: 'Made-up service', qty: 1, unitPriceCents: 30_000 }] } });
     const items = await auditBooks(env.sql, '2026-07-31');
     expect(res.statusCode).toBe(400);
@@ -37,7 +37,7 @@ describe('a sale that became an invoice', () => {
 
   it('any business: no receipt can be added to it (money back is a refund, with its credit note)', async () => {
     const s = await me.post('/api/sales', { date: D, sourceId: till, lines: [{ description: 'Made-up goods', qty: 1, unitPriceCents: 10_000 }] });
-    await me.post(`/api/sales/${s.id}/invoice`, { clientId: client.id });
+    await me.post(`/api/sales/${s.id}/customer`, { clientId: client.id });
     const before = await balance(env.sql, 'receivables');
     const res = await me.call({ method: 'POST', url: `/api/documents/${s.id}/receipts`, payload: { date: D, amountCents: -4_000, sourceId: till, method: 'cash' } });
     expect(res.statusCode).toBe(400);

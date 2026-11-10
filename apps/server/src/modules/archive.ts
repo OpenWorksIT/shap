@@ -87,7 +87,7 @@ export function registerArchiveRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { fyEnd } = parse(fyParam, req.params);
     const settings = await getSettings(sql);
     if (financialYear(fyEnd, settings.fyEndMonth).end !== fyEnd) throw badRequest('That isn’t the last day of a financial year');
-    if (!settings.lockDate || settings.lockDate < fyEnd) throw badRequest('Lock the year first (Year end → lock the books), so nothing in it can change.');
+    if (!settings.lockDate || settings.lockDate < fyEnd) throw badRequest('Lock the year first (Accounts → Locks), so nothing in it can change.');
     const body = parse(z.object({ photos: z.number().int().min(0), bytesBefore: z.number().int().min(0), bytesAfter: z.number().int().min(0) }), req.body);
     await sql`insert into archived_years (fy_end, photos, bytes_before, bytes_after) values (${fyEnd}, ${body.photos}, ${body.bytesBefore}, ${body.bytesAfter})
               on conflict (fy_end) do update set archived_at = now(), photos = excluded.photos,

@@ -53,7 +53,9 @@ The name is the shaka: thumb and pinky out, *shap, all good*.
 - **Accounts.** Income statement (totals or **by month**, like a Trade Statement), balance sheet,
   trial balance, general ledger per account, journals, an **asset register** with monthly
   depreciation and disposal, **balance checks** against bank, card and loan statements with
-  one-tap adjustments, a lock date for closed years, and CSV exports for your accountant. An
+  one-tap adjustments, **locks** (month end for a business that sells, by hand or by itself; closed
+  years; reopening with a reason, by whoever is allowed: see [docs/LOCKS.md](docs/LOCKS.md)), and
+  CSV exports for your accountant. An
   *accountant* login can read and export everything but change nothing.
 - **Bank statements.** Import a bank or card statement as CSV and Shap reconciles it: each line
   is matched to what you captured, including a slip captured item by item against the one total
@@ -62,8 +64,9 @@ The name is the shaka: thumb and pinky out, *shap, all good*.
   how you captured that supplier before); client payments are recorded against their invoice;
   transfers between your own accounts are booked; and anything unticked is left off.
 - **Sales and inventory** (optional). A Sales tab for selling over the counter: a quick item
-  list, the money into the till or bank, a slip to share, VAT by line, refunds, and an invoice
-  afterwards for a business customer. With inventory: stock at weighted average cost, supplier
+  list, the money into the till or bank, every sale a tax invoice in the same numbers as the
+  rest (a walk-in's the abridged one), VAT by line, refunds, and a business customer's details
+  added afterwards. With inventory: stock at weighted average cost, supplier
   invoices (short supplied claimed back), returns and credit notes, stock takes with reasons, and
   each item's whole history. See [docs/SALES_AND_STOCK.md](docs/SALES_AND_STOCK.md).
 - **Annual financial statements** (optional). Drawn up from the books under the IFRS for SMEs

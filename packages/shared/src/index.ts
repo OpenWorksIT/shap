@@ -22,3 +22,4 @@ export * from './statement-lines.js';
 export * from './financial-statements.js';
 export * from './public-interest.js';
 export * from './sha256.js';
+export * from './locks.js';

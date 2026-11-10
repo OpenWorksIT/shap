@@ -27,7 +27,7 @@ the sales to be seen): ticking one ticks the other.
 
 | Heading | Job | Needs |
 | --- | --- | --- |
-| Selling | Sell at the counter (their own sales and slips, and making a sale an invoice) | |
+| Selling | Sell at the counter (their own sales and their invoices, and adding a walk-in's details to one) | |
 | | Refund | See all sales and takings |
 | | See all sales and takings | |
 | | Change items and prices | |
@@ -56,10 +56,12 @@ the sales to be seen): ticking one ticks the other.
 | Accounts & reports | Reports, VAT201 and the ledger (every report and the books, read only, and the statements; the ledger names each worker's days and wages) | See days worked and wages |
 | | Bank statements (bring them in, tick off what's captured, and capture what isn't: costs, payments received; so it also lets them delete or merge costs and write off invoices) | Reports, Capture and change any cost, Record what's paid |
 | | Journals, assets and balance checks | Reports |
+| | Close and reopen months and years (month end, the year's lock; reopening takes a reason, kept with the books: docs/LOCKS.md) | Reports |
 
 **Always the owner's**: the settings, the people who sign in and their profiles, the year end, tax
 estimates, dividends and profit shares, sending, approving and reopening the financial
-statements, moving in from another package, backups and the system. The audit log is the owner's
+statements, moving in from another package, backups and the system. Closing and reopening months
+and years is the owner's unless given (above). The audit log is the owner's
 and the accountant's.
 
 The profiles Shap starts with:

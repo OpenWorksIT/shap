@@ -12,7 +12,8 @@
  *
  * What's never anyone's but the owner's: the settings, the people who sign in and their profiles,
  * the year end, tax estimates, dividends and profit shares, approving the financial statements,
- * backups and the system.
+ * backups and the system. Locking and reopening periods is a task (books.lock), the owner's unless
+ * given.
  */
 import type { Feature } from './features.js';
 
@@ -38,7 +39,7 @@ export const ACCESS_GROUPS = [
     label: 'Selling',
     feature: 'sales',
     tasks: [
-      { key: 'sales.sell', label: 'Sell at the counter', hint: 'Ring up sales, take the money, hand over the slip, make a sale an invoice. They see their own sales.' },
+      { key: 'sales.sell', label: 'Sell at the counter', hint: 'Ring up sales (each one an invoice, paid on the spot), take the money, hand over the invoice, add a walk-in’s details to it. They see their own sales.' },
       { key: 'sales.refund', label: 'Refund', hint: 'Take goods back and pay the money out', needs: ['sales.view'] },
       { key: 'sales.view', label: 'See all sales and takings', hint: 'Everyone’s sales and each day’s takings' },
       { key: 'items.edit', label: 'Change items and prices' },
@@ -113,6 +114,12 @@ export const ACCESS_GROUPS = [
       { key: 'reports.view', label: 'Reports, VAT201 and the ledger', hint: 'Every report and the books, read only, and the financial statements (the books show each worker’s wages)', needs: ['labour.view'] },
       { key: 'bank.reconcile', label: 'Bank statements', hint: 'Bring them in, tick off what’s captured, and capture the rest. Comes with “Capture and change any cost” and “Record what’s paid on them”, so they can also delete or merge costs and write off invoices', feature: 'bank', needs: ['reports.view', 'costs.manage', 'documents.paid'] },
       { key: 'books.adjust', label: 'Journals, assets and balance checks', needs: ['reports.view'] },
+      {
+        key: 'books.lock',
+        label: 'Close and reopen months and years',
+        hint: 'Lock a month (month end) or a year so nothing dated in it changes, and reopen it with a reason to put something right, then lock it again',
+        needs: ['reports.view'],
+      },
     ],
   },
 ] as const satisfies readonly AccessGroup[];

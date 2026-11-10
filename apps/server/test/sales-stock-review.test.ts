@@ -104,12 +104,12 @@ describe('selling from stock: what the accountant bot found', () => {
     expect(again.statusCode).toBe(400);
   });
 
-  it('makes a sale’s slip a slip, and an invoice paid at the counter says so', async () => {
+  it('makes every sale a tax invoice that says it was paid at the counter', async () => {
     const s = await me.post('/api/sales', { date: D, sourceId: till, lines: [{ description: 'Key cut (made up)', qty: 1, unitPriceCents: 2_500, category: 'other' }] });
-    expect(s.doc.terms).toBe('');
+    expect(s.doc.terms).toMatch(/Paid in full/);
     const pdf = await me.call({ method: 'GET', url: `/api/documents/${s.id}/pdf` });
-    expect(pdf.headers['content-disposition']).toMatch(/Sale /);
-    const inv = await me.post(`/api/sales/${s.id}/invoice`, { clientId: client.id });
+    expect(pdf.headers['content-disposition']).toMatch(/Tax invoice /);
+    const inv = await me.post(`/api/sales/${s.id}/customer`, { clientId: client.id });
     expect(inv.doc.terms).toMatch(/Paid in full/);
     // Never voided, never paid again: refunded.
     expect((await me.call({ method: 'POST', url: `/api/documents/${s.id}/void`, payload: { reason: 'x' } })).statusCode).toBe(400);
@@ -126,10 +126,10 @@ describe('selling from stock: what the accountant bot found', () => {
     expect(x.statusCode).toBe(200);
   });
 
-  it('keeps a closed year closed: a sale in it isn’t made an invoice', async () => {
+  it('keeps a closed year closed: a sale in it doesn’t get the customer’s details', async () => {
     const s = await me.post('/api/sales', { date: '2026-06-02', sourceId: till, lines: [{ description: 'Key cut (made up)', qty: 1, unitPriceCents: 2_500 }] });
     await env.sql`update settings set lock_date = '2026-06-30'`;
-    const r = await me.call({ method: 'POST', url: `/api/sales/${s.id}/invoice`, payload: { clientId: client.id } });
+    const r = await me.call({ method: 'POST', url: `/api/sales/${s.id}/customer`, payload: { clientId: client.id } });
     expect(r.statusCode).toBe(400);
     await env.sql`update settings set lock_date = null`;
   });

@@ -102,8 +102,8 @@ at those figures (Accounts → Year end), **closes the year** (nothing more can 
 and keeps the signed PDF on file. Each step is in the audit log.
 
 **Reopen** (the owner, with a reason) takes the statements back to a draft. An approved year stays
-closed: its lock date can't be moved back while the statements stand approved, and after
-reopening only by moving it (Accounts → Year end), which is in the audit log too.
+closed: the books can't be reopened into it while the statements stand approved, and after
+reopening the statements only by reopening the books (Accounts → Locks, with the reason: docs/LOCKS.md), which is in the audit log too.
 
 ## The public interest score
 

@@ -276,7 +276,7 @@ describe('the statements’ words and lines (from the accountant bot’s run)', 
     expect(note.paragraphs.join(' ')).toMatch(/net of them/);
   });
 
-  it('keeps an approved year closed: the lock date doesn’t move back until the statements are reopened', async () => {
+  it('keeps an approved year closed: the books aren’t reopened into it until the statements are', async () => {
     env = await setup();
     me = await login(env.app, 'owner@example.co.za');
     const { settings } = await me.get('/api/reference');
@@ -287,13 +287,14 @@ describe('the statements’ words and lines (from the accountant bot’s run)', 
     await me.post('/api/statements/2026-02-28/compiler-report', { attachmentId: file.id, compilerName: 'Fictional Accountant', date: '2026-04-01' });
     await me.post('/api/statements/2026-02-28/approve', { name: 'Fictional Director', date: '2026-04-02' });
     const now = (await me.get('/api/reference')).settings;
-    const moved = await me.call({ method: 'PUT', url: '/api/settings', payload: { ...now, lockDate: null } });
+    const moved = await me.call({ method: 'POST', url: '/api/periods/reopen', payload: { to: null, reason: 'A missed invoice (made up)' } });
     expect(moved.statusCode).toBe(400);
     expect(moved.json().error).toMatch(/Reopen them first/);
-    // Saving settings without touching the lock date still works.
-    const { lockDate: _l, ...rest } = now;
-    expect((await me.call({ method: 'PUT', url: '/api/settings', payload: rest })).statusCode).toBe(200);
-    await me.post('/api/statements/2026-02-28/reopen', { reason: 'A missed invoice (made up)' });
+    // Saving settings doesn't move the lock date (it's under Accounts → Locks), whatever it sends.
     expect((await me.call({ method: 'PUT', url: '/api/settings', payload: { ...now, lockDate: null } })).statusCode).toBe(200);
+    expect((await me.get('/api/reference')).settings.lockDate).toBe('2026-02-28');
+    await me.post('/api/statements/2026-02-28/reopen', { reason: 'A missed invoice (made up)' });
+    expect((await me.call({ method: 'POST', url: '/api/periods/reopen', payload: { to: null, reason: 'A missed invoice (made up)' } })).statusCode).toBe(200);
+    expect((await me.get('/api/reference')).settings.lockDate).toBeNull();
   });
 });

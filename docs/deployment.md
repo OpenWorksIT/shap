@@ -186,7 +186,8 @@ Allow 80 and 443 (Caddy), and SSH from your own addresses only. Postgres is neve
   sign-in is rate-limited.
 - Every change (costs, labour, invoices, journals, settings, users) is written to an
   append-only audit log, which the database won't let anyone edit or delete.
-- A lock date stops anything in a closed financial year from being changed.
+- A lock date stops anything in a closed month or year from being changed, for everyone; reopening
+  takes the task, and a reason in the audit log (docs/LOCKS.md).
 - The app can read shap-ctl's status and the backups, but writes only its single request file (a
   read-only mount and a separate drop-box), and runs with `no-new-privileges` and all Linux
   capabilities dropped, so a compromise of the app can't reach root on the host.

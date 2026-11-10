@@ -41,6 +41,7 @@ import { registerTaxPackRoutes } from './modules/tax-pack.js';
 import { registerAuditRoutes } from './modules/audit.js';
 import { registerBillRoutes } from './modules/bills.js';
 import { registerSalesRoutes } from './modules/sales.js';
+import { registerPeriodRoutes } from './modules/periods.js';
 import { registerStockRoutes } from './modules/stock.js';
 import { registerFinancialStatementRoutes } from './modules/financial-statements.js';
 import { registerLogbookRoutes } from './modules/logbook.js';
@@ -245,6 +246,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   registerReportRoutes(app, ctx);
   registerImportRoutes(app, ctx);
   registerYearEndRoutes(app, ctx);
+  registerPeriodRoutes(app, ctx);
   registerArchiveRoutes(app, ctx);
   registerTaxFormRoutes(app, ctx);
   registerTaxPackRoutes(app, ctx);

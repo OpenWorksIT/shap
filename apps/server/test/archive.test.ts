@@ -28,8 +28,7 @@ describe('archiving a year', () => {
     expect(photos.map((p: { id: string }) => p.id)).toEqual([att.id]);
     // Only once the year is closed.
     expect((await me.call({ method: 'PUT', url: `/api/attachments/${att.id}`, payload: { mime: 'image/jpeg', dataBase64: tiny.toString('base64') } })).statusCode).toBe(400);
-    const { settings } = await me.get('/api/reference');
-    await me.post('/api/settings', { ...settings, lockDate: '2026-02-28' }, 'PUT');
+    await me.post('/api/periods/lock', { through: '2026-02-28' });
     // A smaller version replaces it; a bigger one is ignored; a broken one is refused.
     expect(await me.post(`/api/attachments/${att.id}`, { mime: 'image/jpeg', dataBase64: big.toString('base64') }, 'PUT')).toMatchObject({ kept: false });
     expect((await me.call({ method: 'PUT', url: `/api/attachments/${att.id}`, payload: { mime: 'image/jpeg', dataBase64: tiny.subarray(0, tiny.length - 2).toString('base64') } })).statusCode).toBe(400);

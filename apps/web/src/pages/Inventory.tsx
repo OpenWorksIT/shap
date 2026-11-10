@@ -236,7 +236,7 @@ function ItemHistory({ id, onClose, onOpen, onChanged }: { id: string; onClose: 
   const { data, error, loading, reload } = useApi<{
     item: Item;
     moves: StockMove[];
-    documents: { id: string; kind: string; number: string; saleNumber: string | null; issueDate: string; status: string; qty: number; lineTotalCents: number; clientName: string | null }[];
+    documents: { id: string; kind: string; number: string; counter: boolean; issueDate: string; status: string; qty: number; lineTotalCents: number; clientName: string | null }[];
     changes: { at: string; action: string; details: Record<string, unknown>; byName: string | null }[];
   }>(`/api/items/${id}/history`, { fresh: true });
   const [edit, setEdit] = useState(false);
@@ -250,8 +250,8 @@ function ItemHistory({ id, onClose, onOpen, onChanged }: { id: string; onClose: 
   };
   const source = (m: StockMove) => {
     if (m.documentId) {
-      const label = m.documentKind === 'credit_note' ? `Credit note ${m.documentNumber}` : m.saleNumber ? `Sale ${m.saleNumber}${m.documentKind === 'invoice' ? ` (invoice ${m.documentNumber})` : ''}` : `Invoice ${m.documentNumber}`;
-      return m.saleNumber && m.documentKind !== 'credit_note' ? (
+      const label = m.documentKind === 'credit_note' ? `Credit note ${m.documentNumber}` : m.counter ? `Sale: invoice ${m.documentNumber}` : `Invoice ${m.documentNumber}`;
+      return m.counter && m.documentKind !== 'credit_note' ? (
         <button type="button" className="link-btn" onClick={() => onOpen({ kind: 'sale', id: m.documentId! })}>
           {label}
         </button>

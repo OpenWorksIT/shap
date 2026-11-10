@@ -72,6 +72,9 @@ export interface Settings {
   defaultWageSourceId: string | null;
   defaultCostSourceId: string | null;
   lockDate: string | null;
+  /** Month end (a business that sells): closed by hand, or locks itself on monthEndDay of the next month. */
+  monthEndMode?: 'manual' | 'auto';
+  monthEndDay?: number;
   defaultBrandId: string | null;
 }
 
@@ -280,6 +283,8 @@ export interface DocRow {
   remindedAt?: string | null;
   reminders?: number;
   creditedInvoiceId?: string | null;
+  /** Sold at the counter (Sales): an invoice issued and paid on the spot. */
+  counter?: boolean;
 }
 
 export interface DocLine {

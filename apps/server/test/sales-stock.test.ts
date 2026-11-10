@@ -73,7 +73,8 @@ describe('selling, from the counter and from stock', () => {
     expect(await balance(env.sql, 'vat')).toBe(34_500);
   });
 
-  it('sells at the counter: paid on the spot, out of stock at average cost, VAT by line', async () => {
+  it('sells at the counter: an invoice with the next invoice number, paid on the spot, out of stock at average cost, VAT by line', async () => {
+    const [n] = await env.sql<{ invoicePrefix: string; invoiceNext: number; invoicePad: number }[]>`select invoice_prefix, invoice_next, invoice_pad from settings`;
     const s = await me.post('/api/sales', {
       date: D,
       sourceId: till,
@@ -86,8 +87,7 @@ describe('selling, from the counter and from stock', () => {
         { itemId: service.id, description: 'Call-out (made up)', qty: 1, unitPriceCents: 51_750, category: 'labour' },
       ],
     });
-    expect(s.kind).toBe('sale');
-    expect(s.doc.number).toBe(s.saleNumber);
+    expect(s.doc).toMatchObject({ kind: 'invoice', counter: true, status: 'issued', saleNumber: null, number: `${n!.invoicePrefix}${String(n!.invoiceNext).padStart(n!.invoicePad, '0')}` });
     // R460 + R57.50 + R18 (zero) + R517.50 = R1 053 including VAT.
     expect(Number(s.doc.totalCents)).toBe(105_300);
     expect(Number(s.doc.vatCents)).toBe(13_500);
@@ -106,9 +106,7 @@ describe('selling, from the counter and from stock', () => {
     expect(refused.json().error).toMatch(/Over R5 000 SARS wants a full tax invoice/);
     const client = await me.post('/api/clients', { name: 'Fictional Contractor (Pty) Ltd', address: '3 Test Street, Fictional Town', vatNumber: '4000000002' });
     const s = await me.post('/api/sales', { ...big, clientId: client.id });
-    expect(s.kind).toBe('invoice');
-    expect(s.doc.saleNumber).toBe(s.saleNumber);
-    expect(s.doc.number).not.toBe(s.saleNumber);
+    expect(s.doc).toMatchObject({ kind: 'invoice', counter: true, clientName: 'Fictional Contractor (Pty) Ltd', saleNumber: null });
     // Sold more than there was: stock goes below nothing, the rest at the latest cost.
     expect(await item(globes.id)).toMatchObject({ qtyOnHand: -30, stockValueCents: -60000 });
     expect(await balance(env.sql, 'receivables')).toBe(0);
@@ -124,19 +122,17 @@ describe('selling, from the counter and from stock', () => {
     expect((await books()).inventory).toBe(await stockValue());
   });
 
-  it('makes a sale an invoice afterwards: the customer added, the amounts and VAT as they were', async () => {
+  it('puts the customer on a walk-in’s invoice afterwards: the same invoice and number, the amounts and VAT as they were', async () => {
     const s = await me.post('/api/sales', { date: D, sourceId: till, lines: [{ itemId: cable.id, description: 'Cable 2.5mm per metre (made up)', qty: 10, unitPriceCents: 1_150, unit: 'm' }, { description: 'Exempt item (made up)', qty: 1, unitPriceCents: 1_000, vatCode: 'exempt' }] });
     const before = { vat: await balance(env.sql, 'vat'), rev: await balance(env.sql, 'revenue_goods'), cos: await balance(env.sql, 'cos_goods') };
     const client = await me.post('/api/clients', { name: 'Fictional Walk-in Builder', address: '9 Test Lane, Fictional Town' });
-    const inv = await me.post(`/api/sales/${s.id}/invoice`, { clientId: client.id });
-    expect(inv.doc.kind).toBe('invoice');
-    expect(inv.doc.saleNumber).toBe(s.saleNumber);
-    expect(inv.doc.clientName).toBe('Fictional Walk-in Builder');
+    const inv = await me.post(`/api/sales/${s.id}/customer`, { clientId: client.id });
+    expect(inv.doc).toMatchObject({ kind: 'invoice', number: s.doc.number, clientName: 'Fictional Walk-in Builder' });
     expect(Number(inv.doc.totalCents)).toBe(Number(s.doc.totalCents));
     expect(inv.lines.map((l: { vatCode: string }) => l.vatCode)).toEqual(['standard', 'exempt']);
     expect({ vat: await balance(env.sql, 'vat'), rev: await balance(env.sql, 'revenue_goods'), cos: await balance(env.sql, 'cos_goods') }).toEqual(before);
-    // Once: it's an invoice now.
-    expect((await me.call({ method: 'POST', url: `/api/sales/${s.id}/invoice`, payload: { clientId: client.id } })).statusCode).toBe(400);
+    // Once: the customer is on it now.
+    expect((await me.call({ method: 'POST', url: `/api/sales/${s.id}/customer`, payload: { clientId: client.id } })).statusCode).toBe(400);
   });
 
   it('refunds: a credit note for what came back, paid out, the good ones back into stock at their cost', async () => {
@@ -163,9 +159,9 @@ describe('selling, from the counter and from stock', () => {
     expect((await me.call({ method: 'PUT', url: `/api/documents/${s.id}`, payload: { issueDate: D, lines: [] } })).statusCode).toBe(400);
     const [rc] = await env.sql<{ id: string }[]>`select sale_receipt_id as id from documents where id = ${s.id}`;
     expect((await me.call({ method: 'DELETE', url: `/api/receipts/${rc!.id}` })).statusCode).toBe(400);
-    // A walk-in's sale with a zero-rated line: its credit note is short like the slip, no customer needed.
+    // A walk-in's sale with a zero-rated line: its credit note is short like its invoice, no customer needed.
     const [bread] = await env.sql<{ id: string; documentId: string }[]>`
-      select l.id, l.document_id from document_lines l join documents d on d.id = l.document_id where d.kind = 'sale' and l.vat_code = 'zero' limit 1`;
+      select l.id, l.document_id from document_lines l join documents d on d.id = l.document_id where d.counter and d.client_id is null and l.vat_code = 'zero' limit 1`;
     const r3 = await me.post(`/api/documents/${bread!.documentId}/refund`, { date: D, sourceId: till, reason: 'Stale (made up)', lines: [{ lineId: bread!.id, qty: 1 }] });
     expect(r3.amountCents).toBe(1_800);
   });
@@ -274,7 +270,7 @@ describe('selling, from the counter and from stock', () => {
     expect(await said(/lines don't add up/)).toMatchObject({ level: 'fail' });
     await env.sql`delete from costs where id = ${c!.id}`;
     // A sale whose payment went missing.
-    const [sale] = await env.sql<{ id: string; receiptId: string }[]>`select id, sale_receipt_id as receipt_id from documents where kind = 'sale' limit 1`;
+    const [sale] = await env.sql<{ id: string; receiptId: string }[]>`select id, sale_receipt_id as receipt_id from documents where counter and client_id is null limit 1`;
     await env.sql`update documents set sale_receipt_id = null where id = ${sale!.id}`;
     expect(await said(/sales without their payment/)).toMatchObject({ level: 'fail' });
     await env.sql`update documents set sale_receipt_id = ${sale!.receiptId} where id = ${sale!.id}`;

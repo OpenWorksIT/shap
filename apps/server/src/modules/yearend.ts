@@ -120,7 +120,7 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
     const input = parse(yearEndInput, req.body);
     const settings = await getSettings(sql);
     if (financialYear(input.fyEnd, settings.fyEndMonth).end !== input.fyEnd) throw badRequest('That date isn’t the end of a financial year');
-    // A closed year's agreed figures are what its books are: move the lock date back to change them.
+    // A closed year's agreed figures are what its books are: reopen it (Accounts → Locks) to change them.
     // (Agreeing a year for the first time is how a closed year gets the accountant's figures.)
     const [already] = await sql`select 1 from year_ends where fy_end = ${input.fyEnd}`;
     if (already) await assertOpen(sql, input.fyEnd);

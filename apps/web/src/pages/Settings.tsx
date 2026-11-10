@@ -398,9 +398,12 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
                   </select>
                 )}
               </Field>
-              <Field label="Books closed up to" hint="Nothing on or before this date can be changed. Set it once your accountant signs off a year.">
-                {(p) => <input {...p} className="input" type="date" value={f.lockDate ?? ''} onChange={(e) => set('lockDate', e.target.value || null)} />}
-              </Field>
+              <div className="stack-sm">
+                <span className="small strong">Books closed up to</span>
+                <span className="small">
+                  {f.lockDate ? formatDate(f.lockDate) : 'Nothing is locked yet'}. Months and years are locked and reopened under <Link to="/accounts?tab=locks">Accounts → Locks</Link>, by you or whoever you allow (People who sign in).
+                </span>
+              </div>
             </div>
           </section>
           <section className="panel panel-pad stack">

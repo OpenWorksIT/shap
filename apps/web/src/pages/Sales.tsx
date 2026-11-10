@@ -1,8 +1,9 @@
 /**
  * Sales at the counter (docs/SALES_AND_STOCK.md): pick what's sold from the item list, take the
- * money, hand over the slip. A walk-in needs no details; a regular or a big buyer gets a tax
- * invoice, at the time or afterwards. Refunds take back what came back (into stock, or not if it
- * came back damaged). A sale is never changed or deleted: a mistake is refunded.
+ * money, hand over the invoice. Every sale is an invoice, paid on the spot, numbered with the
+ * other invoices. A walk-in needs no details (the abridged tax invoice, up to R5 000); a regular or
+ * a big buyer's name goes on it, at the time or afterwards. Refunds take back what came back (into
+ * stock, or not if it came back damaged). A sale is never changed or deleted: a mistake is refunded.
  */
 import { useMemo, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
@@ -125,7 +126,7 @@ function Till({ onSold }: { onSold: (id: string) => void }) {
   const [tendered, setTendered] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState<{ id: string; saleNumber: string; number: string; kind: 'sale' | 'invoice'; totalCents: number; change: number | null } | null>(null);
+  const [done, setDone] = useState<{ id: string; number: string; totalCents: number; change: number | null } | null>(null);
   const [preview, setPreview] = useState<{ id: string; title: string } | null>(null);
   const [adding, setAdding] = useState(false);
 
@@ -187,7 +188,7 @@ function Till({ onSold }: { onSold: (id: string) => void }) {
     if (needsClient && !clientId) return setError(fullInvoice ? (exported ? 'An export needs a full tax invoice: choose the customer.' : 'Over R5 000 SARS wants a full tax invoice: choose the customer.') : 'Choose the customer for the invoice');
     setBusy(true);
     try {
-      const made = await api<{ id: string; number: string; saleNumber: string; kind: 'sale' | 'invoice' }>('/api/sales', {
+      const made = await api<{ id: string; number: string }>('/api/sales', {
         body: {
           date,
           sourceId,
@@ -200,7 +201,7 @@ function Till({ onSold }: { onSold: (id: string) => void }) {
         },
       });
       setDone({ ...made, totalCents: totals.totalCents, change: method === 'cash' && tendered != null && tendered >= totals.totalCents ? tendered - totals.totalCents : null });
-      toast(`Sold: ${made.saleNumber}`);
+      toast(`Sold: invoice ${made.number}`);
       setCart([]);
       setCustomerName('');
       setReference('');
@@ -294,7 +295,7 @@ function Till({ onSold }: { onSold: (id: string) => void }) {
         {done && (
           <div className="banner ok stack-sm" role="status">
             <strong>
-              {done.kind === 'invoice' ? `Invoice ${done.number}` : `Sale ${done.saleNumber}`}: <Money cents={done.totalCents} /> paid
+              Invoice {done.number}: <Money cents={done.totalCents} /> paid
             </strong>
             {done.change != null && (
               <span>
@@ -302,12 +303,12 @@ function Till({ onSold }: { onSold: (id: string) => void }) {
               </span>
             )}
             <div className="row wrap">
-              <button type="button" className="btn small" onClick={() => setPreview({ id: done.id, title: done.kind === 'invoice' ? `Invoice ${done.number}` : `Sale ${done.saleNumber}` })}>
+              <button type="button" className="btn small" onClick={() => setPreview({ id: done.id, title: `Invoice ${done.number}` })}>
                 <Icon name="print" size={16} />
-                {done.kind === 'invoice' ? 'Invoice' : 'Slip'}
+                {vatRate > 0 ? 'Tax invoice' : 'Invoice'}
               </button>
               <button type="button" className="btn small" onClick={() => onSold(done.id)}>
-                {done.kind === 'sale' ? 'Make it an invoice or refund' : 'Refund'}
+                Customer’s details or refund
               </button>
             </div>
           </div>
@@ -414,13 +415,13 @@ function Till({ onSold }: { onSold: (id: string) => void }) {
             ) : (
               <label className="check">
                 <input type="checkbox" checked={asInvoice} onChange={(e) => setAsInvoice(e.target.checked)} />
-                <span>A tax invoice for a customer (it can also be done afterwards)</span>
+                <span>Put a customer’s details on the invoice (it can also be done afterwards)</span>
               </label>
             )}
             {needsClient ? (
               <ClientPick value={clientId} onChange={setClientId} />
             ) : (
-              <Field label="Customer’s name (optional)" hint="On the slip. Leave it for a walk-in.">
+              <Field label="Customer’s name (optional)" hint="On the invoice. Leave it for a walk-in.">
                 {(p) => <input {...p} className="input" value={customerName} onChange={(e) => setCustomerName(e.target.value)} />}
               </Field>
             )}
@@ -446,13 +447,13 @@ function Till({ onSold }: { onSold: (id: string) => void }) {
           }}
         />
       )}
-      {preview && <SlipPreview {...preview} onClose={() => setPreview(null)} />}
+      {preview && <InvoicePreview {...preview} onClose={() => setPreview(null)} />}
     </div>
   );
 }
 
-/** A slip, invoice or credit note on screen, to share with the customer (WhatsApp, email) or print. */
-function SlipPreview({ id, title, onClose }: { id: string; title: string; onClose: () => void }) {
+/** An invoice or credit note on screen, to share with the customer (WhatsApp, email) or print. */
+function InvoicePreview({ id, title, onClose }: { id: string; title: string; onClose: () => void }) {
   const toast = useToast();
   const share = async () => {
     try {
@@ -576,7 +577,7 @@ function SalesList({ onOpen }: { onOpen: (id: string) => void }) {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Sale</th>
+                  <th>Invoice</th>
                   <th>Date</th>
                   <th>Customer</th>
                   <th>Paid</th>
@@ -589,9 +590,9 @@ function SalesList({ onOpen }: { onOpen: (id: string) => void }) {
                   <tr key={r.id} className="clickable" onClick={() => onOpen(r.id)}>
                     <td>
                       <button type="button" className="link-btn" onClick={() => onOpen(r.id)}>
-                        {r.saleNumber}
+                        {r.number}
                       </button>
-                      {r.kind === 'invoice' && <div className="xs muted">Invoice {r.number}</div>}
+                      {r.saleNumber && r.saleNumber !== r.number && <div className="xs muted">Sale {r.saleNumber}</div>}
                     </td>
                     <td className="nowrap">{formatDate(r.issueDate)}</td>
                     <td>{r.clientName ?? (r.customerName || <span className="muted">Walk-in</span>)}</td>
@@ -611,18 +612,18 @@ function SalesList({ onOpen }: { onOpen: (id: string) => void }) {
         </>
       ) : (
         <div className="panel">
-          <Empty title="No sales yet">Sales made under Sell show here, with their slips, invoices and refunds.</Empty>
+          <Empty title="No sales yet">Sales made under Sell show here, with their invoices and refunds.</Empty>
         </div>
       )}
     </div>
   );
 }
 
-/** One sale: what was sold, how it was paid, its refunds; make it an invoice, or refund it. */
+/** One sale: its invoice, what was sold, how it was paid, its refunds; add a walk-in’s details, or refund it. */
 export function SaleDrawer({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged?: () => void }) {
   const { can } = useAuthed();
   const { data, error, loading, reload } = useApi<SaleDetail>(`/api/sales/${id}`, { fresh: true });
-  const [mode, setMode] = useState<'view' | 'invoice' | 'refund'>('view');
+  const [mode, setMode] = useState<'view' | 'customer' | 'refund'>('view');
   const [preview, setPreview] = useState<{ id: string; title: string } | null>(null);
   const changed = async () => {
     setMode('view');
@@ -631,7 +632,7 @@ export function SaleDrawer({ id, onClose, onChanged }: { id: string; onClose: ()
   };
   const d = data?.doc;
   const left = (data?.lines ?? []).filter((l) => Number(l.qty) - Number(l.creditedQty) > 0);
-  const title = d ? (d.kind === 'invoice' ? `Invoice ${d.number}${d.saleNumber ? ` (sale ${d.saleNumber})` : ''}` : `Sale ${d.saleNumber}`) : 'Sale';
+  const title = d ? `Invoice ${d.number}${d.saleNumber && d.saleNumber !== d.number ? ` (sale ${d.saleNumber})` : ''}` : 'Sale';
   return (
     <Drawer title={title} sub={d ? `${formatDate(d.issueDate, 'long')} · ${d.clientName ?? (d.customerName || 'Walk-in')}` : undefined} onClose={onClose} wide>
       <ErrorBox error={error} onRetry={reload} />
@@ -639,26 +640,26 @@ export function SaleDrawer({ id, onClose, onChanged }: { id: string; onClose: ()
         <Loading />
       ) : data && d ? (
         <div className="stack">
-          {mode === 'invoice' && <MakeInvoice id={id} onCancel={() => setMode('view')} onDone={changed} />}
+          {mode === 'customer' && <AddCustomer id={id} onCancel={() => setMode('view')} onDone={changed} />}
           {mode === 'refund' && <RefundForm sale={data} onCancel={() => setMode('view')} onDone={changed} />}
           {mode === 'view' && (
             <>
               <div className="row wrap">
                 <button type="button" className="btn small" onClick={() => setPreview({ id: d.id, title })}>
                   <Icon name="print" size={16} />
-                  {d.kind === 'invoice' ? 'Invoice PDF' : 'Slip'}
+                  {d.vatRateBp > 0 ? 'Tax invoice' : 'Invoice'} PDF
                 </button>
-                {can('sales.sell') && d.kind === 'sale' && (
-                  <button type="button" className="btn small" onClick={() => setMode('invoice')}>
-                    Make it an invoice
+                {can('sales.sell') && d.counter && !d.clientId && (
+                  <button type="button" className="btn small" onClick={() => setMode('customer')}>
+                    Add the customer’s details
                   </button>
                 )}
-                {can(d.saleNumber ? 'sales.refund' : 'documents.edit') && left.length > 0 && (
+                {can(d.counter ? 'sales.refund' : 'documents.edit') && left.length > 0 && (
                   <button type="button" className="btn small" onClick={() => setMode('refund')}>
-                    {d.kind === 'invoice' && !d.saleNumber ? 'Goods returned' : 'Refund'}
+                    {d.counter ? 'Refund' : 'Goods returned'}
                   </button>
                 )}
-                {d.kind === 'invoice' && d.saleNumber && can('documents.view') && (
+                {d.counter && can('documents.view') && (
                   <Link className="btn small quiet" to={`/documents/${d.id}`}>
                     Open the invoice
                   </Link>
@@ -769,12 +770,12 @@ export function SaleDrawer({ id, onClose, onChanged }: { id: string; onClose: ()
           )}
         </div>
       ) : null}
-      {preview && <SlipPreview {...preview} onClose={() => setPreview(null)} />}
+      {preview && <InvoicePreview {...preview} onClose={() => setPreview(null)} />}
     </Drawer>
   );
 }
 
-function MakeInvoice({ id, onCancel, onDone }: { id: string; onCancel: () => void; onDone: () => Promise<void> }) {
+function AddCustomer({ id, onCancel, onDone }: { id: string; onCancel: () => void; onDone: () => Promise<void> }) {
   const toast = useToast();
   const [clientId, setClientId] = useState('');
   const [error, setError] = useState('');
@@ -782,16 +783,16 @@ function MakeInvoice({ id, onCancel, onDone }: { id: string; onCancel: () => voi
     e.preventDefault();
     setError('');
     try {
-      const r = await api<{ doc: { number: string } }>(`/api/sales/${id}/invoice`, { body: { clientId } });
-      toast(`Now invoice ${r.doc.number}`);
+      const r = await api<{ doc: { number: string } }>(`/api/sales/${id}/customer`, { body: { clientId } });
+      toast(`The customer’s details are on invoice ${r.doc.number}`);
       await onDone();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Couldn’t make the invoice');
+      setError(err instanceof ApiError ? err.message : 'Couldn’t add the customer');
     }
   };
   return (
     <form className="stack" onSubmit={submit}>
-      <p className="small muted">The sale becomes a tax invoice with the customer’s details on it: every item, price and VAT class stays as it was sold, and it stays paid.</p>
+      <p className="small muted">The customer’s details go on this sale’s invoice (the full tax invoice they asked for): the same number, and every item, price and VAT class as it was sold. It stays paid.</p>
       <ClientPick value={clientId} onChange={setClientId} />
       {error && <div className="banner alert small">{error}</div>}
       <div className="row">
@@ -799,7 +800,7 @@ function MakeInvoice({ id, onCancel, onDone }: { id: string; onCancel: () => voi
           Back
         </button>
         <button className="btn primary grow" disabled={!clientId}>
-          Make it an invoice
+          Put them on the invoice
         </button>
       </div>
     </form>

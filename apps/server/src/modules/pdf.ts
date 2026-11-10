@@ -30,10 +30,12 @@ export const LOGO_BOX = { w: 210, h: 78 } as const;
 export interface PdfDocument {
   doc: {
     id: string;
-    kind: 'quote' | 'invoice' | 'credit_note' | 'sale';
+    kind: 'quote' | 'invoice' | 'credit_note';
     proforma?: boolean;
     creditedInvoiceNumber?: string | null;
-    /** A sale's own number (on an invoice made from a sale too), and a walk-in's name. */
+    /** Sold at the counter: an invoice issued and paid on the spot. */
+    counter?: boolean;
+    /** Before 1.24, the sale number an invoice made from a sale was first issued under; and a walk-in's name. */
     saleNumber?: string | null;
     customerName?: string | null;
     creditedInvoiceDate?: string | null;
@@ -165,7 +167,7 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
     bank: brand?.bankDetails || settings.bankDetails,
   };
 
-  const pdf = new PDFDocument({ size: 'A4', margins: { top: 40, bottom: 60, left: 44, right: 44 }, bufferPages: true, info: { Title: `${doc.kind === 'invoice' ? 'Invoice' : doc.kind === 'sale' ? 'Sale' : doc.kind === 'credit_note' ? 'Credit note' : doc.proforma ? 'Pro-forma invoice' : 'Quote'} ${doc.number}`, Author: tradingName } });
+  const pdf = new PDFDocument({ size: 'A4', margins: { top: 40, bottom: 60, left: 44, right: 44 }, bufferPages: true, info: { Title: `${doc.kind === 'invoice' ? 'Invoice' : doc.kind === 'credit_note' ? 'Credit note' : doc.proforma ? 'Pro-forma invoice' : 'Quote'} ${doc.number}`, Author: tradingName } });
   const chunks: Buffer[] = [];
   pdf.on('data', (c: Buffer) => chunks.push(c));
   const done = new Promise<Buffer>((resolve) => pdf.on('end', () => resolve(Buffer.concat(chunks))));
@@ -183,15 +185,15 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   const isCredit = doc.kind === 'credit_note';
   const isProforma = doc.kind === 'quote' && Boolean(doc.proforma);
   // A pro-forma asks to be paid like an invoice, but it isn't one (no tax invoice until the work's invoiced).
-  // A sale is an invoice paid on the spot: its slip is the (abridged) tax invoice.
-  const isSale = doc.kind === 'sale';
-  const isInvoice = doc.kind === 'invoice' || isSale;
+  const isInvoice = doc.kind === 'invoice';
+  // A sale at the counter is an invoice paid on the spot (a walk-in's, the abridged tax invoice): it asks for nothing.
+  const isSale = isInvoice && Boolean(doc.counter);
   const asksPayment = (isInvoice && !isSale) || isProforma;
   // Its own VAT rate says whether the business was a VAT vendor for it (not whether it is today):
   // a vendor's invoice is a tax invoice even when everything on it is zero-rated (VAT Act s20(4)(a)),
   // and one from before registering still reprints as a plain invoice.
   const vatShown = doc.vatRateBp > 0;
-  const heading = isCredit ? 'Credit note' : isSale ? (vatShown ? 'Tax invoice' : 'Sale') : isInvoice ? (vatShown ? 'Tax invoice' : 'Invoice') : isProforma ? 'Pro-forma invoice' : 'Quotation';
+  const heading = isCredit ? 'Credit note' : isInvoice ? (vatShown ? 'Tax invoice' : 'Invoice') : isProforma ? 'Pro-forma invoice' : 'Quotation';
   const balance = doc.totalCents - (isInvoice ? doc.paidCents : 0);
   const label = (text: string, x: number, at: number, opts: PDFKit.Mixins.TextOptions = {}) =>
     pdf.font(bold).fontSize(7.5).fillColor(MUTED).text(text.toUpperCase(), x, at, { characterSpacing: 0.9, ...opts });
@@ -219,11 +221,11 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   }
   pdf.font(bold).fontSize(26).fillColor(accent).text(heading, L, y, { width: contentW, align: 'right' });
   const meta: [string, string][] = [
-    [isCredit ? 'Credit note no.' : isSale ? 'Sale no.' : isInvoice ? 'Invoice no.' : isProforma ? 'Pro-forma no.' : 'Quote no.', doc.number],
+    [isCredit ? 'Credit note no.' : isInvoice ? 'Invoice no.' : isProforma ? 'Pro-forma no.' : 'Quote no.', doc.number],
     ['Date', formatDate(doc.issueDate)],
   ];
-  // An invoice made from a sale says which sale it is.
-  if (!isSale && doc.saleNumber) meta.push(['Sale no.', doc.saleNumber]);
+  // An invoice made from a sale before 1.24 says which sale it was first issued as.
+  if (doc.saleNumber && doc.saleNumber !== doc.number) meta.push(['Sale no.', doc.saleNumber]);
   if (isCredit && doc.creditedInvoiceNumber) meta.push(['For invoice', doc.creditedInvoiceNumber]);
   if (isCredit && doc.creditedInvoiceDate) meta.push(['Invoice date', formatDate(doc.creditedInvoiceDate)]);
   if (doc.dueDate && !isCredit && !isSale) meta.push([isInvoice || isProforma ? 'Due' : 'Valid until', formatDate(doc.dueDate)]);

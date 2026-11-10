@@ -115,8 +115,8 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
   section = 'Debtors, creditors, VAT and payroll';
   const [deb] = await db<{ expected: number }[]>`
     select (coalesce(sum(d.total_cents), 0) - coalesce(sum(d.written_off_cents), 0)
-            - coalesce((select sum(r.amount_cents) from receipts r join documents i on i.id = r.invoice_id where i.kind in ('invoice', 'sale') and i.status = 'issued'), 0))::bigint as expected
-    from documents d where d.kind in ('invoice', 'sale') and d.status = 'issued'`;
+            - coalesce((select sum(r.amount_cents) from receipts r join documents i on i.id = r.invoice_id where i.kind = 'invoice' and i.status = 'issued'), 0))::bigint as expected
+    from documents d where d.kind = 'invoice' and d.status = 'issued'`;
   const debtors = await posted(['receivables']);
   if (debtors.app === n(deb!.expected)) ok(`the debtors account agrees with the open invoices (${rand(debtors.app)}${besides(debtors.byHand)})`);
   else fail(`the debtors account (${rand(debtors.app)}, not counting journals by hand or year-end adjustments) and the open invoices (${rand(n(deb!.expected))}) differ by ${rand(debtors.app - n(deb!.expected))}`);
@@ -238,7 +238,9 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
 
   // Numbers that went missing: SARS expects invoices numbered in sequence. Deleting one leaves a
   // gap, which the audit log should explain.
-  const numbers = await db<{ number: string }[]>`select number from documents where kind = 'invoice'`;
+  // (An invoice made from a sale before 1.24 took its own number; the sale number it was first
+  // issued under counts in the sales' old series, now invoices.)
+  const numbers = await db<{ number: string }[]>`select number from documents where kind = 'invoice' union all select sale_number from documents where sale_number is not null`;
   const deleted = new Set(
     (await db<{ number: string | null }[]>`select details->>'number' as number from audit_log where action = 'delete' and entity = 'invoice'`).map((d) => d.number).filter(Boolean) as string[],
   );
@@ -334,15 +336,15 @@ async function salesAndStock(
 ): Promise<void> {
   const { ok, warn, fail } = a;
   const [has] = await db<{ sales: number; moves: number; refunds: number }[]>`
-    select (select count(*)::int from documents where sale_number is not null) as sales, (select count(*)::int from stock_moves) as moves, (select count(*)::int from refunds) as refunds`;
+    select (select count(*)::int from documents where counter) as sales, (select count(*)::int from stock_moves) as moves, (select count(*)::int from refunds) as refunds`;
   const salesOn = featureOn(settings.features, 'sales');
   const stockOn = featureOn(settings.features, 'inventory');
   if (!has!.sales && !has!.moves && !has!.refunds && !salesOn && !stockOn) return;
 
   a.setSection('Sales');
   const unpaid = await db<{ number: string }[]>`
-    select coalesce(d.sale_number, d.number) as number from documents d left join receipts r on r.id = d.sale_receipt_id
-    where d.sale_number is not null and d.status = 'issued' and (r.id is null or r.amount_cents <> d.total_cents or r.invoice_id <> d.id
+    select d.number from documents d left join receipts r on r.id = d.sale_receipt_id
+    where d.counter and d.status = 'issued' and (r.id is null or r.amount_cents <> d.total_cents or r.invoice_id <> d.id
       -- and nothing else paid on it (money back on a sale is a refund, never a payment the other way)
       or exists (select 1 from receipts x where x.invoice_id = d.id and x.method <> 'credit' and x.id <> d.sale_receipt_id)) limit 20`;
   if (!unpaid.length) ok(`every sale has its payment, for its full amount (${has!.sales} sales)`);
@@ -350,7 +352,7 @@ async function salesAndStock(
 
   const over = await db<{ number: string }[]>`
     select d.number from documents d
-    where d.kind in ('sale', 'invoice') and exists (select 1 from documents cn join refunds rf on rf.credit_note_id = cn.id where cn.credited_invoice_id = d.id)
+    where d.kind = 'invoice' and exists (select 1 from documents cn join refunds rf on rf.credit_note_id = cn.id where cn.credited_invoice_id = d.id)
       and (select coalesce(sum(rf.amount_cents), 0) from refunds rf join documents cn on cn.id = rf.credit_note_id where cn.credited_invoice_id = d.id)
         > (select coalesce(sum(r.amount_cents), 0) from receipts r where r.invoice_id = d.id and r.method <> 'credit')
     limit 20`;
@@ -369,20 +371,9 @@ async function salesAndStock(
   if (-clearing.app === n(cn!.expected)) ok('every credit note is either taken off what was owed or refunded');
   else fail(`credit notes issued and what settled them differ by ${rand(-clearing.app - n(cn!.expected))} (the credit notes account)`);
 
-  // A sale's own numbers can't go missing: a sale is never deleted.
-  const sold = (await db<{ number: string }[]>`select sale_number as number from documents where sale_number is not null`).map((x) => x.number);
-  const bySeries = new Map<string, number[]>();
-  for (const num of sold) {
-    const m = /^(.*?)(\d+)$/.exec(num);
-    if (m) bySeries.set(m[1]!, [...(bySeries.get(m[1]!) ?? []), Number(m[2])]);
-  }
-  const missing: string[] = [];
-  for (const [prefix, nums] of bySeries) {
-    const sorted = [...new Set(nums)].sort((x, y) => x - y);
-    for (let i = 1; i < sorted.length && missing.length < 10; i++) if (sorted[i]! - sorted[i - 1]! > 1) missing.push(`${prefix}… after ${sorted[i - 1]}`);
-  }
-  if (!missing.length) ok('sale numbers run in sequence');
-  else warn(`sale numbers with gaps: ${few(missing)} (a sale is never deleted, so this needs a look)`);
+  // A sale's number is an invoice number: the invoice numbers' check (above) covers them.
+  const [voided] = await db<{ number: string }[]>`select number from documents where counter and status <> 'issued' limit 1`;
+  if (voided) fail(`a sale's invoice that isn't issued (a sale is never voided or a draft): ${voided.number}`);
 
   if (!has!.moves && !stockOn) return;
   a.setSection('Stock');
@@ -442,7 +433,7 @@ async function salesAndStock(
 
   const unmoved = await db<{ number: string }[]>`
     select d.number from document_lines l join documents d on d.id = l.document_id join items i on i.id = l.item_id
-    where i.stocked and l.qty > 0 and d.kind in ('sale', 'invoice') and d.status in ('issued', 'void')
+    where i.stocked and l.qty > 0 and d.kind = 'invoice' and d.status in ('issued', 'void')
       and coalesce((select sum(-m.qty) from stock_moves m where m.document_line_id = l.id), 0) <> case when d.status = 'void' then 0 else l.qty end
       -- (A line issued before the item's stock was kept, this time round, never moved stock: only those since.)
       and (exists (select 1 from stock_moves m where m.document_line_id = l.id)

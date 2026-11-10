@@ -3,6 +3,28 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.24.0 (10 November 2026)
+
+Every sale is a tax invoice, and the books lock month by month for a business that sells.
+
+- **No more cash receipts for sales** (your accountant's call). Every sale at the counter is an
+  invoice, issued and paid on the spot, with the next number in the same series as your other
+  invoices; a walk-in's is the abridged tax invoice (no details needed up to R5 000; over that, or
+  an export, it asks for the customer as before). A business not registered for VAT gets
+  "Invoice", not "Tax invoice". The separate sale numbers (SL00001…) and the slip are gone.
+- **Add the customer's details** to a walk-in's invoice afterwards: the same invoice and number
+  (before, a sale made an invoice took a second number).
+- Sales made before stay as they were issued: invoices now, each at its own number (SL00012 stays
+  SL00012, as the customer has it); one made an invoice later keeps its invoice number and shows
+  which sale it was.
+- **Month end** (with Sales on): close each month by hand, or let it lock itself on a day of the
+  next month; setup asks, and Accounts → Month end & locks shows each month's sales, refunds,
+  invoices, costs and bank lines still to tick off. Home reminds you while last month is open. A
+  business that doesn't sell keeps the year's lock.
+- **Who may lock**: "Close and reopen months and years" is a task in People who sign in. A closed
+  period is closed for everyone; reopening takes a reason, kept with the books, and Home shows the
+  books are reopened until they're locked again. The lock date is no longer a setting.
+
 ## 1.23.2 (10 November 2026)
 
 The tax and SARS rules checked again by an accountant, and every update now goes through four
