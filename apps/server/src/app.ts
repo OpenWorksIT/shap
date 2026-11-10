@@ -9,6 +9,7 @@ import type { Config } from './config.js';
 import type { Ctx } from './context.js';
 import { pgCode, PG, type Sql } from './db/index.js';
 import { Secrets } from './lib/crypto.js';
+import { applyMonthLock } from './lib/books.js';
 import { HttpError } from './lib/errors.js';
 import { routePath } from './lib/http.js';
 import { safeError } from './lib/logging.js';
@@ -175,6 +176,13 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
     if (oldPage || (typeof theirs === 'string' && theirs !== version && req.headers['x-shap-client'] !== 'native')) {
       return reply.code(409).send({ error: 'Shap was updated while this page was open. Reload the page, then try again.', code: 'stale_client' });
     }
+  });
+
+  // Month end set to lock itself: the months due are locked before any change is made, so whatever
+  // reads the lock date (the database's own checks too) sees it (lib/books.ts applyMonthLock).
+  app.addHook('preHandler', async (req) => {
+    if (!routePath(req).startsWith('/api/') || req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return;
+    await applyMonthLock(sql);
   });
 
   app.addHook('onSend', async (req, reply, payload) => {

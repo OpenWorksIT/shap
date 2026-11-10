@@ -17,6 +17,7 @@ import type { FastifyInstance } from 'fastify';
 import {
   documentTotals,
   featureOn,
+  needsFullTaxInvoice,
   itemInput,
   openingStockInput,
   refundInput,
@@ -92,11 +93,17 @@ export async function makeSale(tx: Db, user: AuthUser, raw: unknown): Promise<{ 
   const lines = input.lines.map((l) => ({ ...l, vatCode: vatRate > 0 ? l.vatCode : ('standard' as const) }));
   const t = documentTotals(lines, vatRate, input.pricesIncludeVat);
   if (t.totalCents <= 0) throw badRequest('A sale is for more than nothing');
-  if (!input.clientId && vatRate > 0 && (t.totalCents > FULL_TAX_INVOICE_CENTS || lines.some((l) => l.vatCode === 'export'))) {
+  // A walk-in's is the abridged tax invoice: not over R5 000, not for an export, and not for
+  // zero-rated goods over R50 (VAT Act s20(5) and its proviso, s20(6)).
+  const exported = lines.some((l) => l.vatCode === 'export');
+  const zeroRated = lines.some((l) => l.vatCode === 'zero' || l.vatCode === 'export');
+  if (!input.clientId && vatRate > 0 && (exported || needsFullTaxInvoice(t.totalCents, zeroRated))) {
     throw badRequest(
       t.totalCents > FULL_TAX_INVOICE_CENTS
         ? 'Over R5 000 SARS wants a full tax invoice, with the buyer’s name and address: choose the customer (or add them as a client).'
-        : 'An export needs a full tax invoice, with the buyer’s name and address: choose the customer.',
+        : exported
+          ? 'An export needs a full tax invoice, with the buyer’s name and address: choose the customer.'
+          : 'Zero-rated goods over R50 need a full tax invoice, with the buyer’s name and address (VAT Act s20(5)): choose the customer (or add them as a client).',
     );
   }
   // The next invoice number: a sale is an invoice like any other.
@@ -138,8 +145,10 @@ export async function addSaleCustomer(tx: Db, user: AuthUser, id: string, raw: u
     select kind, counter, number, client_id, issue_date, project_id from documents where id = ${id} for update`;
   if (!d || !d.counter) throw notFound('Sale');
   if (d.clientId) throw badRequest('This sale’s invoice already has its customer');
-  // The invoice is dated the sale's day: that period has to be open.
-  await assertOpen(tx, d.issueDate);
+  // Even in a closed period: nothing it charges, its date or its VAT changes, only who it's to (a
+  // customer asking for a full tax invoice gets it within 21 days: VAT Act s20(1B)). In the audit log.
+  const [paid] = await tx<{ status: string }[]>`select status from documents where id = ${id}`;
+  if (paid?.status !== 'issued') throw badRequest('Only an issued sale gets the customer’s details');
   const [c] = await tx`select 1 from clients where id = ${clientId}`;
   if (!c) throw badRequest('That customer isn’t on the client list');
   await tx`
@@ -375,8 +384,15 @@ export function registerSalesRoutes(app: FastifyInstance, ctx: Ctx): void {
     const audits = await sql`
       select a.at, a.action, a.details, u.name as by_name from audit_log a left join users u on u.id = a.user_id
       where a.entity = 'item' and a.entity_id = ${id} order by a.at desc limit 200`;
-    if (!can(user, 'stock.costs')) return { item: hideCosts(item), moves: moves.map(hideCosts), documents: sold, changes: audits.map((a) => ({ ...a, details: hideCosts(a.details ?? {}) })) };
-    return { item, moves, documents: sold, changes: audits };
+    // Seeing stock is in quantities: whose sale or invoice it was, and what it charged, are the
+    // sales' and the invoices' (someone selling sees their own sales).
+    const seesAll = can(user, 'sales.view') || can(user, 'documents.view');
+    const own = new Set((await sql<{ id: string }[]>`select id from documents where counter and created_by = ${user.id}`).map((d) => d.id));
+    const mayName = (documentId: unknown) => seesAll || (typeof documentId === 'string' && own.has(documentId));
+    const movesShown = moves.map((m) => (mayName(m.documentId) ? m : { ...m, documentNumber: null, clientName: null, documentId: null }));
+    const soldShown = seesAll ? sold : sold.filter((d) => own.has(String(d.id))).map(({ lineTotalCents: _t, clientName: _c, ...d }) => d);
+    if (!can(user, 'stock.costs')) return { item: hideCosts(item), moves: movesShown.map(hideCosts), documents: soldShown, changes: audits.map((a) => ({ ...a, details: hideCosts(a.details ?? {}) })) };
+    return { item, moves: movesShown, documents: soldShown, changes: audits };
   });
 
   // ---- sales

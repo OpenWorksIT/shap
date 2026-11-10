@@ -12,6 +12,7 @@ import {
   formatDate,
   formatZar,
   FULL_TAX_INVOICE_CENTS,
+  needsFullTaxInvoice,
   LINE_CATEGORIES,
   lineLabel,
   PAYMENT_METHOD_LABELS,
@@ -144,7 +145,14 @@ function Till({ onSold }: { onSold: (id: string) => void }) {
     true,
   );
   const exported = vatRate > 0 && cart.some((l) => l.vatCode === 'export');
-  const fullInvoice = vatRate > 0 && (totals.totalCents > FULL_TAX_INVOICE_CENTS || exported);
+  // A walk-in's is the abridged tax invoice: not over R5 000, not an export, not zero-rated goods over R50 (VAT Act s20(5), s20(6)).
+  const zeroRated = vatRate > 0 && cart.some((l) => l.vatCode === 'zero' || l.vatCode === 'export');
+  const fullInvoice = vatRate > 0 && (exported || needsFullTaxInvoice(totals.totalCents, zeroRated));
+  const why = exported
+    ? 'An export needs a full tax invoice with the buyer’s name and address.'
+    : totals.totalCents > FULL_TAX_INVOICE_CENTS
+      ? `Over ${formatZar(FULL_TAX_INVOICE_CENTS, { cents: false })} SARS wants a full tax invoice with the buyer’s name and address.`
+      : 'Zero-rated goods over R50 need a full tax invoice with the buyer’s name and address (VAT Act s20(5)).';
   const needsClient = fullInvoice || asInvoice;
 
   const add = (it: Item) => {
@@ -185,7 +193,7 @@ function Till({ onSold }: { onSold: (id: string) => void }) {
     e.preventDefault();
     setError('');
     if (!cart.length) return setError('Add something to sell');
-    if (needsClient && !clientId) return setError(fullInvoice ? (exported ? 'An export needs a full tax invoice: choose the customer.' : 'Over R5 000 SARS wants a full tax invoice: choose the customer.') : 'Choose the customer for the invoice');
+    if (needsClient && !clientId) return setError(fullInvoice ? `${why} Choose the customer.` : 'Choose the customer for the invoice');
     setBusy(true);
     try {
       const made = await api<{ id: string; number: string }>('/api/sales', {
@@ -411,7 +419,7 @@ function Till({ onSold }: { onSold: (id: string) => void }) {
             )}
 
             {vatRate > 0 && fullInvoice ? (
-              <div className="banner signal small">{exported ? 'An export needs a full tax invoice with the buyer’s name and address.' : `Over ${formatZar(FULL_TAX_INVOICE_CENTS, { cents: false })} SARS wants a full tax invoice with the buyer’s name and address.`} Choose the customer:</div>
+              <div className="banner signal small">{why} Choose the customer:</div>
             ) : (
               <label className="check">
                 <input type="checkbox" checked={asInvoice} onChange={(e) => setAsInvoice(e.target.checked)} />
@@ -453,11 +461,12 @@ function Till({ onSold }: { onSold: (id: string) => void }) {
 }
 
 /** An invoice or credit note on screen, to share with the customer (WhatsApp, email) or print. */
-function InvoicePreview({ id, title, onClose }: { id: string; title: string; onClose: () => void }) {
+function InvoicePreview({ id, title, onClose, abridged }: { id: string; title: string; onClose: () => void; abridged?: boolean }) {
   const toast = useToast();
+  const path = `/api/documents/${id}/pdf${abridged ? '?abridged=1' : ''}`;
   const share = async () => {
     try {
-      const how = await sharePdf(`/api/documents/${id}/pdf`, title, `${title}: thank you for your business.`);
+      const how = await sharePdf(path, title, `${title}: thank you for your business.`);
       if (how === 'downloaded') toast('PDF saved');
     } catch (err) {
       toast(err instanceof ApiError ? err.message : 'Couldn’t share it', 'error');
@@ -466,7 +475,7 @@ function InvoicePreview({ id, title, onClose }: { id: string; title: string; onC
   return (
     <PdfPreview
       title={title}
-      load={async () => (await apiBlob(`/api/documents/${id}/pdf`)).blob}
+      load={async () => (await apiBlob(path)).blob}
       onClose={onClose}
       actions={
         <button type="button" className="btn primary small" onClick={() => void share()}>
@@ -624,7 +633,7 @@ export function SaleDrawer({ id, onClose, onChanged }: { id: string; onClose: ()
   const { can } = useAuthed();
   const { data, error, loading, reload } = useApi<SaleDetail>(`/api/sales/${id}`, { fresh: true });
   const [mode, setMode] = useState<'view' | 'customer' | 'refund'>('view');
-  const [preview, setPreview] = useState<{ id: string; title: string } | null>(null);
+  const [preview, setPreview] = useState<{ id: string; title: string; abridged?: boolean } | null>(null);
   const changed = async () => {
     setMode('view');
     await reload();
@@ -649,6 +658,11 @@ export function SaleDrawer({ id, onClose, onChanged }: { id: string; onClose: ()
                   <Icon name="print" size={16} />
                   {d.vatRateBp > 0 ? 'Tax invoice' : 'Invoice'} PDF
                 </button>
+                {d.counter && d.clientId && d.invoicedAt && !d.saleNumber && (
+                  <button type="button" className="btn small quiet" onClick={() => setPreview({ id: d.id, title: `${title} (as first issued)`, abridged: true })}>
+                    As first issued
+                  </button>
+                )}
                 {can('sales.sell') && d.counter && !d.clientId && (
                   <button type="button" className="btn small" onClick={() => setMode('customer')}>
                     Add the customer’s details
@@ -792,7 +806,7 @@ function AddCustomer({ id, onCancel, onDone }: { id: string; onCancel: () => voi
   };
   return (
     <form className="stack" onSubmit={submit}>
-      <p className="small muted">The customer’s details go on this sale’s invoice (the full tax invoice they asked for): the same number, and every item, price and VAT class as it was sold. It stays paid.</p>
+      <p className="small muted">The customer’s details go on this sale’s invoice (the full tax invoice they asked for): the same number, and every item, price and VAT class as it was sold. It stays paid, and says it replaces the short one. The client needs a name and address, and their VAT number if they’re registered for VAT.</p>
       <ClientPick value={clientId} onChange={setClientId} />
       {error && <div className="banner alert small">{error}</div>}
       <div className="row">

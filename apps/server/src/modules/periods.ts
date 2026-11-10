@@ -7,12 +7,12 @@
  * closes its years.
  */
 import type { FastifyInstance } from 'fastify';
-import { addMonths, featureOn, financialYear, lockInput, monthEnd, monthEndInput, monthLockDue, nextMonthLock, reopenInput } from '@shap/shared';
-import { requireAccess, userOrThrow } from '../auth.js';
+import { addMonths, featureOn, financialYear, lockInput, monthEnd, monthEndInput, monthLockDue, nextMonthLock, reopenInput, vatPeriod, type VatCategory } from '@shap/shared';
+import { can, requireAccess, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
-import { applyMonthLock, getSettings, today } from '../lib/books.js';
+import { applyMonthLock, effectiveLock, getSettings, today } from '../lib/books.js';
 import { badRequest } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 
@@ -23,9 +23,12 @@ async function signedAfter(db: Db, date: string | null): Promise<string | null> 
   return signed?.fyEnd ?? null;
 }
 
-/** The lock as it stands, with what month end needs. */
-export async function lockState(db: Db) {
-  const lockDate = await applyMonthLock(db);
+/**
+ * The lock as it stands, with what month end needs. `who`: whether to say who reopened the books
+ * and why (it's the audit log's: for whoever may lock, the owner and the accountant).
+ */
+export async function lockState(db: Db, who = true) {
+  const lockDate = await effectiveLock(db);
   const s = await getSettings(db);
   const sells = featureOn(s.features, 'sales');
   // Reopened: the lock it was at, while that's still later than the lock now.
@@ -39,20 +42,37 @@ export async function lockState(db: Db) {
   const lastMonthEnd = monthEnd(addMonths(`${t.slice(0, 8)}01`, -1));
   return {
     lockDate,
-    reopened: relock ? { relockDate: relock, at: reopened?.at ?? null, byName: reopened?.byName ?? null, reason: reopened?.reason ?? '' } : null,
+    reopened: relock ? { relockDate: relock, at: reopened?.at ?? null, byName: who ? (reopened?.byName ?? null) : null, reason: who ? (reopened?.reason ?? '') : '' } : null,
     sells,
     monthEnd: { mode: s.monthEndMode, day: s.monthEndDay, next: s.monthEndMode === 'auto' && sells ? nextMonthLock(t, s.monthEndDay) : null },
     // Month end due: a business that sells, last month still open, from the month end day.
     monthDue: sells && (!lockDate || lockDate < lastMonthEnd) && Number(t.slice(8, 10)) >= s.monthEndDay ? lastMonthEnd : null,
     fyEndMonth: s.fyEndMonth,
+    // A VAT vendor's VAT periods that have ended and are closed: reopening one may mean a VAT201
+    // already filed (docs/LOCKS.md).
+    vatPeriods: s.vatRegistered && lockDate ? closedVatPeriods(lockDate, s.vatCategory, s.fyEndMonth) : [],
   };
 }
+
+/** The VAT periods ended on or before the lock date, the last two years of them, newest first. */
+export function closedVatPeriods(lockDate: string, category: VatCategory, fyEndMonth: number): { start: string; end: string }[] {
+  const out: { start: string; end: string }[] = [];
+  for (let m = 0; m < 24; m++) {
+    const p = vatPeriod(monthEnd(addMonths(`${lockDate.slice(0, 8)}01`, -m)), category, fyEndMonth);
+    if (p.end <= lockDate && !out.some((x) => x.end === p.end)) out.push(p);
+  }
+  return out;
+}
+
+/** The VAT periods a reopen to `to` opens again (ended after `to`, closed up to `was`). */
+export const vatPeriodsReopened = (periods: { start: string; end: string }[], to: string | null) => periods.filter((p) => !to || p.end > to);
 
 export function registerPeriodRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
 
-  app.get('/api/periods', { preHandler: requireAccess('books.lock', 'reports.view') }, async () => {
-    const state = await lockState(sql);
+  app.get('/api/periods', { preHandler: requireAccess('books.lock', 'reports.view') }, async (req) => {
+    const user = userOrThrow(req);
+    const state = await lockState(sql, user.role !== 'staff' || can(user, 'books.lock'));
     const t = today();
     // The last twelve month ends (a business that sells) or financial years, newest first, with
     // what each holds: a month end looks over these before locking.
@@ -66,7 +86,8 @@ export function registerPeriodRoutes(app: FastifyInstance, ctx: Ctx): void {
         select
           (select count(*)::int from documents where counter and status = 'issued' and issue_date between ${start}::date and ${end}::date) as sales_count,
           (select coalesce(sum(total_cents), 0) from documents where counter and status = 'issued' and issue_date between ${start}::date and ${end}::date) as sales_cents,
-          (select coalesce(sum(amount_cents), 0) from refunds where date between ${start}::date and ${end}::date) as refunds_cents,
+          (select coalesce(sum(rf.amount_cents), 0) from refunds rf join documents cn on cn.id = rf.credit_note_id join documents s on s.id = cn.credited_invoice_id
+             where s.counter and rf.date between ${start}::date and ${end}::date) as refunds_cents,
           (select coalesce(sum(total_cents), 0) from documents where kind = 'invoice' and not counter and status = 'issued' and issue_date between ${start}::date and ${end}::date) as invoiced_cents,
           (select coalesce(sum(amount_cents), 0) from costs where date between ${start}::date and ${end}::date) as costs_cents,
           (select count(*)::int from bank_lines l where l.date between ${start}::date and ${end}::date and not l.ignored
@@ -93,9 +114,11 @@ export function registerPeriodRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { through } = parse(lockInput, req.body);
     if (through >= today()) throw badRequest('A month is locked once it has ended');
     return sql.begin(async (tx) => {
+      // One at a time: two locks sent together can't leave it at the earlier one.
+      await tx`select 1 from settings where id for update`;
       const was = await applyMonthLock(tx);
       if (was && was >= through) throw badRequest(`The books are already closed up to ${was}`);
-      await tx`update settings set lock_date = ${through}::date, relock_date = case when relock_date <= ${through}::date then null else relock_date end where id`;
+      await tx`update settings set lock_date = greatest(coalesce(lock_date, ${through}::date), ${through}::date), relock_date = case when relock_date <= ${through}::date then null else relock_date end where id`;
       await audit(tx, { userId: user.id, action: 'lock', entity: 'period', ip: req.ip, details: { through, was } });
       return lockState(tx);
     });
@@ -109,15 +132,18 @@ export function registerPeriodRoutes(app: FastifyInstance, ctx: Ctx): void {
     const user = userOrThrow(req);
     const { to, reason } = parse(reopenInput, req.body);
     return sql.begin(async (tx) => {
+      await tx`select 1 from settings where id for update`;
       const was = await applyMonthLock(tx);
       if (!was) throw badRequest('Nothing is locked');
       if (to && to >= was) throw badRequest(`The books are closed up to ${was}: reopen them from an earlier month end`);
       const signed = await signedAfter(tx, to);
       if (signed) throw badRequest(`The financial statements for the year ended ${signed} were approved and signed. Reopen them first (Accounts → Financial statements, with the reason), then the books.`);
       const [s] = await tx<{ relockDate: string | null }[]>`select relock_date::text as relock_date from settings where id for update`;
+      const before = await lockState(tx);
       await tx`update settings set lock_date = ${to}::date, relock_date = greatest(coalesce(${s!.relockDate}::date, ${was}::date), ${was}::date) where id`;
-      await audit(tx, { userId: user.id, action: 'reopen', entity: 'period', ip: req.ip, details: { was, to, reason } });
-      return lockState(tx);
+      const vat = vatPeriodsReopened(before.vatPeriods, to);
+      await audit(tx, { userId: user.id, action: 'reopen', entity: 'period', ip: req.ip, details: { was, to, reason, vatPeriods: vat.map((p) => p.end) } });
+      return { ...(await lockState(tx)), vatReopened: vat };
     });
   });
 

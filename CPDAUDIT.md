@@ -362,6 +362,43 @@ Then the four reviews of the fixes (each by a separate agent), all fixed with te
   tests. Accepted: tax overpaid shows as a negative liability, not an asset; the accountant
   reclassifies it where it matters.
 
+### The four reviews of 1.24 (before release)
+
+Every sale an invoice in the invoice numbers, month end and the lock task. All fixed with tests
+(`apps/server/test/review-1.24/four-reviews.test.ts`, `sales-invoices-locks.test.ts`; Pocket the
+same):
+
+- Security and privacy: putting time on an invoice changed issued tax invoices and paid sales,
+  past the lock and with no audit entry (older than 1.24, newly reachable): time goes on quotes and
+  draft invoices only, VAT by line, logged. A month due to lock itself wasn't locked for what reads
+  the lock date directly (the database's job check, settings, the archive): every change locks it
+  first, and a look no longer writes it. A teller's stock history showed other people's sales and
+  the invoices with client names and amounts. Two locks at once could leave the earlier; the loser
+  of a race on the lock day saw the old lock. Staff reading the reports saw who reopened the books
+  and why. A sale could be paid again from a bank line, and changed (number, customer, job) through
+  Quotes & invoices. Photo shrinking took slips from a closed month, not only a closed year. The
+  penetration test's never-read lists now cover the locks.
+- IFRS for SMEs and company law: the migration renamed a clashing old sale and dropped the number
+  it was issued under (now: a draft gives way, an issued clash keeps both numbers, each renumbering
+  logged); it added due dates to old sales (no longer). Reopened approved statements threw the
+  signed set away (now kept, with its PDF and the reason). A company file, a move-in and a tracker
+  import could change closed or signed years. The docs said a sale's invoice is never changed when
+  it could be, and "the accountant's call" read as the owner's own accountant (now: on an
+  accountant's advice to OpenWorks IT; not advice for your business).
+- SARS and tax: a walk-in's sale with zero-rated goods took the abridged tax invoice; the proviso to
+  VAT Act s20(5) rules that out for zero-rated supplies (up to R50, s20(6), none is needed): the till
+  asks for the customer, and the books audit goes by the same rule. The full invoice made afterwards
+  didn't say it replaces the abridged one, which couldn't be printed again. A reopen didn't say a
+  filed VAT201 might be affected (and that late input tax is claimed in the current period). Adding
+  a walk-in's details needed a reopen (it changes no figure). Old sales reprinted under new labels.
+  docs/SARS.md now has the tax invoice and credit note rules with sources. Not changed, the owner's
+  decision: a business that doesn't sell keeps the year's lock (a VAT vendor might want each VAT
+  period locked; offered as a later option).
+- Accounting and arithmetic: the upgrade gives the same figures (18 months of made-up books, every
+  posting, report, VAT201 and the signed fingerprint identical). Undoing a bank match changed a
+  closed month. An old sale number could be handed out again. The database let a sale's invoice
+  become a draft or void (now refused). Month end's refunds counted refunds on other invoices.
+
 ### Code scanning (CodeQL), first run
 
 - The Accounts screen's download links carried the period's dates unencoded (flagged as text

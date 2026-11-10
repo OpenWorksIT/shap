@@ -251,7 +251,8 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
           select filename, mime, bytes from attachments a where a.id = ${id} and (a.created_by = ${user.id} or (${slips} and exists (select 1 from costs c where c.receipt_id = a.id)
             and not exists (select 1 from statement_files f where f.attachment_id = a.id) and not exists (select 1 from brands b where b.logo_id = a.id)
             and not exists (select 1 from settings st where st.logo_id = a.id)
-            and not exists (select 1 from financial_statements fs where a.id in (fs.compiler_report_id, fs.final_pdf_id))))`;
+            and not exists (select 1 from financial_statements fs where a.id in (fs.compiler_report_id, fs.final_pdf_id))
+            and not exists (select 1 from financial_statement_versions v where a.id in (v.compiler_report_id, v.final_pdf_id))))`;
     if (!row) throw notFound('File');
     // Only the kinds of file Shap takes in are served as themselves: anything else (from a doctored
     // backup, say) is handed over as plain bytes to save, never opened as a page.

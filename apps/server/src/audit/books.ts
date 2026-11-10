@@ -22,7 +22,7 @@
  * audit (deploy/vps/audit-server.sh) and by the tests, which also break the books on purpose to
  * see each check catch it (test/books-audit.test.ts).
  */
-import { featureOn, financialYear, formatZar, vatIncluded, vatPeriod, vatRateOn } from '@shap/shared';
+import { featureOn, financialYear, formatZar, needsFullTaxInvoice, vatIncluded, vatPeriod, vatRateOn } from '@shap/shared';
 import type { Ctx } from '../context.js';
 
 type Db = Ctx['sql'];
@@ -219,8 +219,8 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
   if (!wrong.length) ok('every document adds up: its items to its subtotal, the subtotal and VAT to its total');
   else fail(`${wrong.length === 20 ? '20 or more' : wrong.length} documents don't add up: ${few(wrong.map((w) => `${w.kind.replace('_', ' ')} ${w.number}`))}`);
 
-  const tax = await db<{ number: string; total: number; clientName: string | null; clientAddress: string | null; zero: boolean }[]>`
-    select d.number, d.total_cents as total, c.name as client_name, c.address as client_address,
+  const tax = await db<{ number: string; total: number; clientName: string | null; clientAddress: string | null; zero: boolean; legacySale: boolean }[]>`
+    select d.number, d.total_cents as total, c.name as client_name, c.address as client_address, d.legacy_sale,
       exists (select 1 from document_lines l where l.document_id = d.id and l.vat_code in ('zero', 'export')) as zero
     from documents d left join clients c on c.id = d.client_id
     where d.kind = 'invoice' and d.status = 'issued' and d.vat_rate_bp > 0`;
@@ -228,9 +228,13 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
     // (Once deregistered, the VAT number and address shown on new documents no longer matter here.)
     if (settings.vatRegistered && !settings.vatNumber.trim()) fail('tax invoices have been issued, but there is no VAT number in Settings → Company to show on them');
     if (settings.vatRegistered && !settings.address.trim()) warn('tax invoices have been issued, but there is no business address in Settings → Company');
-    const short = tax.filter((t) => (Math.abs(n(t.total)) > FULL_TAX_INVOICE_CENTS || t.zero) && (!t.clientName?.trim() || !t.clientAddress?.trim()));
+    // The same rule the documents are issued by (VAT Act s20(4) to (6): vat.ts needsFullTaxInvoice).
+    const unnamed = tax.filter((t) => needsFullTaxInvoice(n(t.total), t.zero) && (!t.clientName?.trim() || !t.clientAddress?.trim()));
+    const short = unnamed.filter((t) => !t.legacySale);
+    const oldSlips = unnamed.filter((t) => t.legacySale);
     if (!short.length) ok(`every full tax invoice names the client and their address (${tax.length} tax invoices)`);
-    else warn(`${short.length} tax invoices over R5 000 (or with zero-rated items) don't show the client's name and address now: ${few(short.map((s) => s.number))}`);
+    else warn(`${short.length} tax invoices over R5 000 (or with zero-rated items over R50) don't show the client's name and address now: ${few(short.map((s) => s.number))}`);
+    if (oldSlips.length) warn(`${oldSlips.length} sales from before 1.24 were given the short slip with zero-rated goods over R50, where SARS wants the full tax invoice: add the customer's details (Sales) if they ask for one: ${few(oldSlips.map((s) => s.number))}`);
   }
   const reasonless = await db<{ number: string }[]>`select number from documents where kind = 'credit_note' and status = 'issued' and trim(credit_reason) = ''`;
   if (reasonless.length) warn(`${reasonless.length} issued credit notes don't say why: ${few(reasonless.map((r) => r.number))}`);

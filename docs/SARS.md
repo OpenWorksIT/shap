@@ -11,7 +11,7 @@ year's figures are checked and put in (the standard update, CPDAUDIT.md).
 
 Everything here is in the shared code, so it is the same in Shap Pocket.
 
-**Checked up to the year ending 28 February 2027 (2026/27), on 10 November 2026.**
+**Checked up to the year ending 28 February 2027 (2026/27), on 10 November 2026** (tax invoices again for 1.24).
 
 The 2026/27 figures from Budget 2026 (the individual tables and rebates, the R2.3 million VAT and
 turnover tax limits, the R430 000 retirement cap) were still in Parliament when checked: the
@@ -49,7 +49,13 @@ promulgated, check the figures against them (the standard update). The 2025/26 t
 | Registration: compulsory R1 million, voluntary R50 000; R2.3 million and R120 000 from 1 April 2026 | `tax.ts` `VAT_THRESHOLDS` | all | SARS Budget 2026 FAQ (above); not yet promulgated when checked |
 | Categories A, B, C (two-monthly, monthly), D (six-monthly, February and August), E (yearly, at the year end) | `tax.ts` `vatPeriod` | all | [SARS: tax periods](https://www.sars.gov.za/types-of-tax/value-added-tax/tax-periods-for-vat-vendors/) |
 | VAT201 due: last business day of the month after (eFiling), 25th by hand | `tax.ts` `vat201Due` | all | [SARS: obligations of a vendor](https://www.sars.gov.za/types-of-tax/value-added-tax/obligations-of-a-vat-vendor/) |
-| Full tax invoice over R5 000 | documents, sales | all | [SARS: tax invoices](https://www.sars.gov.za/businesses-and-employers/tax-invoices/) |
+| Full tax invoice (the recipient's name, address and VAT number, s20(4)) over R5 000, or for anything zero-rated or exported (the abridged form "shall not apply to a supply that is charged with tax under section 11", proviso to s20(5)); the abridged tax invoice up to R5 000 (s20(5)); none needed at R50 or less paid in money (s20(6)) | `vat.ts` `needsFullTaxInvoice`, `documents.ts` `assertTaxDocument`, `sales.ts` `makeSale`, the books audit | all | [SARS: tax invoices](https://www.sars.gov.za/businesses-and-employers/tax-invoices/), [VAT Act s20](https://www.acts.co.za/value-added-tax-act-1991/20__tax_invoices), [VAT 404 §13](https://www.sars.gov.za/legal-pub-guide-vat404-vat-404-guide-for-vendors) |
+| Every sale at the counter is a tax invoice (from 1.24), numbered with the other invoices; only a VAT vendor issues a tax invoice (s20(1)), so a business not registered says "Invoice" | `sales.ts`, `pdf.ts` | all | VAT Act s20 (above) |
+| One tax invoice per supply; a copy marked "copy" (provisos to s20(1)); a walk-in's details added afterwards go on the same invoice and number, which then says it replaces the abridged one (s20(1B): corrected within 21 days of the request) | `sales.ts` `addSaleCustomer`, `pdf.ts` `fullAfterwards` | all | VAT Act s20 (above) |
+| Credit notes: the reason, the invoice credited (s21(3)); a walk-in's short slip from before 1.24 gets as short a credit note | `documents.ts` `assertTaxDocument` | all | [VAT Act s21](https://www.acts.co.za/value-added-tax-act-1991/21__credit_and_debit_notes) |
+| Records kept five years (s55, Tax Administration Act s29): issued documents are never deleted; a reopened month is in the audit log | `periods.ts`, the audit log | all | [VAT Act s55](https://www.acts.co.za/value-added-tax-act-1991/55__records) |
+| A filed VAT201 is corrected by a revised return; input tax isn't increased by revising a past period (it's claimed in a later one, within five years): Locks says so when a reopen opens an ended VAT period | `periods.ts` `vatPeriodsReopened`, `Locks.tsx` | all | [SARS: request for correction](https://www.sars.gov.za/individuals/what-if-i-do-not-agree/request-for-corrections/), [VAT201 guide](https://www.sars.gov.za/gen-elec-04-g01-guide-for-completing-the-value-added-tax-vat201-declaration-external-guide) |
+| A tourist taking goods home is charged 15% (not zero-rated as an export); they claim it back from the VAT Refund Administrator | the docs (SALES_AND_STOCK.md) | all | [SARS: VAT refunds for tourists](https://www.sars.gov.za/types-of-tax/value-added-tax/vat-refunds-for-tourists-and-foreign-enterprises/) |
 | Bad debts (s22(1)): output VAT back at the invoice's rate | the ledger, `books.ts` | all | [VAT Act s22](https://www.acts.co.za/value-added-tax-act-1991/22__irrecoverable_debts) |
 
 ## Payroll
@@ -80,6 +86,9 @@ promulgated, check the figures against them (the standard update). The 2025/26 t
 - Individual tables before the 2023 year (earlier years use 2023's), medical credits before the
   2023 year (2023's), and SBC tables before the year ending 1 April 2020 (2021's).
 - The travel logbook's rate per km (Shap keeps the trips, not a claim).
+- A direction from SARS under s20(7) (another document in place of a tax invoice).
+- Proof of export (s11(3)): the documents are the vendor's to keep.
+- Marking a reprint of an issued tax invoice "copy".
 - Tax allowances in place of depreciation: wear and tear (s11(e)), and a small business
   corporation's write-off of plant (s12E(1), (1A)). The estimates take the profit in the books.
 - A year shorter than twelve months (a new company's first year): SARS scales the SBC table (the

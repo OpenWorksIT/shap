@@ -188,7 +188,12 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
     const [agreed] = await sql`select 1 from year_ends where fy_end >= ${fyEnd}::date limit 1`;
     const settings = await getSettings(sql);
     const yearClosed = Boolean(settings.lockDate && String(settings.lockDate) >= fyEnd);
-    return { statements, status: r?.status ?? 'draft', row: r ? { ...r, snapshot: undefined } : null, changedSince, audit, yearAgreed: Boolean(agreed), yearClosed };
+    // The sets signed before and reopened since, kept as they were signed.
+    const versions = await sql`
+      select v.id, v.reopened_at, v.reason, u.name as reopened_by_name, v.signed->>'status' as status, v.signed->>'approved_on' as approved_on,
+        v.signed->>'approved_name' as approved_name, v.signed->>'compiled_on' as compiled_on, v.final_pdf_id is not null as has_pdf
+      from financial_statement_versions v left join users u on u.id = v.reopened_by where v.fy_end = ${fyEnd}::date order by v.reopened_at desc`;
+    return { statements, status: r?.status ?? 'draft', row: r ? { ...r, snapshot: undefined } : null, changedSince, audit, yearAgreed: Boolean(agreed), yearClosed, versions };
   });
 
   app.get('/api/statements/:fyEnd/pdf', { preHandler: requireAccess('reports.view') }, async (req, reply) => {
@@ -206,6 +211,18 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
     reply.header('content-type', 'application/pdf');
     reply.header('content-disposition', `inline; filename="${name}"`);
     return reply.send(pdf);
+  });
+
+  /** A set signed before and reopened since: its signed PDF (or the compiler's report), as it was. */
+  app.get('/api/statements/:fyEnd/versions/:id/pdf', { preHandler: requireAccess('reports.view') }, async (req, reply) => {
+    const { fyEnd, id } = parse(z.object({ fyEnd: fyParam.shape.fyEnd, id: z.string().uuid() }), req.params);
+    const [v] = await sql<{ bytes: Buffer; filename: string }[]>`
+      select a.bytes, a.filename from financial_statement_versions v join attachments a on a.id = coalesce(v.final_pdf_id, v.compiler_report_id)
+      where v.id = ${id} and v.fy_end = ${fyEnd}::date`;
+    if (!v) throw notFound('Signed statements');
+    reply.header('content-type', 'application/pdf');
+    reply.header('content-disposition', `inline; filename="${v.filename.replace(/[^\w.\- ]/g, '_')}"`);
+    return reply.send(v.bytes);
   });
 
   /** Emailed to the accountant to compile, with the draft set attached. */
@@ -341,8 +358,16 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
     const { reason } = parse(reopenStatementsInput, req.body);
     const r = await row(sql, fyEnd);
     if (!r || r.status === 'draft') throw badRequest('These statements are still a draft');
-    await sql`update financial_statements set status = 'draft', snapshot = null, snapshot_hash = null, compiled_by = null, compiler = null, compiled_on = null,
-      compiled_at = null, approved_by = null, approved_name = '', approved_on = null, approved_at = null, updated_at = now() where fy_end = ${fyEnd}::date`;
+    await sql.begin(async (tx) => {
+      // A set that was compiled (or approved and signed) is kept as it was, with its PDFs and why it
+      // was reopened (Companies Act s24: the statements are kept seven years).
+      if (r.status === 'compiled' || r.status === 'approved') {
+        await tx`insert into financial_statement_versions (fy_end, signed, final_pdf_id, compiler_report_id, reopened_by, reason)
+          select fy_end, to_jsonb(fs), final_pdf_id, compiler_report_id, ${user.id}, ${reason} from financial_statements fs where fy_end = ${fyEnd}::date`;
+      }
+      await tx`update financial_statements set status = 'draft', snapshot = null, snapshot_hash = null, compiled_by = null, compiler = null, compiled_on = null,
+        compiled_at = null, approved_by = null, approved_name = '', approved_on = null, approved_at = null, updated_at = now() where fy_end = ${fyEnd}::date`;
+    });
     await audit(sql, { userId: user.id, action: 'reopen_statements', entity: 'financial_statements', entityId: fyEnd, ip: req.ip, details: { reason, was: r.status } });
     return { ok: true };
   });

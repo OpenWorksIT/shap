@@ -70,7 +70,8 @@ export async function nextNumber(db: Db, kind: DocKind, proforma = false): Promi
   let number = formatNumber(s!.prefix, n, s!.pad);
   // Skip numbers already used (e.g. typed by hand or imported).
   for (let i = 0; i < 1000; i++) {
-    const [taken] = await db`select 1 from documents where kind = ${kind} and number = ${number}`;
+    // (An invoice number an old sale was first issued under, before 1.24, is taken too.)
+    const [taken] = await db`select 1 from documents where (kind = ${kind} and number = ${number}) or (${kind} = 'invoice' and sale_number = ${number}) limit 1`;
     if (!taken) break;
     n++;
     number = formatNumber(s!.prefix, n, s!.pad);
@@ -78,6 +79,9 @@ export async function nextNumber(db: Db, kind: DocKind, proforma = false): Promi
   await db`update settings set ${db.unsafe(`${series}_next`)} = ${n + 1} where id`;
   return number;
 }
+
+/** A document's lines written afresh, with its totals (for a quote or a draft: an issued one's lines are fixed). */
+export const rewriteLines = (db: Db, documentId: string, lines: NonNullable<DocInput['lines']>, vatRateBp: number, pricesIncludeVat = false) => writeLines(db, documentId, lines, vatRateBp, pricesIncludeVat);
 
 async function writeLines(db: Db, documentId: string, lines: NonNullable<DocInput['lines']>, vatRateBp: number, pricesIncludeVat = false) {
   await db`delete from document_lines where document_id = ${documentId}`;
@@ -191,9 +195,17 @@ export async function loadDocument(db: Db, id: string) {
   return { doc, lines, receipts, creditNotes };
 }
 
-/** A quote or invoice as its PDF, under its trading name, with the file name clients see. */
-export async function documentPdf(db: Db, id: string) {
-  const data = await loadDocument(db, id);
+/**
+ * A quote or invoice as its PDF, under its trading name, with the file name clients see.
+ * `abridged`: a walk-in's sale whose customer was added afterwards, as it was first handed over
+ * (without them).
+ */
+export async function documentPdf(db: Db, id: string, opts: { abridged?: boolean } = {}) {
+  const loaded = await loadDocument(db, id);
+  const asFirst = Boolean(opts.abridged && loaded.doc.counter && loaded.doc.invoicedAt && loaded.doc.clientName);
+  const data = asFirst
+    ? { ...loaded, doc: { ...loaded.doc, clientName: null, clientContact: null, clientAddress: null, clientEmail: null, clientPhone: null, clientVatNumber: null, clientCode: null, invoicedAt: null } }
+    : loaded;
   const settings = await getSettings(db);
   // One name on the door (trading names switched off): the business's own details and logo.
   const brand = featureOn(settings.features, 'brands') ? await loadBrand(db, data.doc.brandId ?? settings.defaultBrandId) : null;
@@ -205,7 +217,7 @@ export async function documentPdf(db: Db, id: string) {
   }
   const pdf = await renderDocumentPdf({ ...data, settings, brand, logo });
   const label =
-    data.doc.kind === 'invoice' ? (Number(data.doc.vatRateBp) > 0 ? 'Tax invoice' : 'Invoice') : data.doc.kind === 'credit_note' ? 'Credit note' : data.doc.proforma ? 'Pro-forma invoice' : 'Quote';
+    data.doc.kind === 'invoice' ? (Number(data.doc.vatRateBp) > 0 ? 'Tax invoice' : data.doc.legacySale ? 'Sale' : 'Invoice') : data.doc.kind === 'credit_note' ? 'Credit note' : data.doc.proforma ? 'Pro-forma invoice' : 'Quote';
   const filename = `${brand ? `${brand.name} ` : ''}${label} ${data.doc.number}${data.doc.clientName ? ` - ${data.doc.clientName}` : ''}.pdf`.replace(/[^\w.\- ]/g, '');
   return { pdf, filename, data, settings, brand };
 }
@@ -245,7 +257,7 @@ export async function markShared(db: Db, id: string): Promise<string | null> {
 
 /** A full tax invoice (over R5 000) names the recipient and their address: VAT Act s20(4)(c). */
 export { FULL_TAX_INVOICE_CENTS } from '@shap/shared';
-import { FULL_TAX_INVOICE_CENTS } from '@shap/shared';
+import { FULL_TAX_INVOICE_CENTS, needsFullTaxInvoice } from '@shap/shared';
 
 /**
  * What a tax invoice or credit note must carry before it's issued (VAT Act s20(4) and (5),
@@ -281,15 +293,17 @@ export async function assertTaxDocument(db: Db, id: string): Promise<void> {
   if (!(d.brandAddress?.trim() || s.address.trim())) throw badRequest(`A ${what} must show your business address. Add it in Settings → Company first.`);
   // Whether the full form is needed: for a credit note, whether the invoice it credits needed it.
   const basis = d.kind === 'credit_note' ? d.creditedInvoiceId! : id;
-  const [f] = await db<{ kind: string; counter: boolean; clientId: string | null; totalCents: number; zeroRated: boolean }[]>`
-    select d.kind, d.counter, d.client_id, d.total_cents, exists (select 1 from document_lines l where l.document_id = d.id and l.vat_code in ('zero', 'export')) as zero_rated
+  const [f] = await db<{ kind: string; legacySale: boolean; clientId: string | null; totalCents: number; zeroRated: boolean }[]>`
+    select d.kind, d.legacy_sale, d.client_id, d.total_cents, exists (select 1 from document_lines l where l.document_id = d.id and l.vat_code in ('zero', 'export')) as zero_rated
     from documents d where d.id = ${basis}`;
-  // A walk-in's sale at the counter is the abridged tax invoice (makeSale asks for the customer
-  // when it can't be: over R5 000, or an export), and money back on it a credit note as short.
-  if (f?.counter && !f.clientId) return;
-  const full = Math.abs(Number(f?.totalCents ?? d.totalCents)) > FULL_TAX_INVOICE_CENTS || Boolean(f?.zeroRated);
+  // Money back on a walk-in's sale from before 1.24 (its short slip, as issued): its credit note is
+  // as short (s21(3)).
+  if (d.kind === 'credit_note' && f?.legacySale && !f.clientId) return;
+  // A walk-in's sale is the abridged tax invoice where the Act allows it (makeSale asks for the
+  // customer where it doesn't); otherwise the full one, with the recipient.
+  const full = needsFullTaxInvoice(Number(f?.totalCents ?? d.totalCents), Boolean(f?.zeroRated));
   if (full && (!d.clientName?.trim() || !d.clientAddress?.trim())) {
-    const why = Math.abs(Number(f?.totalCents ?? d.totalCents)) > FULL_TAX_INVOICE_CENTS ? 'over R5 000' : 'with zero-rated or exported items';
+    const why = Math.abs(Number(f?.totalCents ?? d.totalCents)) > FULL_TAX_INVOICE_CENTS ? 'over R5 000' : 'with zero-rated or exported items over R50';
     throw badRequest(
       d.kind === 'invoice'
         ? `A tax invoice ${why} must show the client’s name and address (and their VAT number if they’re registered). Add them to the client first.`
@@ -427,6 +441,9 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
       throw new HttpError(409, 'Someone else changed this while you had it open. Reload to see their changes, then make yours again.', 'stale_record');
     }
     if (old.status === 'void') throw badRequest('This invoice was voided. Duplicate it to make a new one.');
+    // A sale's invoice is as it was issued at the counter, paid: nothing on it changes here (a
+    // walk-in's details go on under Sales; what comes back is a refund).
+    if ((old as unknown as { counter: boolean }).counter) throw badRequest('A sale’s invoice can’t be changed: add a walk-in’s details, or refund what came back, under Sales.');
     if (old.kind === 'credit_note' && old.status !== 'draft') throw badRequest('An issued credit note can’t be changed. Void it and make a new one.');
     if (old.kind === 'invoice' && old.status === 'issued') await assertOpen(sql, old.issueDate, input.issueDate);
     const settings = await getSettings(sql);
@@ -434,13 +451,8 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     // A credit note is priced the way its invoice was. Left out, how prices were typed stays as it was.
     const was = Boolean((old as { pricesIncludeVat?: boolean }).pricesIncludeVat);
     if (old.kind === 'invoice' && old.status === 'issued' && Number(old.vatRateBp) > 0) await assertTaxInvoiceUnchanged(sql, id, input);
-    // A sale was paid when it was made, and goods taken back stand against an invoice's lines:
-    // either way, what it charges (and for a sale, its date and customer) stays.
+    // Goods taken back stand against an invoice's lines: what it charges stays.
     if (old.kind === 'invoice' && old.status === 'issued') {
-      const o = old as unknown as { counter: boolean; clientId: string | null };
-      if (o.counter && (!(await linesUnchanged(sql, id, input.lines ?? [])) || input.issueDate !== String(old.issueDate) || (input.clientId ?? o.clientId) !== o.clientId)) {
-        throw badRequest('This invoice was a sale, paid when it was made: what it charges, its date and its customer stay as they are. Take anything back with a refund (Sales), or add a walk-in’s details there.');
-      }
       const [returned] = await sql`select 1 from document_lines cl join document_lines l on l.id = cl.credited_line_id join documents c on c.id = cl.document_id
         where l.document_id = ${id} and c.status <> 'void' limit 1`;
       if (returned && !(await linesUnchanged(sql, id, input.lines ?? []))) throw badRequest('Goods came back against this invoice, so what it charges can’t change. Credit it and make a new invoice.');
@@ -788,7 +800,8 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: Ctx): void {
     }
     // A draft invoice shows the VAT it will be issued with.
     await refreshDraftVat(sql, id);
-    const { pdf, filename } = await pdfFor(id);
+    // (abridged=1: a walk-in's sale whose details were added later, as first handed over.)
+    const { pdf, filename } = await documentPdf(sql, id, { abridged: q(req).abridged === '1' });
     reply.header('content-type', 'application/pdf');
     reply.header('content-disposition', `${q(req).download ? 'attachment' : 'inline'}; filename="${filename}"`);
     return reply.send(pdf);

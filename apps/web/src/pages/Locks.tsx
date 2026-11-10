@@ -31,6 +31,8 @@ export interface LockState {
   monthEnd: { mode: 'manual' | 'auto'; day: number; next: { on: string; through: string } | null };
   monthDue: string | null;
   periods: Period[];
+  /** A VAT vendor's VAT periods that have ended and are closed. */
+  vatPeriods: { start: string; end: string }[];
 }
 
 export function Locks() {
@@ -161,6 +163,7 @@ export function Locks() {
           period={reopening}
           label={name(reopening)}
           sells={data.sells}
+          vatPeriods={data.vatPeriods}
           onCancel={() => setReopening(null)}
           onDone={async () => {
             setReopening(null);
@@ -174,7 +177,7 @@ export function Locks() {
 }
 
 /** The month (or year) ending `period` and everything after it opened again, with the reason. */
-function Reopen({ period, label, sells, onCancel, onDone }: { period: string; label: string; sells: boolean; onCancel: () => void; onDone: () => Promise<void> }) {
+function Reopen({ period, label, sells, vatPeriods, onCancel, onDone }: { period: string; label: string; sells: boolean; vatPeriods: { start: string; end: string }[]; onCancel: () => void; onDone: () => Promise<void> }) {
   const toast = useToast();
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
@@ -201,6 +204,19 @@ function Reopen({ period, label, sells, onCancel, onDone }: { period: string; la
       <p className="small muted">
         {label[0]!.toUpperCase() + label.slice(1)} and everything after it opens again, so it can be put right. The reason is kept with the books, with who reopened it. Lock it again once it’s done.
       </p>
+      {vatPeriods.filter((p) => p.end > to).length > 0 && (
+        <div className="banner signal small stack-sm">
+          <span>
+            <strong>VAT periods already ended:</strong>{' '}
+            {vatPeriods
+              .filter((p) => p.end > to)
+              .reverse()
+              .map((p) => `${formatDate(p.start)} to ${formatDate(p.end)}`)
+              .join('; ')}
+            . If a VAT201 for one is filed, a change to it means a revised VAT201 (ask your accountant). SARS doesn’t take more input tax by revising a past period: a supplier invoice that came in late is claimed in the current one, so capture it dated in an open period, not by reopening.
+          </span>
+        </div>
+      )}
       <Field label="Why it’s reopened">{(p) => <input {...p} className="input" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={300} required placeholder="e.g. a supplier invoice dated in the month came in late" />}</Field>
       {error && <div className="banner alert small">{error}</div>}
       <div className="row">

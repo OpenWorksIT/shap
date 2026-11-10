@@ -88,7 +88,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
   const doc = detail?.doc;
   const credit = kind === 'credit_note';
   // Issued credit notes are fixed (void and make a new one); everything else stays editable.
-  const editable = isOwner && doc?.status !== 'void' && !(credit && doc?.status === 'issued');
+  const editable = isOwner && doc?.status !== 'void' && !(credit && doc?.status === 'issued') && !doc?.counter;
   // An issued tax invoice (one that charged VAT) is fixed: what it charges, to whom, when and under
   // which number. Corrections go through a credit note. Invoices without VAT stay open to change.
   const taxLocked = doc?.kind === 'invoice' && doc.status === 'issued' && doc.vatRateBp > 0;
@@ -351,7 +351,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
       {doc?.status === 'void' && <div className="banner alert">Voided: {doc.voidReason}</div>}
       {doc?.counter && (
         <div className="banner small">
-          A sale at the counter, paid when it was made: what it charges, its date and customer stay as they are. Refunds and a walk-in’s details are under{' '}
+          A sale at the counter, paid when it was made: it stays as it was issued. Refunds and a walk-in’s details are under{' '}
           {has('sales') ? <Link to="/sales">Sales</Link> : 'Sales'}.
         </div>
       )}
@@ -460,7 +460,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
             <div className="panel-head spread">
               <strong>Items and services</strong>
               <span className="row wrap" style={{ gap: 6 }}>
-                {itemsEditable && !credit && has('timeTracker') && (
+                {itemsEditable && !credit && has('timeTracker') && !(doc?.kind === 'invoice' && doc.status !== 'draft') && (
                   <button type="button" className="btn small" onClick={() => setDrawer('time')}>
                     <Icon name="clock" size={14} />
                     Add time…

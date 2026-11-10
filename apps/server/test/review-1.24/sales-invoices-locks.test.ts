@@ -21,7 +21,8 @@ async function shop(env: TestEnv, opts: { vat?: boolean } = {}) {
   const client = await me.post('/api/clients', { name: 'Fictional Builder (Pty) Ltd', address: '5 Pretend Road, Fictional Town' });
   return { me, till, client };
 }
-const sale = (till: string, extra: Record<string, unknown> = {}) => ({ date: D, sourceId: till, method: 'cash', lines: [{ description: 'Brown bread (made up)', qty: 1, unitPriceCents: 1_800, vatCode: 'zero' }, { description: 'Key cut (made up)', qty: 2, unitPriceCents: 2_300 }], ...extra });
+// R50 in all, a zero-rated line among them: a walk-in's abridged tax invoice (VAT Act s20(5), s20(6)).
+const sale = (till: string, extra: Record<string, unknown> = {}) => ({ date: D, sourceId: till, method: 'cash', lines: [{ description: 'Bread roll (made up)', qty: 1, unitPriceCents: 400, vatCode: 'zero' }, { description: 'Key cut (made up)', qty: 2, unitPriceCents: 2_300 }], ...extra });
 
 describe('every sale is an invoice, in the invoice numbers', () => {
   let env: TestEnv;
@@ -53,7 +54,7 @@ describe('every sale is an invoice, in the invoice numbers', () => {
     expect((await me.get('/api/documents?kind=invoice')).map((d: { id: string }) => d.id)).toContain(s.id);
   });
 
-  it('is a tax invoice on paper, a walk-in’s with zero-rated goods the abridged one (no customer up to R5 000)', async () => {
+  it('is a tax invoice on paper, a walk-in’s the abridged one (no customer: up to R5 000, zero-rated goods up to R50)', async () => {
     const s = await me.post('/api/sales', sale(till, { customerName: 'Made-up Walk-in' }));
     const pdf = await me.call({ method: 'GET', url: `/api/documents/${s.id}/pdf` });
     expect(pdf.statusCode).toBe(200);
@@ -84,12 +85,6 @@ describe('every sale is an invoice, in the invoice numbers', () => {
     }
   });
 
-  it('flags a sale’s invoice that isn’t issued (put wrong behind the app’s back)', async () => {
-    const s = await me.post('/api/sales', sale(till));
-    await env.sql`update documents set status = 'void' where id = ${s.id}`;
-    expect((await auditBooks(env.sql, '2026-09-30')).find((i) => /a sale's invoice that isn't issued/.test(i.text))).toMatchObject({ level: 'fail' });
-    await env.sql`update documents set status = 'issued' where id = ${s.id}`;
-  });
 });
 
 describe('a business not registered for VAT', () => {
@@ -128,21 +123,38 @@ describe('sales made before 1.24, brought up to it', () => {
       const walkIn = await made('sale', 'SL00001', 'SL00001');
       const invoiced = await made('invoice', '9001', 'SL00002');
       const clash = await made('sale', 'SL00003', 'SL00003');
-      await env.sql`insert into documents (kind, number, status, issue_date) values ('invoice', 'SL00003', 'draft', ${D})`;
+      const issuedClash = await made('sale', 'SL00004', 'SL00004');
+      // A draft invoice typed with an old sale's number (it was never handed over: it gives way),
+      // and an issued one (both were handed over: the sale keeps its number as "Sale no.").
+      const [draft] = await env.sql<{ id: string }[]>`insert into documents (kind, number, status, issue_date) values ('invoice', 'SL00003', 'draft', ${D}) returning id`;
+      await made('invoice', 'SL00004', 'SL00004-X');
+      await env.sql`update documents set sale_number = null where number = 'SL00004' and kind = 'invoice'`;
       await env.sql.unsafe(readFileSync(join(import.meta.dirname, '../../migrations/044_sales_invoices_locks.sql'), 'utf8'));
-      const rows = await env.sql<{ id: string; kind: string; number: string; saleNumber: string | null; counter: boolean; dueDate: string }[]>`
-        select id, kind, number, sale_number, counter, due_date::text as due_date from documents where id in (${walkIn}, ${invoiced}, ${clash})`;
+      const rows = await env.sql<{ id: string; kind: string; number: string; saleNumber: string | null; counter: boolean; dueDate: string | null; legacySale: boolean }[]>`
+        select id, kind, number, sale_number, counter, due_date::text as due_date, legacy_sale from documents where id in (${walkIn}, ${invoiced}, ${clash}, ${issuedClash}, ${draft!.id})`;
       const by = new Map(rows.map((x) => [x.id, x]));
-      expect(by.get(walkIn)).toMatchObject({ kind: 'invoice', number: 'SL00001', saleNumber: null, counter: true, dueDate: D });
-      expect(by.get(invoiced)).toMatchObject({ kind: 'invoice', number: '9001', saleNumber: 'SL00002', counter: true });
-      expect(by.get(clash)).toMatchObject({ kind: 'invoice', number: 'SL00003-S', counter: true });
+      // Nothing about what was issued changes but its kind (no due date added).
+      expect(by.get(walkIn)).toMatchObject({ kind: 'invoice', number: 'SL00001', saleNumber: null, counter: true, dueDate: null, legacySale: true });
+      expect(by.get(invoiced)).toMatchObject({ kind: 'invoice', number: '9001', saleNumber: 'SL00002', counter: true, legacySale: false });
+      expect(by.get(clash)).toMatchObject({ kind: 'invoice', number: 'SL00003', counter: true });
+      expect(by.get(draft!.id)).toMatchObject({ number: 'SL00003-D' });
+      expect(by.get(issuedClash)).toMatchObject({ number: 'SL00004-S', saleNumber: 'SL00004', legacySale: true });
+      const renumbered = await env.sql<{ details: { from: string; to: string } }[]>`select details from audit_log where action = 'renumber' order by id`;
+      expect(renumbered.map((x) => `${x.details.from}→${x.details.to}`)).toEqual(['SL00003→SL00003-D', 'SL00004→SL00004-S']);
+      // An old sale reprints as it was handed over.
+      const pdf = await me.call({ method: 'GET', url: `/api/documents/${walkIn}/pdf` });
+      expect(pdf.statusCode).toBe(200);
       expect(await env.sql`select column_name from information_schema.columns where table_name = 'settings' and column_name like 'sale_%'`).toEqual([]);
       // SL00002 counts as used (it's invoice 9001's first number): no gap in the old series.
       const items = await auditBooks(env.sql, '2026-09-30');
       expect(items.find((i) => /invoice numbers missing/.test(i.text))?.text ?? '').not.toMatch(/SL00002/);
       expect(items.filter((i) => i.level === 'fail').map((i) => i.text)).toEqual([]);
       // And they're sales still: under Sales, refunded at the counter.
-      expect((await me.get('/api/sales')).map((x: { id: string }) => x.id).sort()).toEqual([walkIn, invoiced, clash].sort());
+      expect((await me.get('/api/sales')).map((x: { id: string }) => x.id).sort()).toEqual([walkIn, invoiced, clash, issuedClash].sort());
+      // And an old sale number isn't handed out again as an invoice number.
+      await env.sql`update settings set invoice_prefix = 'SL', invoice_pad = 5, invoice_next = 2`;
+      const next = await me.post('/api/sales', sale(till));
+      expect(next.number).not.toBe('SL00002');
     } finally {
       await env.close();
     }
@@ -235,7 +247,7 @@ describe('locks: month end, and who may close and reopen', () => {
     const p = await me.get('/api/periods');
     const sep = p.periods.find((x: { end: string }) => x.end === '2026-09-30');
     expect(sep).toMatchObject({ locked: true, salesCount: 2 });
-    expect(sep.salesCents).toBe(2 * 6_400);
+    expect(sep.salesCents).toBe(2 * 5_000);
   });
 });
 

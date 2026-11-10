@@ -7,23 +7,36 @@ entries newer than the version you're running before you update.
 
 Every sale is a tax invoice, and the books lock month by month for a business that sells.
 
-- **No more cash receipts for sales** (your accountant's call). Every sale at the counter is an
-  invoice, issued and paid on the spot, with the next number in the same series as your other
-  invoices; a walk-in's is the abridged tax invoice (no details needed up to R5 000; over that, or
-  an export, it asks for the customer as before). A business not registered for VAT gets
+- **No more cash receipts for sales** (on an accountant's advice to OpenWorks IT; not advice for
+  your business: check with your own accountant). Every sale at the counter is an invoice, issued
+  and paid on the spot, with the next number in the same series as your other invoices. A walk-in
+  needs no details where SARS allows the abridged tax invoice: up to R5 000, and for zero-rated
+  goods only up to R50 (a full tax invoice, with the buyer's name and address, is due for anything
+  zero-rated over R50 or exported: VAT Act s20(5) and (6)). A business not registered for VAT gets
   "Invoice", not "Tax invoice". The separate sale numbers (SL00001…) and the slip are gone.
-- **Add the customer's details** to a walk-in's invoice afterwards: the same invoice and number
-  (before, a sale made an invoice took a second number).
+- **Add the customer's details** to a walk-in's invoice afterwards, even in a closed month: the same
+  invoice and number (before, a sale made an invoice took a second number), saying it replaces the
+  abridged one; the one first handed over still prints. A sale's invoice is otherwise never changed,
+  paid again (also not from a bank line) or given time.
 - Sales made before stay as they were issued: invoices now, each at its own number (SL00012 stays
-  SL00012, as the customer has it); one made an invoice later keeps its invoice number and shows
-  which sale it was.
+  SL00012, as the customer has it), reprinting as it was handed over. Where an invoice had the same
+  number, a draft one gives way ("-D"); an issued one keeps it and the sale says which number it
+  was issued as. An old sale number is never handed out again. The books audit lists old walk-in
+  slips with zero-rated goods over R50. In the ledger and the accountant's export, old sales now
+  read "Invoice"; they're in the invoice list and the invoices CSV.
 - **Month end** (with Sales on): close each month by hand, or let it lock itself on a day of the
   next month; setup asks, and Accounts → Month end & locks shows each month's sales, refunds,
   invoices, costs and bank lines still to tick off. Home reminds you while last month is open. A
   business that doesn't sell keeps the year's lock.
 - **Who may lock**: "Close and reopen months and years" is a task in People who sign in. A closed
-  period is closed for everyone; reopening takes a reason, kept with the books, and Home shows the
-  books are reopened until they're locked again. The lock date is no longer a setting.
+  period is closed for everyone; reopening takes a reason, kept with the books, and says which
+  ended VAT periods it opens (a filed VAT201 is corrected by a revised return; late input tax is
+  claimed in the current period). Home shows the books are reopened until they're locked again.
+  The lock date is no longer a setting.
+- Closed and signed years stay so: undoing a bank match, time put on an issued invoice, a company
+  file's agreed year, a move-in into an approved year and a tracker import replacing closed books
+  are all refused; reopened approved statements keep the signed set, with its PDF.
+- Time goes on a quote or a draft invoice only, with VAT worked out line by line.
 
 ## 1.23.2 (10 November 2026)
 

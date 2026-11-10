@@ -19,8 +19,11 @@ end & locks**):
   next month, Home reminds you while last month is still open.
 - **By itself**: each month locks itself on the day you choose of the next month (the 7th: the
   first week to catch up), whether or not it's been checked. You can still close it earlier.
-  Each one is in the audit log, by "month end, by itself". It locks once: a month reopened after its
-  day stays open until the next month's day, which closes both.
+  Each one is in the audit log, by "month end, by itself". The month locks before the first change
+  made on or after its day (a look at the books doesn't lock it; the screens show it as locked). It
+  locks once: a month reopened after its day stays open until the next month's day, which closes
+  both. A year end locks with its last month: a journal for the year (the tax, the accountant's
+  adjustments) after that needs a reopen.
 
 ## A business that doesn't sell: the year
 
@@ -30,14 +33,36 @@ end ("lock the books"), or when the financial statements are approved.
 ## Putting something right in a closed period
 
 Someone who may close and reopen **reopens** it from a month (or year): that month and everything
-after it opens again. They say why; the reason, who and when are kept in the audit log, and Home
-shows the books are reopened. Put it right, then **Lock it again** (back to where it was).
+after it opens again (there's one lock date). They say why; the reason, who and when are kept in the
+audit log, and Home shows the books are reopened (who and why only to those who may lock, the
+owner and the accountant). Put it right, then **Lock it again** (back to where it was).
+
+- **VAT**: a VAT period that has ended may have its VAT201 filed. Locks says which ended VAT
+  periods a reopen opens. More output tax, or less input tax, in a filed period means a revised
+  VAT201 (your accountant's); SARS doesn't take more input tax by revising a past period: a supplier
+  invoice that came in late is claimed in the current one, so capture it dated in an open period
+  rather than reopening. Sources: docs/SARS.md.
 
 - A year whose financial statements were approved stays closed until the statements are reopened
   (Accounts → Financial statements, with the reason).
+- Reopened approved statements go back to a draft; the set that was signed is kept as it was,
+  with its signed PDF and why it was reopened (Accounts → Financial statements).
 - A year agreed with the accountant keeps its agreed figures whatever's posted into it after; the
   difference goes to suspense for them to look at (docs/STATEMENTS.md).
 
-The lock date isn't a setting any more (from 1.24): Settings shows it, and it moves only here.
+## What else moves the lock, and what gets past it
+
+The lock date moves forward also when the year end is locked (Year end), the financial statements
+are approved, a company file or a move-in brings a closed year in, and month end locks a month by
+itself: each is in the audit log. Nothing moves it back except a reopen.
+
+On purpose, past a lock: agreeing a closed year with the accountant the first time (how a closed
+year gets their figures); matching a captured cost to a bank line inside an agreed year (the
+agreed figures hold either way); adding a walk-in's details to their sale's invoice (nothing it
+charges changes). A move-in's history from before its opening date goes in behind the lock, but
+never into a year whose statements were approved; a company file doesn't bring an agreed year into
+a year already closed, and a tracker import never replaces books with closed periods.
+
+The lock date isn't a setting any more (from 1.24): Settings shows it.
 Code: `apps/server/src/modules/periods.ts`, `lib/books.ts` (`assertOpen`, `applyMonthLock`),
 `packages/shared/src/locks.ts`.

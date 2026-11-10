@@ -4,7 +4,7 @@
  * (it has the image tools); this hands it the photos and takes the smaller ones back.
  */
 import type { FastifyInstance } from 'fastify';
-import { financialYear } from '@shap/shared';
+import { addDays, financialYear } from '@shap/shared';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { requireRole, userOrThrow } from '../auth.js';
@@ -69,8 +69,11 @@ export function registerArchiveRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [old] = await sql<{ size: number; mime: string; bytes: Buffer }[]>`select size, mime, bytes from attachments where id = ${id}`;
     if (!old) throw notFound('File');
     if (!old.mime.startsWith('image/')) throw badRequest('Only photos can be made smaller');
-    const { lockDate } = await getSettings(sql);
-    const [slip] = lockDate ? await sql`select 1 from costs where receipt_id = ${id} and date <= ${lockDate}::date limit 1` : [];
+    const { lockDate, fyEndMonth } = await getSettings(sql);
+    // A closed year, not only a closed month: the last financial year end on or before the lock.
+    const fy = lockDate ? financialYear(String(lockDate), fyEndMonth) : null;
+    const closedYearEnd = fy ? (fy.end === String(lockDate) ? fy.end : addDays(fy.start, -1)) : null;
+    const [slip] = closedYearEnd ? await sql`select 1 from costs where receipt_id = ${id} and date <= ${closedYearEnd}::date limit 1` : [];
     if (!slip) throw badRequest('Only slips in a closed year are made smaller');
     if (bytes.length >= Number(old.size)) return { kept: false, size: Number(old.size) };
     const hash = (b: Buffer) => createHash('sha256').update(b).digest('hex');

@@ -74,11 +74,14 @@ describe('selling, from the counter and from stock', () => {
   });
 
   it('sells at the counter: an invoice with the next invoice number, paid on the spot, out of stock at average cost, VAT by line', async () => {
+    // Zero-rated bread over R50 on it: the full tax invoice, so the customer's on it (VAT Act s20(5)).
+    const regular = await me.post('/api/clients', { name: 'Fictional Café', address: '2 Test Road, Fictional Town' });
     const [n] = await env.sql<{ invoicePrefix: string; invoiceNext: number; invoicePad: number }[]>`select invoice_prefix, invoice_next, invoice_pad from settings`;
     const s = await me.post('/api/sales', {
       date: D,
       sourceId: till,
       method: 'cash',
+      clientId: regular.id,
       lines: [
         { itemId: globes.id, description: 'LED globe 9W (made up)', qty: 10, unitPriceCents: 4_600 },
         { itemId: cable.id, description: 'Cable 2.5mm per metre (made up)', qty: 5, unitPriceCents: 1_150, unit: 'm' },
@@ -159,9 +162,9 @@ describe('selling, from the counter and from stock', () => {
     expect((await me.call({ method: 'PUT', url: `/api/documents/${s.id}`, payload: { issueDate: D, lines: [] } })).statusCode).toBe(400);
     const [rc] = await env.sql<{ id: string }[]>`select sale_receipt_id as id from documents where id = ${s.id}`;
     expect((await me.call({ method: 'DELETE', url: `/api/receipts/${rc!.id}` })).statusCode).toBe(400);
-    // A walk-in's sale with a zero-rated line: its credit note is short like its invoice, no customer needed.
+    // The sale with a zero-rated line: its credit note names the customer, as its invoice did.
     const [bread] = await env.sql<{ id: string; documentId: string }[]>`
-      select l.id, l.document_id from document_lines l join documents d on d.id = l.document_id where d.counter and d.client_id is null and l.vat_code = 'zero' limit 1`;
+      select l.id, l.document_id from document_lines l join documents d on d.id = l.document_id where d.counter and l.vat_code = 'zero' limit 1`;
     const r3 = await me.post(`/api/documents/${bread!.documentId}/refund`, { date: D, sourceId: till, reason: 'Stale (made up)', lines: [{ lineId: bread!.id, qty: 1 }] });
     expect(r3.amountCents).toBe(1_800);
   });

@@ -83,6 +83,8 @@ interface StatementsView {
   /** Agreed with the accountant, or closed: the year's tax goes in through them, not a journal here. */
   yearAgreed?: boolean;
   yearClosed?: boolean;
+  /** Sets signed before and reopened since, kept as they were signed. */
+  versions?: { id: string; reopenedAt: string; reason: string; reopenedByName: string | null; status: string; approvedOn: string | null; approvedName: string | null; compiledOn: string | null; hasPdf: boolean }[];
 }
 
 export function FinancialStatements() {
@@ -92,6 +94,7 @@ export function FinancialStatements() {
   const fyEnd = picked ?? years.data?.[0]?.fyEnd ?? null;
   const view = useApi<StatementsView>(fyEnd ? `/api/statements/${fyEnd}` : null, { fresh: true });
   const [preview, setPreview] = useState(false);
+  const [oldPdf, setOldPdf] = useState<string | null>(null);
   const [form, setForm] = useState<'details' | 'send' | 'upload' | 'compile' | 'approve' | 'reopen' | null>(null);
   const reload = async () => {
     setForm(null);
@@ -376,8 +379,29 @@ export function FinancialStatements() {
             )}
           </div>
           {!ready && (status === 'draft' || status === 'sent') && <p className="xs muted">They can be signed once every check passes and the books audit has nothing to fix.</p>}
+          {(v?.versions ?? []).length > 0 && (
+            <div className="stack-sm">
+              <h3 className="small strong">Signed before, and reopened</h3>
+              <ul className="list small">
+                {v!.versions!.map((x) => (
+                  <li key={x.id} className="row wrap" style={{ gap: 8 }}>
+                    <span className="grow">
+                      {x.status === 'approved' ? `Approved${x.approvedName ? ` by ${x.approvedName}` : ''}${x.approvedOn ? ` on ${formatDate(x.approvedOn)}` : ''}` : `Compiled${x.compiledOn ? ` on ${formatDate(x.compiledOn)}` : ''}`}; reopened {formatDate(String(x.reopenedAt).slice(0, 10))}
+                      {x.reopenedByName ? ` by ${x.reopenedByName}` : ''}: {x.reason}
+                    </span>
+                    {x.hasPdf && s && (
+                      <button type="button" className="btn small quiet" onClick={() => setOldPdf(x.id)}>
+                        The signed set
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </>
       ) : null}
+      {oldPdf && s && <PdfPreview title={`${s.title} ${s.period} (as signed)`} load={async () => (await apiBlob(`/api/statements/${s.fyEnd}/versions/${oldPdf}/pdf`)).blob} onClose={() => setOldPdf(null)} />}
 
       {preview && s && <PdfPreview title={`${s.title} ${s.period}`} load={async () => (await apiBlob(`/api/statements/${s.fyEnd}/pdf`)).blob} onClose={() => setPreview(false)} />}
       {form === 'details' && s && <DetailsForm defaults={s.policyDefaults} governing={s.governing} onClose={() => setForm(null)} onSaved={reload} />}

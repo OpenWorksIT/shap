@@ -234,6 +234,18 @@ async function link(tx: Db, line: LineRow, items: { kind: Kind; id: string }[]) 
   }
 }
 
+/** The dates of what undoing this line's match would change (records that took the statement's account or amount). */
+async function changedByUnlink(db: Db, lineId: string): Promise<string[]> {
+  const dates: string[] = [];
+  for (const [kind, table] of [...(Object.entries(PAID_FROM) as [Kind, string][]), ['cost', 'costs'] as [Kind, string]]) {
+    const rows = await db<{ date: string }[]>`
+      select r.date::text as date from ${db(table)} r join bank_matches m on m.record_id = r.id
+      where m.kind = ${kind} and m.bank_line_id = ${lineId} and (m.source_changed or m.prev_amount_cents is not null)`;
+    dates.push(...rows.map((r) => r.date));
+  }
+  return dates;
+}
+
 /** Undoes matches on these lines: costs get back the account (and amount) they had before matching. */
 async function unlink(tx: Db, lineIds: string[]) {
   if (!lineIds.length) return;
@@ -665,6 +677,9 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.delete('/api/bank/lines/:id/match', { preHandler: requireAccess('bank.reconcile') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(z.object({ id: uuid }), req.params);
+    // Undoing a match gives what was captured back the account (and amount) it had: not in a
+    // closed period, as matching it wasn't either.
+    await assertCanChange(sql, await changedByUnlink(sql, id));
     await sql.begin(async (tx) => {
       await unlink(tx, [id]);
       await audit(tx, { userId: user.id, action: 'unmatch', entity: 'bank_line', entityId: id, ip: req.ip });
@@ -824,8 +839,10 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
     const line = await loadLine(sql, id);
     if (line.amountCents <= 0) throw badRequest('Only money in can pay an invoice');
     await assertOpen(sql, line.date);
-    const [doc] = await sql<{ status: string; writtenOffOn: string | null }[]>`select status, written_off_on from documents where id = ${invoiceId} and kind = 'invoice'`;
+    const [doc] = await sql<{ status: string; writtenOffOn: string | null; counter: boolean }[]>`select status, written_off_on, counter from documents where id = ${invoiceId} and kind = 'invoice'`;
     if (!doc || doc.status !== 'issued') throw badRequest('Choose an issued invoice');
+    // A sale was paid at the counter when it was made: nothing more is paid on it.
+    if (doc.counter) throw badRequest('That invoice was a sale, paid when it was made: the money in is something else');
     if (doc.writtenOffOn) throw badRequest('That invoice was written off. Undo the write-off first.');
     await sql.begin(async (tx) => {
       const [r] = await tx<{ id: string }[]>`

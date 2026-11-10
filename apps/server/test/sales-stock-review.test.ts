@@ -126,11 +126,12 @@ describe('selling from stock: what the accountant bot found', () => {
     expect(x.statusCode).toBe(200);
   });
 
-  it('keeps a closed year closed: a sale in it doesn’t get the customer’s details', async () => {
+  it('gives a sale in a closed period the customer’s details, and nothing else changes (1.24)', async () => {
     const s = await me.post('/api/sales', { date: '2026-06-02', sourceId: till, lines: [{ description: 'Key cut (made up)', qty: 1, unitPriceCents: 2_500 }] });
     await env.sql`update settings set lock_date = '2026-06-30'`;
     const r = await me.call({ method: 'POST', url: `/api/sales/${s.id}/customer`, payload: { clientId: client.id } });
-    expect(r.statusCode).toBe(400);
+    expect(r.statusCode).toBe(200);
+    expect(r.json().doc).toMatchObject({ totalCents: s.doc.totalCents, issueDate: s.doc.issueDate, number: s.number });
     await env.sql`update settings set lock_date = null`;
   });
 

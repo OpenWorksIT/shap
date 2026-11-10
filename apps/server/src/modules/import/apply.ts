@@ -60,6 +60,10 @@ export async function applyTracker(sql: Sql, plan: TrackerPlan, opts: ImportOpti
       // Sales, refunds and stock records are never deleted, so books with any can't be replaced.
       const [kept] = await tx`select 1 from documents where counter union all select 1 from stock_moves union all select 1 from refunds limit 1`;
       if (kept) throw badRequest('These books have sales or stock records, which are never deleted, so they can’t be replaced by an import. Import into new books instead (or bring the tracker in before selling).');
+      // Nor books with closed periods: replacing would change what was locked (and maybe signed).
+      const [closed] = await tx<{ lockDate: string | null; signed: string | null }[]>`
+        select (select lock_date::text from settings where id) as lock_date, (select max(fy_end)::text from financial_statements where status = 'approved') as signed`;
+      if (closed?.lockDate || closed?.signed) throw badRequest(`These books are closed up to ${closed.lockDate ?? closed.signed}, so they can’t be replaced by an import: reopen them first (Accounts → Locks), or import into new books.`);
       for (const t of OPERATIONAL_TABLES) await tx`delete from ${tx(t)}`;
       await tx`delete from journals where kind = 'import'`;
     }

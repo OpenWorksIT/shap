@@ -65,6 +65,8 @@ export interface SaleDetail {
     customerName: string;
     clientId: string | null;
     clientName: string | null;
+    /** When a walk-in's details were added (the full tax invoice from then). */
+    invoicedAt: string | null;
     subtotalCents: number;
     vatCents: number;
     totalCents: number;
