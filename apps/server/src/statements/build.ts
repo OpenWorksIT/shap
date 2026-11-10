@@ -22,6 +22,7 @@ import {
   whatScoreMeans,
   type PiMeaning,
   entity,
+  formatZar,
   vatRateOn,
   flipOf,
   formatDate,
@@ -673,10 +674,10 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
       'The year’s income tax is in the books (IFRS for SMEs 29)',
       incomeTax.current !== 0 || e.taxCents === 0,
       incomeTax.current !== 0
-        ? `R${money(-incomeTax.current)} for the year`
+        ? `${formatZar(-incomeTax.current)} for the year`
         : e.taxCents === 0
           ? 'no tax on the year’s profit (after any assessed loss), on Shap’s estimate'
-          : `none booked: Shap estimates R${money(e.taxCents)} on a taxable income of R${money(e.taxableCents)}${sbc ? ' (small business corporation rates)' : ` (at ${Math.round(companyRate(fyEnd) * 100)}%)`}. An estimate only: your accountant works out the tax, and it’s booked with a journal (income tax against tax owed).`,
+          : `none booked: Shap estimates ${formatZar(e.taxCents)} on a taxable income of ${formatZar(e.taxableCents)}${sbc ? ' (small business corporation rates)' : ` (at ${Math.round(companyRate(fyEnd) * 100)}%)`}. An estimate only: your accountant works out the tax, and it’s booked with a journal (income tax against tax owed).`,
     );
   }
   // Inventories at no more than they'll sell for (13.19, 27.2).
@@ -695,14 +696,14 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
   // Work in progress (13.14 of the 2015 edition; 23 for revenue): jobs' costs waiting for their invoice.
   const wipAcc = accounts.find((a) => a.systemKey === 'wip');
   const wip = wipAcc ? val(wipAcc, 'atEnd') : 0;
-  if (wip) look('Work in progress at the year end is recoverable, and work done is invoiced', false, `R${money(wip)} of job costs not yet invoiced at the year end, carried at cost. If a job will make a loss, write its costs down; if work was done but not invoiced, consider accruing the revenue (stage of completion).`);
+  if (wip) look('Work in progress at the year end is recoverable, and work done is invoiced', false, `${formatZar(wip)} of job costs not yet invoiced at the year end, carried at cost. If a job will make a loss, write its costs down; if work was done but not invoiced, consider accruing the revenue (stage of completion).`);
   // Receivables long overdue (11.21): impaired if they won't be recovered.
   const [old] = await db<{ n: number; owing: string }[]>`
     select count(*)::int as n, coalesce(sum(owing), 0)::bigint as owing from (
       select d.total_cents - coalesce((select sum(r.amount_cents) from receipts r where r.invoice_id = d.id and r.date <= ${fyEnd}::date), 0) as owing
       from documents d where d.kind = 'invoice' and d.status = 'issued' and d.issue_date <= ${fyEnd}::date
         and (d.written_off_on is null or d.written_off_on > ${fyEnd}::date) and coalesce(d.due_date, d.issue_date) < (${fyEnd}::date - 365)) x where owing > 0`;
-  look('Receivables will be recovered (IFRS for SMEs 11.21)', old!.n === 0, old!.n ? `${old!.n} invoice${old!.n === 1 ? '' : 's'} more than a year overdue at the year end (R${money(Number(old!.owing))}): if they won’t be paid, mark them delinquent (written off as bad debts).` : 'nothing more than a year overdue');
+  look('Receivables will be recovered (IFRS for SMEs 11.21)', old!.n === 0, old!.n ? `${old!.n} invoice${old!.n === 1 ? '' : 's'} more than a year overdue at the year end (${formatZar(Number(old!.owing))}): if they won’t be paid, mark them delinquent (written off as bad debts).` : 'nothing more than a year overdue');
   // Leave pay and bonuses owed at the year end (28.6, 28.8): Shap's payroll doesn't keep leave balances.
   if (moved(['salaries'])) look('Leave pay and bonuses owed to employees at the year end are provided for (IFRS for SMEs 28.6)', false, 'Shap’s payroll doesn’t keep leave balances: if employees have leave owing (or a bonus earned) at the year end, your accountant provides for it with a journal.');
 
@@ -722,7 +723,9 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
     const liabilitiesCents = totalLiabilities.current;
     const shareholderLoansCents = (['shareholder_loans', 'shareholder_loans_current'] as StatementLineKey[]).reduce((t, k) => t + (lineTotals.get(k)?.current ?? 0), 0);
     const turnoverCents = sum(revenue.map((l) => l.current));
-    const holders = details.piHolders ?? details.directors.filter((d) => d.name.trim()).length;
+    // A company or CC has at least one holder; an NPC may have no members.
+    const named = details.directors.filter((d) => d.name.trim()).length;
+    const holders = details.piHolders ?? (bt === 'npc' ? named : Math.max(1, named));
     const pi = publicInterestScore({ employees, liabilitiesCents, turnoverCents, holders });
     const meaning = whatScoreMeans(pi.score, bt, { independentlyCompiled: !details.internallyCompiled, ownerManaged: details.ownerManaged });
     const { score, ...parts } = pi;
