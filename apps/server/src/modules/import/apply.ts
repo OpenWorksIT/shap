@@ -57,6 +57,9 @@ export async function applyTracker(sql: Sql, plan: TrackerPlan, opts: ImportOpti
   return sql.begin(async (tx) => {
     if (!(await isCompanyEmpty(tx))) {
       if (!opts.replace) throw badRequest('Shap already has jobs or costs in it. Tick “Replace what’s there” to import over them.');
+      // Sales, refunds and stock records are never deleted, so books with any can't be replaced.
+      const [kept] = await tx`select 1 from documents where sale_number is not null union all select 1 from stock_moves union all select 1 from refunds limit 1`;
+      if (kept) throw badRequest('These books have sales or stock records, which are never deleted, so they can’t be replaced by an import. Import into new books instead (or bring the tracker in before selling).');
       for (const t of OPERATIONAL_TABLES) await tx`delete from ${tx(t)}`;
       await tx`delete from journals where kind = 'import'`;
     }
@@ -101,15 +104,18 @@ export async function applyTracker(sql: Sql, plan: TrackerPlan, opts: ImportOpti
 
     // ---------------------------------------------------------- what costs were for
     const categories = await tx<{ id: string; name: string; kind: string }[]>`select id, name, kind from cost_categories`;
-    const byName = new Map(categories.map((c) => [c.name.toLowerCase(), c.id]));
+    // (Never Shap's own Stock purchases type: stock comes in under Inventory, line by line.)
+    const byName = new Map(categories.filter((c) => c.kind !== 'stock').map((c) => [c.name.toLowerCase(), c.id]));
+    const stockName = categories.find((c) => c.kind === 'stock')?.name.toLowerCase();
     const aliases: Record<string, string> = { 'cellphone c': 'cellphone', 'vehicle maintenance': 'vehicle maintenance', parts: 'parts', '': 'sundry' };
     const sundryAcc = await accountId('sundry');
     const categoryFor = async (type: string): Promise<string> => {
       const key = aliases[type.trim().toLowerCase()] ?? type.trim().toLowerCase();
       const hit = byName.get(key);
       if (hit) return hit;
+      const name = type.trim().toLowerCase() === stockName ? `${type.trim()} (from the tracker)` : type.trim();
       const [row] = await tx<{ id: string }[]>`
-        insert into cost_categories (name, kind, account_id, sort) values (${type.trim()}, 'overhead', ${sundryAcc}, (select coalesce(max(sort), 0) + 1 from cost_categories)) returning id`;
+        insert into cost_categories (name, kind, account_id, sort) values (${name}, 'overhead', ${sundryAcc}, (select coalesce(max(sort), 0) + 1 from cost_categories)) returning id`;
       byName.set(key, row!.id);
       warnings.push(`New cost type "${type.trim()}" was added as a running cost (Sundry). Change where it posts under Settings → Lists.`);
       return row!.id;

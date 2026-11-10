@@ -16,7 +16,7 @@ import type { Settings } from '../lib/types';
 import { MarketWhat } from '../components/MarketShare';
 import { setTone } from '../lib/words';
 
-const STEPS = ['hello', 'structure', 'industry', 'people', 'workflow', 'extras', 'logo', 'details', 'tone', 'terms'] as const;
+const STEPS = ['hello', 'structure', 'industry', 'people', 'workflow', 'selling', 'extras', 'logo', 'details', 'tone', 'terms'] as const;
 type Step = (typeof STEPS)[number];
 
 export default function WelcomePage({ canRestore = true }: { canRestore?: boolean }) {
@@ -40,6 +40,10 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
   const [workflow, setWorkflow] = useState<Workflow>('quote_job_invoice');
   const [extras, setExtras] = useState<SetupExtras>(() => extrasFor(settings.industry || ''));
   const [movingIn, setMovingIn] = useState<boolean | null>(null);
+  // Sells over the counter? Then, does the stock live in Shap? And does Shap draft the annual statements?
+  const [sales, setSales] = useState<boolean | null>(settings.features.sales ? true : null);
+  const [inventory, setInventory] = useState<boolean | null>(settings.features.inventory ? true : null);
+  const [statements, setStatements] = useState<boolean | null>(settings.features.statements ? true : null);
   const extra = (k: keyof SetupExtras) => (v: boolean) => setExtras((x) => ({ ...x, [k]: v }));
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -65,7 +69,7 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
     setError('');
     const features = {
       ...f.features,
-      ...featuresFor({ workflow, employees: Boolean(employees), casual: Boolean(casual), company: paysOut, dividends: dividendsAlways || (dividends ?? false), extras, payshap: Boolean(f.payshapId.trim()) }),
+      ...featuresFor({ workflow, employees: Boolean(employees), casual: Boolean(casual), company: paysOut, dividends: dividendsAlways || (dividends ?? false), extras, payshap: Boolean(f.payshapId.trim()), selling: { sales: Boolean(sales), inventory: Boolean(inventory) }, statements: Boolean(statements) }),
     };
     try {
       const employer = employees
@@ -288,10 +292,27 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
             {WORKFLOWS.map((w) => (
               <Choice key={w.key} on={workflow === w.key} onClick={() => setWorkflow(w.key)} title={w.label} hint={w.hint} />
             ))}
-            <p className="xs muted">
-              Selling stock? Shap doesn’t track inventory yet: a stock tracker is in the pipeline. Until then, keep your stock in your own tracker and use Shap for the quotes, invoices and books of what you sell.
-            </p>
             {nav()}
+          </Q>
+        )}
+
+        {step === 'selling' && (
+          <Q title="Do you sell things over the counter?" sub="Walk-in customers who pay on the spot: a shop, a stall, a salon’s products, parts at the counter.">
+            <YesNo
+              q="Do you do sales?"
+              hint="A Sales tab: pick what’s sold from a quick list, take the money, and hand over a slip. A big customer can have it turned into a tax invoice afterwards, and refunds are a tap."
+              value={sales}
+              onChange={(v) => (setSales(v), v ? undefined : setInventory(null))}
+            />
+            {sales && (
+              <YesNo
+                q="Do you plan to keep inventory records in Shap?"
+                hint="An Inventory tab: what’s on hand at average cost, supplier invoices and returns, stock takes, and every item’s history. Many small shops keep a spreadsheet of their handful of stock instead, and that’s fine: say no, and you can switch it on later."
+                value={inventory}
+                onChange={setInventory}
+              />
+            )}
+            {nav(sales === false || (sales === true && inventory !== null))}
           </Q>
         )}
 
@@ -306,9 +327,15 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
             <YesNo q="Do you drive for work?" hint="SARS’s travel logbook: each business trip and the odometer at the start and end of the tax year. You need it to claim your travel." value={extras.travel} onChange={extra('travel')} />
             <YesNo q="Do suppliers give you bills to pay later (an account)?" hint="Bills to pay: what you owe, when it’s due, and a nudge on Home before it is." value={extras.bills} onChange={extra('bills')} />
             <YesNo q="Do clients sometimes pay before you start?" hint="Pro-forma invoices: ask for the money up front, without a tax invoice. Once paid, turn it into the invoice." value={extras.upfront} onChange={extra('upfront')} />
+            <YesNo
+              q="Should Shap draw up your annual financial statements?"
+              hint="Yes: Shap prepares them from your books (IFRS for SMEs), your accountant compiles and signs them, and that finishes the year. No: your accountant prepares them in their own software from what Shap gives them."
+              value={statements}
+              onChange={setStatements}
+            />
             <YesNo q="Are you moving from another package?" hint="Sage, Xero, QuickBooks, Zoho or Invoice Ninja: after setup Shap opens Move in, to bring your clients, invoices and balances across." value={movingIn} onChange={setMovingIn} />
             <p className="xs muted">Switched on for everyone: credit notes, payment reminders on Home (with a message ready for WhatsApp) and step-by-step SARS filing guides.</p>
-            {nav(movingIn !== null)}
+            {nav(movingIn !== null && statements !== null)}
           </Q>
         )}
 

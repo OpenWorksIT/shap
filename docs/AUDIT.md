@@ -80,7 +80,19 @@ brings the report totals up to date first, as any report does). It checks that:
 - VAT claimed has its slip; no cost claims more VAT than it can hold (the rule a cost is saved by:
   the VAT the amount includes at the rate on its date, and a cent for the supplier's rounding);
   everyone paid has an ID and tax number for their IRP5;
-- the database's own safeguards are there (the audit log can't be changed, journals must balance).
+- sales and stock (docs/SALES_AND_STOCK.md): every sale has its payment and every refund its
+  credit note, no more refunded than paid, sale numbers without gaps; the inventory account is
+  the stock movements and the items' values, item by item; the stock purchases clearing account
+  is empty and the supplier claims account is what's still owed back; every stocked line on an
+  issued document moved stock; warnings for stock below nothing, valued above its selling price,
+  not counted in a year, and claims older than 60 days;
+- the database's own safeguards are there (the audit log can't be changed, journals must balance,
+  sales, refunds and stock records can't be changed or deleted).
+
+The annual financial statements (docs/STATEMENTS.md) can only be signed when they balance, the
+cash flows tie, equity ties, nothing is in suspense and this audit finds nothing to fix; once
+compiled they're frozen at their figures, and approving checks the books still give exactly
+those.
 
 ## 4. Before each release (the version goes up)
 
@@ -151,6 +163,45 @@ brings the report totals up to date first, as any report does). It checks that:
   after a later one, or bringing history in after a year was agreed, made the later year look
   changed (each year is now compared by what was posted within it); and splitting a cost could
   give one part a cent more VAT than the app allows on a cost (each part is now kept within it).
+
+### Sales, inventory and the financial statements (1.22, before release)
+
+An accountant bot ran a year of made-up trading through the API (a VAT-registered shop and a
+stall that isn't registered for VAT), with its own books to compare: 267 figures and 50 refusals checked. What it
+found, all fixed with tests (`apps/server/test/sales-stock-review.test.ts`, `financial-statements.test.ts`):
+
+- Voiding an invoice put its stock back dated the day of voiding, so its cost of sales stayed in
+  the year its revenue left. Now on the invoice's date; a count since then points to a credit note.
+- A walk-in's sale with a zero-rated item couldn't be refunded (its credit note asked for the
+  customer). VAT that can't be claimed was left out of the stock's cost and what was owed. A
+  business not registered for VAT could send a VAT amount that was silently dropped.
+- Suppliers' credit notes on account couldn't be taken off a bill, so the bill still showed
+  owing; goods back on an invoice still owed couldn't go back into stock.
+- An approved year could be reopened from Settings, and a sale in it made an invoice. Stock could
+  be dated before a count. Opening stock cleared by the opening balances always warned; an item
+  stocked again after selling it unstocked failed the audit; a stall not registered for VAT had
+  its stock judged against a price with VAT taken off.
+- The statements: a bank overdraft added to cash in the cash note; a sole proprietor's words ("the
+  owner are"), drawings reported as none, tax mentioned where there's none; the compiler's report
+  named the IFRS for SMEs where note 1 describes a basis of its own. Loans from the owners with no
+  fixed terms are now current (IFRS for SMEs 4.7(d)), and other invoice lines revenue.
+- A report up to a past day refused when it was before this year's start.
+
+Then the independent review (`apps/server/test/review-1.22/`), all fixed with tests:
+
+- Stock takes, returns, claims and refunds didn't mark the books as changed, so the reports'
+  quick totals went stale (and a set could be approved without a count in it). Every table the
+  ledger reads now does, and the books audit checks it.
+- Approving the statements deleted the tracker import's journal for the year, closing it at
+  other figures than were signed. Kept now, and the signed figures are checked again as the year
+  closes.
+- A sale made an invoice could be edited (not registered for VAT) or paid again, even backwards.
+- A stock purchase could be rounded by bank matching or a merge, or made without lines from the
+  bank or a tracker import.
+- A double tap could issue an invoice's stock twice or write a claim off twice.
+- A return at an old purchase price could leave stock worth less than nothing (now at average
+  cost); a discount could take a VAT class below nothing.
+- `www.ifrs.org` was missing from the outside addresses, so CI's privacy check failed.
 
 ### Code scanning (CodeQL), first run
 

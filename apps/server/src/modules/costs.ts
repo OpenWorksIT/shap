@@ -16,6 +16,18 @@ const idParam = z.object({ id: z.string().uuid() });
  * personal spending, the same sign as the amount, and no more than the VAT a VAT-inclusive
  * amount can hold (a cent's rounding allowed).
  */
+/** Stock purchases and suppliers' credits are made on Inventory (with their lines), and stay as made. */
+async function refuseStock(db: Db, input: { categoryId?: string | null }, ids: string[] = []): Promise<void> {
+  if (input.categoryId) {
+    const [cat] = await db<{ kind: string }[]>`select kind from cost_categories where id = ${input.categoryId}`;
+    if (cat?.kind === 'stock') throw badRequest('Stock is bought on Inventory → Purchases, line by line, so it goes into stock.');
+  }
+  if (ids.length) {
+    const [stock] = await db`select 1 from costs c join cost_categories k on k.id = c.category_id where c.id = any(${ids}::uuid[]) and k.kind = 'stock' limit 1`;
+    if (stock) throw badRequest('That’s a stock purchase or a supplier’s credit: it stays as captured. Correct it with a return or a supplier credit on Inventory.');
+  }
+}
+
 async function claimableVat(db: Db, input: { date: string; amountCents: number; vatCents: number; categoryId: string; vatCode?: PurchaseVatCode }): Promise<number> {
   const settings = await getSettings(db);
   // Zero-rated, exempt, no VAT on the slip, or VAT that can't be claimed (entertainment, a car): none claimed.
@@ -114,6 +126,7 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
     );
     const dates = await sql<{ date: string }[]>`select date::text from costs where id = any(${input.ids}::uuid[])`;
     await assertOpen(sql, ...dates.map((d) => d.date));
+    await refuseStock(sql, { categoryId: input.categoryId }, input.categoryId ? input.ids : []);
     const res = input.projectId
       ? await sql`update costs set project_id = ${input.projectId}, no_job = false where id = any(${input.ids}::uuid[])`
       : input.noJob
@@ -146,6 +159,7 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
     const user = userOrThrow(req);
     const input = user.role === 'owner' ? parse(costInput, req.body) : await limitCaptureCost(parse(costInput, req.body));
     await assertOpen(sql, input.date);
+    await refuseStock(sql, input);
     const vat = await claimableVat(sql, input);
     const [row] = await sql`
       insert into costs ${sql({ ...input, vatCents: vat, projectId: input.projectId ?? null, receiptId: input.receiptId ?? null, plannedItemId: input.plannedItemId ?? null, createdBy: user.id })}
@@ -161,6 +175,7 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [old] = await sql<{ date: string; createdBy: string | null; createdAt: Date }[]>`select date, created_by, created_at from costs where id = ${id}`;
     if (!old) throw notFound('Cost');
     if (user.role !== 'owner' && (old.createdBy !== user.id || Date.now() - old.createdAt.getTime() > 24 * 3600_000)) throw forbidden('Ask the owner to change this cost');
+    await refuseStock(sql, input, [id]);
     await assertOpen(sql, old.date, input.date);
     const vat = await claimableVat(sql, input);
     // A bill with payments on it: still a bill, and never less than what's been paid.
@@ -197,6 +212,7 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [c] = await sql<{ date: string; amountCents: number; vatCents: number; note: string }[]>`
       select date::text, amount_cents, vat_cents, note from costs where id = ${id}`;
     if (!c) throw notFound('Cost');
+    await refuseStock(sql, {}, [id]);
     await assertOpen(sql, c.date);
     const total = parts.reduce((t, p) => t + p.amountCents, 0);
     if (total !== c.amountCents) throw badRequest(`The parts add up to R${(total / 100).toFixed(2)}, not R${(c.amountCents / 100).toFixed(2)}`);
@@ -237,6 +253,7 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [old] = await sql<{ date: string }[]>`select date from costs where id = ${id}`;
     if (!old) throw notFound('Cost');
     await assertOpen(sql, old.date);
+    await refuseStock(sql, {}, [id]);
     const [asset] = await sql`select 1 from assets where cost_id = ${id}`;
     if (asset) throw badRequest('This cost bought an asset: delete the asset first (Accounts → Assets).');
     const [paid] = await sql`select 1 from bill_payments where cost_id = ${id} limit 1`;
@@ -254,6 +271,7 @@ export function registerCostRoutes(app: FastifyInstance, ctx: Ctx): void {
     const input = parse(assignSourceInput, req.body);
     const dates = await sql<{ date: string }[]>`select date from costs where id = any(${input.ids}::uuid[])`;
     await assertOpen(sql, ...dates.map((d) => d.date));
+    await refuseStock(sql, {}, input.ids);
     const res = await sql`update costs set source_id = ${input.sourceId} where id = any(${input.ids}::uuid[])`;
     await audit(sql, { userId: user.id, action: 'assign_source', entity: 'cost', ip: req.ip, details: { count: res.count, sourceId: input.sourceId } });
     return { updated: res.count };

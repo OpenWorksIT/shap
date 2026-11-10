@@ -1,6 +1,14 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
+  defaultLineFor,
+  flipOf,
+  lineFits,
+  linesForType,
+  SECTION_LABELS,
+  STATEMENT_LINES,
+  statementLineLabel,
+  type StatementLineKey,
   ACCOUNT_TYPE_LABELS,
   ACCOUNT_TYPES,
   CATEGORY_KIND_LABELS,
@@ -521,16 +529,18 @@ function ListTable({ rows, head, onEdit }: { rows: { id: string; cells: string[]
 }
 
 function ListDrawer({ kind, row, onClose, onSaved }: { kind: ListKind; row: Record<string, unknown> | null; accountName: (id: string) => string; onClose: () => void; onSaved: () => Promise<void> }) {
-  const { ref } = useAuthed();
+  const { ref, settings } = useAuthed();
   const toast = useToast();
   const [f, setF] = useState<Record<string, unknown>>(
     row ?? (kind === 'sources' ? { name: '', kind: 'card', accountId: ref.accounts.find((a) => a.systemKey === 'owner_loan')?.id, active: true } : kind === 'categories' ? { name: '', kind: 'overhead', accountId: ref.accounts.find((a) => a.systemKey === 'sundry')?.id, active: true } : kind === 'accounts' ? { code: '', name: '', type: 'expense', active: true } : { name: '', active: true }),
   );
   const [error, setError] = useState('');
   const set = (k: string, v: unknown) => setF((x) => ({ ...x, [k]: v }));
+  // The line on the statements: the one chosen if it still suits the type, otherwise Shap's default.
+  const line: StatementLineKey = lineFits(String(f.statementLine ?? ''), f.type as AccountType) ? (f.statementLine as StatementLineKey) : defaultLineFor({ systemKey: (row?.systemKey as string | null) ?? null, type: f.type as AccountType, name: String(f.name ?? '') });
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    const body = kind === 'sources' ? { name: f.name, kind: f.kind, accountId: f.accountId, active: f.active, statementsRequired: Boolean(f.statementsRequired), statementsFrom: f.statementsRequired && f.statementsFrom ? f.statementsFrom : null } : kind === 'categories' ? { name: f.name, kind: f.kind, accountId: f.accountId, active: f.active } : kind === 'accounts' ? { code: f.code, name: f.name, type: f.type, active: f.active } : { name: f.name, active: f.active };
+    const body = kind === 'sources' ? { name: f.name, kind: f.kind, accountId: f.accountId, active: f.active, statementsRequired: Boolean(f.statementsRequired), statementsFrom: f.statementsRequired && f.statementsFrom ? f.statementsFrom : null } : kind === 'categories' ? { name: f.name, kind: f.kind, accountId: f.accountId, active: f.active } : kind === 'accounts' ? { code: f.code, name: f.name, type: f.type, statementLine: line, active: f.active } : { name: f.name, active: f.active };
     try {
       if (row) await api(`/api/${kind}/${row.id as string}`, { method: 'PUT', body });
       else await api(`/api/${kind}`, { body });
@@ -624,6 +634,19 @@ function ListDrawer({ kind, row, onClose, onSaved }: { kind: ListKind; row: Reco
                 {ACCOUNT_TYPES.map((t) => (
                   <option key={t} value={t}>
                     {ACCOUNT_TYPE_LABELS[t]}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
+        )}
+        {kind === 'accounts' && (
+          <Field label="On the financial statements" hint={`Shows under ${SECTION_LABELS[STATEMENT_LINES[line].section].toLowerCase()}. ${flipOf(line) ? 'If the balance turns the other way at year end, it moves across by itself.' : ''}`.trim()}>
+            {(p) => (
+              <select {...p} className="select" value={line} onChange={(e) => set('statementLine', e.target.value)}>
+                {linesForType(f.type as AccountType).map((k) => (
+                  <option key={k} value={k}>
+                    {statementLineLabel(k, settings.businessType)} ({SECTION_LABELS[STATEMENT_LINES[k].section].toLowerCase()})
                   </option>
                 ))}
               </select>

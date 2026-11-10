@@ -34,7 +34,7 @@
   {
    "host": "www.acts.co.za",
    "kind": "link",
-   "why": "the VAT Act, cited"
+   "why": "the VAT Act and the Companies Act, cited"
   },
   {
    "host": "tradeshield-help.freshdesk.com",
@@ -55,6 +55,11 @@
    "host": "raw.githubusercontent.com",
    "kind": "sends",
    "why": "the notices file (notice.json): fetched with nothing about the business or the person in the request"
+  },
+  {
+   "host": "www.ifrs.org",
+   "kind": "link",
+   "why": "the IFRS for SMEs Accounting Standard, cited for the financial statements"
   }
  ]
 }

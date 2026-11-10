@@ -28,6 +28,8 @@ export function Shell({ children }: { children: ReactNode }) {
     { to: '/jobs', label: 'Jobs', icon: 'jobs', show: has('jobs') },
     { to: '/workers', label: 'Workers', icon: 'workers', show: seesMoney && has('workers') },
     { to: '/payroll', label: has('payroll') ? 'Payroll' : entityWords(settings.businessType).Payouts, icon: 'money', show: seesMoney && (has('payroll') || (paysOutProfit(settings.businessType) && has('dividends'))) },
+    { to: '/sales', label: 'Sales', icon: 'till', show: seesMoney && has('sales') },
+    { to: '/inventory', label: 'Inventory', icon: 'box', show: seesMoney && has('inventory') },
     { to: '/costs', label: 'Costs', icon: 'costs', show: seesMoney },
     { to: '/bills', label: 'Bills to pay', icon: 'bill', show: seesMoney && has('bills') },
     { to: '/logbook', label: 'Logbook', icon: 'car', show: seesMoney && has('logbook') },
@@ -39,7 +41,8 @@ export function Shell({ children }: { children: ReactNode }) {
   ];
   const items = all.filter((i) => i.show);
   // Phones: four tabs plus "More". Log sits in the middle, where a thumb finds it.
-  const tabKeys = seesMoney ? ['/', has('jobs') ? '/jobs' : '/costs', '/log', '/documents'] : has('jobs') ? ['/', '/log', '/jobs'] : ['/', '/log'];
+  // A shop's second tab is the till.
+  const tabKeys = seesMoney ? ['/', has('sales') ? '/sales' : has('jobs') ? '/jobs' : '/costs', '/log', '/documents'] : has('jobs') ? ['/', '/log', '/jobs'] : ['/', '/log'];
   const tabs = tabKeys.map((k) => items.find((i) => i.to === k)).filter(Boolean) as Item[];
   const overflow = items.filter((i) => !tabKeys.includes(i.to));
 

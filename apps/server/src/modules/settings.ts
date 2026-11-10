@@ -34,12 +34,12 @@ export async function applyIndustry(db: Db, industry: string) {
 export async function referenceData(db: Db, money: boolean) {
   const [settings, sources, categories, workTypes, accounts, brands] = await Promise.all([
     getSettings(db),
-    db`select s.id, s.name, s.kind, s.role, s.account_id, s.active, s.statements_required, s.statements_from, a.code as account_code, a.name as account_name
+    db`select s.id, s.name, s.kind, s.role, s.till, s.account_id, s.active, s.statements_required, s.statements_from, a.code as account_code, a.name as account_name
        from payment_sources s join accounts a on a.id = s.account_id order by s.sort, s.name`,
     db`select c.id, c.name, c.kind, c.account_id, c.active, a.code as account_code, a.name as account_name
        from cost_categories c join accounts a on a.id = c.account_id order by c.sort, c.name`,
     db`select id, name, active from work_types order by sort, name`,
-    money ? db`select id, code, name, type, system_key, active from accounts order by code` : Promise.resolve([]),
+    money ? db`select id, code, name, type, system_key, statement_line, active from accounts order by code` : Promise.resolve([]),
     db`select * from brands order by active desc, sort, name`,
   ]);
   return { settings, sources, categories, workTypes, accounts, brands };
@@ -120,12 +120,23 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     input.vatRateBp = vatRateOn(today());
     // A company's (or CC's) dividends are declared to SARS: the dividends section is always on for them.
     if (entity(input.businessType).dividendsTax) input.features = { ...input.features, dividends: true };
+    // Stock is sold through sales: keeping inventory switches sales on.
+    if (input.features?.inventory) input.features = { ...input.features, sales: true };
+    // A year whose financial statements were approved and signed stays closed: the lock date can't
+    // move back into it until the statements are reopened (with a reason, in the audit log).
+    if (input.lockDate !== undefined && before.lockDate && (!input.lockDate || input.lockDate < String(before.lockDate))) {
+      const [signed] = await sql<{ fyEnd: string }[]>`
+        select fy_end::text as fy_end from financial_statements where status = 'approved' and fy_end > coalesce(${input.lockDate ?? null}::date, '0001-01-01'::date) order by fy_end desc limit 1`;
+      if (signed) throw badRequest(`The financial statements for the year ended ${signed.fyEnd} were approved and signed. Reopen them first (Accounts → Financial statements, with the reason), then move the lock date.`);
+    }
     // Accepting the terms: when, and in the audit log (below).
     const accepted = input.termsVersion && input.termsVersion !== before.termsVersion ? input.termsVersion : null;
     await sql.begin(async (tx) => {
       const row: Record<string, unknown> = { ...input, ...(accepted ? { termsAcceptedAt: new Date() } : {}), features: tx.json(input.features as never), logoLayout: tx.json(input.logoLayout as never), lockDate: input.lockDate, updatedAt: new Date() };
       for (const k of Object.keys(row)) if (row[k] === undefined) delete row[k];
       await tx`update settings set ${tx(row as never)} where id`;
+      // Selling at the counter takes money into the till: its account is there from then on.
+      if ((input.features as Record<string, boolean> | undefined)?.sales) await tx`update payment_sources set active = true where till and not active`;
       await applyBusinessType(tx, input.businessType);
       if (input.industry && input.industry !== before.industry) await applyIndustry(tx, input.industry);
     });
@@ -225,7 +236,8 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/accounts', { preHandler: requireRole('owner') }, async (req) => {
     const input = parse(accountInput, req.body);
     try {
-      const [row] = await sql`insert into accounts ${sql(input)} returning *`;
+      // No line given: the database picks one that fits the type (migration 038).
+      const [row] = await sql`insert into accounts (code, name, type, statement_line, active) values (${input.code}, ${input.name}, ${input.type}, ${input.statementLine ?? null}, ${input.active}) returning *`;
       return row;
     } catch (err) {
       if (pgCode(err) === PG.uniqueViolation) throw conflict('An account with that code already exists');
@@ -242,7 +254,10 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (existing.type !== input.type && (await postedInClosedYear(sql, () => sql`select 1 from ledger l where l.account_id = ${id} and l.date <= (select lock_date from settings where id) limit 1`)))
       throw badRequest('This account has postings in a closed year, so its type can’t change. Make a new account for what’s coming instead.');
     try {
-      const [row] = await sql`update accounts set ${sql(input)} where id = ${id} returning *`;
+      // The line stays as it was unless one is given (or the type changed to one it doesn't fit).
+      const [row] = input.statementLine
+        ? await sql`update accounts set code = ${input.code}, name = ${input.name}, type = ${input.type}, statement_line = ${input.statementLine}, active = ${input.active} where id = ${id} returning *`
+        : await sql`update accounts set code = ${input.code}, name = ${input.name}, type = ${input.type}, active = ${input.active} where id = ${id} returning *`;
       return row;
     } catch (err) {
       if (pgCode(err) === PG.uniqueViolation) throw conflict('An account with that code already exists');

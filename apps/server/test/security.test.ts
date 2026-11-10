@@ -206,9 +206,9 @@ describe('breaking in', () => {
     // What site staff may do besides read their pickers: log days and costs, attach slips, look after their own sign-in.
     const siteMay = new Set(['POST /api/costs', 'PUT /api/costs/:id', 'POST /api/labour', 'PUT /api/labour/:id', 'POST /api/attachments', 'POST /api/auth/mfa/setup', 'POST /api/auth/mfa/disable', 'POST /api/auth/mfa/recovery-codes', 'POST /api/auth/password', 'POST /api/feedback']);
     // Money site staff may never read (the same list as the penetration test's).
-    const siteNeverReads = /^\/api\/(reports|vat|payroll|pay-runs|audit|system|users|year-ends|journals|bank|tax|accounts\/|dividends|documents\/[^/]+\/pdf|export)/;
+    const siteNeverReads = /^\/api\/(reports|vat|payroll|sales|stock|statements|pay-runs|audit|system|users|year-ends|journals|bank|tax|accounts\/|dividends|documents\/[^/]+\/pdf|export)/;
     // Everyone signed in can send feedback.
-    const accountantMay = new Set(['POST /api/auth/mfa/setup', 'POST /api/auth/mfa/disable', 'POST /api/auth/mfa/recovery-codes', 'POST /api/auth/password', 'POST /api/feedback']);
+    const accountantMay = new Set(['POST /api/auth/mfa/setup', 'POST /api/auth/mfa/disable', 'POST /api/auth/mfa/recovery-codes', 'POST /api/auth/password', 'POST /api/feedback', 'PUT /api/statements/details', 'POST /api/statements/:fyEnd/compile']);
     const site = await login(env.app, 'site@example.co.za');
     const acc = await login(env.app, 'accountant@example.co.za');
     const id = '00000000-0000-4000-8000-000000000000';

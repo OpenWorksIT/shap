@@ -3,6 +3,41 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.22.0 (10 November 2026)
+
+Sales, inventory and the annual financial statements (docs/SALES_AND_STOCK.md, docs/STATEMENTS.md).
+Each is switched on in setup, or in Settings → What you use.
+
+- **Sales**: a Sales tab for selling over the counter. Pick items from a quick list (search, and
+  with inventory a filter for what's in stock), take the money into the till or the bank, and
+  share the slip. Each line keeps its VAT class (standard, zero-rated, export, exempt); a
+  business not registered for VAT sells without VAT. Over R5 000, or with an export, Shap asks
+  for the customer (a full tax invoice). A sale can be made an invoice afterwards, with the
+  customer's details, and refunded: a credit note for what came back, the money paid out, and
+  goods in good order back into stock. Sales and refunds are never changed or deleted.
+- **Inventory**: stock on hand at weighted average cost. Supplier invoices for stock (paid, or
+  bills to pay), with anything short supplied claimed from the supplier; stock sent back; the
+  supplier's credit notes settling those claims; stock takes that correct each item with the
+  reason, the difference to stock losses; and each item's whole history, linked to its sales,
+  invoices and purchases. Selling what isn't in stock is allowed and put right when stock
+  arrives or is counted. Everything posts to the books by itself, and the books check now checks
+  the stock and the books agree.
+- **Financial statements** (Accounts → Financial statements): the year's statements drawn up from
+  the books under the IFRS for SMEs Accounting Standard: the statements of financial position,
+  comprehensive income, changes in equity and cash flows, the notes, the directors' report and a
+  detailed income statement, with last year beside this year. Your accountant compiles them
+  (signed in to Shap, or on paper and the signed report uploaded), you approve them, and that
+  agrees and closes the year.
+- **Where each account goes** on the statements (current or non-current and so on) is set on the
+  account in Settings → Chart of accounts; Shap sets it for every account already.
+- A new kind of business in setup: **Shop, retail or trading**.
+- **Goods returned** on an invoice: a credit note for what came back, back into stock, the money
+  paid back or taken off what's still owed.
+- **Bills to pay**: a supplier's credit note on account is taken off one of their bills (it waits
+  under Bills to pay until it is), so the bill shows what's really owed.
+- Reports and the accountant's export up to a past day (a year end) start at that day's
+  financial year, instead of refusing.
+
 ## 1.21.1 (9 November 2026)
 
 Fixes from the first code scanning (CodeQL) of Shap, and from an independent review of 1.21

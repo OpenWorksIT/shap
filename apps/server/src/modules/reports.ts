@@ -182,9 +182,9 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/reports/income-statement', readers, async (req, reply) => {
     const settings = await getSettings(sql);
     const { from, to, by, format } = q(req);
-    const fy = financialYear(today(), settings.fyEndMonth);
-    const f = isIsoDate(from) ? from : fy.start;
+    // Up to a day given (today by default), from the start of that day's financial year unless said.
     const t = isIsoDate(to) ? to : today();
+    const f = isIsoDate(from) ? from : financialYear(t, settings.fyEndMonth).start;
     if (f > t) throw badRequest('The start date is after the end date');
     const is = await incomeStatement(sql, f, t, by === 'month');
     if (format === 'csv') {
@@ -461,9 +461,9 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { what } = parse(z.object({ what: z.enum(['costs', 'labour', 'invoices', 'receipts', 'wage-payments', 'ledger']) }), req.params);
     const settings = await getSettings(sql);
     const { from, to } = q(req);
-    const fy = financialYear(today(), settings.fyEndMonth);
-    const f = isIsoDate(from) ? from : fy.start;
+    // Up to a day given (today by default), from the start of that day's financial year unless said.
     const t = isIsoDate(to) ? to : today();
+    const f = isIsoDate(from) ? from : financialYear(t, settings.fyEndMonth).start;
     const name = `${what}-${f}-to-${t}.csv`;
     if (what === 'costs') {
       const rows = await sql`select c.date, c.description, c.supplier, k.name as category, s.name as source, p.number, p.name as project, c.amount_cents, c.vat_cents, c.note

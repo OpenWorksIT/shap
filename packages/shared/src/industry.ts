@@ -470,6 +470,27 @@ const P: Record<string, Partial<IndustryProfile>> = {
     categories: [{ name: 'Tolls', kind: 'overhead', account: '6060' }],
     hide: ['Demo'],
   },
+  retail: {
+    lines: { labour: 'Services', materials: 'Products', other: 'Other' },
+    units: ['item', 'pack', 'box', 'kg'],
+    items: [
+      { d: 'Products', cat: 'materials', unit: 'item' },
+      { d: 'Delivery', cat: 'other' },
+      { d: 'Gift wrapping', cat: 'other' },
+      { d: 'Fitting or set-up', cat: 'labour', unit: 'hour' },
+    ],
+    heading: 'e.g. Order for a regular customer',
+    costStock: 'e.g. Stock for resale',
+    costOther: 'e.g. Shop rent',
+    supplier: 'e.g. Wholesaler',
+    part: 'e.g. Stock for an order',
+    categories: [
+      { name: 'Packaging & bags', kind: 'materials', account: '5010' },
+      { name: 'Shop rent', kind: 'overhead', account: '6200' },
+      { name: 'Card machine fees', kind: 'overhead', account: '6030' },
+    ],
+    hide: [...OFFICE_HIDE, 'Tool'],
+  },
 };
 
 export function industryProfile(industry: string | null | undefined): IndustryProfile {
@@ -478,6 +499,6 @@ export function industryProfile(industry: string | null | undefined): IndustryPr
 
 /** The name of a line type for this business. Demolition only ever appears on old builder lines. */
 export function lineLabel(industry: string | null | undefined, cat: LineCategory): string {
-  if (cat === 'demo') return LINE_CATEGORY_LABELS.demo;
+  if (cat === 'demo' || cat === 'goods') return LINE_CATEGORY_LABELS[cat];
   return industryProfile(industry).lines[cat];
 }

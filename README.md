@@ -57,6 +57,14 @@ The name is the shaka: thumb and pinky out, *shap, all good*.
   fees and debit orders you never captured become costs in one click (the cost type guessed from
   how you captured that supplier before); client payments are recorded against their invoice;
   transfers between your own accounts are booked; and anything unticked is left off.
+- **Sales and inventory** (optional). A Sales tab for selling over the counter: a quick item
+  list, the money into the till or bank, a slip to share, VAT by line, refunds, and an invoice
+  afterwards for a business customer. With inventory: stock at weighted average cost, supplier
+  invoices (short supplied claimed back), returns and credit notes, stock takes with reasons, and
+  each item's whole history. See [docs/SALES_AND_STOCK.md](docs/SALES_AND_STOCK.md).
+- **Annual financial statements** (optional). Drawn up from the books under the IFRS for SMEs
+  Accounting Standard, compiled and signed by the accountant (in Shap or on paper), approved by
+  the directors, and the year is closed. See [docs/STATEMENTS.md](docs/STATEMENTS.md).
 - **Year end and tax.** Type in the accountant's figures from the annual financial statements and
   Shap posts one adjustment per account, so that year's statements match and the next year opens
   from the agreed balances; whatever doesn't tie up shows in Suspense. A **provisional tax**

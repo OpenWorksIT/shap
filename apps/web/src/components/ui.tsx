@@ -41,6 +41,9 @@ const paths: Record<string, ReactNode> = {
   book: <><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 19V5M8 7h7M8 11h7" /></>,
   clock: <><circle cx="12" cy="12" r="8" /><path d="M12 8v4l3 2" /></>,
   bill: <><path d="M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6M9 16h3" /></>,
+  till: <><path d="M5 8h14l-1.2 12H6.2z" /><path d="M9 8V6.5a3 3 0 0 1 6 0V8" /></>,
+  box: <><path d="M3.5 7.5 12 3l8.5 4.5v9L12 21l-8.5-4.5z" /><path d="M3.5 7.5 12 12l8.5-4.5M12 12v9" /></>,
+  statements: <><path d="M6 3.5h9l4 4v13H6z" /><path d="M9 17v-3M12 17v-6M15 17v-4" /></>,
 };
 
 export function Icon({ name, size = 20 }: { name: keyof typeof paths | string; size?: number }) {
@@ -164,6 +167,7 @@ export function MoneyInput({
   disabled?: boolean;
   'aria-invalid'?: boolean;
   'aria-describedby'?: string;
+  'aria-label'?: string;
 }) {
   const [text, setText] = useState(() => centsToInput(value));
   const last = useRef(value);

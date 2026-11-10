@@ -17,3 +17,5 @@ export * from './notice.js';
 export * from './vat.js';
 export * from './paymentTerms.js';
 export * from './trail.js';
+export * from './statement-lines.js';
+export * from './financial-statements.js';

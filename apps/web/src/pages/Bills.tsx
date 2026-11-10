@@ -94,6 +94,7 @@ export default function BillsPage() {
           <Empty title={state === 'open' ? 'No bills to pay' : 'No paid bills yet'} />
         </div>
       )}
+      {state === 'open' && <Credits bills={data ?? []} onDone={reload} />}
       {paying && <PayBill bill={paying} onClose={() => setPaying(null)} onDone={reload} />}
     </div>
   );
@@ -142,6 +143,109 @@ function PayBill({ bill, onClose, onDone }: { bill: Bill; onClose: () => void; o
           Pay <Money cents={amount} />
         </button>
       </form>
+    </Drawer>
+  );
+}
+
+/** Suppliers' credit notes on account not yet taken off a bill: each one taken off one of their bills. */
+function Credits({ bills, onDone }: { bills: Bill[]; onDone: () => void }) {
+  const { isOwner } = useAuthed();
+  const { data, reload } = useApi<Bill[]>('/api/bills?state=credits');
+  const [using, setUsing] = useState<Bill | null>(null);
+  if (!data?.length) return null;
+  return (
+    <section className="stack-sm">
+      <h2 className="small strong">Credits from suppliers, to take off a bill</h2>
+      <ul className="panel list">
+        {data.map((c) => (
+          <li key={c.id} className="list-row">
+            <div className="grow">
+              <strong>{c.supplier || c.description}</strong>
+              <div className="xs muted">
+                {c.billNumber ? `Credit ${c.billNumber} · ` : ''}
+                {c.description} · {formatDate(c.date)}
+              </div>
+            </div>
+            <div className="stack-sm" style={{ alignItems: 'flex-end' }}>
+              <strong>
+                <Money cents={-Number(c.owingCents)} />
+              </strong>
+              {isOwner && (
+                <button className="btn small" onClick={() => setUsing(c)}>
+                  Take off a bill
+                </button>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+      {using && (
+        <UseCredit
+          credit={using}
+          bills={bills.filter((b) => b.supplier.trim().toLowerCase() === using.supplier.trim().toLowerCase())}
+          onClose={() => setUsing(null)}
+          onDone={() => (void reload(), onDone())}
+        />
+      )}
+    </section>
+  );
+}
+
+function UseCredit({ credit, bills, onClose, onDone }: { credit: Bill; bills: Bill[]; onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const left = -Number(credit.owingCents);
+  const [billId, setBillId] = useState(bills[0]?.id ?? '');
+  const bill = bills.find((b) => b.id === billId);
+  const [amount, setAmount] = useState<number | null>(bill ? Math.min(left, Number(bill.owingCents)) : left);
+  const [date, setDate] = useState(todayIso());
+  const [error, setError] = useState('');
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setError('');
+    try {
+      await api(`/api/costs/${billId}/bill-credits`, { body: { date, creditId: credit.id, amountCents: amount ?? 0 } });
+      toast('Taken off the bill');
+      onDone();
+      onClose();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Couldn’t save');
+    }
+  };
+  return (
+    <Drawer title={`Credit from ${credit.supplier || credit.description}`} sub={<>Left to use: <Money cents={left} /></>} onClose={onClose}>
+      {bills.length ? (
+        <form className="stack" onSubmit={submit}>
+          <Field label="Off the bill">
+            {(p) => (
+              <select
+                {...p}
+                className="select"
+                value={billId}
+                onChange={(e) => {
+                  setBillId(e.target.value);
+                  const b = bills.find((x) => x.id === e.target.value);
+                  if (b) setAmount(Math.min(left, Number(b.owingCents)));
+                }}
+              >
+                {bills.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.billNumber || b.description} · {formatDate(b.date)} · owing {(Number(b.owingCents) / 100).toFixed(2)}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
+          <div className="form-grid">
+            <Field label="Amount">{(p) => <MoneyInput {...p} value={amount} onChange={setAmount} />}</Field>
+            <Field label="On">{(p) => <input {...p} className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} required />}</Field>
+          </div>
+          <p className="xs muted">No money moves: the bill is that much less owed, and the credit that much used.</p>
+          {error && <div className="banner alert small">{error}</div>}
+          <button className="btn primary big block">Take it off</button>
+        </form>
+      ) : (
+        <p className="small muted">There’s no unpaid bill from {credit.supplier || 'this supplier'} to take it off. It stays here until there is one.</p>
+      )}
     </Drawer>
   );
 }

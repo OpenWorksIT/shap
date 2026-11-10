@@ -23,16 +23,18 @@ export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
 };
 
 /** The three ways a job's money is split, as in the tracker, plus anything else. */
-export const LINE_CATEGORIES = ['labour', 'materials', 'demo', 'other'] as const;
+export const LINE_CATEGORIES = ['labour', 'materials', 'demo', 'other', 'goods'] as const;
 export type LineCategory = (typeof LINE_CATEGORIES)[number];
 export const LINE_CATEGORY_LABELS: Record<LineCategory, string> = {
   labour: 'Labour',
   materials: 'Materials',
   demo: 'Demo',
   other: 'Other',
+  goods: 'Goods',
 };
 
-export const DOC_KINDS = ['quote', 'invoice', 'credit_note'] as const;
+/** A sale: a walk-in's till slip, paid on the spot (it can become an invoice later). */
+export const DOC_KINDS = ['quote', 'invoice', 'credit_note', 'sale'] as const;
 export type DocKind = (typeof DOC_KINDS)[number];
 
 export const QUOTE_STATUSES = ['draft', 'sent', 'accepted', 'declined'] as const;
