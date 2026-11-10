@@ -28,7 +28,7 @@
     "nodemailer": "^10.1.1",
     "pdfkit": "^0.17.0",
     "pngjs": "^7.0.0",
-    "postgres": "^3.4.5",
+    "postgres": "^4.1.0",
     "zod": "^4.6.6"
   },
   "devDependencies": {
