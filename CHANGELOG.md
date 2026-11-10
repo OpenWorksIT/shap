@@ -2,6 +2,12 @@
 
 What changed in each version of Shap Pocket, newest first.
 
+## 1.7.1 (10 November 2026)
+
+- zod 4 (4.6.7), the checker of everything the app's screens hand its books: the security update
+  for [CVE-2023-54404](https://www.vulncheck.com/advisories/zod-uncontrolled-resource-consumption-via-array-validation)
+  (from Shap 1.23.1).
+
 ## 1.7.0 (10 November 2026)
 
 The financial statements checked against the IFRS for SMEs Accounting Standard, and a tax pack for
