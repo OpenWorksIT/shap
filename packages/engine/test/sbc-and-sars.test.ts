@@ -84,7 +84,7 @@ describe('the four reviews of Shap 1.23.2 / Pocket 1.7.2 (each failed before its
     expect((await me.get('/api/reports/provisional-tax?fyEnd=2027-02-28&asAt=2026-10-31')).sbc).toBe(false);
     expect((await me.call({ method: 'PUT', url: '/api/tax/sbc', payload: { fyEnd: '2026-03-31', sbc: true } })).statusCode).toBe(400);
     const file = await exportCompanyFile(env.sql);
-    expect([...file.sbcYears]).toEqual([{ fyEnd: FY, sbc: true }, { fyEnd: '2027-02-28', sbc: false }]);
+    expect([...(file.sbcYears ?? [])]).toEqual([{ fyEnd: FY, sbc: true }, { fyEnd: '2027-02-28', sbc: false }]);
     await env.sql`delete from sbc_years`;
     await env.sql.begin((tx) => restoreCompanyFile(tx as never, file));
     expect((await buildStatements(env.sql, FY)).taxEstimate).toMatchObject({ sbc: true });
