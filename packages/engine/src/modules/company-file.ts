@@ -41,6 +41,8 @@ const fileSchema = z.object({
   jobs: z.array(z.object({ name: z.string(), client: z.string().nullable().default(null), brand: z.string().nullable().default(null) })).default([]),
   /** Agreed year ends: amounts by account code, debit positive (as in the ledger). */
   yearEnds: z.array(z.object({ fyEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), note: str, figures: z.record(z.string(), z.number().int()) })).default([]),
+  /** Whether it qualified as a small business corporation (s12E), year by year, as said. */
+  sbcYears: z.array(z.object({ fyEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), sbc: z.boolean() })).max(200).default([]),
 });
 export type CompanyFile = z.input<typeof fileSchema>;
 
@@ -93,6 +95,7 @@ export async function exportCompanyFile(tx: Tx | import('../db/index.js').Sql): 
     clients,
     jobs,
     yearEnds,
+    sbcYears: await tx<{ fyEnd: string; sbc: boolean }[]>`select fy_end::text as fy_end, sbc from sbc_years order by fy_end`,
   };
 }
 
@@ -207,6 +210,10 @@ export async function restoreCompanyFile(tx: Tx, raw: unknown) {
     await noteShapFigures(tx, y.fyEnd);
     await tx`update settings set lock_date = greatest(coalesce(lock_date, ${y.fyEnd}::date), ${y.fyEnd}::date) where id`;
     count('yearEnds');
+  }
+  for (const y of file.sbcYears) {
+    await tx`insert into sbc_years (fy_end, sbc) values (${y.fyEnd}::date, ${y.sbc}) on conflict (fy_end) do update set sbc = excluded.sbc, updated_at = now()`;
+    count('sbcYears');
   }
   return done;
 }

@@ -139,10 +139,11 @@ export function FinancialStatements() {
       toast(err instanceof ApiError ? err.message : 'Couldn’t book it', 'error');
     }
   };
-  // The small business corporation question (s12E), answered here for the statements, the tax pack and the IRP6.
+  // The small business corporation question (s12E) for the year, answered here for the statements, the tax pack and the IRP6.
   const answerSbc = async (sbc: boolean) => {
+    if (!s) return;
     try {
-      await api('/api/settings/sbc', { method: 'PUT', body: { sbc } });
+      await api('/api/tax/sbc', { method: 'PUT', body: { fyEnd: s.fyEnd, sbc } });
       toast(sbc ? 'On the small business corporation table' : 'At the company rate');
       await reload();
     } catch (err) {

@@ -1,11 +1,11 @@
 import type { App as FastifyInstance } from '../http.js';
-import { addMonths, companyTax, estimateTax, provisionalPayable, financialYear, isoDate, monthEnd, monthsBetween, taxEstimateInput, yearEndInput, type AccountType, entity, sbcApplies, SBC_GROSS_INCOME_LIMIT_CENTS } from '@shap/shared';
+import { addMonths, companyTax, estimateTax, provisionalPayable, financialYear, isoDate, monthEnd, monthsBetween, taxEstimateInput, yearEndInput, type AccountType, entity, sbcApplies } from '@shap/shared';
 import { z } from 'zod';
 import { requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
-import { assessedLossBefore, assertOpen, getSettings, isIsoDate, q, today, freshTotals, noteShapFigures } from '../lib/books.js';
+import { assessedLossBefore, assertOpen, sbcAnswer, getSettings, isIsoDate, q, today, freshTotals, noteShapFigures } from '../lib/books.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 
@@ -203,11 +203,33 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
       businessType: settings.businessType,
       kind: taxKind(settings.businessType),
       approvedPbo: settings.approvedPbo,
-      // Qualifies as a small business corporation (s12E): what the business said (null: not yet).
-      sbc: settings.sbc,
+      // Qualifies as a small business corporation (s12E) this year: what was said (null: not yet).
+      sbc: (await sbcAnswer(sql, fy.end, settings.businessType)).sbc,
+      // Provisional tax already paid for the year (recorded in Shap): what "paid" starts at.
+      payments: await sql<{ id: string; date: string; amountCents: number; sourceName: string; reference: string }[]>`
+        select p.id, p.date::text as date, p.amount_cents, s.name as source_name, p.reference from sars_payments p join payment_sources s on s.id = p.source_id
+        where p.kind = 'irp6' and p.period = ${fy.end.slice(0, 7)} order by p.date`,
       ...(await taxFigures(sql, settings.businessType, fy)),
       exampleTaxOn100k: companyTax(10_000_000, fy.end, true),
     };
+  });
+
+  /**
+   * Whether the company qualifies as a small business corporation (s12E) for a year: yes, no, or
+   * not said (null). The owner's or the accountant's to say; SARS tests it each year.
+   */
+  app.put('/api/tax/sbc', { preHandler: requireRole('owner', 'accountant') }, async (req) => {
+    const user = userOrThrow(req);
+    const input = parse(z.object({ fyEnd: isoDate, sbc: z.boolean().nullable() }), req.body);
+    const settings = await getSettings(sql);
+    if (!entity(settings.businessType).sbcPossible) throw badRequest(`${entity(settings.businessType).label} can’t be a small business corporation`);
+    if (financialYear(input.fyEnd, settings.fyEndMonth).end !== input.fyEnd) throw badRequest('That isn’t one of the business’s year ends');
+    if (input.sbc === null) await sql`delete from sbc_years where fy_end = ${input.fyEnd}::date`;
+    else
+      await sql`insert into sbc_years (fy_end, sbc, updated_by) values (${input.fyEnd}::date, ${input.sbc}, ${user.id})
+        on conflict (fy_end) do update set sbc = excluded.sbc, updated_at = now(), updated_by = excluded.updated_by`;
+    await audit(sql, { userId: user.id, action: 'update', entity: 'sbc_year', entityId: input.fyEnd, ip: req.ip, details: { sbc: input.sbc } });
+    return { fyEnd: input.fyEnd, sbc: input.sbc };
   });
 
   app.post('/api/tax-estimates', owner, async (req) => {
@@ -221,10 +243,11 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
     const income = input.lines.reduce((s, l) => s + (l.type === 'income' ? l.projectedCents : -l.projectedCents), 0);
     // The small business corporation table only if the company qualifies, and never over R20 million of gross income.
     const gross = input.lines.reduce((s, l) => s + (l.type === 'income' ? l.projectedCents : 0), 0);
-    input.sbc = input.kind === 'company' && entity(settings.businessType).sbcPossible ? sbcApplies(input.sbc ?? settings.sbc, gross) === true : false;
+    // The estimate is on the table it was worked out on (the screen shows what was said for the
+    // year); saving it doesn't answer the question for the year: only choosing does (/api/tax/sbc).
+    const said = (await sbcAnswer(sql, fy.end, settings.businessType)).sbc;
+    input.sbc = input.kind === 'company' && entity(settings.businessType).sbcPossible ? sbcApplies(input.sbc ?? said, gross) === true : false;
     const { taxableCents: taxable, taxCents: tax } = estimateTax({ ...input, profitCents: income, approvedPbo: settings.approvedPbo, distributedCents: extra.distributedCents, partners: extra.partners });
-    // An estimate on the SBC table (or not) answers the question for the statements and the tax pack too, if it wasn't answered yet.
-    if (settings.sbc === null && req.body && typeof (req.body as { sbc?: unknown }).sbc === 'boolean' && input.kind === 'company' && entity(settings.businessType).sbcPossible && gross <= SBC_GROSS_INCOME_LIMIT_CENTS) await sql`update settings set sbc = ${input.sbc} where id`;
     const { payableCents: payable } = provisionalPayable({ taxCents: tax, payeCents: input.kind === 'individual' ? input.payeCents : 0, period: input.period, paidCents: input.paidCents });
     const [row] = await sql`
       insert into tax_estimates (fy_end, period, as_at, lines, taxable_income_cents, tax_cents, payable_cents, note, created_by)

@@ -1,5 +1,5 @@
 import type { App as FastifyInstance } from '../http.js';
-import { addDays, addMonths, featureOn, financialYear, lastBusinessDay, monthEnd, monthLabel, monthStart, monthsBetween, vat201Due, vatPeriod, type VatCategory } from '@shap/shared';
+import { addDays, addMonths, featureOn, financialYear, lastBusinessDay, monthEnd, monthLabel, monthStart, monthsBetween, vat201Due, vatPeriod, SARS_CHECKED_TO, taxYearEnd, type VatCategory } from '@shap/shared';
 import { requireRole, seesMoney, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { getSettings, today, freshTotals } from '../lib/books.js';
@@ -125,6 +125,8 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
         ? ((await sql`select t.id, t.started_at, t.project_id, t.note, p.name as project_name from time_entries t left join projects p on p.id = t.project_id where t.ended_at is null and t.user_id is not distinct from ${user.id}`)[0] ?? null)
         : null,
       taxDue: taxDue(settings, now),
+      // This version's SARS tables were checked up to SARS_CHECKED_TO: a later tax year needs an update.
+      sarsCheckedTo: taxYearEnd(now) > SARS_CHECKED_TO ? SARS_CHECKED_TO : null,
       bankCents: bal('bank'),
       ownerLoanCents: -bal('owner_loan'),
       projects: projects.map((p) => ({ ...p, ...totals(p as unknown as ProjectSummary) })),

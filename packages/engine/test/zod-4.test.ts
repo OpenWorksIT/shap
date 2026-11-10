@@ -5,6 +5,8 @@
  * being refused. All data made up.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { z } from 'zod';
+import '@shap/shared';
 import { login, ref, setup, type TestEnv } from './helpers.js';
 
 describe('the words a refused request comes back with', () => {
@@ -23,7 +25,9 @@ describe('the words a refused request comes back with', () => {
     const bank = await (await ref(env.sql)).src('Business bank');
     const pattern = await me.call({ method: 'POST', url: '/api/sars-payments', payload: { kind: 'emp201', period: '', date: '2026-06-05', amountCents: 1_000, sourceId: bank } });
     expect(pattern.statusCode).toBe(400);
-    expect(pattern.json().error).toBe('Invalid');
+    expect(pattern.json().error).toBe('Choose the month');
+    // A pattern with no words of its own says "Invalid", not the pattern.
+    expect(z.string().regex(/^\d{4}-\d{2}$/).safeParse('').error?.issues[0]?.message).toBe('Invalid');
   });
 
   it('refuses an unknown accountant export', async () => {

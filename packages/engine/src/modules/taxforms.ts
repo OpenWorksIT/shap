@@ -78,7 +78,8 @@ export function registerTaxFormRoutes(app: FastifyInstance, ctx: Ctx): void {
   /** The VAT201 for the period ending in (or the period containing) `on`; recent periods to pick from. */
   app.get('/api/vat/return', readers, async (req) => {
     const settings = await getSettings(sql);
-    const { on } = parse(z.object({ on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }), req.query);
+    // A real date, within the years a VAT201 can be for.
+    const { on } = parse(z.object({ on: z.string().regex(/^(19|20)\d{2}-\d{2}-\d{2}$/).refine((v) => !Number.isNaN(Date.parse(v)) && new Date(v).toISOString().slice(0, 10) === v, 'A real date').optional() }), req.query);
     const cat = settings.vatCategory;
     // The default: the last period that has ended.
     const current = vatPeriod(today(), cat, settings.fyEndMonth);

@@ -42,6 +42,8 @@ interface Dashboard {
   billsDue?: { id: string; supplier: string; description: string; dueDate: string | null; date: string; owingCents: number }[];
   timer?: Running | null;
   taxDue?: { key: string; label: string; due: string; to: string }[];
+  /** This version's SARS tables were checked up to this year end, before the tax year we're in. */
+  sarsCheckedTo?: string | null;
   bankCents: number;
   ownerLoanCents: number;
   projects: ProjectRow[];
@@ -98,6 +100,15 @@ function OwnerHome() {
             Update
           </button>
         )}
+      </div>
+    ),
+    // This version's SARS tables end before the tax year we're in (SARS_CHECKED_TO).
+    data.sarsCheckedTo && (
+      <div key="sars-tables" className="attention">
+        <Icon name="alert" size={18} />
+        <span className="grow">
+          <strong>SARS’s new tax year</strong>: this version of Shap Pocket has SARS’s tables up to the year ended {formatDate(data.sarsCheckedTo)}. Update Shap Pocket before you run payroll or estimate tax for the new year.
+        </span>
       </div>
     ),
     data.timer && (

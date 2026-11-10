@@ -18,8 +18,6 @@ export interface SettingsRow {
   businessType: BusinessType;
   /** A non-profit company approved by SARS as a public benefit organisation. */
   approvedPbo: boolean;
-  /** Qualifies as a small business corporation (s12E); null: not said. */
-  sbc: boolean | null;
   features: Record<string, boolean>;
   tone: 'casual' | 'formal';
   creditPrefix: string;
@@ -109,6 +107,18 @@ export async function assessedLossBefore(db: Db, fyStart: string, fyEndMonth: nu
     for (const r of given) add(r.m, 'given', Number(r.cents));
   }
   return assessedLossCarried(kind, [...years].map(([fyEnd, y]) => ({ fyEnd, profitCents: y.profit - Math.min(y.given, Math.max(0, y.profit)) })));
+}
+
+/**
+ * Whether the company qualifies as a small business corporation (s12E) for the year ending
+ * `fyEnd`: the answer given for that year, or the latest one given for a year before it (a
+ * company usually goes on qualifying), or null: not said. `said`: answered for this year itself.
+ * Only for a kind of business that can be one (entities.ts sbcPossible); else false.
+ */
+export async function sbcAnswer(db: Db, fyEnd: string, businessType: string): Promise<{ sbc: boolean | null; said: boolean; from: string | null }> {
+  if (!entity(businessType).sbcPossible) return { sbc: false, said: false, from: null };
+  const [r] = await db<{ fyEnd: string; sbc: boolean }[]>`select fy_end::text as fy_end, sbc from sbc_years where fy_end <= ${fyEnd}::date order by fy_end desc limit 1`;
+  return r ? { sbc: r.sbc, said: r.fyEnd === fyEnd, from: r.fyEnd } : { sbc: null, said: false, from: null };
 }
 
 export async function getSettings(db: Db): Promise<SettingsRow> {

@@ -430,6 +430,15 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/sars-payments', owner, async (req) => {
     const user = userOrThrow(req);
     const input = parse(sarsPaymentInput, req.body);
+    if (input.kind === 'irp6') {
+      // Provisional tax is the business's own income tax: only for a business taxed on its own
+      // profit (a sole proprietor's is the owner's own: drawings).
+      const settings = await getSettings(sql);
+      const taxedAs = entity(settings.businessType).taxedAs;
+      if (!(taxedAs === 'company' || taxedAs === 'trust' || (taxedAs === 'npc' && !settings.approvedPbo)) || settings.turnoverTax)
+        throw badRequest(`${entity(settings.businessType).label}${settings.turnoverTax ? ' on turnover tax' : ''} pays no income tax of its own: provisional tax paid is the owner’s (drawings)`);
+      if (Number(input.period.slice(5, 7)) !== settings.fyEndMonth) throw badRequest('Provisional tax is for a year: give the month the year ends in');
+    }
     await assertOpen(sql, input.date);
     const src = await sourceAccount(sql, input.sourceId);
     const s = await sarsSummary(sql);
@@ -478,14 +487,16 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/sars-payments', readers, async () => sql`select p.*, s.name as source_name from sars_payments p join payment_sources s on s.id = p.source_id order by p.date desc`);
 
   app.delete('/api/sars-payments/:id', owner, async (req) => {
+    const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
-    const [p] = await sql<{ date: string }[]>`select date::text from sars_payments where id = ${id}`;
+    const [p] = await sql<{ date: string; kind: string; period: string; amountCents: string }[]>`select date::text, kind, period, amount_cents from sars_payments where id = ${id}`;
     if (!p) throw notFound('Payment');
     await assertOpen(sql, p.date);
     await sql.begin(async (tx) => {
       await tx`delete from journals where kind = 'sars' and source_id = ${id}`;
       await tx`delete from sars_payments where id = ${id}`;
     });
+    await audit(sql, { userId: user.id, action: 'delete', entity: 'sars_payment', entityId: id, ip: req.ip, details: { kind: p.kind, period: p.period, amountCents: Number(p.amountCents) } });
     return { ok: true };
   });
 

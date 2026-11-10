@@ -355,8 +355,10 @@ interface TaxData {
   /** Who pays (entities.ts), and what that needs. */
   kind?: 'company' | 'individual' | 'trust' | 'npc' | 'partners';
   approvedPbo?: boolean;
-  /** Qualifies as a small business corporation (s12E): as the business said (null: not yet). */
+  /** Qualifies as a small business corporation (s12E) this year: as said (null: not yet). */
   sbc?: boolean | null;
+  /** Provisional tax recorded as paid for the year. */
+  payments?: { id: string; date: string; amountCents: number; sourceName: string; reference: string }[];
   partners?: { name: string; shareBp: number }[];
   distributedCents?: number;
   saved: { id: string; period: number; asAt: string; taxableIncomeCents: number; taxCents: number; payableCents: number; note: string; createdAt: string }[];
@@ -379,7 +381,8 @@ export function ProvisionalTax() {
   const { data, error, reload } = useApi<TaxData>(`/api/reports/provisional-tax?fyEnd=${fyEnd}${asAt ? `&asAt=${asAt}` : ''}`);
   const [proj, setProj] = useState<Record<string, number>>({});
   const [loss, setLoss] = useState(0);
-  const [sbc, setSbc] = useState(true);
+  // On the small business corporation table: as said for the year (null: not said, so both figures).
+  const [sbc, setSbc] = useState<boolean | null>(null);
   const [ageBand, setAgeBand] = useState<AgeBand>('under65');
   const [otherIncome, setOtherIncome] = useState(0);
   const [retirement, setRetirement] = useState(0);
@@ -390,9 +393,10 @@ export function ProvisionalTax() {
 
   useEffect(() => {
     if (!data) return;
-    // What the business said (Settings), or, not said yet: on, except for an Inc. (most give a
-    // personal service, law, accounting, engineering, which rules the table out).
-    setSbc(data.sbc ?? data.businessType !== 'inc');
+    // What was said for the year; not said, neither (both figures shown, and a choice).
+    setSbc(data.sbc ?? null);
+    // What's been paid for the year, as recorded.
+    setPaid((data.payments ?? []).reduce((t, x) => t + Number(x.amountCents), 0));
     setProj(Object.fromEntries(data.lines.map((l) => [l.accountId, l.projectedCents])));
     setLoss(data.assessedLossCents);
     // First period runs to the half-year; after that it's the second.
@@ -417,14 +421,27 @@ export function ProvisionalTax() {
   const rules = entity(data.businessType ?? settings.businessType);
   // Gross income over R20 million rules the small business corporation table out (s12E).
   const overLimit = totals[2]!.income > SBC_GROSS_INCOME_LIMIT_CENTS;
-  const onSbc = sbc && rules.sbcPossible && !overLimit;
-  const setSbcSaved = async (on: boolean) => {
+  const onSbc = sbc === true && rules.sbcPossible && !overLimit;
+  // The answer for the year, saved for the statements and the tax pack too.
+  const setSbcSaved = async (on: boolean | null) => {
     setSbc(on);
     if (!isOwner) return;
     try {
-      await api('/api/settings/sbc', { method: 'PUT', body: { sbc: on } });
+      await api('/api/tax/sbc', { method: 'PUT', body: { fyEnd: data.fy.end, sbc: on } });
     } catch (err) {
       toast(err instanceof ApiError ? err.message : 'Couldn’t save that', 'error');
+    }
+  };
+  const sbcFigure = estimateTax({ kind, profitCents: net, assessedLossCents: loss, fyEnd: data.fy.end, sbc: true, distributedCents: data.distributedCents, approvedPbo: data.approvedPbo }).taxCents;
+  const flatFigure = estimateTax({ kind, profitCents: net, assessedLossCents: loss, fyEnd: data.fy.end, sbc: false, distributedCents: data.distributedCents, approvedPbo: data.approvedPbo }).taxCents;
+  const removePayment = async (id: string) => {
+    if (!confirm('Delete this provisional tax payment? Its journal goes with it.')) return;
+    try {
+      await api(`/api/sars-payments/${id}`, { method: 'DELETE' });
+      toast('Payment deleted');
+      await reload();
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Couldn’t delete it', 'error');
     }
   };
   const est = estimateTax({ kind, profitCents: net, assessedLossCents: loss, fyEnd: data.fy.end, sbc: onSbc, ageBand, otherIncomeCents: otherIncome, retirementCents: retirement, distributedCents: data.distributedCents, approvedPbo: data.approvedPbo, partners: data.partners });
@@ -441,7 +458,8 @@ export function ProvisionalTax() {
           period,
           asAt: data.asAt,
           note,
-          sbc,
+          // The table this estimate is on (not the answer for the year: that's only ever chosen).
+          sbc: onSbc,
           kind,
           ageBand,
           otherIncomeCents: individual ? otherIncome : 0,
@@ -679,7 +697,7 @@ export function ProvisionalTax() {
               <tr>
                 <td>
                   <label className="check">
-                    <input type="checkbox" checked={sbc} onChange={(e) => void setSbcSaved(e.target.checked)} />
+                    <input type="checkbox" checked={sbc === true} onChange={(e) => void setSbcSaved(e.target.checked)} />
                     <span>
                       Small business corporation rates (s12E)
                       <div className="xs muted">
@@ -689,7 +707,18 @@ export function ProvisionalTax() {
                           : onSbc
                             ? bands.map((b, i) => (i === 0 ? `0% to R${b.upTo!.toLocaleString('en-ZA')}` : `${Math.round(b.rate * 100)}% above R${b.over.toLocaleString('en-ZA')}`)).join(', ')
                             : 'Flat 27% company rate'}
-                        {' '}If it qualifies: gross income up to R20 million, every shareholder a person holding no shares in another company, no more than 20% investment income and personal services. Saved for the financial statements and the tax pack too.
+                        {' '}If it qualifies: gross income up to R20 million, every shareholder a person holding no shares in another company, no more than 20% investment income and personal services. Your answer for this year is saved for the financial statements and the tax pack too.
+                        {sbc === null && !overLimit && (
+                          <div className="banner small" style={{ marginTop: 6 }}>
+                            Not said for this year: {formatZar(sbcFigure)} if it qualifies, {formatZar(flatFigure)} at 27% if it doesn’t (the estimate below is at 27% until you say).
+                            {isOwner && (
+                              <div className="row wrap" style={{ marginTop: 6 }}>
+                                <button type="button" className="btn small" onClick={() => void setSbcSaved(true)}>It qualifies</button>
+                                <button type="button" className="btn small" onClick={() => void setSbcSaved(false)}>It doesn’t</button>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </span>
                   </label>
@@ -721,7 +750,24 @@ export function ProvisionalTax() {
             )}
             {period > 1 && (
               <tr>
-                <td>Less: paid in earlier periods</td>
+                <td>
+                  Less: paid in earlier periods
+                  {(data.payments ?? []).length > 0 && (
+                    <div className="xs muted">
+                      Recorded:{' '}
+                      {data.payments!.map((x) => (
+                        <span key={x.id} className="no-wrap">
+                          {formatZar(x.amountCents)} on {formatDate(x.date)} from {x.sourceName}
+                          {isOwner && (
+                            <button type="button" className="btn link small" onClick={() => void removePayment(x.id)} aria-label={`Delete the payment of ${formatZar(x.amountCents)}`}>
+                              Delete
+                            </button>
+                          )}{' '}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </td>
                 <td className="num">{isOwner ? <MoneyInput value={paid} onChange={(c) => setPaid(c ?? 0)} aria-label="Already paid" /> : formatZar(paid)}</td>
               </tr>
             )}
@@ -745,7 +791,7 @@ export function ProvisionalTax() {
             <button className="btn primary" onClick={() => void save()}>
               Save this estimate
             </button>
-            {kind !== 'individual' && kind !== 'partners' && (
+            {kind !== 'individual' && kind !== 'partners' && !settings.turnoverTax && (
               <button className="btn" onClick={() => setPaying(true)}>
                 Record a provisional tax payment to SARS
               </button>
@@ -760,6 +806,7 @@ export function ProvisionalTax() {
             onSaved={() => {
               setPaying(false);
               toast('Paid: off what’s owed to SARS for the year’s income tax');
+              void reload();
             }}
           />
         )}

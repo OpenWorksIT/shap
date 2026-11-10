@@ -30,8 +30,6 @@ export interface Settings {
   proformaNext: number;
   payshapId: string;
   vatCategory: 'A' | 'B' | 'C' | 'D' | 'E';
-  /** Qualifies as a small business corporation (s12E); null: not said. */
-  sbc?: boolean | null;
   turnoverTax: boolean;
   hourlyRateCents: number;
   watermark: boolean;

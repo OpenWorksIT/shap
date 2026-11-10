@@ -33,7 +33,8 @@ what changed.
 
 The standard update of Shap's CPD audit (section 2), with Shap's: the tables are in the shared code
 (`packages/shared/src/tax.ts`, `payroll.ts`, `vat.ts`), copied here. From 1 March each year the
-tests fail until the new tax year's figures are checked (`SARS_CHECKED_TO`).
+tests fail until the new tax year's figures are checked (`SARS_CHECKED_TO`), and the home screen
+tells the owner when this version's tables end before the tax year they're in.
 
 ## 3. What each review found
 
@@ -45,3 +46,6 @@ Shap's CPD audit (section 7) has each review; what was Pocket's own:
 - **1.7.0**: the statements' fingerprint used node:crypto, an empty stand-in in the app, so
   uploading the signed compiler's report or approving failed there (from 1.6): SHA-256 in plain
   JavaScript now, and the tests check the engine imports nothing of Node's.
+- **1.7.2**: Shap 1.23.2's SARS review and its four reviews (Shap's section 7) apply here: the same
+  code, fixed the same way, with the tests in `packages/engine/test/sbc-and-sars.test.ts`. What was
+  about staff (provisional tax kept from payroll staff) doesn't arise: Pocket has one person.
