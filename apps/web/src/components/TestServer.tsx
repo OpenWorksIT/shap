@@ -116,7 +116,7 @@ export function TestServerPanel() {
       ) : s.empty ? (
         <>
           <p className="small">
-            Fill these books with made-up data for this setup: the last full financial year and this one to date. Quotes, invoices and payments, costs with their slips, and whatever this setup uses (payroll, casual workers, sales and stock, bills, the logbook, VAT, provisional tax, dividends or drawings). The same setup always gets the same figures.
+            Fill these books with made-up data for this setup: the last full financial year and this one to date. Quotes, invoices and payments, costs with their slips, and whatever this setup uses (payroll, casual workers, sales and stock, bills, the logbook, VAT, provisional tax, dividends or drawings). The same setup gets the same figures (within a financial year). Made up for trying Shap out: the tax in them is Shap’s estimate, not advice.
           </p>
           <div>
             <button type="button" className="btn primary" disabled={busy} onClick={() => void start()}>

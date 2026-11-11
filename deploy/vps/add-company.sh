@@ -35,6 +35,24 @@ fi
 [ -f "companies/$SLUG.env" ] && { echo "There is already a company called $SLUG (companies/$SLUG.env)." >&2; exit 1; }
 command -v openssl >/dev/null || { echo "Please install openssl." >&2; exit 1; }
 
+# COMPOSE_FILE in .env (so plain "docker compose ..." commands include the companies), checked
+# before anything is made: if it's already set (for edge.yml, say), companies.yml goes on the end of
+# it, once. Only a plain line (no quotes, comment or Windows line ending) is changed.
+COMPOSE_CHANGE=none
+if grep -q '^COMPOSE_FILE=' .env; then
+  if ! grep -q '^COMPOSE_FILE=.*companies\.yml' .env; then
+    cr=$(printf '\r')
+    if grep -qE "^COMPOSE_FILE=[^ #\"'${cr}]*\$" .env; then
+      COMPOSE_CHANGE=append
+    else
+      echo "The COMPOSE_FILE line in .env has quotes, a comment or a Windows line ending: make it a plain line (COMPOSE_FILE=a.yml:b.yml), then run this again. Nothing has been changed." >&2
+      exit 1
+    fi
+  fi
+else
+  COMPOSE_CHANGE=new
+fi
+
 DB="shap_$SLUG"
 DB_PASSWORD="$(openssl rand -hex 24)"
 
@@ -112,21 +130,10 @@ if [ "$TEST_SERVER" = true ]; then
     mem_limit: 1g
 YML
 fi
-if grep -q '^COMPOSE_FILE=' .env; then
-  # Already set (for edge.yml, say): companies.yml goes on the end of it, once. Only a plain line
-  # (no quotes, comment or Windows line ending) is changed; otherwise say what to add by hand.
-  if ! grep -q '^COMPOSE_FILE=.*companies\.yml' .env; then
-    cr=$(printf '\r')
-    if grep -qE "^COMPOSE_FILE=[^ #\"'${cr}]*\$" .env; then
-      sed -i '/^COMPOSE_FILE=/s/$/:companies.yml/' .env
-    else
-      echo "Add :companies.yml to the end of the COMPOSE_FILE line in .env, then run: docker compose up -d app-$SLUG && docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile" >&2
-      exit 1
-    fi
-  fi
-else
-  printf '\n# Your company plus the ones add-company.sh added.\nCOMPOSE_FILE=docker-compose.yml:companies.yml\n' >> .env
-fi
+case "$COMPOSE_CHANGE" in
+  append) sed -i '/^COMPOSE_FILE=/s/$/:companies.yml/' .env ;;
+  new) printf '\n# Your company plus the ones add-company.sh added.\nCOMPOSE_FILE=docker-compose.yml:companies.yml\n' >> .env ;;
+esac
 
 # 4. Its web address.
 mkdir -p sites

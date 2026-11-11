@@ -5,7 +5,7 @@
  * the same setup always gets the same books.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { addDays, extrasFor, featuresFor, financialYear, idNumberProblem, taxNumberProblem, turnoverTaxLimit, vatNumberProblem, vatThresholds, type SetupExtras } from '@shap/shared';
+import { addDays, addMonths, estimateTax, extrasFor, featuresFor, financialYear, idNumberProblem, isBusinessDay, monthEnd, taxNumberProblem, turnoverTax, turnoverTaxLimit, vat201Due, vatNumberProblem, vatPeriod, vatThresholds, type SetupExtras, type TaxEstimateFigures } from '@shap/shared';
 import { buildApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { today } from '../src/lib/books.js';
@@ -358,6 +358,34 @@ describe('test server: every kind of setup passes the books audit', () => {
   }
 });
 
+describe('test server: kept under turnover tax’s limit, it trades to the end of each month', () => {
+  it('a busy salon on turnover tax, at full size: each month near the cap, under it, and selling in its last days', async () => {
+    const env = await setup({ env: { TEST_SERVER: 'true' } });
+    try {
+      await env.sql`delete from workers`;
+      const a: Answers = { businessType: 'sole_prop', industry: 'hair', workflow: 'invoice', sales: true, turnoverTax: true };
+      const owner = await setUp(env, a);
+      const t = today();
+      const from = addMonths(`${t.slice(0, 7)}-01`, -3);
+      await populate(io(owner), env.sql, { today: t, from, scale: 1 });
+      await expectCleanAudit(env.sql);
+      for (let m = from; m < `${t.slice(0, 7)}-01`; m = addMonths(m, 1)) {
+        const end = monthEnd(m);
+        const cap = (Math.min(vatThresholds(m).compulsoryCents, turnoverTaxLimit(financialYear(m, 2).end)) * 0.7) / 12;
+        const [x] = await env.sql<{ t: string; last: string }[]>`
+          select coalesce(-sum(l.amount_cents), 0)::bigint as t,
+                 (select max(issue_date)::text from documents where kind = 'invoice' and status = 'issued' and issue_date between ${m}::date and ${end}::date) as last
+          from ledger l join accounts a on a.id = l.account_id where a.type = 'income' and l.date between ${m}::date and ${end}::date`;
+        expect(Number(x!.t), `${m.slice(0, 7)} under the cap`).toBeLessThanOrEqual(cap);
+        expect(Number(x!.t), `${m.slice(0, 7)} near the cap`).toBeGreaterThan(cap * 0.8);
+        expect(x!.last >= addDays(end, -4), `${m.slice(0, 7)} sold till ${x!.last}`).toBe(true);
+      }
+    } finally {
+      await env.close();
+    }
+  }, 600_000);
+});
+
 /** What the four reviews of 1.25 found the filling got wrong, checked on every setup's books. */
 async function checkMadeUp(env: TestEnv, owner: Awaited<ReturnType<typeof sessionFor>>, a: Answers, from: string) {
   const t = today();
@@ -381,15 +409,69 @@ async function checkMadeUp(env: TestEnv, owner: Awaited<ReturnType<typeof sessio
     if (!a.vat) expect(num(tv!.t)).toBeLessThan(vatThresholds(fy.end).compulsoryCents);
     if (a.turnoverTax) expect(num(tv!.t)).toBeLessThan(turnoverTaxLimit(fy.end));
   }
-  // Rent every month for a trade with premises.
+  // Rent every month for a trade with premises (on the month's first business day, so this month's
+  // only once that's come).
+  const onOrAfter = (d: string) => {
+    let x = d;
+    while (!isBusinessDay(x)) x = addDays(x, 1);
+    return x;
+  };
   const months = new Set<string>();
-  for (let d = from; d <= t; d = addDays(d, 1)) months.add(d.slice(0, 7));
+  for (let d = from; d <= t; d = addDays(d, 1)) if ((d === from || d.endsWith('-01')) && onOrAfter(d) <= t) months.add(d.slice(0, 7));
   const [rent] = await sql<{ n: number }[]>`select count(*)::int as n from costs where description = 'Rent for the premises'`;
   if (['retail', 'hair', 'mechanic', 'catering', 'health'].includes(a.industry)) expect(rent!.n).toBe(months.size);
-  // Every VAT period the books reach, once due, has its VAT201 paid (or the refund in).
+  // Every VAT period the books reach, once due, has its VAT201: field 20 paid on its due date, or
+  // the refund in (about three weeks after); none for a nil return.
   if (a.vat) {
-    const periods = await sql<{ n: number }[]>`select count(*)::int as n from journals where reference = 'VAT201'`;
-    expect(periods[0]!.n).toBeGreaterThan(0);
+    const done = new Set<string>();
+    let checked = 0;
+    for (let d = from; d <= t; d = addDays(d, 1)) {
+      const p = vatPeriod(d, a.vatCategory ?? 'B', a.fyEndMonth ?? 2);
+      if (done.has(p.end) || addDays(vat201Due(p.end), 30) > t) continue;
+      done.add(p.end);
+      const f20 = Number((await owner.get(`/api/vat/return?on=${p.end}`)).fields.field20);
+      const js = await sql<{ date: string; amt: string }[]>`
+        select j.date::text as date, sum(jl.debit_cents)::bigint as amt from journals j join journal_lines jl on jl.journal_id = j.id
+        where j.reference = 'VAT201' and j.description like ${`VAT201 ${p.start} to ${p.end}:%`} group by j.id, j.date`;
+      expect(js.length, `VAT201 for ${p.start} to ${p.end}`).toBe(f20 === 0 ? 0 : 1);
+      if (f20 === 0) continue;
+      expect(num(js[0]!.amt)).toBe(Math.abs(f20));
+      if (f20 > 0) expect(js[0]!.date).toBe(vat201Due(p.end));
+      checked++;
+    }
+    expect(checked).toBeGreaterThan(0);
+  }
+  // The last full year's provisional tax (or the owners' own, as drawings) and turnover tax's
+  // interim payments: about the year's tax, as Shap works it out on the year's own figures.
+  {
+    const fy = financialYear(addDays(financialYear(t, a.fyEndMonth ?? 2).start, -1), a.fyEndMonth ?? 2);
+    const p = await owner.get(`/api/reports/provisional-tax?fyEnd=${fy.end}&asAt=${fy.end}`);
+    const sum = (k: string) => (p.lines as { type: string; projectedCents: number }[]).filter((l) => l.type === k).reduce((x, l) => x + Number(l.projectedCents), 0);
+    const est = estimateTax({ kind: p.kind as TaxEstimateFigures['kind'], profitCents: sum('income') - sum('cost_of_sales') - sum('expense'), assessedLossCents: Number(p.assessedLossCents), fyEnd: fy.end, sbc: p.sbc === true, distributedCents: Number(p.distributedCents), approvedPbo: p.approvedPbo, partners: p.partners });
+    const near = (paid: number, tax: number, what: string) => expect(Math.abs(paid - tax), `${what}: paid ${paid}, the year's tax ${tax}`).toBeLessThanOrEqual(Math.max(100_000, tax * 0.15));
+    if (a.turnoverTax) {
+      if (['sole_prop', 'partnership'].includes(a.businessType)) {
+        const [income] = await sql<{ t: string }[]>`select coalesce(-sum(l.amount_cents), 0)::bigint as t from ledger l join accounts a on a.id = l.account_id where a.type = 'income' and coalesce(a.system_key, '') not in ('disposal_gain_loss', 'interest_income') and l.date between ${fy.start}::date and ${fy.end}::date`;
+        const tax = turnoverTax(num(income!.t), fy.end);
+        const tt = await sql<{ n: number; paid: string }[]>`select count(*)::int as n, coalesce(sum(amount_cents), 0)::bigint as paid from costs where description like 'Turnover tax (TT02) interim payment%' and date between ${fy.start}::date and ${fy.end}::date`;
+        if (tax > 50_000) expect(tt[0]!.n).toBe(2);
+        near(num(tt[0]!.paid), tax, 'TT02');
+      }
+    } else if (['sole_prop', 'partnership'].includes(a.businessType)) {
+      for (const x of est.partners ?? [{ name: '', taxCents: est.taxCents }]) {
+        const [own] = await sql<{ paid: string }[]>`select coalesce(sum(amount_cents), 0)::bigint as paid from costs where description like ${`Provisional tax (IRP6) for ${x.name}%`} and date between ${fy.start}::date and ${fy.end}::date`;
+        near(num(own!.paid), Math.max(0, x.taxCents), `IRP6 for ${x.name || 'the owner'}`);
+      }
+    } else if (!(a.businessType === 'npc' && p.approvedPbo)) {
+      const [irp6] = await sql<{ paid: string }[]>`select coalesce(sum(amount_cents), 0)::bigint as paid from sars_payments where kind = 'irp6' and period = ${fy.end.slice(0, 7)}`;
+      near(num(irp6!.paid), Math.max(0, est.taxCents), 'IRP6');
+    }
+  }
+  // Someone new starts on the first business day after the leaver's last.
+  const left = await sql<{ end: string }[]>`select end_date::text as end from employees where end_date is not null`;
+  for (const l of left) {
+    const starts = onOrAfter(addDays(l.end, 1));
+    expect((await sql`select 1 from employees where start_date = ${starts}::date`).length, `someone new from ${starts}`).toBe(1);
   }
   // No costs on a job after its last invoice: they'd wait in work in progress for ever.
   const [late] = await sql<{ n: number }[]>`
@@ -430,10 +512,9 @@ async function checkMadeUp(env: TestEnv, owner: Awaited<ReturnType<typeof sessio
   // The logbook: by SARS's tax year, the odometer moving by the trips, private use under 5%.
   if (a.extras?.travel) {
     const lb = await owner.get(`/api/logbook?yearEnd=${financialYear(addDays(financialYear(t, 2).start, -1), 2).end}`);
-    if (lb.totalKm) {
-      expect(lb.totalKm).toBe(lb.loggedKm);
-      expect(lb.businessShare).toBeGreaterThanOrEqual(0.95);
-    }
+    expect(lb.totalKm).toBeGreaterThan(0);
+    expect(lb.totalKm).toBe(lb.loggedKm);
+    expect(lb.businessShare).toBeGreaterThanOrEqual(0.95);
   }
   // The statements name the made-up owners.
   const details = await owner.get('/api/statements/details');

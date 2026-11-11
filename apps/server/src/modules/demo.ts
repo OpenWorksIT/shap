@@ -5,7 +5,7 @@
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { confirmPassword, DEMO_SESSION_COOKIE, requireRole, SESSION_COOKIE, userOrThrow } from '../auth.js';
+import { browserName, confirmPassword, DEMO_SESSION_COOKIE, requireRole, SESSION_COOKIE, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Sql } from '../db/index.js';
 import { inDemo } from '../db/routing.js';
@@ -55,7 +55,7 @@ export function registerDemoRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!owner) throw badRequest('The demo company has no owner');
     const token = newToken();
     await demo`insert into sessions (token_hash, user_id, expires_at, user_agent, ip)
-      values (${sha256(token)}, ${owner.id}, now() + make_interval(hours => ${config.SESSION_TTL_HOURS}), ${String(req.headers['user-agent'] ?? '').slice(0, 300)}, ${req.ip})`;
+      values (${sha256(token)}, ${owner.id}, now() + make_interval(hours => ${config.SESSION_TTL_HOURS}), ${browserName(req)}, ${req.ip})`;
     reply.setCookie(DEMO_COOKIE, '1', cookie);
     reply.setCookie(DEMO_SESSION_COOKIE, token, cookie);
   };

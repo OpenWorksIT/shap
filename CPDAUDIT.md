@@ -403,9 +403,10 @@ same):
 
 The test server: made-up books filled through Shap's own API for any setup, and wiped. Each
 reviewer filled the books for many setups (about 60 fillings between them, every one passing the
-books audit) and reconciled them. All fixed with tests (`apps/server/test/test-server.test.ts`,
-which now fills 14 setups and checks each against the findings below, and
-`test/review-1.25/statements-checks.test.ts`; Pocket the statements' checks):
+books audit) and reconciled them. All fixed, with tests except where noted
+(`apps/server/test/test-server.test.ts`, which now fills 14 setups and checks each against the
+findings below, and `test/review-1.25/statements-checks.test.ts`, `fill-cleanup.test.ts`; Pocket
+the statements' checks):
 
 - Security and privacy: two fillings, or a filling and a wipe, could start at once (both got
   through before either was marked as running; the hold on other changes then lifted while one
@@ -417,16 +418,18 @@ which now fills 14 setups and checks each against the findings below, and
   (now where it stopped only). "New books only" missed time, bank statements, year ends and tax
   estimates. The streets were real ones (now "Test Street" in "Fictional Town"), and the suppliers
   and businesses are marked "(made up)". `add-company.sh` could put `:companies.yml` inside a
-  comment or a quoted `COMPOSE_FILE`; a test server now has one CPU and 1 GB. The penetration test
-  against a production-mode test server: 286 routes, nothing to fix.
+  comment or a quoted `COMPOSE_FILE`; a test server now has one CPU and 1 GB. Not tested: the log's
+  text, the refresh sent when the filling ends, leaving the demo while it fills. The penetration
+  test against a production-mode test server: 286 routes, nothing to fix.
 - IFRS for SMEs and company law: labour went on jobs paid up front after their tax invoice, so it
   sat in work in progress until the day the books were filled (13.14, 23.14). A business not
   registered for VAT had its stock booked without the VAT it paid (13.6). A trust got a second
   distribution, three months after the year end, flagged as passing straight to the beneficiary
   (s25B). Companies with payroll traded on an overdraft nobody arranged (the owners now lend what
   it needs); and the statements had no going-concern check except a CC's deficit: now every kind of
-  business (3.8, Companies Act s128, s129(7)), with checks for distributions declared after the
-  year end (32.8, 32.10) and for stock on hand when Shap doesn't keep it (13.4). The statement of
+  business (3.8; business rescue for a company or CC, Companies Act s128(1)(f), s129(7), CC Act
+  s66(1A)), with checks for distributions declared after the year end (32.8, 32.10) and for stock
+  on hand when Shap doesn't keep it (13.4). The statement of
   changes in equity called a CC's, trust's and co-op's capital "Issue of shares" (CC Act s24). The
   co-op had one member (Co-operatives Act s6(1)(a): now five, sharing the distribution). The
   statements named the person signed in as director (now the made-up owners). Left to the
@@ -452,10 +455,22 @@ which now fills 14 setups and checks each against the findings below, and
   route's own lock check skips it, and the lock is cleared while the books are new). Two fillings
   doubled the capital. The till could go below nothing on a cash refund. Most made-up businesses
   ran an unfunded overdraft at the test scale (fixed costs now scale too). Time entries all started
-  at 08:00. Other open screens weren't told when the filling ended. "The same books whichever day
-  you fill" holds within a financial year (now said). Not changed, older code: the balance sheet
-  report and the statements show provisional tax paid differently, both balanced; computers go to
-  "Tools & equipment at cost".
+  at 08:00 (not tested). Other open screens weren't told when the filling ended. "The same books
+  whichever day you fill" holds within a financial year (now said). Not changed, older code: the
+  balance sheet report and the statements show provisional tax paid differently, both balanced;
+  computers go to "Tools & equipment at cost"; a non-vendor's stock is coded "supplier not
+  registered for VAT" whatever the supplier (`stock.ts`; no figure changes).
+- The fixes, checked by a separate agent: capped trade stopped part-way through each month (now
+  spread over it; tested at full size); a distribution counted as after the year end however many
+  years later (now up to the next year end); "The owner assess", and a CC left out of business
+  rescue and of the going-concern check unless overdrawn; `add-company.sh`'s hand-fix path left a
+  company half made (the line is checked before anything is made); the filling said it was done
+  before putting month end back, and failing before it began left its sign-in, month end aside and
+  the books "busy"; a browser could sign in as the filling's sign-in. Tests that couldn't fail now
+  can: the limits (at a fifth of the size nothing reached them), the logbook (an empty year was
+  skipped), each VAT201 against field 20 and its due date, provisional tax and TT02 against the
+  year's tax, the new hire's start. Also: the slip's VAT rate written in, trips before the vehicle
+  was bought, the new hire's job, the wording on liability in the docs and changelog.
 
 ### Code scanning (CodeQL), first run
 

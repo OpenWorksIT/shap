@@ -56,7 +56,7 @@ What the setup switches on decides what's made, as a business like that would ha
 | Quotes → jobs → invoices | Jobs with quotes (most accepted, some declined, some still waiting), materials bought onto the job, the invoice when the job's done |
 | Quotes → invoices / just invoices | Quotes turned into invoices / invoices straight away |
 | Clients paying | On time, late, in two parts, or (rarely) never |
-| Not registered for VAT, or on turnover tax | Trade kept to about 70% of the compulsory VAT registration line (R1 million before 1 April 2026, R2.3 million after) and of the turnover tax limit for the year, a twelfth a month; a smaller place to rent and one employee |
+| Not registered for VAT, or on turnover tax | Trade kept to about 70% of the compulsory VAT registration line (R1 million before 1 April 2026, R2.3 million after) and of the turnover tax limit for the year, a twelfth a month, spread over the month; a smaller place to rent and one employee |
 | VAT | Each period's VAT201 paid on its due date (a refund received about three weeks after), by journal from the bank, from the first period the books reach |
 | Payroll | One to three employees (a company's or Inc.'s director on a salary too), a pay run on the 25th, a December bonus, overtime now and then, someone leaving at the end of the tenth month and someone new starting the next; each EMP201 paid by the 7th. Without SDL, the payroll stays under R500 000 a year; no medical aid through the payroll |
 | Casual workers | Two of them, each in two or three days a week (on a job when one is running), paid each Friday. Shap's casual labour has no PAYE or UIF: someone working more than 24 hours a month contributes to UIF, so check how your business pays its helpers |
@@ -67,11 +67,11 @@ What the setup switches on decides what's made, as a business like that would ha
 | Time tracker | The hours on the time tracker, put onto the invoices |
 | Travel logbook | A panel van too, for a trade that doesn't already have a bakkie; trips there and back on about half the working days; the odometer by SARS's tax year (March to February), moving by the trips. Private trips only for a sole proprietor or partners, under 5% of the kilometres |
 | Pro-forma invoices | Some jobs paid up front: the pro-forma, then the tax invoice when the money comes in (VAT Act s9(1)). Its revenue is then in the books before the work is done |
-| Sole proprietor, partnership | Drawings each month; the owners' own provisional tax (and turnover tax's two interim payments, TT02, on turnover tax) paid from the business as drawings |
+| Sole proprietor, partnership | Drawings each month; the owners' own provisional tax (and turnover tax's two interim payments, TT02, on turnover tax) paid from the business as drawings. (A company on turnover tax makes no TT02 payments: Shap has no payment of its own for them yet) |
 | Partnership | Two partners (60/40) with capital accounts |
 | Company, CC, co-op, Inc., trust, NPC not approved as a PBO (not on turnover tax) | Provisional tax (IRP6) six months in and at the year end, for what Shap's own provisional tax screen works out (the year so far projected to twelve months; half at six months, the rest less what was paid), rounded down to R100 |
 | Company, CC, Inc. | A dividend (a CC's distribution) about three months after the year end, out of last year's profit after tax, with dividends tax paid by the end of the next month |
-| Co-op | Five members, each with a R1 000 share; the distribution shared equally between them |
+| Co-op | Five members, each with a R1 000 share; the distribution shared equally between them (simplified: a co-op shares its surplus by how much each member did business with it, Co-operatives Act s44) |
 | Trust | A beneficiary who is also a trustee, and another trustee; a distribution of the year's income to the beneficiary at the year end (taxed in their hands, s25B) |
 | Any business | When the bank would go below R10 000, the owners lend the business what it needs (a sole proprietor puts in more capital): an overdraft would be trading on credit nobody arranged |
 
@@ -98,12 +98,14 @@ VAT numbers that only pass their check digits (one may, by chance, be someone's 
 with any made-up test data). Prices are a rough idea of each trade's, not anyone's actual rates.
 The filling's own figures (drawings, dividends, how much trade) are rough rules of thumb so the
 books look lived in, not tax or accounting advice; the tax it pays is what Shap estimates, and
-Shap's estimates are estimates.
+Shap's estimates are estimates. Shap is free software from OpenWorks IT, who are not accountants,
+tax practitioners or auditors: check anything you'd rely on with your own accountant.
 
 ## Things to know
 
 - Filling refuses books that already have data in them (clients, documents, costs, journals,
-  people, items, assets or trips): wipe first.
+  projects, people, items, assets, trips, time, bank statements, year ends or tax estimates;
+  partners added after setup are fine): wipe first.
 - If the server restarts while the books fill, the filling stops part way: wipe and fill again.
   (The filling's own sign-in is removed and month end set back when the server starts.)
 - Every filling and wiping is in the audit log, with who did it.

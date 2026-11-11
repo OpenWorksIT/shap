@@ -125,21 +125,25 @@ export function registerTestServerRoutes(app: FastifyInstance, ctx: Ctx, bus: Li
     if (busy) throw badRequest(busy === 'wiping' ? 'The books are being wiped: wait till that’s done' : 'The books are already being filled');
     busy = 'filling';
     let started = false;
+    // What's been set up for the filling, undone here if it never gets going.
+    let token: string | null = null;
+    let monthEnd: Awaited<ReturnType<typeof setMonthEndAside>> | null = null;
     try {
       const settings = await getSettings(db);
       if (!settings.setupDone) throw badRequest('Set the business up first (the first-run questions): the made-up data follows the setup.');
       if (!(await booksEmpty(db))) throw badRequest('Made-up data goes into new books only: wipe these and set up again first.');
 
       // Signed in as the owner who asked, for the requests the filling makes (removed after).
-      const token = newToken();
-      await db`insert into sessions (token_hash, user_id, expires_at, user_agent, ip) values (${sha256(token)}, ${user.id}, now() + interval '3 hours', ${FILLING}, ${req.ip})`;
+      const signIn = newToken();
+      token = signIn;
+      await db`insert into sessions (token_hash, user_id, expires_at, user_agent, ip) values (${sha256(signIn)}, ${user.id}, now() + interval '3 hours', ${FILLING}, ${req.ip})`;
       const call = async (method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string, body?: unknown) => {
         const res = await app.inject({
           method,
           url,
           payload: body === undefined ? undefined : (body as never),
           headers: { 'x-shap-version': appVersion(), 'x-shap-internal': INTERNAL },
-          cookies: { shap_session: token },
+          cookies: { shap_session: signIn },
         });
         if (res.statusCode >= 400) {
           let msg = res.body;
@@ -154,30 +158,38 @@ export function registerTestServerRoutes(app: FastifyInstance, ctx: Ctx, bus: Li
       };
       const io: Io = { get: (url) => call('GET', url), send: (method, url, body) => call(method, url, body ?? {}) };
 
-      const monthEnd = await setMonthEndAside(db);
+      const aside = await setMonthEndAside(db);
+      monthEnd = aside;
+      await audit(db, { userId: user.id, action: 'test_populate', entity: 'books', ip: req.ip, details: { businessType: settings.businessType, industry: settings.industry, monthEndMode: aside.was } });
       state = { ...idle(), running: true, startedAt: new Date().toISOString() };
-      await audit(db, { userId: user.id, action: 'test_populate', entity: 'books', ip: req.ip, details: { businessType: settings.businessType, industry: settings.industry, monthEndMode: monthEnd.was } });
       const to = today();
       started = true;
       void (async () => {
+        let done = state;
         try {
           const summary = await populate(io, db, { today: to, progress: (p) => (state = { ...state, done: p.done, total: p.total, day: p.step }) });
-          state = { ...state, running: false, finishedAt: new Date().toISOString(), summary };
+          done = { ...state, running: false, finishedAt: new Date().toISOString(), summary };
         } catch (err) {
           // Logged by where it stopped only (the message can quote what was being saved); the owner sees it on Home.
           req.log.warn({ at: String((err as Error).message).split(':')[0]?.slice(0, 80) }, 'test server: filling the books stopped');
-          state = { ...state, running: false, finishedAt: new Date().toISOString(), error: (err as Error).message.slice(0, 500) };
+          done = { ...state, running: false, finishedAt: new Date().toISOString(), error: (err as Error).message.slice(0, 500) };
         } finally {
-          await monthEnd.restore().catch(() => undefined);
-          await db`delete from sessions where token_hash = ${sha256(token)}`.catch(() => undefined);
+          await aside.restore().catch(() => undefined);
+          await db`delete from sessions where token_hash = ${sha256(signIn)}`.catch(() => undefined);
           busy = null;
-          // Every screen open on the books: refresh.
+          // Done only once month end is back and the sign-in gone; then every screen open on the books refreshes.
+          state = done;
           bus.publish({ type: 'changed', by: null, demo: false, at: Date.now() });
         }
       })();
       return { started: true, fill: state };
     } finally {
-      if (!started) busy = null;
+      if (!started) {
+        // Refused or failed before it began: put back what was set up for it.
+        if (monthEnd) await monthEnd.restore().catch(() => undefined);
+        if (token) await db`delete from sessions where token_hash = ${sha256(token)}`.catch(() => undefined);
+        busy = null;
+      }
     }
   });
 

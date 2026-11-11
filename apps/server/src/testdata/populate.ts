@@ -209,10 +209,14 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
     return lines.length ? Math.round((Math.min(...lines) * 0.7) / 12) : null;
   };
   const traded = new Map<string, number>();
+  // Spread over the month: up to the month's share so far (and a few days ahead, for a bigger job),
+  // so it trades to the month's end rather than stopping once the month's twelfth is used.
   const roomFor = (date: string, cents: number) => {
     const cap = capFor(date);
     if (cap == null) return true;
-    return (traded.get(date.slice(0, 7)) ?? 0) + cents <= cap;
+    const days = Number(monthEnd(date).slice(8, 10));
+    const share = Math.min(1, (Number(date.slice(8, 10)) + 3) / days);
+    return (traded.get(date.slice(0, 7)) ?? 0) + cents <= cap * share;
   };
   const trade$ = (date: string, cents: number) => traded.set(date.slice(0, 7), (traded.get(date.slice(0, 7)) ?? 0) + cents);
   // A small business (under those lines) rents a smaller place and employs fewer people.
@@ -1069,7 +1073,8 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
       if (monthNo === 10 && employees.length > 1) {
         const leaving = employees[employees.length - 1]!;
         on(addDays(last, -10), () => io.send('PUT', `/api/employees/${leaving.id}`, { ...leaving.body, endDate: last }));
-        const [title] = trade.staff[trade.staff.length - 1]!;
+        // In the leaver's place: the same job, at the same pay.
+        const title = /\(([^)]+)\)$/.exec(String(leaving.body.name))?.[1] ?? trade.staff[trade.staff.length - 1]![0];
         const startNext = fromDay(addDays(last, 1));
         on(startNext, () => hire(current, title, Number(leaving.body.salaryCents), false, r));
       }
@@ -1080,7 +1085,8 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
         if (new Date(`${d}T00:00:00Z`).getUTCDay() === 5) on(d, () => payWorkers(d));
       }
     }
-    if (has('logbook')) for (const d of days) if (r.chance(0.5)) on(d, () => trip(d, r));
+    // (Trips from the day after the vehicle is bought, on day four.)
+    if (has('logbook')) for (const d of days) if (r.chance(0.5) && d > addDays(start, 3)) on(d, () => trip(d, r));
 
     // The owners' money: drawings each month; dividends and distributions after the year end.
     on(byDay(`${month}-28`), () => drawings(current));

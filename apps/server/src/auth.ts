@@ -16,6 +16,11 @@ import { parse } from './lib/validate.js';
  * shows it: it doesn't slide like a person's, and any left from a restart go at start-up.
  */
 export const FILLING_SESSION = 'Shap test server: filling the books';
+/** The browser a person signs in from, as the sessions table keeps it: never passing for the filling's. */
+export const browserName = (req: FastifyRequest) => {
+  const ua = String(req.headers['user-agent'] ?? '').slice(0, 300);
+  return ua.startsWith(FILLING_SESSION) ? `(a browser) ${ua}`.slice(0, 300) : ua;
+};
 
 export const SESSION_COOKIE = 'shap_session';
 /** While showing the demo company, its own sign-in rides in a separate cookie; yours stays as it was. */
@@ -173,7 +178,7 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
     await sql`
       insert into sessions (token_hash, user_id, expires_at, user_agent, ip)
       values (${sha256(token)}, ${user.id}, now() + make_interval(hours => ${config.SESSION_TTL_HOURS}),
-              ${String(req.headers['user-agent'] ?? '').slice(0, 300)}, ${req.ip})
+              ${browserName(req)}, ${req.ip})
     `;
     await sql`update users set last_login_at = now() where id = ${user.id}`;
     await audit(sql, { userId: user.id, action: 'login', entity: 'user', entityId: user.id, ip: req.ip, details: { method } });

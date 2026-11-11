@@ -13,18 +13,21 @@ A test server: made-up books for any kind of business, to try Shap out or check 
   quotes, jobs and invoices, payments (some late, some never), costs with made-up slips, and
   whatever the setup uses (payroll and EMP201s, casual workers, counter sales, the till and stock,
   supplier bills, the time tracker, the travel logbook, pro-formas, VAT201s paid, provisional tax,
-  dividends, distributions or drawings). The same setup always gets the same books. *Wipe and start
+  dividends, distributions or drawings). The same setup gets the same books (within a financial
+  year: docs/TEST_SERVER.md). The figures are made up, and the tax in them is Shap's estimate: Shap
+  is free software from OpenWorks IT, who are not accountants. *Wipe and start
   again* goes back to the setup questions; sign-ins stay. A banner on every screen says it's a test
   server, and nothing is shared from it (no anonymous prices, usage notes or feedback). Wiping
   takes the word WIPE and your password. On every other Shap this does nothing.
 - `add-company.sh` takes `--test-server` to set one up next to your own Shap (on one CPU and 1 GB
   of memory, so filling it doesn't slow the real companies), and now adds its companies to a plain
-  `COMPOSE_FILE` that's already set (for `edge.yml`, say) instead of leaving them out.
+  `COMPOSE_FILE` that's already set (for `edge.yml`, say) instead of leaving them out (one it can't
+  change safely, it says so before making anything).
 - **The financial statements look for three more things** (every Shap, from the test server's
   IFRS review): whether the business is a going concern when liabilities exceed assets or the bank
-  is overdrawn at the year end (IFRS for SMEs 3.8; for a company, business rescue: Companies Act
-  s128, s129(7)); distributions declared after the year end, disclosed rather than owed (32.8,
-  32.10); and, selling without keeping stock in Shap, the stock on hand at the year end (13.4). The
+  is overdrawn at the year end (IFRS for SMEs 3.8; for a company or close corporation, business
+  rescue: Companies Act s128, s129(7), CC Act s66(1A)); distributions declared after the year end
+  and before the next, disclosed rather than owed (32.8, 32.10); and, selling without keeping stock in Shap, the stock on hand at the year end (13.4). The
   statement of changes in equity names a CC's capital as members' contributions, a trust's as
   capital contributed and a co-op's as members' shares. Checks to help you and your accountant,
   not an opinion on your books.

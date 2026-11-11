@@ -4,6 +4,7 @@
  * in it, so a cost that claims VAT has a slip behind it as a real one would.
  */
 import PDFDocument from 'pdfkit';
+import { vatRateOn } from '@shap/shared';
 
 export interface Slip {
   supplier: string;
@@ -31,7 +32,7 @@ export function slipPdf(s: Slip): Promise<string> {
     doc.moveDown(0.8).fontSize(8).text(`No. ${s.number}`).text(`Date: ${s.date}`);
     doc.moveDown(0.6).text(s.description, { width: 198 });
     doc.moveDown(0.8).font('Helvetica-Bold').text(`Total: ${rand(s.totalCents)}`);
-    doc.font('Helvetica').text(s.vatCents ? `VAT included (15%): ${rand(s.vatCents)}` : 'No VAT');
+    doc.font('Helvetica').text(s.vatCents ? `VAT included (${vatRateOn(s.date) / 100}%): ${rand(s.vatCents)}` : 'No VAT');
     doc.end();
   });
 }
