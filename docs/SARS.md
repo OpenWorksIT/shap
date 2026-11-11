@@ -11,6 +11,13 @@ year's figures are checked and put in (the standard update, CPDAUDIT.md).
 
 Everything here is in the shared code, so it is the same in Shap Pocket.
 
+The test server's made-up books (`apps/server/src/testdata/populate.ts`, `slip.ts`;
+docs/TEST_SERVER.md) take every rate and limit from the shared code too (`vatRateOn`,
+`vatThresholds`, `turnoverTaxLimit`, `NO_TAX_INVOICE_CENTS`, `estimateTax`, `provisionalPayable`,
+`turnoverTax`): a SARS change reaches them with the rest. Its own rules of thumb (payroll kept
+under SDL's R500 000 a year without SDL, trade kept to 70% of the VAT and turnover tax lines) are
+worth a look when those lines move.
+
 **Checked up to the year ending 28 February 2027 (2026/27), on 10 November 2026** (tax invoices again for 1.24).
 
 The 2026/27 figures from Budget 2026 (the individual tables and rebates, the R2.3 million VAT and

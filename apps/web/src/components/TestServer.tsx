@@ -65,6 +65,7 @@ export function TestServerPanel() {
   const [busy, setBusy] = useState(false);
   const [wiping, setWiping] = useState(false);
   const [typed, setTyped] = useState('');
+  const [password, setPassword] = useState('');
   const fill = s?.fill;
   // Filled: show the books (the screen was loaded while they were empty).
   const [wasRunning, setWasRunning] = useState(false);
@@ -92,7 +93,7 @@ export function TestServerPanel() {
     setBusy(true);
     setError('');
     try {
-      await api('/api/test-server/wipe', { body: { confirm: typed } });
+      await api('/api/test-server/wipe', { body: { confirm: typed, password } });
       cached = null;
       window.location.assign('/');
     } catch (err) {
@@ -131,7 +132,7 @@ export function TestServerPanel() {
           To try another kind of business, wipe them and answer the setup questions again.
         </p>
       )}
-      {fill?.error && <div className="banner alert small">The filling stopped: {fill.error}. Wipe the books and try again, or tell OpenWorks (Feedback).</div>}
+      {fill?.error && <div className="banner alert small">The filling stopped: {fill.error}. Wipe the books and try again; if it stops again, say so with Feedback (it stays on this server, for whoever runs it).</div>}
       {error && <div className="banner alert small">{error}</div>}
       {!fill?.running && !s.empty && (
         wiping ? (
@@ -143,7 +144,8 @@ export function TestServerPanel() {
             }}
           >
             <input className="input" value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Type WIPE" aria-label="Type WIPE to wipe the test books" autoFocus />
-            <button className="btn danger" disabled={busy || typed.trim().toUpperCase() !== 'WIPE'}>
+            <input className="input" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Your password" aria-label="Your password" />
+            <button className="btn danger" disabled={busy || typed.trim().toUpperCase() !== 'WIPE' || !password}>
               Wipe the books
             </button>
             <button type="button" className="btn quiet" onClick={() => setWiping(false)}>

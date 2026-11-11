@@ -76,7 +76,7 @@ export const TRADES: Record<string, Trade> = {
     asset: 'bakkie',
     staff: [['Foreman', 16500], ['General worker', 7200]],
     dayRate: 400,
-    suppliers: ['Bayside Builders Supply', 'Coastal Hardware', 'Karoo Brick Works'],
+    suppliers: ['Bayside Builders Supply (made up)', 'Coastal Hardware (made up)', 'Karoo Brick Works (made up)'],
   },
   electrician: {
     services: [
@@ -100,7 +100,7 @@ export const TRADES: Record<string, Trade> = {
     asset: 'bakkie',
     staff: [['Electrician', 18500], ['Assistant', 7800]],
     dayRate: 380,
-    suppliers: ['Volt Electrical Wholesale', 'Coastal Hardware'],
+    suppliers: ['Volt Electrical Wholesale (made up)', 'Coastal Hardware (made up)'],
   },
   plumber: {
     services: [
@@ -123,7 +123,7 @@ export const TRADES: Record<string, Trade> = {
     asset: 'bakkie',
     staff: [['Plumber', 17500]],
     dayRate: 380,
-    suppliers: ['Flow Plumbing Supplies', 'Coastal Hardware'],
+    suppliers: ['Flow Plumbing Supplies (made up)', 'Coastal Hardware (made up)'],
   },
   painter: {
     services: [
@@ -145,7 +145,7 @@ export const TRADES: Record<string, Trade> = {
     asset: 'bakkie',
     staff: [['Painter', 9800], ['Painter', 9200]],
     dayRate: 350,
-    suppliers: ['Colourfast Paint Centre', 'Coastal Hardware'],
+    suppliers: ['Colourfast Paint Centre (made up)', 'Coastal Hardware (made up)'],
   },
   handyman: {
     services: [
@@ -167,7 +167,7 @@ export const TRADES: Record<string, Trade> = {
     asset: 'bakkie',
     staff: [['Handyman', 9500]],
     dayRate: 350,
-    suppliers: ['Coastal Hardware'],
+    suppliers: ['Coastal Hardware (made up)'],
   },
   mechanic: {
     services: [
@@ -195,7 +195,7 @@ export const TRADES: Record<string, Trade> = {
     asset: 'equipment',
     staff: [['Mechanic', 16500], ['Apprentice', 6800]],
     dayRate: 380,
-    suppliers: ['Gear & Piston Auto Parts', 'Coastal Hardware'],
+    suppliers: ['Gear & Piston Auto Parts (made up)', 'Coastal Hardware (made up)'],
   },
   garden: {
     services: [
@@ -216,7 +216,7 @@ export const TRADES: Record<string, Trade> = {
     asset: 'bakkie',
     staff: [['Garden worker', 6500]],
     dayRate: 300,
-    suppliers: ['Green Thumb Nursery', 'Poolside Supplies'],
+    suppliers: ['Green Thumb Nursery (made up)', 'Poolside Supplies (made up)'],
   },
   cleaning: {
     services: [
@@ -232,7 +232,7 @@ export const TRADES: Record<string, Trade> = {
     asset: 'bakkie',
     staff: [['Cleaner', 6200], ['Cleaner', 6200], ['Supervisor', 9500]],
     dayRate: 280,
-    suppliers: ['Sparkle Cleaning Supplies'],
+    suppliers: ['Sparkle Cleaning Supplies (made up)'],
   },
   hair: {
     services: [
@@ -256,7 +256,7 @@ export const TRADES: Record<string, Trade> = {
     asset: 'equipment',
     staff: [['Stylist', 9800], ['Nail technician', 7500]],
     dayRate: 300,
-    suppliers: ['Salon Pro Wholesale'],
+    suppliers: ['Salon Pro Wholesale (made up)'],
   },
   it: {
     services: [
@@ -277,7 +277,7 @@ export const TRADES: Record<string, Trade> = {
     asset: 'computer',
     staff: [['Technician', 18500]],
     dayRate: 450,
-    suppliers: ['Bytewise Distribution', 'Cloudnine Hosting'],
+    suppliers: ['Bytewise Distribution (made up)', 'Cloudnine Hosting (made up)'],
   },
   design: {
     services: [
@@ -294,7 +294,7 @@ export const TRADES: Record<string, Trade> = {
     asset: 'computer',
     staff: [['Junior designer', 12500]],
     dayRate: 450,
-    suppliers: ['Inkspot Printers', 'Cloudnine Hosting'],
+    suppliers: ['Inkspot Printers (made up)', 'Cloudnine Hosting (made up)'],
   },
   photo: {
     services: [
@@ -310,7 +310,7 @@ export const TRADES: Record<string, Trade> = {
     asset: 'computer',
     staff: [['Assistant photographer', 9500]],
     dayRate: 500,
-    suppliers: ['Lightbox Camera Hire', 'Inkspot Printers'],
+    suppliers: ['Lightbox Camera Hire (made up)', 'Inkspot Printers (made up)'],
   },
   consulting: {
     services: [
@@ -326,7 +326,7 @@ export const TRADES: Record<string, Trade> = {
     asset: 'computer',
     staff: [['Analyst', 22000]],
     dayRate: 600,
-    suppliers: ['Cloudnine Hosting', 'Paperclip Office Supplies'],
+    suppliers: ['Cloudnine Hosting (made up)', 'Paperclip Office Supplies (made up)'],
   },
   tutor: {
     services: [
@@ -341,7 +341,7 @@ export const TRADES: Record<string, Trade> = {
     asset: 'computer',
     staff: [['Tutor', 9500]],
     dayRate: 350,
-    suppliers: ['Paperclip Office Supplies'],
+    suppliers: ['Paperclip Office Supplies (made up)'],
   },
   catering: {
     services: [
@@ -365,7 +365,7 @@ export const TRADES: Record<string, Trade> = {
     asset: 'equipment',
     staff: [['Chef', 14500], ['Kitchen assistant', 6500]],
     dayRate: 350,
-    suppliers: ['Fresh Market Foods', 'Party Hire Co.'],
+    suppliers: ['Fresh Market Foods (made up)', 'Party Hire Co. (made up)'],
   },
   health: {
     services: [
@@ -384,7 +384,7 @@ export const TRADES: Record<string, Trade> = {
     asset: 'equipment',
     staff: [['Receptionist', 8500]],
     dayRate: 350,
-    suppliers: ['Medisupply Wholesale', 'Paperclip Office Supplies'],
+    suppliers: ['Medisupply Wholesale (made up)', 'Paperclip Office Supplies (made up)'],
   },
   transport: {
     services: [
@@ -400,7 +400,7 @@ export const TRADES: Record<string, Trade> = {
     asset: 'bakkie',
     staff: [['Driver', 9800], ['Loader', 6200]],
     dayRate: 320,
-    suppliers: ['Roadside Tyres', 'Coastal Hardware'],
+    suppliers: ['Roadside Tyres (made up)', 'Coastal Hardware (made up)'],
   },
   retail: {
     services: [['Delivery', 'trip', 350, 'other']],
@@ -413,7 +413,7 @@ export const TRADES: Record<string, Trade> = {
     asset: 'equipment',
     staff: [['Shop assistant', 6500], ['Shop assistant', 6500]],
     dayRate: 300,
-    suppliers: ['Highveld Wholesalers', 'Coastal Hardware'],
+    suppliers: ['Highveld Wholesalers (made up)', 'Coastal Hardware (made up)'],
   },
   other: {
     services: [
@@ -427,7 +427,7 @@ export const TRADES: Record<string, Trade> = {
     asset: 'computer',
     staff: [['Assistant', 8500]],
     dayRate: 350,
-    suppliers: ['Coastal Hardware', 'Paperclip Office Supplies'],
+    suppliers: ['Coastal Hardware (made up)', 'Paperclip Office Supplies (made up)'],
   },
 };
 
@@ -482,6 +482,7 @@ export const PEOPLE = [
 
 export const WORKER_NAMES = ['Sipho', 'Themba', 'Lucky', 'Precious', 'Andile', 'Bheki'] as const;
 
-/** Made-up streets and suburbs for the clients' addresses. */
-export const STREETS = ['Acacia Avenue', 'Main Road', 'Beach Road', 'Church Street', 'Hill Crescent', 'Protea Lane', 'Oak Street', 'Marine Drive'] as const;
-export const SUBURBS = ['Walmer', 'Summerstrand', 'Newton Park', 'Lorraine', 'Mill Park', 'Humewood', 'Sunridge Park'] as const;
+/** Made-up streets, suburbs and town for the addresses: plainly not anyone's real address. */
+export const STREETS = ['Test Street', 'Example Road', 'Sample Avenue', 'Specimen Lane', 'Mock Crescent', 'Model Drive', 'Pretend Place', 'Dummy Close'] as const;
+export const SUBURBS = ['Testville', 'Exampleton', 'Sampledale', 'Mockford', 'Modelpark'] as const;
+export const TOWN = 'Fictional Town 0001';

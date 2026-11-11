@@ -133,7 +133,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   app.addHook('onResponse', async (req, reply) => {
     if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS' || reply.statusCode >= 400) return;
     const p = routePath(req);
-    // The test server's filling makes thousands of saves: one "changed" when it's done is enough.
+    // The test server's filling makes thousands of saves: one "changed" when it's done (test-server.ts) is enough.
     if (!p.startsWith('/api/') || p.startsWith('/api/auth') || p.startsWith('/api/feedback') || p.startsWith('/api/demo') || isInternal(req)) return;
     bus.publish({ type: 'changed', by: req.user?.id ?? null, demo: req.cookies?.shap_demo === '1', at: Date.now() });
   });
@@ -184,6 +184,8 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   // reads the lock date (the database's own checks too) sees it (lib/books.ts applyMonthLock).
   app.addHook('preHandler', async (req) => {
     if (!routePath(req).startsWith('/api/') || req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return;
+    // Filling or wiping a test server's books sets month end aside itself (test-server.ts).
+    if (routePath(req).startsWith('/api/test-server/')) return;
     await applyMonthLock(sql);
   });
 
@@ -237,7 +239,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
 
   registerAuth(app, ctx);
   registerDemoRoutes(app, ctx);
-  registerTestServerRoutes(app, ctx);
+  registerTestServerRoutes(app, ctx, bus);
   registerSettingsRoutes(app, ctx);
   registerDashboardRoutes(app, ctx);
   registerClientRoutes(app, ctx);

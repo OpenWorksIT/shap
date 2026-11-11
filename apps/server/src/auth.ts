@@ -11,6 +11,12 @@ import { newToken, sha256 } from './lib/tokens.js';
 import { newRecoveryCodes, newTotpSecret, normaliseRecoveryCode, otpauthUrl, verifyTotp } from './lib/totp.js';
 import { parse } from './lib/validate.js';
 
+/**
+ * The test server's sign-in for filling the books (modules/test-server.ts), as the sessions table
+ * shows it: it doesn't slide like a person's, and any left from a restart go at start-up.
+ */
+export const FILLING_SESSION = 'Shap test server: filling the books';
+
 export const SESSION_COOKIE = 'shap_session';
 /** While showing the demo company, its own sign-in rides in a separate cookie; yours stays as it was. */
 export const DEMO_SESSION_COOKIE = 'shap_demo_session';
@@ -148,11 +154,12 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
     if (!row) return;
     const { lastSeenAt, ...user } = row;
     req.user = toAuthUser(user);
-    // Sliding expiry, but only touch the row once a minute.
+    // Sliding expiry, but only touch the row once a minute. (The test server's filling keeps the
+    // few hours it was given.)
     if (Date.now() - lastSeenAt.getTime() > 60_000) {
       await sql`
         update sessions set last_seen_at = now(),
-          expires_at = now() + make_interval(hours => ${config.SESSION_TTL_HOURS})
+          expires_at = case when user_agent = ${FILLING_SESSION} then expires_at else now() + make_interval(hours => ${config.SESSION_TTL_HOURS}) end
         where token_hash = ${sha256(token)}
       `;
     }

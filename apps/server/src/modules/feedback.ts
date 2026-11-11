@@ -217,8 +217,9 @@ export function registerFeedbackRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (input.kind !== 'love' && !input.message) throw badRequest('Please say a few words about it');
     const id = await store(input, { id: user.id, name: user.name, role: user.role }, `${user.name} (${user.role})`, 'here', req.ip);
     req.log.info({ feedback: id }, 'feedback received');
-    // On to OpenWorks, who make Shap (not from OpenWorks' own Shap: it is the collector).
-    if (!ctx.config.COLLECT) {
+    // On to OpenWorks, who make Shap (not from OpenWorks' own Shap: it is the collector; not from a
+    // test server, whose feedback stays in its own inbox, Settings → Feedback).
+    if (!ctx.config.COLLECT && !ctx.config.TEST_SERVER) {
       void forward(ctx.config.COLLECTOR_URL, 'feedback', { ...input, screenshot: input.screenshotMasked ? input.screenshot : null, app: 'shap', version: appVersion(), role: user.role }, req.log);
     }
     reply.code(201);

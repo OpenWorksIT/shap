@@ -399,6 +399,64 @@ same):
   closed month. An old sale number could be handed out again. The database let a sale's invoice
   become a draft or void (now refused). Month end's refunds counted refunds on other invoices.
 
+### The four reviews of 1.25 (before release)
+
+The test server: made-up books filled through Shap's own API for any setup, and wiped. Each
+reviewer filled the books for many setups (about 60 fillings between them, every one passing the
+books audit) and reconciled them. All fixed with tests (`apps/server/test/test-server.test.ts`,
+which now fills 14 setups and checks each against the findings below, and
+`test/review-1.25/statements-checks.test.ts`; Pocket the statements' checks):
+
+- Security and privacy: two fillings, or a filling and a wipe, could start at once (both got
+  through before either was marked as running; the hold on other changes then lifted while one
+  still wrote): one is claimed before anything is awaited. The filling's sign-in slid to 30 days
+  like a person's (now keeps its 3 hours), and a restart part way left it behind with month end on
+  "by hand" (both put right at start-up). The wipe took only the word WIPE (now your password too,
+  as Settings → Wipe all data). Feedback still went to OpenWorks from a test server switched on
+  with `TEST_SERVER=true` alone (now it stays on the server). The log had the API's own error text
+  (now where it stopped only). "New books only" missed time, bank statements, year ends and tax
+  estimates. The streets were real ones (now "Test Street" in "Fictional Town"), and the suppliers
+  and businesses are marked "(made up)". `add-company.sh` could put `:companies.yml` inside a
+  comment or a quoted `COMPOSE_FILE`; a test server now has one CPU and 1 GB. The penetration test
+  against a production-mode test server: 286 routes, nothing to fix.
+- IFRS for SMEs and company law: labour went on jobs paid up front after their tax invoice, so it
+  sat in work in progress until the day the books were filled (13.14, 23.14). A business not
+  registered for VAT had its stock booked without the VAT it paid (13.6). A trust got a second
+  distribution, three months after the year end, flagged as passing straight to the beneficiary
+  (s25B). Companies with payroll traded on an overdraft nobody arranged (the owners now lend what
+  it needs); and the statements had no going-concern check except a CC's deficit: now every kind of
+  business (3.8, Companies Act s128, s129(7)), with checks for distributions declared after the
+  year end (32.8, 32.10) and for stock on hand when Shap doesn't keep it (13.4). The statement of
+  changes in equity called a CC's, trust's and co-op's capital "Issue of shares" (CC Act s24). The
+  co-op had one member (Co-operatives Act s6(1)(a): now five, sharing the distribution). The
+  statements named the person signed in as director (now the made-up owners). Left to the
+  accountant and said so in docs/TEST_SERVER.md: a co-op's indivisible reserve (s46), leave pay,
+  the solvency and liquidity test, revenue on a pro-forma job before the work.
+- SARS and tax: non-VAT and turnover-tax setups traded far over the compulsory VAT registration
+  line and the turnover tax limit (now about 70% of each). The logbook logged one way and moved the
+  odometer both ways (halving the business share), and kept its readings by the business's year,
+  not SARS's tax year. Provisional tax followed neither SARS's method nor Shap's own estimate (the
+  second payment ignored the first; partners taxed on one table; a trust on what it distributed):
+  now Shap's own estimate. The first VAT period, when it started before the books, was never paid
+  or refunded. Costs planned for a day before their month were dropped (rent in about half the
+  months). SDL stayed off on payrolls over R500 000 (now kept under it without SDL). The director
+  got medical tax credits with no medical aid. Private kilometres with full input VAT (s17(1):
+  now under 5%, and none for companies). A new hire started the day the leaver ended. The VAT rate
+  and the R50 limit were written in (now `vatRateOn`, `NO_TAX_INVOICE_CENTS`; docs/SARS.md says
+  the generator takes its rates from the shared code). Turnover tax's interim payments (TT02) now
+  made for a sole proprietor or partners. Said in docs/TEST_SERVER.md, not changed: Shap's casual
+  labour has no UIF or PAYE; a company's TT02 payments have no payment kind in Shap.
+- Accounting and arithmetic: every figure reconciled to the cent (bank, till, debtors, creditors,
+  wages, VAT, stock, dividends tax, the EMP501, the exports). Month end that locks by itself made
+  the filling fail on its first write (the lock came before the route set it aside; now the
+  route's own lock check skips it, and the lock is cleared while the books are new). Two fillings
+  doubled the capital. The till could go below nothing on a cash refund. Most made-up businesses
+  ran an unfunded overdraft at the test scale (fixed costs now scale too). Time entries all started
+  at 08:00. Other open screens weren't told when the filling ended. "The same books whichever day
+  you fill" holds within a financial year (now said). Not changed, older code: the balance sheet
+  report and the statements show provisional tax paid differently, both balanced; computers go to
+  "Tools & equipment at cost".
+
 ### Code scanning (CodeQL), first run
 
 - The Accounts screen's download links carried the period's dates unencoded (flagged as text

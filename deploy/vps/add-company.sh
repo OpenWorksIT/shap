@@ -104,9 +104,26 @@ cat >> companies.yml <<YML
       db:
         condition: service_healthy
 YML
+# A test server fills its books in a burst (a minute or two of heavy writes): kept to one CPU and
+# 1 GB, so the real companies on the server don't feel it.
+if [ "$TEST_SERVER" = true ]; then
+  cat >> companies.yml <<'YML'
+    cpus: 1.0
+    mem_limit: 1g
+YML
+fi
 if grep -q '^COMPOSE_FILE=' .env; then
-  # Already set (for edge.yml, say): companies.yml goes on the end of it, once.
-  grep -q '^COMPOSE_FILE=.*companies\.yml' .env || sed -i '/^COMPOSE_FILE=/s/$/:companies.yml/' .env
+  # Already set (for edge.yml, say): companies.yml goes on the end of it, once. Only a plain line
+  # (no quotes, comment or Windows line ending) is changed; otherwise say what to add by hand.
+  if ! grep -q '^COMPOSE_FILE=.*companies\.yml' .env; then
+    cr=$(printf '\r')
+    if grep -qE "^COMPOSE_FILE=[^ #\"'${cr}]*\$" .env; then
+      sed -i '/^COMPOSE_FILE=/s/$/:companies.yml/' .env
+    else
+      echo "Add :companies.yml to the end of the COMPOSE_FILE line in .env, then run: docker compose up -d app-$SLUG && docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile" >&2
+      exit 1
+    fi
+  fi
 else
   printf '\n# Your company plus the ones add-company.sh added.\nCOMPOSE_FILE=docker-compose.yml:companies.yml\n' >> .env
 fi

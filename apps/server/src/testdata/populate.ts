@@ -9,28 +9,38 @@
  * workers, counter sales and stock, supplier bills, the time tracker and the travel logbook.
  *
  * The same setup gives the same books: each month's made-up activity comes from a random
- * generator seeded with the setup and the month, so a month that has ended always looks the same.
+ * generator seeded with the setup and the month, so a month that has ended always looks the same
+ * (within one financial year: the filling starts at the last full year, which moves at a year end).
+ *
+ * The amounts it decides for itself (drawings, dividends, how much trade a business not registered
+ * for VAT does) are rough rules of thumb, made to keep the books lawful and lived in. The tax it
+ * pays (provisional tax, turnover tax) is what Shap's own estimates say. None of it is advice.
  */
 import {
   addDays,
   addMonths,
   businessDayOnOrBefore,
-  companyTax,
   entity,
+  estimateTax,
   featureOn,
   financialYear,
-  individualTax,
   isBusinessDay,
   lastBusinessDay,
   monthEnd,
+  NO_TAX_INVOICE_CENTS,
   paysOutProfit,
-  TRUST_RATE,
+  provisionalPayable,
+  turnoverTax,
+  turnoverTaxLimit,
   vat201Due,
   vatPeriod,
+  vatRateOn,
+  vatThresholds,
   type Feature,
+  type TaxEstimateFigures,
 } from '@shap/shared';
 import type { Db } from '../db/index.js';
-import { CLIENTS, GENERIC_GOODS, PEOPLE, STREETS, SUBURBS, tradeFor, WORKER_NAMES, type Good, type LineCat, type Service } from './catalogue.js';
+import { CLIENTS, GENERIC_GOODS, PEOPLE, STREETS, SUBURBS, TOWN, tradeFor, WORKER_NAMES, type Good, type LineCat, type Service } from './catalogue.js';
 import { idNumber, luhnNumber, rng, type Rng } from './rng.js';
 import { slipPdf } from './slip.js';
 
@@ -61,7 +71,8 @@ export interface PopulateSummary {
 }
 
 const R = (rand: number) => Math.round(rand * 100);
-const VAT_FRACTION = 15 / 115;
+/** Rounded down to whole hundreds of rand (provisional tax, dividends). */
+const down = (cents: number, to = R(100)) => Math.floor(cents / to) * to;
 
 interface Ref {
   settings: Record<string, any>;
@@ -79,9 +90,11 @@ interface OpenInvoice {
   neverPays: boolean;
 }
 
-/** Fills the books. Refuses nothing itself: the route checks the books are new first. */
+/** Fills the books. The route checks the books are new first. */
 export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<PopulateSummary> {
   const scale = opts.scale ?? 1;
+  // Rent, salaries and the like don't shrink with a test's scale as far as the trade does.
+  const fixed = Math.max(0.3, Math.min(1, scale));
   const today = opts.today;
   let ref = await io.get<Ref>('/api/reference');
   const s = ref.settings;
@@ -96,10 +109,14 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
   const start = opts.from && opts.from > lastFy.start ? opts.from : lastFy.start;
   // The setup's answers that change what's made (not the look of the documents or the reminders).
   const SHAPES: Feature[] = ['jobs', 'quotes', 'workers', 'payroll', 'dividends', 'sales', 'inventory', 'bills', 'logbook', 'timeTracker', 'proformas', 'creditNotes'];
-  const seed = ['shap-test', s.businessType, s.industry, vat ? `vat-${s.vatCategory}` : 'novat', s.turnoverTax ? 'tt' : '', `fy${fyEndMonth}`, SHAPES.filter(has).join(',')].join('|');
+  const seed = ['shap-test', s.businessType, s.industry, vat ? `vat-${s.vatCategory}` : 'novat', s.turnoverTax ? 'tt' : '', s.sdl ? 'sdl' : '', `fy${fyEndMonth}`, SHAPES.filter(has).join(',')].join('|');
   const monthRng = (ym: string) => rng(`${seed}|${ym}`);
   const summary: PopulateSummary = { from: start, to: today, invoices: 0, quotes: 0, sales: 0, costs: 0, payRuns: 0 };
   const n = (range: readonly [number, number], r: Rng) => Math.max(1, Math.round(r.int(range[0], range[1]) * scale));
+  /** The VAT in a VAT-inclusive amount, at the rate on the day. */
+  const vatIn = (totalCents: number, date: string) => Math.round((totalCents * vatRateOn(date)) / (10_000 + vatRateOn(date)));
+  /** A price before VAT, with VAT added at the rate on the day. */
+  const withVat = (cents: number, date: string) => Math.round((cents * (10_000 + vatRateOn(date))) / 10_000);
 
   // ---------------------------------------------------------------- what's in the books already
   const acc = (key: string) => {
@@ -143,9 +160,13 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
   };
 
   // ---------------------------------------------------------------- the day-by-day plan
+  let current = start;
   const plan = new Map<string, (() => Promise<unknown>)[]>();
   const on = (date: string, fn: () => Promise<unknown>) => {
-    if (date > today || date < start) return;
+    // Before the books start (the first month's earlier days) or after today: not made.
+    if (date < start || date > today) return;
+    // Planning a day that has already gone would lose it without a word: a mistake here, not in the books.
+    if (date < current) throw new Error(`planned for ${date}, before ${current}`);
     const list = plan.get(date) ?? [];
     list.push(fn);
     plan.set(date, list);
@@ -158,24 +179,57 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
     }
     return out;
   };
-  const businessDay = (d: string) => businessDayOnOrBefore(d);
+  /** Payments due by a date: the business day on or before it. */
+  const byDay = (d: string) => businessDayOnOrBefore(d);
+  /** Things that happen from a date: the business day on or after it. */
+  const fromDay = (d: string) => {
+    let x = d;
+    while (!isBusinessDay(x)) x = addDays(x, 1);
+    return x;
+  };
 
   // ---------------------------------------------------------------- the people
   const people = monthRng('people');
-  const owners = kind.key === 'partnership' ? [PEOPLE[0], PEOPLE[1]] : [PEOPLE[people.int(0, PEOPLE.length - 1)]!];
-
+  // A co-op has at least five members (Co-operatives Act s6(1)(a)); a partnership two partners;
+  // a trust a beneficiary who is also a trustee, and another trustee.
+  const owners: string[] =
+    kind.key === 'partnership' ? [PEOPLE[0]!, PEOPLE[1]!]
+    : kind.key === 'coop' ? PEOPLE.slice(2, 7)
+    : kind.key === 'trust' ? [PEOPLE[people.int(0, 5)]!, PEOPLE[people.int(6, PEOPLE.length - 1)]!]
+    : [PEOPLE[people.int(0, PEOPLE.length - 1)]!];
   const partnerList = async () => (await io.get<{ partners: { id: string; name: string; shareBp: number; capitalAccountId: string }[] }>('/api/partners')).partners;
+
+  // ---------------------------------------------------------------- how much trade
+  // A business not registered for VAT stays under the compulsory registration line, and one on
+  // turnover tax under its limit: to 70% of the lower, a twelfth a month (by when it's quoted or sold).
+  const capFor = (date: string): number | null => {
+    const lines: number[] = [];
+    if (!vat) lines.push(vatThresholds(date).compulsoryCents);
+    if (s.turnoverTax) lines.push(turnoverTaxLimit(financialYear(date, fyEndMonth).end));
+    return lines.length ? Math.round((Math.min(...lines) * 0.7) / 12) : null;
+  };
+  const traded = new Map<string, number>();
+  const roomFor = (date: string, cents: number) => {
+    const cap = capFor(date);
+    if (cap == null) return true;
+    return (traded.get(date.slice(0, 7)) ?? 0) + cents <= cap;
+  };
+  const trade$ = (date: string, cents: number) => traded.set(date.slice(0, 7), (traded.get(date.slice(0, 7)) ?? 0) + cents);
+  // A small business (under those lines) rents a smaller place and employs fewer people.
+  const small = !vat || Boolean(s.turnoverTax);
 
   // ---------------------------------------------------------------- clients
   const clients: { id: string; name: string; vat: boolean }[] = [];
   const addClients = async () => {
     const r = monthRng('clients');
     for (const [i, c] of CLIENTS.entries()) {
-      const address = `${r.int(1, 120)} ${r.pick(STREETS)}\n${r.pick(SUBURBS)}\nGqeberha 6001`;
+      // A business's name could be a real one's: marked as made up.
+      const name = c.contact ? `${c.name} (made up)` : c.name;
+      const address = `${r.int(1, 120)} ${r.pick(STREETS)}\n${r.pick(SUBURBS)}\n${TOWN}`;
       const email = `${c.name.toLowerCase().replace(/[^a-z]+/g, '.').replace(/^\.|\.$/g, '')}@example.com`;
       const made = await io.send<{ id: string }>('POST', '/api/clients', {
         code: `TEST${String(i + 1).padStart(3, '0')}`,
-        name: c.name,
+        name,
         contactPerson: c.contact ?? '',
         email,
         phone: `000 ${String(r.int(100, 999))} ${String(r.int(1000, 9999))}`,
@@ -183,7 +237,7 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
         vatNumber: c.vat ? luhnNumber(r, '4', 10) : '',
         notes: 'Made up, for testing.',
       });
-      clients.push({ id: made.id, name: c.name, vat: Boolean(c.vat) });
+      clients.push({ id: made.id, name, vat: Boolean(c.vat) });
     }
   };
   // A business's regulars come back more often than strangers.
@@ -191,6 +245,7 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
 
   // ---------------------------------------------------------------- money in from the owners
   const capitalCents = R(trade.asset === 'bakkie' || has('logbook') ? 300_000 : has('inventory') ? 220_000 : 140_000);
+  const lenderLine = kind.key === 'sole_prop' ? 'Capital from the owner' : kind.key === 'npc' ? 'Loan from a director' : kind.key === 'partnership' ? 'Loan from the partners' : `Loan from ${owners[0]}`;
   const putInCapital = async (date: string) => {
     const lines: { accountId: string; debitCents?: number; creditCents?: number; memo?: string }[] = [{ accountId: acc('bank'), debitCents: capitalCents, memo: 'Money put in to start the business' }];
     if (kind.key === 'partnership') {
@@ -202,36 +257,55 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
         lines.push({ accountId: p.capitalAccountId, creditCents: part, memo: `Capital from ${p.name}` });
       });
     } else if (kind.key === 'sole_prop' || kind.key === 'npc') {
-      lines.push({ accountId: acc('owner_loan'), creditCents: capitalCents, memo: kind.key === 'npc' ? 'Loan from a member' : 'Capital from the owner' });
+      lines.push({ accountId: acc('owner_loan'), creditCents: capitalCents, memo: lenderLine });
     } else {
-      const shares = R(kind.key === 'trust' ? 100 : kind.key === 'cc' ? 10_000 : kind.key === 'coop' ? 5_000 : 1_000);
-      lines.push({ accountId: acc('share_capital'), creditCents: shares, memo: kind.key === 'trust' ? 'Trust capital (the settlement)' : 'Shares issued' });
-      lines.push({ accountId: acc('owner_loan'), creditCents: capitalCents - shares, memo: `Loan from ${owners[0]}` });
+      // Shares, a CC's members' contributions, a co-op's members' shares (R1 000 each), a trust's settlement.
+      const shares = R(kind.key === 'trust' ? 100 : kind.key === 'cc' ? 10_000 : kind.key === 'coop' ? 1_000 * owners.length : 1_000);
+      const what = kind.key === 'trust' ? 'Trust capital (the settlement)' : kind.key === 'cc' ? 'Members’ contributions' : kind.key === 'coop' ? `Members’ shares (${owners.length} members)` : 'Shares issued';
+      lines.push({ accountId: acc('share_capital'), creditCents: shares, memo: what });
+      lines.push({ accountId: acc('owner_loan'), creditCents: capitalCents - shares, memo: kind.key === 'coop' ? 'Loans from the members' : lenderLine });
     }
     await io.send('POST', '/api/journals', { date, description: 'Money put in to start the business (made up)', reference: 'START', lines });
   };
+  /**
+   * The owners lend the business what it needs to stay out of overdraft (or, a sole proprietor,
+   * put in more capital): an unfunded overdraft would be insolvent, interest-free trading.
+   */
+  const keepAfloat = async (date: string, needCents = 0) => {
+    const floor = R(10_000) + needCents;
+    const balance = await bankBalance(date);
+    if (balance >= floor) return;
+    const lend = Math.ceil((floor - balance + R(40_000) * fixed) / R(10_000)) * R(10_000);
+    await io.send('POST', '/api/journals', {
+      date,
+      description: `${kind.key === 'sole_prop' ? 'More capital from the owner' : `${lenderLine.replace('Loan from', 'Further loan from')}`} (made up)`,
+      reference: 'LOAN',
+      lines: [{ accountId: acc('bank'), debitCents: lend }, { accountId: acc('owner_loan'), creditCents: lend }],
+    });
+  };
 
   // ---------------------------------------------------------------- costs
-  const vatOn = (totalCents: number, code: string) => (vat && (code === 'standard' || code === 'not_claimable') ? Math.round(totalCents * VAT_FRACTION) : 0);
   /** The supplier's slip, made up, uploaded as the business would photograph it (most costs have one). */
-  const slip = async (date: string, supplier: string, description: string, totalCents: number, vatCents: number, charged: boolean): Promise<string | null> => {
+  const slip = async (date: string, supplier: string, description: string, totalCents: number, vatCents: number, registered: boolean): Promise<string | null> => {
     const r = rng(`${seed}|slip|${date}|${supplier}|${totalCents}`);
     if (!r.chance(0.92)) return null;
     const number = `${supplier.replace(/[^A-Z]/g, '').slice(0, 3) || 'INV'}${r.int(10_000, 99_999)}`;
-    const dataBase64 = await slipPdf({ supplier, vatNumber: charged ? luhnNumber(rng(`vat|${supplier}`), '4', 10) : '', date, number, description, totalCents, vatCents });
+    const dataBase64 = await slipPdf({ supplier, vatNumber: registered ? luhnNumber(rng(`vat|${supplier}`), '4', 10) : '', date, number, description, totalCents, vatCents });
     const made = await io.send<{ id: string }>('POST', '/api/attachments', { filename: `slip-${date}-${number}.pdf`, mime: 'application/pdf', dataBase64 });
     return made.id;
   };
-  const cost = async (c: { date: string; description: string; totalCents: number; category: string; supplier: string; code?: string; sourceId?: string; projectId?: string | null; billDays?: number }) => {
+  const cost = async (c: { date: string; description: string; totalCents: number; category: string; supplier: string; code?: string; sourceId?: string; projectId?: string | null; billDays?: number; noSlip?: boolean }) => {
     const code = c.code ?? 'standard';
     const onAccount = c.billDays != null;
-    // Drawings and the owner's own tax have no supplier's slip.
-    const receiptId = code === 'no_vat' ? null : await slip(c.date, c.supplier, c.description, c.totalCents, code === 'standard' || code === 'not_claimable' ? Math.round(c.totalCents * VAT_FRACTION) : 0, true);
+    const charged = code === 'standard' || code === 'not_claimable' ? vatIn(c.totalCents, c.date) : 0;
+    if (!onAccount && (c.sourceId ?? bank) === bank) await keepAfloat(c.date, c.totalCents);
+    // Drawings and the owners' own tax have no supplier's slip; a supplier not registered for VAT has no VAT number.
+    const receiptId = c.noSlip ? null : await slip(c.date, c.supplier, c.description, c.totalCents, charged, code !== 'no_vat');
     const made = await io.send<{ id: string }>('POST', '/api/costs', {
       date: c.date,
       description: c.description,
       amountCents: c.totalCents,
-      vatCents: vatOn(c.totalCents, code),
+      vatCents: vat ? charged : 0,
       vatCode: vat ? code : 'standard',
       supplier: c.supplier,
       categoryId: c.category,
@@ -242,19 +316,20 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
       receiptId,
     });
     summary.costs++;
-    if (onAccount) on(businessDay(addDays(c.date, c.billDays!)), () => payBill(made.id));
+    if (onAccount) on(fromDay(addDays(c.date, c.billDays!)), () => payBill(made.id));
     return made.id;
   };
   /** A supplier's bill, paid in full when it's due. */
   const payBill = async (costId: string) => {
     const c = await io.get<{ amountCents: number }>(`/api/costs/${costId}`);
+    await keepAfloat(current, Number(c.amountCents));
     await io.send('POST', `/api/costs/${costId}/bill-payments`, { date: current, amountCents: Number(c.amountCents), sourceId: bank, note: 'Paid when due' });
   };
 
   // ---------------------------------------------------------------- quotes, jobs and invoices
   const workflow = has('jobs') ? 'jobs' : has('quotes') ? 'quotes' : 'invoices';
   const open: OpenInvoice[] = [];
-  const activeJobs = new Map<string, { until: string; hourly: boolean }>();
+  const activeJobs = new Map<string, { until: string }>();
   const hourly = has('timeTracker');
   const hourPrice = trade.services.find((x) => x[1] === 'hour')?.[2] ?? 500;
 
@@ -286,15 +361,15 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
     while (picks.size < howMany) picks.add(r.int(0, trade.services.length - 1));
     return [...picks].map((i) => lineFor(trade.services[i]!, r));
   };
+  const valueOf = (lines: { qty: number; unitPriceCents: number }[]) => lines.reduce((t, l) => t + l.qty * l.unitPriceCents, 0);
   /** Buys the materials on a job or invoice from a supplier: paid, or a bill to pay. */
   const buyMaterials = async (date: string, mats: ReturnType<typeof materialLines>, r: Rng, projectId: string | null) => {
     if (!mats.length) return;
-    // The supplier's invoice, VAT included (a VAT vendor claims it back).
-    const total = Math.round(mats.reduce((t, m) => t + m.costCents * m.qty, 0) * 1.15);
+    // The supplier's invoice, VAT included (a VAT vendor claims it back; anyone else pays it as part of the cost).
     await cost({
       date,
       description: mats.map((m) => `${m.qty} × ${m.description}`).join(', ').slice(0, 190),
-      totalCents: total,
+      totalCents: withVat(mats.reduce((t, m) => t + m.costCents * m.qty, 0), date),
       category: await cat('Parts'),
       supplier: r.pick(trade.suppliers),
       projectId,
@@ -325,12 +400,14 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
     const client = pickClient(r);
     const svc = serviceLines(r);
     const mats = materialLines(r);
+    if (!roomFor(date, valueOf([...svc, ...mats]))) return;
+    trade$(date, valueOf([...svc, ...mats]));
     if (mats.length) await buyMaterials(date, mats, r, null);
     const timed = hourly ? svc.filter((l) => l.unit === 'hour') : [];
     if (timed.length) await logTime(date, null, timed.reduce((t, l) => t + l.qty, 0), r);
     const lines = [...svc.filter((l) => !timed.includes(l)), ...strip(mats)];
     const inv = await io.send<{ id: string; number: string }>('POST', '/api/documents', { kind: 'invoice', clientId: client.id, issueDate: date, lines, pricesIncludeVat: false, title: lines[0] ? String((lines[0] as { description: string }).description) : 'Time' });
-    if (timed.length) await billTime(inv.id, null);
+    if (timed.length) await billTime(inv.id);
     await issue(inv, date, client.id, r);
   };
   const issue = async (inv: { id: string; number: string }, date: string, clientId: string | null, r: Rng) => {
@@ -341,22 +418,28 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
     schedulePayment(o, r);
   };
 
-  /** Hours worked, on the time tracker: whole hours from eight in the morning, on the days before. */
+  /** Hours worked, on the time tracker: whole hours from eight in the morning, the day's next free hour on. */
   const timeEntries: string[] = [];
+  const nextHour = new Map<string, number>();
   const logTime = async (lastDay: string, projectId: string | null, hours: number, r: Rng) => {
     let left = Math.max(1, Math.round(hours));
     let day = lastDay;
     while (left > 0) {
-      const h = Math.min(left, r.int(2, 6));
-      const end = 8 + h;
-      const t = await io.send<{ id: string }>('POST', '/api/time', { projectId, startedAt: `${day}T08:00:00+02:00`, endedAt: `${day}T${String(end).padStart(2, '0')}:00:00+02:00`, note: 'Made up' });
+      const from = nextHour.get(day) ?? 8;
+      const h = Math.min(left, r.int(2, 6), 17 - from);
+      if (h <= 0 || day < start) {
+        day = addDays(day, -1);
+        if (day < start) break;
+        continue;
+      }
+      const t = await io.send<{ id: string }>('POST', '/api/time', { projectId, startedAt: `${day}T${String(from).padStart(2, '0')}:00:00+02:00`, endedAt: `${day}T${String(from + h).padStart(2, '0')}:00:00+02:00`, note: 'Made up' });
       timeEntries.push(t.id);
+      nextHour.set(day, from + h);
       left -= h;
       day = addDays(day, -1);
-      if (day < start) day = start;
     }
   };
-  const billTime = async (documentId: string, _projectId: string | null) => {
+  const billTime = async (documentId: string) => {
     if (!timeEntries.length) return;
     await io.send('POST', '/api/time/bill', { documentId, ids: timeEntries.splice(0) });
   };
@@ -366,6 +449,8 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
     const client = pickClient(r);
     const svc = serviceLines(r);
     const mats = materialLines(r);
+    if (!roomFor(date, valueOf([...svc, ...mats]))) return;
+    trade$(date, valueOf([...svc, ...mats]));
     let projectId: string | null = null;
     const address = `${r.int(1, 120)} ${r.pick(STREETS)}, ${r.pick(SUBURBS)}`;
     const title = `${svc[0]!.description} at ${address}`;
@@ -381,9 +466,11 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
     await io.send('POST', `/api/documents/${q.id}/status`, { status: 'sent' });
     const roll = r.next();
     if (upfront && roll < 0.8) {
-      const paid = addDays(date, r.int(1, 7));
-      on(paid, async () => {
-        if (projectId) activeJobs.set(projectId, { until: addDays(paid, r.int(2, 10)), hourly: false });
+      // The materials come in and the money too; the tax invoice goes out when it's paid (VAT Act
+      // s9(1)). The job's labour isn't logged on it after that: costs dated after a job's last
+      // invoice would wait in work in progress for an invoice that never comes.
+      on(addDays(date, r.int(1, 7)), async () => {
+        await buyMaterials(current, mats, r, projectId);
         const inv = await io.send<{ id: string; number: string }>('POST', `/api/documents/${q.id}/convert`);
         await io.send('PUT', `/api/documents/${inv.id}`, { clientId: client.id, projectId, issueDate: current, title, lines, pricesIncludeVat: false });
         const issued = await io.send<{ number?: string }>('POST', `/api/documents/${inv.id}/issue`);
@@ -391,7 +478,6 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
         const o: OpenInvoice = { id: inv.id, number: issued?.number ?? inv.number, issued: current, clientId: client.id, neverPays: false };
         open.push(o);
         await receive(o, 1, 'eft');
-        await buyMaterials(current, mats, r, projectId);
       });
     } else if (upfront) {
       on(addDays(date, r.int(5, 20)), () => io.send('POST', `/api/documents/${q.id}/status`, { status: 'declined' }));
@@ -401,7 +487,7 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
       const done = addDays(yes, days);
       on(yes, async () => {
         await io.send('POST', `/api/documents/${q.id}/status`, { status: 'accepted' });
-        if (projectId) activeJobs.set(projectId, { until: done, hourly });
+        if (projectId) activeJobs.set(projectId, { until: done });
         await buyMaterials(current, mats, r, projectId);
       });
       on(done, async () => {
@@ -411,7 +497,7 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
         const inv = await io.send<{ id: string; number: string }>('POST', `/api/documents/${q.id}/convert`);
         const kept = [...svc.filter((l) => !timed.includes(l)), ...strip(mats)];
         await io.send('PUT', `/api/documents/${inv.id}`, { clientId: client.id, projectId, issueDate: current, title, lines: kept, pricesIncludeVat: false });
-        if (timed.length) await billTime(inv.id, projectId);
+        if (timed.length) await billTime(inv.id);
         await issue(inv, current, client.id, r);
       });
     } else if (roll < 0.9) {
@@ -472,15 +558,15 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
     }
   };
   const buyStock = async (date: string, r: Rng, opening = false) => {
-    const lines = items
-      .filter((i) => opening || i.qty < 15)
-      .map((i) => ({ item: i, qty: r.int(60, 110) }));
+    const lines = items.filter((i) => opening || i.qty < 15).map((i) => ({ item: i, qty: Math.max(10, Math.round(r.int(60, 110) * (small ? 0.5 : 1))) }));
     if (!lines.length) return;
     const onAccount = has('bills') && !opening;
     const supplier = r.pick(trade.suppliers);
+    // What the supplier charged: before VAT, and the VAT on the standard-rated lines.
     const before = lines.reduce((t, l) => t + R(l.item.good[2]) * l.qty, 0);
-    const vatIn = lines.reduce((t, l) => t + (l.item.good[4] ? 0 : Math.round(R(l.item.good[2]) * l.qty * 0.15)), 0);
-    const receiptId = await slip(date, supplier, lines.map((l) => `${l.qty} × ${l.item.good[0]}`).join(', ').slice(0, 300), before + vatIn, vatIn, true);
+    const vatOnIt = lines.reduce((t, l) => t + (l.item.good[4] ? 0 : withVat(R(l.item.good[2]) * l.qty, date) - R(l.item.good[2]) * l.qty), 0);
+    if (!onAccount) await keepAfloat(date, before + vatOnIt);
+    const receiptId = await slip(date, supplier, lines.map((l) => `${l.qty} × ${l.item.good[0]}`).join(', ').slice(0, 300), before + vatOnIt, vatOnIt, true);
     const made = await io.send<{ costId: string }>('POST', '/api/stock/purchases', {
       date,
       supplier,
@@ -488,19 +574,25 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
       reference: `${opening ? 'OPEN' : 'PO'}-${date.replace(/-/g, '')}`,
       sourceId: onAccount ? bills : bank,
       dueDate: onAccount ? addDays(date, 30) : null,
-      // Zero-rated or standard, as the supplier charged it: a business not registered for VAT pays it as part of the cost.
-      lines: lines.map((l) => ({ itemId: l.item.id, qtyInvoiced: l.qty, unitCostCents: R(l.item.good[2]), vatCode: l.item.good[4] ? 'zero' : 'standard' })),
+      // A VAT vendor gives the price before VAT (the VAT is claimed); a business not registered for
+      // VAT gives what it paid, VAT and all, which is its cost (IFRS for SMEs 13.6).
+      lines: lines.map((l) => ({ itemId: l.item.id, qtyInvoiced: l.qty, unitCostCents: vat || l.item.good[4] ? R(l.item.good[2]) : withVat(R(l.item.good[2]), date), vatCode: l.item.good[4] ? 'zero' : 'standard' })),
     });
     summary.costs++;
     for (const l of lines) l.item.qty += l.qty;
-    if (onAccount) on(businessDay(addDays(date, 30)), () => payBill(made.costId));
+    if (onAccount) on(fromDay(addDays(date, 30)), () => payBill(made.costId));
   };
-  /** Goods for resale bought as a cost, when stock isn't kept in Shap. */
-  const buyGoods = async (date: string, r: Rng, salesCents: number) => {
-    if (salesCents <= 0) return;
-    await cost({ date, description: 'Goods for resale', totalCents: Math.round(salesCents * 0.55), category: await category('Goods for resale', 'materials', 'cos_goods'), supplier: r.pick(trade.suppliers), billDays: has('bills') && r.chance(0.5) ? 30 : undefined });
+  /** Goods for resale bought as a cost, when stock isn't kept in Shap: zero-rated goods on a cost of their own. */
+  let soldStandard = 0;
+  let soldZero = 0;
+  const buyGoods = async (date: string, r: Rng) => {
+    const supplier = r.pick(trade.suppliers);
+    const billDays = has('bills') && r.chance(0.5) ? 30 : undefined;
+    if (soldStandard > 0) await cost({ date, description: 'Goods for resale', totalCents: Math.round(soldStandard * 0.55), category: await category('Goods for resale', 'materials', 'cos_goods'), supplier, billDays });
+    if (soldZero > 0) await cost({ date, description: 'Goods for resale (zero-rated foods)', totalCents: Math.round(soldZero * 0.6), category: await category('Goods for resale', 'materials', 'cos_goods'), supplier, code: 'zero', billDays });
+    soldStandard = 0;
+    soldZero = 0;
   };
-  let soldSinceBuying = 0;
   const sellNow = async (date: string, r: Rng, toClient = false) => {
     const howMany = toClient ? r.int(2, 4) : r.int(1, 3);
     const picked: { item: (typeof items)[number]; qty: number }[] = [];
@@ -511,15 +603,18 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
       if (stocked && item.qty < qty) continue;
       picked.push({ item, qty });
     }
-    // A zero-rated supply over R50 needs a full tax invoice (VAT Act s20(5) proviso), so a walk-in
-    // buys zero-rated goods on their own, up to R50; more goes on an account customer's invoice.
+    // A zero-rated supply over R50 needs a full tax invoice (VAT Act s20(5) proviso, s20(6)), so a
+    // walk-in buys zero-rated goods on their own, up to R50; more goes on an account customer's invoice.
     if (vat && !toClient && picked.some((p) => p.item.good[4])) {
       const z = picked.find((p) => p.item.good[4])!;
-      const most = Math.floor(50 / z.item.good[3]);
+      const most = Math.floor(NO_TAX_INVOICE_CENTS / R(z.item.good[3]));
       if (most < 1) return;
       picked.splice(0, picked.length, { item: z.item, qty: Math.min(z.qty, most) });
     }
     if (!picked.length) return;
+    const shelf = picked.reduce((t, p) => t + R(p.item.good[3]) * p.qty, 0);
+    if (!roomFor(date, shelf)) return;
+    trade$(date, shelf);
     const client = toClient ? clients.find((c) => c.vat) ?? null : null;
     const cash = !toClient && r.chance(0.45) && till != null;
     const sourceId = cash ? till! : bank;
@@ -533,10 +628,12 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
       lines: picked.map((p) => ({ itemId: p.item.id, description: p.item.good[0], qty: p.qty, unit: 'each', unitPriceCents: R(p.item.good[3]), vatCode: p.item.good[4] ? 'zero' : 'standard', category: 'goods' })),
     });
     summary.sales++;
-    for (const p of picked) p.item.qty -= p.qty;
-    const total = Number(sale.doc.totalCents);
-    soldSinceBuying += total;
-    if (cash) tillCash += total;
+    for (const p of picked) {
+      p.item.qty -= p.qty;
+      if (p.item.good[4]) soldZero += R(p.item.good[3]) * p.qty;
+      else soldStandard += R(p.item.good[3]) * p.qty;
+    }
+    if (cash) tillCash += Number(sale.doc.totalCents);
     recentSales.push({ id: sale.id, date, sourceId, method, lineIds: sale.lines.map((l) => l.id) });
     if (recentSales.length > 40) recentSales.shift();
   };
@@ -546,19 +643,21 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
     const sale = r.pick(candidates);
     recentSales.splice(recentSales.indexOf(sale), 1);
     const lineId = sale.lineIds[0]!;
-    const before = await io.get<{ lines: { id: string; itemId: string | null }[] }>(`/api/documents/${sale.id}`);
+    const before = await io.get<{ lines: { id: string; itemId: string | null; unitPriceCents: number }[] }>(`/api/documents/${sale.id}`);
     const line = before.lines.find((l) => l.id === lineId);
+    // Cash back from the till only if the till has it; otherwise paid back from the bank.
+    const fromTill = sale.method === 'cash' && tillCash >= Number(line?.unitPriceCents ?? 0);
     const done = await io.send<{ amountCents: number }>('POST', `/api/documents/${sale.id}/refund`, {
       date,
       money: 'paid_out',
-      sourceId: sale.sourceId,
-      method: sale.method,
+      sourceId: fromTill ? sale.sourceId : bank,
+      method: fromTill ? 'cash' : sale.method === 'cash' ? 'eft' : sale.method,
       reason: 'Returned by the customer: faulty (made up)',
       lines: [{ lineId, qty: 1, restock: true }],
     });
     const back = items.find((i) => i.id === line?.itemId);
     if (back) back.qty += 1;
-    if (sale.method === 'cash') tillCash -= Number(done.amountCents);
+    if (fromTill) tillCash -= Number(done.amountCents);
   };
   /** The till's cash takings, banked. */
   const bankTill = async (date: string) => {
@@ -579,8 +678,11 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
 
   // ---------------------------------------------------------------- people on the payroll
   const payroll = has('payroll');
+  // Without SDL, the payroll stays under R500 000 a year (SDL is due over it): about R35 700 a
+  // month, leaving room for a December bonus and overtime.
+  const monthlyRoom = s.sdl ? Infinity : R(35_700);
   const employees: { id: string; body: Record<string, unknown> }[] = [];
-  const hire = async (date: string, title: string, salaryRand: number, director: boolean, r: Rng) => {
+  const hire = async (date: string, title: string, salaryCents: number, director: boolean, r: Rng) => {
     const name = `${PEOPLE[r.int(0, PEOPLE.length - 1)]!.split(' ')[0]} ${['Jacobs', 'Mabuza', 'Naidoo', 'Smit', 'Khoza', 'Petersen', 'Mkhize', 'Venter'][r.int(0, 7)]}`;
     const born = `${r.int(1965, 2002)}-${String(r.int(1, 12)).padStart(2, '0')}-${String(r.int(1, 28)).padStart(2, '0')}`;
     const body = {
@@ -588,9 +690,10 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
       idNumber: idNumber(r, born),
       taxNumber: luhnNumber(r, '0', 10),
       isDirector: director,
-      salaryCents: R(salaryRand),
+      salaryCents,
       ageBand: 'under65',
-      medicalMembers: director ? 2 : 0,
+      // No medical aid through the payroll, so no medical tax credits on it.
+      medicalMembers: 0,
       // A director on a salary contributes to UIF like any employee.
       uif: true,
       startDate: date,
@@ -602,17 +705,18 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
     employees.push({ id: e.id, body });
   };
   const payRun = async (period: string, r: Rng) => {
-    const payDate = businessDay(`${period}-25`);
-    const run = await io.send<{ id: string; lines?: { employeeId: string; salaryCents: number }[] }>('POST', '/api/pay-runs', { period, payDate, sourceId: bank });
+    const payDate = byDay(`${period}-25`);
+    const run = await io.send<{ id: string }>('POST', '/api/pay-runs', { period, payDate, sourceId: bank });
     const full = await io.get<{ lines: { employeeId: string; salaryCents: number }[] }>(`/api/pay-runs/${run.id}`);
     for (const l of full.lines) {
       const e = employees.find((x) => x.id === l.employeeId);
       const december = period.endsWith('-12') && e && !e.body.isDirector;
-      const overtime = !e?.body.isDirector && r.chance(0.2) ? R(r.int(4, 25) * 100) : 0;
+      const overtime = !e?.body.isDirector && r.chance(0.2) ? Math.round(R(r.int(4, 25) * 100) * fixed) : 0;
       if (december || overtime) {
         await io.send('PUT', `/api/pay-runs/${run.id}/lines/${l.employeeId}`, { salaryCents: Number(l.salaryCents), overtimeCents: overtime, commissionCents: 0, extraCents: december ? Number(l.salaryCents) : 0, note: december ? 'Year-end bonus (made up)' : 'Overtime (made up)' });
       }
     }
+    await keepAfloat(current, full.lines.reduce((t, l) => t + Number(l.salaryCents) * 2, 0));
     await io.send('POST', `/api/pay-runs/${run.id}/finalise`);
     summary.payRuns++;
   };
@@ -622,22 +726,26 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
     if (!m) return;
     const due = Number(m.payeCents) + Number(m.uifCents) + Number(m.sdlCents) - Number(m.paidCents);
     if (due <= 0) return;
+    await keepAfloat(current, due);
     await io.send('POST', '/api/sars-payments', { kind: 'emp201', period, date: current, amountCents: due, sourceId: bank, reference: `EMP201 ${period}` });
   };
 
   // ---------------------------------------------------------------- casual workers
+  // Helpers who come in on the days there's work: two or three days a week each.
   const workers: { id: string; rate: number; owed: number }[] = [];
   const general = ref.workTypes.find((w) => w.active)?.id ?? null;
   const labourDay = async (date: string, r: Rng) => {
-    const today2 = workers.filter(() => r.chance(0.75));
-    if (!today2.length) return;
+    const here = workers.filter(() => r.chance(0.5));
+    if (!here.length) return;
     const jobs = [...activeJobs.entries()].filter(([, j]) => j.until >= date).map(([id]) => id);
     const projectId = jobs.length ? r.pick(jobs) : null;
-    const entries = today2.map((w) => ({ workerId: w.id, days: 1, wageCents: w.rate, allowanceCents: r.chance(0.3) ? R(50) : 0 }));
+    const entries = here.map((w) => ({ workerId: w.id, days: 1, wageCents: w.rate, allowanceCents: r.chance(0.3) ? R(50) : 0 }));
     await io.send('POST', '/api/labour', { date, projectId, workTypeId: projectId ? null : general, note: '', entries });
     for (const e of entries) workers.find((w) => w.id === e.workerId)!.owed += e.wageCents + e.allowanceCents;
   };
   const payWorkers = async (date: string) => {
+    const owed = workers.reduce((t, w) => t + w.owed, 0);
+    if (owed > 0) await keepAfloat(date, owed);
     for (const w of workers) {
       if (w.owed <= 0) continue;
       await io.send('POST', '/api/wage-payments', { date, workerId: w.id, amountCents: w.owed, sourceId: bank, note: 'Week’s wages' });
@@ -646,74 +754,127 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
   };
 
   // ---------------------------------------------------------------- the travel logbook
+  // SARS's logbook runs by the tax year (March to February), whatever the business's year end. Each
+  // trip is there and back, and the odometer moves by what the trips add up to, private ones too.
+  // Private use is kept small (under 5%: full input VAT on the vehicle, VAT Act s17(1)), and none
+  // for a business with its own legal personality (it would be a fringe benefit on the payroll).
+  const taxYear = (d: string) => financialYear(d, 2);
   let odometer = 48_000;
-  let fyKmStart = odometer;
+  let yearStartKm = odometer;
+  const privateUse = kind.key === 'sole_prop' || kind.key === 'partnership';
   const vehicle = `${trade.asset === 'bakkie' ? 'Single-cab bakkie' : 'Panel van'} (made up), CA 000-000`;
   const trip = async (date: string, r: Rng) => {
-    const business = r.chance(0.85);
-    const km = business ? r.int(8, 45) : r.int(5, 30);
+    const business = !privateUse || !r.chance(0.03);
+    const km = business ? 2 * r.int(8, 45) : 2 * r.int(3, 10);
     const client = business ? pickClient(r) : null;
-    await io.send('POST', '/api/trips', { date, fromPlace: 'Workshop', toPlace: business ? `${client!.name}, ${r.pick(SUBURBS)}` : 'Shops', reason: business ? 'To the client (made up)' : 'Private', km, business, clientId: client?.id ?? null });
-    odometer += km * 2;
+    await io.send('POST', '/api/trips', { date, fromPlace: 'Workshop', toPlace: business ? `${client!.name}, ${r.pick(SUBURBS)}` : 'Shops', reason: business ? 'To the client and back (made up)' : 'Private', km, business, clientId: client?.id ?? null });
+    odometer += km;
   };
-  const logbookYear = async (fyEnd: string, ended: boolean) => {
-    await io.send('PUT', `/api/logbook/${fyEnd}`, { vehicle, odometerStart: fyKmStart, odometerEnd: ended ? odometer : null });
+  const logbookYear = async (yearEnd: string, ended: boolean) => {
+    await io.send('PUT', `/api/logbook/${yearEnd}`, { vehicle, odometerStart: yearStartKm, odometerEnd: ended ? odometer : null });
   };
 
   // ---------------------------------------------------------------- the owners' money and tax
   const drawings = async (date: string) => {
     if (kind.payout !== 'drawings') return;
     const room = (await bankBalance(date)) - R(25_000);
-    const want = R(Math.round(14_000 * Math.max(scale, 0.3)));
+    const want = R(Math.round(14_000 * fixed * (small ? 0.6 : 1)));
     const take = Math.min(want, room);
     if (take < R(1_000)) return;
     const shares = kind.key === 'partnership' ? await partnerList() : [{ name: owners[0]!, shareBp: 10_000 }];
     for (const p of shares) {
       const part = Math.round((take * p.shareBp) / 10_000 / 100) * 100;
       if (part <= 0) continue;
-      const personal = kind.key === 'partnership' ? `Personal (${p.name})` : 'Personal (owner)';
-      await cost({ date, description: `Drawings: ${p.name}`, totalCents: part, category: await cat(personal), supplier: p.name, code: 'no_vat' });
+      await cost({ date, description: `Drawings: ${p.name}`, totalCents: part, category: await cat(personalOf(p.name)), supplier: p.name, code: 'no_vat', noSlip: true });
     }
   };
-  const taxPaidByCompany = (kind.taxedAs === 'company' || kind.taxedAs === 'trust' || (kind.taxedAs === 'npc' && !s.approvedPbo)) && !s.turnoverTax;
-  const taxOn = (profitCents: number, fyEnd: string) =>
-    profitCents <= 0 ? 0 : kind.taxedAs === 'trust' ? Math.round(profitCents * TRUST_RATE) : kind.taxedAs === 'individual' || kind.taxedAs === 'partners' ? individualTax(profitCents, fyEnd) : companyTax(profitCents, fyEnd, false);
+  const personalOf = (name: string) => (kind.key === 'partnership' ? `Personal (${name})` : 'Personal (owner)');
+  const taxPaidByBusiness = (kind.taxedAs === 'company' || kind.taxedAs === 'trust' || (kind.taxedAs === 'npc' && !s.approvedPbo)) && !s.turnoverTax;
+  const ownTaxPaid = new Map<string, number>();
+  /**
+   * Provisional tax, as Shap's own provisional tax screen works it out: the year so far projected
+   * to twelve months, Shap's estimate of the year's tax (the partners each on their own share; a
+   * trust on what it keeps), half of it at six months, the rest less what was paid at the year end.
+   */
   const provisional = async (date: string, fy: { start: string; end: string }, second: boolean) => {
     if (s.turnoverTax || (kind.taxedAs === 'npc' && s.approvedPbo)) return;
-    const months = Math.max(1, Math.round((Date.parse(date) - Date.parse(fy.start)) / (30.44 * 86_400_000)));
-    const sofar = await profit(fy.start, date);
-    const year = Math.round((sofar / months) * 12);
-    const tax = taxOn(year, fy.end);
-    const due = Math.floor((second ? tax - Math.floor(tax / 2 / 10_000) * 10_000 : tax / 2) / 10_000) * 10_000;
-    if (due <= 0) return;
-    if (taxPaidByCompany) {
+    const asAt = monthEnd(addMonths(date, -1)) < fy.start ? date : monthEnd(addMonths(date, -1));
+    const p = await io.get<{ fy: { end: string }; lines: { type: string; projectedCents: number }[]; assessedLossCents: number; kind: TaxEstimateFigures['kind']; approvedPbo: boolean; sbc: boolean | null; partners: { name: string; shareBp: number }[]; distributedCents: number; payments: { amountCents: number }[] }>(
+      `/api/reports/provisional-tax?fyEnd=${fy.end}&asAt=${asAt}`,
+    );
+    const sum = (t: string) => p.lines.filter((l) => l.type === t).reduce((x, l) => x + Number(l.projectedCents), 0);
+    const net = sum('income') - sum('cost_of_sales') - sum('expense');
+    const est = estimateTax({ kind: p.kind, profitCents: net, assessedLossCents: Number(p.assessedLossCents), fyEnd: p.fy.end, sbc: p.sbc === true, distributedCents: Number(p.distributedCents), approvedPbo: p.approvedPbo, partners: p.partners });
+    if (taxPaidByBusiness) {
+      const paid = p.payments.reduce((t, x) => t + Number(x.amountCents), 0);
+      const due = down(provisionalPayable({ taxCents: est.taxCents, period: second ? 2 : 1, paidCents: paid }).payableCents);
+      if (due <= 0) return;
+      await keepAfloat(date, due);
       await io.send('POST', '/api/sars-payments', { kind: 'irp6', period: fy.end.slice(0, 7), date, amountCents: due, sourceId: bank, reference: `IRP6 ${second ? 'second' : 'first'} payment` });
     } else if (kind.payout === 'drawings') {
       // A sole proprietor's or partner's provisional tax is their own: paid from the business, it's drawings.
-      const shares = kind.key === 'partnership' ? await partnerList() : [{ name: owners[0]!, shareBp: 10_000 }];
-      for (const p of shares) {
-        const part = Math.floor((due * p.shareBp) / 10_000 / 100) * 100;
-        if (part <= 0) continue;
-        const personal = kind.key === 'partnership' ? `Personal (${p.name})` : 'Personal (owner)';
-        await cost({ date, description: `Provisional tax (IRP6) for ${p.name}: their own tax`, totalCents: part, category: await cat(personal), supplier: 'SARS', code: 'no_vat' });
+      const each = est.partners?.map((x) => ({ name: x.name, tax: x.taxCents })) ?? [{ name: owners[0]!, tax: est.taxCents }];
+      for (const x of each) {
+        const key = `${fy.end}|${x.name}`;
+        const due = down(second ? x.tax - (ownTaxPaid.get(key) ?? 0) : x.tax / 2);
+        if (due <= 0) continue;
+        await keepAfloat(date, due);
+        await cost({ date, description: `Provisional tax (IRP6) for ${x.name}: their own tax`, totalCents: due, category: await cat(personalOf(x.name)), supplier: 'SARS', code: 'no_vat', noSlip: true });
+        ownTaxPaid.set(key, (ownTaxPaid.get(key) ?? 0) + due);
       }
     }
   };
-  /** A dividend (a CC's or co-op's distribution) out of last year's profit, three months after the year end. */
+  /**
+   * Turnover tax's two interim payments (TT02), for a sole proprietor or partners: their own tax,
+   * so paid from the business it's drawings. (Shap has no payment of its own for a company's: none
+   * is made for one.) Worked out from the year's turnover so far, projected to twelve months.
+   */
+  const turnoverInterim = async (date: string, fy: { start: string; end: string }, second: boolean) => {
+    if (!s.turnoverTax || kind.payout !== 'drawings') return;
+    const months = Math.max(1, Math.round((Date.parse(date) - Date.parse(fy.start)) / (30.44 * 86_400_000)));
+    const [t] = await db<{ income: number }[]>`
+      select coalesce(-sum(l.amount_cents), 0)::bigint as income from ledger l join accounts a on a.id = l.account_id
+      where a.type = 'income' and coalesce(a.system_key, '') not in ('disposal_gain_loss', 'interest_income') and l.date between ${fy.start}::date and ${date}::date`;
+    const projected = Math.round((Number(t!.income) / months) * 12);
+    const shares = kind.key === 'partnership' ? await partnerList() : [{ name: owners[0]!, shareBp: 10_000 }];
+    for (const p of shares) {
+      const tax = turnoverTax(Math.round((projected * p.shareBp) / 10_000), fy.end);
+      const key = `tt|${fy.end}|${p.name}`;
+      const due = down(second ? tax - (ownTaxPaid.get(key) ?? 0) : tax / 2);
+      if (due <= 0) continue;
+      await keepAfloat(date, due);
+      await cost({ date, description: `Turnover tax (TT02) interim payment for ${p.name}: their own tax`, totalCents: due, category: await cat(personalOf(p.name)), supplier: 'SARS', code: 'no_vat', noSlip: true });
+      ownTaxPaid.set(key, (ownTaxPaid.get(key) ?? 0) + due);
+    }
+  };
+  /**
+   * A dividend (a CC's distribution, a co-op's to its members in equal shares) out of last year's
+   * profit after tax, three months after the year end; a trust's distribution of the year's income
+   * at its end. Never more than half the profit after tax, and never out of the bank's last R30 000:
+   * a rule of thumb, not the solvency and liquidity test (Companies Act s4, s46; CC Act s51), which
+   * is the owners' to do.
+   */
   const payOut = async (date: string, fy: { start: string; end: string }, fromThisYear: boolean) => {
     if (!paysOutProfit(s.businessType) || !has('dividends')) return;
     const p = await profit(fy.start, fromThisYear ? date : fy.end);
-    const after = p - taxOn(p, fy.end);
+    const after = p - estimateTax({ kind: kind.taxedAs === 'trust' ? 'trust' : 'company', profitCents: p, assessedLossCents: 0, fyEnd: fy.end }).taxCents;
     const room = (await bankBalance(date)) - R(30_000);
-    const gross = Math.floor(Math.min(after * (fromThisYear ? 0.6 : 0.5), room) / R(1_000)) * R(1_000);
-    if (gross < R(5_000)) return;
-    const made = await io.send<{ id: string }>('POST', '/api/dividends', { declaredOn: date, paidOn: date, shareholder: owners[0], grossCents: gross, sourceId: bank, conduit: true, note: 'Made up' });
-    const list = await io.get<{ dividends?: { id: string; dwtCents: number }[] } | { id: string; dwtCents: number }[]>('/api/dividends');
-    const rows = Array.isArray(list) ? list : (list.dividends ?? []);
-    const dwt = Number(rows.find((x) => x.id === made.id)?.dwtCents ?? 0);
+    const payees = kind.key === 'coop' ? owners : [owners[0]!];
+    const each = down(Math.min(after * (fromThisYear ? 0.6 : 0.5), room) / payees.length, R(1_000));
+    if (each * payees.length < R(5_000)) return;
+    let dwt = 0;
+    for (const who of payees) {
+      const made = await io.send<{ id: string }>('POST', '/api/dividends', { declaredOn: date, paidOn: date, shareholder: who, grossCents: each, sourceId: bank, conduit: true, note: 'Made up' });
+      const list = await io.get<{ dividends?: { id: string; dwtCents: number }[] } | { id: string; dwtCents: number }[]>('/api/dividends');
+      const rows = Array.isArray(list) ? list : (list.dividends ?? []);
+      dwt += Number(rows.find((x) => x.id === made.id)?.dwtCents ?? 0);
+    }
     if (dwt > 0) {
       const [y, m] = addMonths(date, 1).split('-').map(Number) as [number, number];
-      on(lastBusinessDay(y, m), () => io.send('POST', '/api/sars-payments', { kind: 'dwt', period: date.slice(0, 7), date: current, amountCents: dwt, sourceId: bank, reference: 'Dividends tax' }));
+      on(lastBusinessDay(y, m), async () => {
+        await keepAfloat(current, dwt);
+        await io.send('POST', '/api/sars-payments', { kind: 'dwt', period: date.slice(0, 7), date: current, amountCents: dwt, sourceId: bank, reference: 'Dividends tax' });
+      });
     }
   };
   const payVat = async (period: { start: string; end: string }) => {
@@ -721,56 +882,81 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
     const f20 = Number(ret.fields.field20);
     if (f20 === 0) return;
     const pay = f20 > 0;
-    const lines = pay
-      ? [{ accountId: acc('vat'), debitCents: f20 }, { accountId: acc('bank'), creditCents: f20 }]
-      : [{ accountId: acc('bank'), debitCents: -f20 }, { accountId: acc('vat'), creditCents: -f20 }];
-    const go = () => io.send('POST', '/api/journals', { date: current, description: `VAT201 ${period.start} to ${period.end}: ${pay ? 'paid to' : 'refund from'} SARS`, reference: 'VAT201', lines });
-    if (pay) await go();
-    else on(addDays(current, 21), go);
+    const go = (d: string) =>
+      io.send('POST', '/api/journals', {
+        date: d,
+        description: `VAT201 ${period.start} to ${period.end}: ${pay ? 'paid to' : 'refund from'} SARS`,
+        reference: 'VAT201',
+        lines: pay ? [{ accountId: acc('vat'), debitCents: f20 }, { accountId: acc('bank'), creditCents: f20 }] : [{ accountId: acc('bank'), debitCents: -f20 }, { accountId: acc('vat'), creditCents: -f20 }],
+      });
+    if (pay) {
+      await keepAfloat(current, f20);
+      await go(current);
+    } else {
+      // A refund comes in about three weeks after the return.
+      const d = fromDay(addDays(current, 21));
+      on(d, () => go(d));
+    }
   };
 
   // ---------------------------------------------------------------- the overheads
   const overheads = async (month: string, r: Rng) => {
-    const first = `${month}-01`;
-    const last = monthEnd(first);
-    const at = (day: number) => businessDay(`${month}-${String(Math.min(day, Number(last.slice(8)))).padStart(2, '0')}`);
-    const plan2: [string, string, number, string, string?][] = [];
-    if (trade.rent) plan2.push([at(1), 'Rent for the premises', R(trade.rent * 1.15), 'Rent', 'Harbourside Properties']);
-    plan2.push([at(3), 'Cellphone contract', R(r.around(650, 0.05)), 'Cellphone', 'Example Mobile']);
-    plan2.push([at(5), 'Business insurance', R(850), 'Insurance', 'Shieldwell Insurance']);
-    plan2.push([at(15), 'Bookkeeping fee', R(1_500), 'Accounting', 'Ledger & Co Bookkeeping']);
-    if (trade.asset === 'computer') plan2.push([at(10), 'Software subscriptions', R(r.around(420, 0.1)), 'Software & subscriptions', 'Cloudnine Hosting']);
-    if (r.chance(0.4)) plan2.push([at(r.int(5, 25)), 'Advertising', R(r.around(900, 0.3)), 'Advertising', 'Coast Community Ads']);
+    const first = month === start.slice(0, 7) ? start : `${month}-01`;
+    const last = monthEnd(`${month}-01`);
+    // A day of the month: on a weekend or holiday, the business day before, unless that's last month.
+    const at = (day: number) => {
+      const d = byDay(`${month}-${String(Math.min(day, Number(last.slice(8)))).padStart(2, '0')}`);
+      return d < first ? fromDay(first) : d;
+    };
+    const plan2: [string, string, number, string, string, string?][] = [];
+    if (trade.rent) plan2.push([at(1), 'Rent for the premises', Math.round(withVat(R(trade.rent), first) * (small ? 0.5 : 1) * fixed), 'Rent', 'Harbourside Properties (made up)']);
+    plan2.push([at(3), 'Cellphone contract', R(r.around(650, 0.05)), 'Cellphone', 'Example Mobile (made up)']);
+    plan2.push([at(5), 'Business insurance', R(850), 'Insurance', 'Shieldwell Insurance (made up)']);
+    plan2.push([at(15), 'Bookkeeping fee', Math.round(R(1_500) * fixed), 'Accounting', 'Ledger & Co Bookkeeping (made up)']);
+    if (trade.asset === 'computer') plan2.push([at(10), 'Software subscriptions', R(r.around(420, 0.1)), 'Software & subscriptions', 'Cloudnine Hosting (made up)']);
+    if (r.chance(0.4)) plan2.push([at(r.int(5, 25)), 'Advertising', R(r.around(900, 0.3)), 'Advertising', 'Coast Community Ads (made up)']);
     if (r.chance(0.3) && trade.asset !== 'computer') plan2.push([at(r.int(5, 25)), 'Small tools', R(r.around(600, 0.4)), 'Tool', trade.suppliers[0]!]);
-    if (r.chance(0.3)) plan2.push([at(r.int(5, 25)), 'Stationery', R(r.around(250, 0.4)), 'Sundry', 'Paperclip Office Supplies']);
-    for (const [date, description, total, catName, supplier] of plan2) {
+    if (r.chance(0.3)) plan2.push([at(r.int(5, 25)), 'Stationery', R(r.around(250, 0.4)), 'Sundry', 'Paperclip Office Supplies (made up)']);
+    // Entertainment: VAT charged, but SARS doesn't allow it back (s17(2)(a)).
+    if (r.chance(0.3)) plan2.push([at(r.int(5, 25)), 'Client lunch', R(r.around(750, 0.4)), 'Entertainment', 'Harbour Grill (made up)', 'not_claimable']);
+    for (const [date, description, total, catName, supplier, code] of plan2) {
+      const personally = code === 'not_claimable' && r.chance(0.3);
       on(date, async () => {
         const catId = catName === 'Rent' ? await category('Rent', 'overhead', 'rent') : await cat(catName);
-        await cost({ date, description, totalCents: total, category: catId, supplier: supplier ?? 'Supplier' });
+        await cost({ date, description, totalCents: total, category: catId, supplier, code, sourceId: personally ? ownerPaid : undefined });
       });
     }
     // Bank charges at the month end: VAT is included in a bank's fees.
-    on(at(31), () => cost({ date: at(31), description: 'Bank charges', totalCents: R(r.around(260, 0.3)), category: ref.categories.find((c) => c.name === 'Bank')!.id, supplier: 'Example Bank' }));
-    // Entertainment: VAT charged, but SARS doesn't allow it back.
-    const lunch = at(r.int(5, 25));
-    if (r.chance(0.3)) on(lunch, async () => cost({ date: lunch, description: 'Client lunch', totalCents: R(r.around(750, 0.4)), category: await cat('Entertainment'), supplier: 'Harbour Grill (made up)', code: 'not_claimable', sourceId: r.chance(0.3) ? ownerPaid : undefined }));
+    const charges = at(31);
+    on(charges, () => cost({ date: charges, description: 'Bank charges', totalCents: R(r.around(260, 0.3)), category: ref.categories.find((c) => c.name === 'Bank')!.id, supplier: 'Example Bank (made up)' }));
     // Fuel: zero-rated. Now and then paid personally (the owner's card).
     if (trade.asset === 'bakkie' || has('logbook')) {
       for (const day of [3, 10, 17, 24]) {
         const d = at(day);
-        on(d, async () => cost({ date: d, description: 'Fuel', totalCents: R(r.around(1_200, 0.25)), category: await cat('Petrol'), supplier: 'FuelStop Walmer (made up)', code: 'zero', sourceId: r.chance(0.15) ? ownerPaid : undefined }));
+        const personally = r.chance(0.15);
+        const amount = R(r.around(1_200, 0.25));
+        on(d, async () => cost({ date: d, description: 'Fuel', totalCents: amount, category: await cat('Petrol'), supplier: 'FuelStop (made up)', code: 'zero', sourceId: personally ? ownerPaid : undefined }));
       }
-      if (Number(month.slice(5)) % 3 === 0) on(at(20), async () => cost({ date: at(20), description: 'Vehicle service', totalCents: R(r.around(3_200, 0.3)), category: await cat('Vehicle Maintenance'), supplier: 'Bayside Motors (made up)' }));
+      if (Number(month.slice(5)) % 3 === 0) {
+        const d = at(20);
+        on(d, async () => cost({ date: d, description: 'Vehicle service', totalCents: R(r.around(3_200, 0.3)), category: await cat('Vehicle Maintenance'), supplier: 'Bayside Motors (made up)' }));
+      }
+      // A car wash now and then, from a one-person business not registered for VAT.
+      const wash = at(r.int(5, 25));
+      if (r.chance(0.5)) on(wash, async () => cost({ date: wash, description: 'Vehicle wash', totalCents: R(150), category: await cat('Vehicle Maintenance'), supplier: 'Sipho’s Car Wash (made up)', code: 'no_vat' }));
     }
   };
 
   // ---------------------------------------------------------------- the first day
-  let current = start;
   const firstDay = async () => {
     const r = monthRng('start');
-    // A tax invoice shows the business's address, and the time tracker needs an hourly rate: made
-    // up here if setup left them out.
-    const missing = { ...(!String(s.address ?? '').trim() ? { address: '1 Test Street\nMade-up Park\nGqeberha 6001' } : {}), ...(hourly && !Number(s.hourlyRateCents) ? { hourlyRateCents: R(hourPrice) } : {}) };
+    // A tax invoice shows the business's address, the EMP501 its income tax number, and the time
+    // tracker needs an hourly rate: made up here if setup left them out.
+    const missing = {
+      ...(!String(s.address ?? '').trim() ? { address: `1 Test Street\n${SUBURBS[0]}\n${TOWN}` } : {}),
+      ...(!String(s.taxNumber ?? '').trim() ? { taxNumber: luhnNumber(r, kind.taxedAs === 'individual' || kind.taxedAs === 'partners' ? '0' : '9', 10) } : {}),
+      ...(hourly && !Number(s.hourlyRateCents) ? { hourlyRateCents: R(hourPrice) } : {}),
+    };
     if (Object.keys(missing).length) {
       const { termsAcceptedAt: _t, logoId: _l, installId: _i, ...rest } = s;
       await io.send('PUT', '/api/settings', { ...rest, ...missing });
@@ -787,9 +973,19 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
     await putInCapital(start);
     await addClients();
     if (payroll) {
-      const staff = trade.staff.slice(0, Math.max(1, Math.round(trade.staff.length * Math.min(1, scale * 2))));
-      if (kind.key === 'company' || kind.key === 'inc') await hire(start, 'Director', 28_000, true, r);
-      for (const [title, pay] of staff) await hire(start, title, pay, false, r);
+      let room = monthlyRoom;
+      if (kind.key === 'company' || kind.key === 'inc') {
+        const pay = Math.round(R(s.sdl ? 28_000 : 18_000) * fixed);
+        await hire(start, 'Director', pay, true, r);
+        room -= pay;
+      }
+      const staff = trade.staff.slice(0, small ? 1 : trade.staff.length);
+      for (const [title, rand] of staff) {
+        const pay = Math.round(R(rand) * fixed);
+        if (pay > room && employees.length) break;
+        await hire(start, title, pay, false, r);
+        room -= pay;
+      }
     }
     if (has('workers')) {
       for (const name of WORKER_NAMES.slice(0, 2)) {
@@ -801,19 +997,21 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
       await addItems();
       if (stocked) await buyStock(start, r, true);
     }
-    if (has('logbook')) await logbookYear(financialYear(start, fyEndMonth).end, false);
+    if (has('logbook')) await logbookYear(taxYear(start).end, false);
   };
   const buyAsset = async (date: string) => {
-    const bought: (readonly [string, string, number, number])[] = [
-      trade.asset === 'bakkie' ? ['Single-cab bakkie (made up)', 'vehicles', 165_000, 60] as const
-      : trade.asset === 'computer' ? ['Laptop and screen (made up)', 'computers', 18_000, 36] as const
-      : ['Shop and workshop equipment (made up)', 'equipment', 45_000, 60] as const,
+    const bought: (readonly [string, string, number, number, number])[] = [
+      trade.asset === 'bakkie' ? ['Single-cab bakkie (made up)', 'vehicles', 165_000, 60, 40_000] as const
+      : trade.asset === 'computer' ? ['Laptop and screen (made up)', 'computers', 18_000, 36, 0] as const
+      : ['Shop and workshop equipment (made up)', 'equipment', 45_000, 60, 0] as const,
     ];
     // The logbook needs a vehicle: a panel van (a commercial vehicle, not a "motor car", so its VAT is claimed).
-    if (has('logbook') && trade.asset !== 'bakkie') bought.push(['Panel van (made up)', 'vehicles', 210_000, 60]);
-    for (const [name, category2, costRand, life] of bought) {
+    if (has('logbook') && trade.asset !== 'bakkie') bought.push(['Panel van (made up)', 'vehicles', 210_000, 60, 50_000]);
+    for (const [name, category2, costRand, life, residual] of bought) {
       const before = R(costRand);
-      await io.send('POST', '/api/assets', { name, category: category2, purchaseDate: date, costCents: vat ? before : Math.round(before * 1.15), vatCents: vat ? Math.round(before * 0.15) : 0, sourceId: bank, lifeMonths: life, notes: 'Made up' });
+      const cost2 = vat ? before : withVat(before, date);
+      await keepAfloat(date, withVat(before, date));
+      await io.send('POST', '/api/assets', { name, category: category2, purchaseDate: date, costCents: cost2, vatCents: vat ? withVat(before, date) - before : 0, residualCents: R(residual), sourceId: bank, lifeMonths: life, notes: 'Made up' });
     }
   };
 
@@ -830,12 +1028,12 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
 
     // Quotes and invoices on the month's working days.
     const docs = n(trade.docs, r);
-    for (let i = 0; i < docs; i++) {
+    for (let i = 0; i < docs && days.length; i++) {
       const d = r.pick(days);
       on(d, () => (workflow === 'invoices' ? invoiceNow(d, r) : quoteNow(d, r)));
     }
-    if (monthNo % 6 === 5 && has('creditNotes')) on(r.pick(days.slice(-8)), () => creditNote(current));
-    if (monthNo % 10 === 8) on(days[0]!, () => writeOff(current));
+    if (monthNo % 6 === 5 && has('creditNotes') && days.length) on(r.pick(days.slice(-8)), () => creditNote(current));
+    if (monthNo % 10 === 8 && days.length) on(days[0]!, () => writeOff(current));
 
     // Counter sales: every trading day (Saturdays too for a shop, salon or café).
     if (sells) {
@@ -852,28 +1050,28 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
           on(d, async () => {
             await bankTill(d);
             if (stocked) await buyStock(d, r);
-            else {
-              await buyGoods(d, r, soldSinceBuying);
-              soldSinceBuying = 0;
-            }
+            else await buyGoods(d, r);
           });
         }
       }
-      // A stock count at each quarter's end.
+      // A stock count at each quarter's end (the year end among them).
       if (stocked && (Number(month.slice(5)) - fyEndMonth + 12) % 3 === 0) on(last, () => stockTake(last, r));
     }
 
     // Overheads, payroll, casual workers and the logbook.
     await overheads(month, r);
     if (payroll) {
-      on(businessDay(`${month}-25`), () => payRun(month, r));
+      on(byDay(`${month}-25`), () => payRun(month, r));
       const prev = addMonths(`${month}-01`, -1).slice(0, 7);
-      on(businessDay(`${month}-07`), () => payEmp201(prev));
+      const emp = byDay(`${month}-07`);
+      if (emp >= first) on(emp, () => payEmp201(prev));
+      // Someone leaves at the end of the tenth month, and someone new starts the next.
       if (monthNo === 10 && employees.length > 1) {
         const leaving = employees[employees.length - 1]!;
         on(addDays(last, -10), () => io.send('PUT', `/api/employees/${leaving.id}`, { ...leaving.body, endDate: last }));
-        const [title, pay] = trade.staff[trade.staff.length - 1]!;
-        on(businessDay(`${addMonths(`${month}-01`, 1).slice(0, 7)}-01`), () => hire(current, title, pay, false, r));
+        const [title] = trade.staff[trade.staff.length - 1]!;
+        const startNext = fromDay(addDays(last, 1));
+        on(startNext, () => hire(current, title, Number(leaving.body.salaryCents), false, r));
       }
     }
     if (workers.length) {
@@ -885,37 +1083,40 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
     if (has('logbook')) for (const d of days) if (r.chance(0.5)) on(d, () => trip(d, r));
 
     // The owners' money: drawings each month; dividends and distributions after the year end.
-    on(businessDay(`${month}-28`), () => drawings(current));
-    if (first === addMonths(fy.start, 3)) {
+    on(byDay(`${month}-28`), () => drawings(current));
+    if (first === addMonths(fy.start, 3) && kind.key !== 'trust') {
       const prior = financialYear(addDays(fy.start, -1), fyEndMonth);
-      if (prior.start >= start) on(businessDay(`${month}-15`), () => payOut(current, prior, false));
+      if (prior.start >= start) on(byDay(`${month}-15`), () => payOut(current, prior, false));
     }
-    // A trust distributes the year's income to its beneficiaries by the year end (taxed in their hands).
-    if (kind.key === 'trust' && last === fy.end) on(businessDay(last), () => payOut(current, fy, true));
+    // A trust distributes the year's income to its beneficiary by the year end (taxed in their hands, s25B).
+    if (kind.key === 'trust' && last === fy.end) on(byDay(last), () => payOut(current, fy, true));
 
-    // Provisional tax: the first payment six months into the year, the second at its end.
+    // Provisional tax and turnover tax's interim payments: six months into the year, and at its end.
     const sixth = monthEnd(addMonths(fy.start, 5));
-    if (last === sixth) on(lastBusinessDay(Number(last.slice(0, 4)), Number(last.slice(5, 7))), () => provisional(current, fy, false));
-    if (last === fy.end) on(lastBusinessDay(Number(last.slice(0, 4)), Number(last.slice(5, 7))), () => provisional(current, fy, true));
+    const due = lastBusinessDay(Number(last.slice(0, 4)), Number(last.slice(5, 7)));
+    if (last === sixth || last === fy.end) {
+      on(due, () => provisional(current, fy, last === fy.end));
+      on(due, () => turnoverInterim(current, fy, last === fy.end));
+    }
 
-    // The travel logbook's year: closed at the year end, the next one opened.
-    if (has('logbook') && last === fy.end) {
+    // The travel logbook's tax year: closed at the end of February, the next one opened.
+    if (has('logbook') && last === taxYear(last).end) {
       on(last, async () => {
-        await logbookYear(fy.end, true);
-        fyKmStart = odometer;
-        if (addDays(last, 1) <= today) await logbookYear(financialYear(addDays(last, 1), fyEndMonth).end, false);
+        await logbookYear(taxYear(last).end, true);
+        yearStartKm = odometer;
+        if (addDays(last, 1) <= today) await logbookYear(taxYear(addDays(last, 1)).end, false);
       });
     }
 
-    // VAT: each period's VAT201 paid (or refunded) on its due date.
+    // VAT: each period's VAT201 paid (or refunded) on its due date, from the first period the books reach.
     if (vat) {
       for (let back = 0; back < 3; back++) {
         const p = vatPeriod(monthEnd(addMonths(`${month}-01`, -back - 1)), s.vatCategory, fyEndMonth);
-        if (p.start < start || vatDone.has(p.end)) continue;
-        const due = vat201Due(p.end);
-        if (due.slice(0, 7) === month) {
+        if (p.end < start || vatDone.has(p.end)) continue;
+        const dueOn = vat201Due(p.end);
+        if (dueOn.slice(0, 7) === month && dueOn >= first) {
           vatDone.add(p.end);
-          on(due, () => payVat(p));
+          on(dueOn, () => payVat(p));
         }
       }
     }
@@ -929,6 +1130,7 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
   for (let d = start; d <= today; d = addDays(d, 1)) {
     current = d;
     if (d === start || d.endsWith('-01')) await planMonth(d.slice(0, 7));
+    await keepAfloat(d);
     const list = plan.get(d) ?? [];
     // Things planned for today while today runs (a payment on the day) run today too.
     for (let i = 0; i < list.length; i++) await list[i]!();
@@ -936,5 +1138,10 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
     done++;
     if (opts.progress && (done % 7 === 0 || d === today)) opts.progress({ done, total, step: d });
   }
+
+  // The statements name the made-up owners (directors, members, trustees, partners), not whoever is signed in.
+  const details = await io.get<Record<string, unknown>>('/api/statements/details');
+  const role = ({ cc: 'Member', trust: 'Trustee', partnership: 'Partner', sole_prop: 'Owner' } as Record<string, string>)[kind.key] ?? 'Director';
+  await io.send('PUT', '/api/statements/details', { ...details, directors: owners.map((name) => ({ name, role })) });
   return summary;
 }
