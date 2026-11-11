@@ -54,3 +54,8 @@ Shap's CPD audit (section 7) has each review; what was Pocket's own:
   `four-reviews.test.ts`. Locking is the owner's (one person: no task to give); what was about
   staff (a teller's stock history, who reopened the books) and the races on the lock (Pocket runs
   one change at a time) don't arise here.
+- **1.9.0**: Shap 1.25's IFRS review (Shap's section 7) applies here: the statements' going-concern,
+  later-distributions and stock-on-hand checks, and the statement of changes in equity naming a
+  CC's, trust's or co-op's capital, with the tests in
+  `packages/engine/test/review-1.9-statements-checks.test.ts`. Shap 1.25's test server (made-up
+  books, filled and wiped on a server) is Shap's only: nothing of it is in Pocket.

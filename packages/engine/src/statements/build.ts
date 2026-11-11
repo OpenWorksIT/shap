@@ -26,6 +26,7 @@ import {
   whatScoreMeans,
   type PiMeaning,
   entity,
+  featureOn,
   formatZar,
   vatRateOn,
   flipOf,
@@ -325,7 +326,9 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
     const shareAt = columns.findIndex((c) => c.key === 'share_capital');
     if (shareAt >= 0 && other[shareAt] !== 0) {
       const row = close.map((_, i) => (i === shareAt ? other[shareAt]! : 0));
-      pushRow(other[shareAt]! > 0 ? 'Issue of shares' : 'Shares bought back', row);
+      // A CC has members' contributions, not shares (CC Act s24); a trust its capital; a co-op its members' shares.
+      const words = ({ cc: ['Members’ contributions', 'Members’ contributions repaid'], trust: ['Capital contributed', 'Capital repaid'], coop: ['Members’ shares issued', 'Members’ shares repaid'] } as Partial<Record<BusinessType, [string, string]>>)[bt] ?? ['Issue of shares', 'Shares bought back'];
+      pushRow(other[shareAt]! > 0 ? words[0] : words[1], row);
       other[shareAt] = 0;
     }
     if (other.some((v) => v !== 0)) pushRow(bt === 'sole_prop' || bt === 'partnership' ? 'Contributions, drawings and other changes' : 'Contributions and other changes in equity', other);
@@ -811,6 +814,28 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
     if (meaning.audit) look('The assurance fits the public interest score', details.assurance === 'audit', `${est}: the statements must be audited (${meaning.auditWhy}). Check the score with your accountant.`);
     else if (meaning.review) look('The assurance fits the public interest score', details.assurance === 'independent_review' || details.assurance === 'audit', `${est}: ${meaning.summary} Check the score with your accountant.`);
   }
+  // Going concern (IFRS for SMEs 3.8, 3.9): liabilities more than assets, or the bank overdrawn,
+  // at the year end is for the owners to assess, and any material uncertainty to be disclosed.
+  // (A CC's accounting officer also reports a deficit to CIPC: below.)
+  const deficit = totalLiabilities.current > totalAssets.current;
+  const overdrawn = (lineTotals.get('bank_overdraft')?.current ?? 0) > 0;
+  if (bt !== 'cc' || overdrawn) {
+    const g = governingFor(bt);
+    const company = ['company', 'inc', 'npc', 'coop'].includes(bt);
+    look(
+      'The business is a going concern (IFRS for SMEs 3.8)',
+      !deficit && !overdrawn,
+      deficit || overdrawn
+        ? `${deficit ? 'Liabilities exceed assets' : 'The bank is overdrawn'} at the year end${deficit && overdrawn ? ', and the bank is overdrawn' : ''}. The ${g.many} assess whether the business can carry on for at least the next twelve months; if there's real doubt, the statements say so (IFRS for SMEs 3.9), and the going-concern wording in the details changes.${company ? ' A company that may not pay its debts as they fall due in the next six months is financially distressed (Companies Act s128, s129(7)).' : ''}`
+        : 'assets cover the liabilities and the bank isn’t overdrawn',
+    );
+  }
+  // Dividends (distributions) declared after the year end aren't a liability at it (32.8), but are disclosed (32.10).
+  const [after] = await db<{ n: number; gross: string }[]>`select count(*)::int as n, coalesce(sum(gross_cents), 0)::bigint as gross from dividends where declared_on > ${fyEnd}::date`;
+  if (after!.n) look('Distributions declared after the year end are disclosed (IFRS for SMEs 32.8, 32.10)', false, `${formatZar(Number(after!.gross))} declared after the year end: not a liability at it. Mention it in the events after the reporting date (the details) if it's material.`);
+  // Sold without keeping stock in Shap: what's on the shelf at the year end isn't in the books (13.4).
+  if (featureOn(settings.features, 'sales') && !featureOn(settings.features, 'inventory') && !lineTotals.has('inventories'))
+    look('Stock on hand at the year end is in the books (IFRS for SMEs 13.4)', false, 'Shap doesn’t keep this business’s stock, so goods on hand at the year end aren’t in the books: count them, and your accountant journals their cost into inventory.');
   if (bt === 'cc') {
     // Close Corporations Act: the accounting officer reports insolvency to CIPC (s62(3)(c)); a loan to a member needs every member's written consent (s52).
     look('The members’ interest is not in deficit (Close Corporations Act s62(3))', totalLiabilities.current <= totalAssets.current, totalLiabilities.current > totalAssets.current ? 'Liabilities exceed assets at the year end: the accounting officer must report this to CIPC.' : 'assets cover the liabilities');
