@@ -505,13 +505,18 @@ async function checkMadeUp(env: TestEnv, owner: Awaited<ReturnType<typeof sessio
       and exists (select 1 from documents d where d.project_id = e.project_id and d.kind = 'invoice' and d.status = 'issued')
       and e.date > (select max(d.issue_date) from documents d where d.project_id = e.project_id and d.kind = 'invoice' and d.status = 'issued')`;
   expect(late!.n).toBe(0);
-  // Payroll: under R500 000 a tax year without SDL; no medical credits without a medical aid.
-  if (a.employees && !a.sdl) {
+  // Payroll and day wages together: under R500 000 a tax year without SDL (day wages count for SDL);
+  // no medical credits without a medical aid.
+  if (!a.sdl) {
     const years = await sql<{ y: string; gross: string }[]>`
-      select case when substr(r.period, 6, 2)::int >= 3 then substr(r.period, 1, 4)::int + 1 else substr(r.period, 1, 4)::int end as y,
-             sum(l.salary_cents + l.overtime_cents + l.commission_cents + l.extra_cents)::bigint as gross
-      from pay_lines l join pay_runs r on r.id = l.run_id where r.status = 'final' group by 1`;
-    for (const y of years) expect(num(y.gross)).toBeLessThan(500_000_00);
+      select y, sum(gross)::bigint as gross from (
+        select case when substr(r.period, 6, 2)::int >= 3 then substr(r.period, 1, 4)::int + 1 else substr(r.period, 1, 4)::int end as y,
+               l.salary_cents + l.overtime_cents + l.commission_cents + l.extra_cents as gross
+        from pay_lines l join pay_runs r on r.id = l.run_id where r.status = 'final'
+        union all
+        select case when extract(month from e.date) >= 3 then extract(year from e.date)::int + 1 else extract(year from e.date)::int end, e.wage_cents
+        from labour_entries e join workers w on w.id = e.worker_id where w.kind <> 'subcontractor') x group by 1`;
+    for (const y of years) expect(num(y.gross), `salaries and day wages, the tax year to ${y.y}`).toBeLessThan(500_000_00);
   }
   expect((await sql`select 1 from employees where medical_members > 0`).length).toBe(0);
   // A trust distributes once a year, on its year end; a co-op to its five members.

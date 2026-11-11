@@ -43,12 +43,15 @@ export async function lockState(db: Db, who = true) {
   const closes = closesOf(s);
   // The last period that has ended, once the month after it has reached the month end day.
   const lastDue = closes === 'year' ? null : periodLockDue(t, s.monthEndDay, closes, s.vatCategory, s.fyEndMonth);
+  // The next period to lock by itself, and any year not yet agreed or approved it closes.
+  const nextLock = s.monthEndMode === 'auto' && closes !== 'year' ? nextPeriodLock(t, s.monthEndDay, closes, s.vatCategory, s.fyEndMonth) : null;
+  const next = nextLock ? { ...nextLock, closesYears: await openYearsUpTo(db, nextLock.through, lockDate, s.fyEndMonth) } : null;
   return {
     lockDate,
     reopened: relock ? { relockDate: relock, at: reopened?.at ?? null, byName: who ? (reopened?.byName ?? null) : null, reason: who ? (reopened?.reason ?? '') : '' } : null,
     sells,
     closes,
-    monthEnd: { mode: s.monthEndMode, day: s.monthEndDay, next: s.monthEndMode === 'auto' && closes !== 'year' ? nextPeriodLock(t, s.monthEndDay, closes, s.vatCategory, s.fyEndMonth) : null },
+    monthEnd: { mode: s.monthEndMode, day: s.monthEndDay, next },
     // Month end (or VAT period end) due: the last period that has ended still open, from the day.
     monthDue: lastDue && (!lockDate || lockDate < lastDue) ? lastDue : null,
     fyEndMonth: s.fyEndMonth,
@@ -64,6 +67,22 @@ export function closedVatPeriods(lockDate: string, category: VatCategory, fyEndM
   for (let m = 0; m < 24; m++) {
     const p = vatPeriod(monthEnd(addMonths(`${lockDate.slice(0, 8)}01`, -m)), category, fyEndMonth);
     if (p.end <= lockDate && !out.some((x) => x.end === p.end)) out.push(p);
+  }
+  return out;
+}
+
+/**
+ * The years ending up to `through`, after the lock, neither agreed with the accountant nor approved:
+ * a lock to `through` would close them before their year-end journals (the tax, the adjustments).
+ */
+export async function openYearsUpTo(db: Db, through: string, lock: string | null, fyEndMonth: number): Promise<string[]> {
+  const [first] = await db<{ d: string | null }[]>`select min(date)::text as d from ledger`;
+  if (!first?.d) return [];
+  const out: string[] = [];
+  for (let end = financialYear(through, fyEndMonth).end; end >= financialYear(first.d, fyEndMonth).end; end = financialYear(addDays(financialYear(end, fyEndMonth).start, -1), fyEndMonth).end) {
+    if (end > through || (lock && end <= lock)) continue;
+    const [done] = await db`select 1 from year_ends where fy_end = ${end}::date union all select 1 from financial_statements where fy_end = ${end}::date and status = 'approved' limit 1`;
+    if (!done) out.push(end);
   }
   return out;
 }
@@ -164,24 +183,16 @@ export function registerPeriodRoutes(app: FastifyInstance, ctx: Ctx): void {
     // Switched to locking by itself: the periods due lock now, unless the books are reopened (then
     // from the next period's day, so what's being put right isn't closed under someone).
     const due = periodLockDue(today(), day, closes, before.vatCategory, before.fyEndMonth);
-    // Locking by itself now would close a year the accountant hasn't agreed yet, or whose statements
-    // aren't approved: their year-end journals would then need a reopen. Asked first.
+    // Locking by itself, now or at the next period's day, would close a year the accountant hasn't
+    // agreed yet, or whose statements aren't approved: their year-end journals would then need a
+    // reopen. Asked first (reopened or not).
     if (mode === 'auto' && !closeYears) {
-      const reopened = before.relockDate && (!before.lockDate || String(before.relockDate) > String(before.lockDate));
-      const lock = await effectiveLock(sql);
-      const [first] = await sql<{ d: string | null }[]>`select min(date)::text as d from ledger`;
-      const open: string[] = [];
-      if (!reopened && first?.d) {
-        for (let end = financialYear(due, before.fyEndMonth).end; end >= financialYear(first.d, before.fyEndMonth).end; end = financialYear(addDays(financialYear(end, before.fyEndMonth).start, -1), before.fyEndMonth).end) {
-          if (end > due || (lock && end <= lock)) continue;
-          const [done] = await sql`select 1 from year_ends where fy_end = ${end}::date union all select 1 from financial_statements where fy_end = ${end}::date and status = 'approved' limit 1`;
-          if (!done) open.push(end);
-        }
-      }
+      const upTo = nextPeriodLock(today(), day, closes, before.vatCategory, before.fyEndMonth).through;
+      const open = await openYearsUpTo(sql, upTo, await effectiveLock(sql), before.fyEndMonth);
       if (open.length)
         throw new HttpError(
           400,
-          `Locking by itself from now closes the year to ${open.map((e) => formatDate(e)).join(' and the year to ')}, not yet agreed with your accountant or approved: their year-end journals (the tax, their adjustments) would need a reopen. Lock by itself anyway, or close each ${closes === 'vat' ? 'VAT period' : 'month'} by hand until the year's done.`,
+          `Locking by itself closes the year to ${open.map((e) => formatDate(e)).join(' and the year to ')} by ${formatDate(nextPeriodLock(today(), day, closes, before.vatCategory, before.fyEndMonth).on)}, not yet agreed with your accountant or approved: their year-end journals (the tax, their adjustments) would need a reopen. Lock by itself anyway, or close each ${closes === 'vat' ? 'VAT period' : 'month'} by hand until the year’s done.`,
           'closes_year',
           { years: open },
         );

@@ -682,8 +682,8 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
 
   // ---------------------------------------------------------------- people on the payroll
   const payroll = has('payroll');
-  // Without SDL, the payroll stays under R500 000 a year (SDL is due over it): about R35 700 a
-  // month, leaving room for a December bonus and overtime.
+  // Without SDL, the payroll and day wages together stay under R500 000 a year (SDL is due over
+  // it): about R35 700 a month, leaving room for a December bonus and overtime.
   const monthlyRoom = s.sdl ? Infinity : R(35_700);
   const employees: { id: string; body: Record<string, unknown> }[] = [];
   const hire = async (date: string, title: string, salaryCents: number, director: boolean, r: Rng) => {
@@ -979,7 +979,8 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
     await putInCapital(start);
     await addClients();
     if (payroll) {
-      let room = monthlyRoom;
+      // Day wages count with salaries for SDL: the two casual workers' (about 11 days a month each) come off the room.
+      let room = monthlyRoom - (has('workers') ? 2 * 11 * R(trade.dayRate) : 0);
       if (kind.key === 'company' || kind.key === 'inc') {
         const pay = Math.round(R(s.sdl ? 28_000 : 18_000) * fixed);
         await hire(start, 'Director', pay, true, r);

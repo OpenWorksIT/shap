@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { formatDate, formatPercent, formatZar, monthLabel } from '@shap/shared';
+import { addDays, formatDate, formatPercent, formatZar, monthLabel, todayIso } from '@shap/shared';
 import { MonthChart } from '../components/MonthChart';
 import { PageHead } from '../components/Shell';
 import { DocChip, Empty, ErrorBox, Icon, Kpi, Loading, Money, ProjectChip, useToast } from '../components/ui';
@@ -45,7 +45,7 @@ interface Dashboard {
   sarsCheckedTo?: string | null;
   /** For whoever may lock the books: month end due (last month still open), or the books reopened. */
   sdlLine?: { payrollCents: number; dayWagesCents: number } | null;
-  periods?: { monthDue: string | null; closes?: 'month' | 'vat' | 'year'; reopened: { relockDate: string; reason: string } | null; lockDate: string | null } | null;
+  periods?: { monthDue: string | null; closes?: 'month' | 'vat' | 'year'; next?: { on: string; through: string; closesYears?: string[] } | null; reopened: { relockDate: string; reason: string } | null; lockDate: string | null } | null;
   bankCents: number;
   ownerLoanCents: number;
   projects: ProjectRow[];
@@ -173,11 +173,22 @@ function OwnerHome() {
         <Icon name="chevronRight" size={16} />
       </Link>
     ),
+    (data.periods?.next?.closesYears?.length ?? 0) > 0 && data.periods!.next!.on <= addDays(todayIso(), 21) && (
+      <Link key="closes-year" to="/accounts?tab=locks" className="attention">
+        <Icon name="calendar" size={18} />
+        <span className="grow">
+          <strong>The year closes soon</strong>: on {formatDate(data.periods!.next!.on)} the books lock by themselves up to {formatDate(data.periods!.next!.through)}, closing the year to {data.periods!.next!.closesYears!.map((e) => formatDate(e)).join(' and the year to ')}, not yet agreed with your accountant. Get their year-end journals in first, or close by hand until then.
+        </span>
+        Locks
+        <Icon name="chevronRight" size={16} />
+      </Link>
+    ),
     data.sdlLine && (
       <Link key="sdl" to="/settings?tab=sections" className="attention">
         <Icon name="alert" size={18} />
         <span className="grow">
-          <strong>SDL may be due</strong>: over the last 12 months you paid employees about {formatZar(data.sdlLine.payrollCents + data.sdlLine.dayWagesCents, { cents: false })} (salaries {formatZar(data.sdlLine.payrollCents, { cents: false })}, day wages {formatZar(data.sdlLine.dayWagesCents, { cents: false })}), over R500 000. Once you expect that, SDL (1%) applies: register with SARS, then switch SDL on in Settings. Worked out from what you’ve captured, not advice: check with your accountant.
+          <strong>SDL may be due</strong>: over the last 12 months you paid employees about {formatZar(data.sdlLine.payrollCents + data.sdlLine.dayWagesCents, { cents: false })} (salaries {formatZar(data.sdlLine.payrollCents, { cents: false })}, day wages {formatZar(data.sdlLine.dayWagesCents, { cents: false })}), over R500 000. Once you expect more than that over the next 12 months, SDL (1% of it) is due: you register with SARS.{' '}
+          {has('payroll') ? 'Then switch SDL on in Settings: Shap works it out on Payroll’s salaries only, not on day wages.' : 'Shap works out SDL only on Payroll’s salaries, not on day wages.'} Worked out from what you’ve captured, not advice: check with your accountant.
         </span>
         Settings
         <Icon name="chevronRight" size={16} />

@@ -76,8 +76,10 @@ export function setupCautions(a: {
     if (a.sdl !== 'yes') out.push('You said you don’t pay SDL. That’s right while everything you pay your employees (salaries and day wages together) is expected to stay under R500 000 over the next 12 months; once it isn’t, you must register and Shap must be told (Settings → What you use).');
     out.push('Payroll: Shap prepares EMP201 and EMP501 figures and payslips from what you capture. Submitting them, issuing IRP5s and paying SARS are your responsibility.');
   }
-  if (a.casual)
-    out.push('You use casual labour: Shap records their days and pay, but doesn’t work out, deduct or pay UIF, PAYE or the Compensation Fund on day wages, or register you with anyone. Someone you pay by the day is usually your employee in the law: the national minimum wage applies to every worker, and UIF and the Basic Conditions of Employment Act’s rules on hours and leave from 24 hours a month. Keeping to these is up to you.');
+  if (a.casual) {
+    out.push('You use casual labour: Shap records their days and pay, but doesn’t work out, deduct or pay PAYE, UIF or the Compensation Fund on day wages, or register you with anyone. Someone you pay by the day is usually your employee in the law, so these may apply: the national minimum wage to every worker, PAYE and the Compensation Fund to employees’ pay, and UIF and the Basic Conditions of Employment Act’s rules on hours and leave from 24 hours a month. Keeping to them is up to you: check with your accountant or a labour practitioner.');
+    if (!a.employees) out.push('SDL: once everything you pay employees (day wages included) is expected to pass R500 000 over the next 12 months, you must register with SARS and pay 1% of it. Shap doesn’t work out SDL on day wages.');
+  }
   if (a.turnoverTax) out.push('You’re on turnover tax: Shap estimates it from your turnover, but the TT01 registration and the TT03 return are yours to file.');
   if (a.paysDividends) out.push('Dividends: each dividend paid is declared to SARS on the DTR01 and DTR02 by the last day of the next month (an exemption is claimed on the DTR01, so exempt dividends are declared too: confirm with your accountant). Shap records them and reminds you; declaring and paying is up to you.');
   return out;

@@ -509,9 +509,10 @@ same, `packages/engine/test/review-1.10-*`):
   change (Sales, VAT registration, the VAT category, the year end) could lock the books at once,
   over a reopen: now a new way of closing starts by hand, a recut one carries on from its next
   day, and the settings log says what changed.
-- IFRS for SMEs and company law: day labour of about 24 hours a month, employment in the law, didn't
-  bring the leave pay item (28.6, BCEA s19(1)) or the employee benefits policy, and nothing told the
-  accountant UIF, PAYE and the Compensation Fund on day wages aren't in the books (28.4): both now.
+- IFRS for SMEs and company law: day labour, usually employment in the law whatever the hours,
+  didn't bring the employee benefits policy, and nothing told the accountant PAYE and the
+  Compensation Fund (and, from about 24 hours a month, UIF) on day wages aren't in the books (28.4),
+  or, from about 24 hours a month, the leave pay item (28.6, BCEA s19(1)): all now.
   Employee costs included subcontractors (28.1): on their own line. Closing by VAT period closes
   the year with its last period, before the accountant's year-end journals: said in setup, Locks
   and docs/LOCKS.md, and switching to "by itself" asks first when it would close a year not agreed
@@ -539,6 +540,18 @@ same, `packages/engine/test/review-1.10-*`):
   among the cautions before the terms. The website's disclaimer said Payroll pays and files (it
   doesn't), and didn't cover periods that lock by themselves: both clarified, within terms 2.2 and
   3.2 (no re-acceptance). Its own brief tightened (section 1, item 5).
+- The fixes, checked by a separate agent: the statements' PAYE and Compensation Fund item still
+  started at 24 hours a month (now any day labour; UIF and leave from 24 hours). The ask before
+  locking by itself closes a year missed the year the next lock closes, and skipped it while the
+  books were reopened (now up to the next lock, reopened or not; Locks and Home say which year the
+  next lock closes). The test of a settings change over a reopen passed without the fix (now one
+  that fails without it). CASUAL_LABOUR.md's BCEA row (Chapter Four from 24 hours a month, s28(1);
+  five employees, s28(2)(a); s9A below the threshold) and s198C's exemptions. The casual caution
+  before the terms left out PAYE and the Compensation Fund, and SDL for a business without
+  Payroll. Home's SDL warning sent a business without Payroll to a switch it doesn't have. Day
+  wages with the EMP201 and SDL showed to staff who see payroll but not wages (now labour.view too).
+  "SARS's tables usually apply" too sure; the minimum wage "now" goes stale (now with its date).
+  The test server's salaries without SDL left day wages out of the R500 000.
 
 ### Code scanning (CodeQL), first run
 

@@ -72,7 +72,8 @@ standard asks that the books alone can't settle.
 - work in progress at the year end (a job that will make a loss; work done but not invoiced);
 - invoices more than a year overdue (write them off if they won't be paid);
 - with employees on payroll, or day labour of about 24 hours a month: leave pay and bonuses owed
-  at the year end; and for day labour, UIF, PAYE and the Compensation Fund owing on day wages;
+  at the year end; with any day labour, PAYE and the Compensation Fund (and UIF from about 24
+  hours a month) owing on day wages;
 - the assurance the public interest score asks for, if the statements don't have it;
 - a close corporation: members' interest in deficit (the accounting officer reports it to CIPC,
   s62(3)), and loans to members (all members' written consent, s52).

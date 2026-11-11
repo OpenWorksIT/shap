@@ -32,7 +32,7 @@ export interface LockState {
   sells: boolean;
   /** Closed as it goes: each month (it sells), each VAT period (a VAT vendor that doesn't), or each year. */
   closes: 'month' | 'vat' | 'year';
-  monthEnd: { mode: 'manual' | 'auto'; day: number; next: { on: string; through: string } | null };
+  monthEnd: { mode: 'manual' | 'auto'; day: number; next: { on: string; through: string; closesYears?: string[] } | null };
   monthDue: string | null;
   periods: Period[];
   /** A VAT vendor's VAT periods that have ended and are closed. */
@@ -220,7 +220,7 @@ function Reopen({ period, label, vatPeriods, onCancel, onDone }: { period: { sta
               .reverse()
               .map((p) => `${formatDate(p.start)} to ${formatDate(p.end)}`)
               .join('; ')}
-            . Not filed yet: put it right, lock it again, then file. Filed: a change to it means a revised VAT201 (ask your accountant); a supplier invoice that came in late can be claimed in a later return instead, within five years (VAT Act s16(3)), and across a year end your accountant says how it goes in the books.
+            . Not filed yet: put it right, lock it again, then file. Filed: a change to it means a revised VAT201 (ask your accountant); a supplier invoice that came in late can be claimed in a later return instead, within five years (VAT Act s16(3)): Shap puts a cost’s VAT in the period it’s dated in, so capture it dated in an open period. Across a year end, your accountant says how it goes in the books.
           </span>
         </div>
       )}
@@ -281,6 +281,7 @@ function MonthEndMode({ state, mayLock, onSaved }: { state: LockState; mayLock: 
       {state.monthEnd.next && !dirty && (
         <p className="small muted">
           Next: {vat ? `the VAT period ending ${formatDate(state.monthEnd.next.through)}` : monthLabel(state.monthEnd.next.through.slice(0, 7))} locks itself on {formatDate(state.monthEnd.next.on)}, whether or not it’s been checked. You can close it earlier.
+          {state.monthEnd.next.closesYears?.length ? ` That closes the year to ${state.monthEnd.next.closesYears.map((e) => formatDate(e)).join(' and the year to ')}, not yet agreed with your accountant: get their year-end journals in first, or close by hand until then.` : ''}
         </p>
       )}
       {error && <div className="banner alert small">{error}</div>}

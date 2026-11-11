@@ -256,7 +256,7 @@ function RunDrawer({ id, onClose }: { id: string; onClose: () => void }) {
         </div>
         <p className="xs muted">
           Also paid by you: UIF {formatZar(total('uifEmployerCents'))}
-          {total('sdlCents') ? `, SDL ${formatZar(total('sdlCents'))}` : ''}. SARS is owed {formatZar(total('payeCents') + total('uifEmployeeCents') + total('uifEmployerCents') + total('sdlCents'))} for this pay run (on the EMP201), by the 7th of next month. Day wages logged under Workers aren’t in it.
+          {total('sdlCents') ? `, SDL ${formatZar(total('sdlCents'))}` : ''}. By Shap’s figures, {formatZar(total('payeCents') + total('uifEmployeeCents') + total('uifEmployerCents') + total('sdlCents'))} is owed to SARS for this pay run (on the EMP201), by the 7th of next month. Day wages logged under Workers aren’t in it.
         </p>
         {draft ? (
           <div className="row wrap">
@@ -466,7 +466,7 @@ function Sars() {
           <div className={`xs ${owing > 0 && dueOn < today ? 'warn-text' : 'muted'}`}>
             {owing > 0 ? `${formatZar(owing)} due by ${formatDate(dueOn)}${dueOn < today ? ' (late)' : ''}` : `Paid ${formatZar(paid)}`}
           </div>
-          {dayWages > 0 && <div className="xs muted">Payroll only: day wages logged under Workers this month ({formatZar(dayWages)}) aren’t in it. PAYE and UIF may be due on them too: check with your accountant.</div>}
+          {dayWages > 0 && <div className="xs muted">Payroll only: day wages logged under Workers this month ({formatZar(dayWages)}) aren’t in it. PAYE and UIF may be due on them too: a reminder, not advice, so check with your accountant.</div>}
         </span>
         {owing > 0 && (
           <button className="btn small" onClick={() => setPay({ kind, period, owing })}>

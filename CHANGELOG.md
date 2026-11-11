@@ -17,8 +17,9 @@ law comes in for day labour.
   lock before. A business that sells still closes each month, and one neither selling nor
   registered for VAT its years.
   - The year end closes with the year's last VAT period, as it does with its last month: your
-    accountant's year-end journals after that need a reopen. Switching to "by itself" when that
-    would close a year not yet agreed or approved asks first.
+    accountant's year-end journals after that need a reopen. Switching to "by itself" when it
+    would close a year not yet agreed or approved asks first, and Locks and Home say which year the
+    next lock closes.
   - **Books already set up**: each VAT period is closed by hand, with Home reminding you from the
     7th of the month after it (change it under Accounts → Locks). A month end that was set to lock
     by itself while Sales was on, then Sales switched off, is by hand now too: it was a choice
@@ -34,8 +35,8 @@ law comes in for day labour.
   national minimum wage (R30.23 an hour from 1 March 2026) applies to every worker, and PAYE and
   the Compensation Fund to employees' pay; from 24 hours a month, UIF (1% each) and the Basic
   Conditions of Employment Act's rules on hours and leave too. For PAYE, SARS's tables usually
-  apply to day labour (22 hours a week or more, or at least 5 hours a day for under R394 a day),
-  so a low wage may come to no tax; otherwise a flat 25%. On the list (about how many hours logged
+  apply to someone working 22 hours a week or more for you, or at least 5 hours a day for under
+  R394 a day, and a low wage may come to no tax; otherwise a flat 25%. On the list (about how many hours logged
   in a month, and a day rate under the minimum wage for an 8-hour day), on each worker's page (the
   months they reached about 24 hours), when adding one, and in setup's cautions. Shap still
   records the days and pay only: it doesn't work out, deduct or pay UIF, PAYE or the Compensation
@@ -44,9 +45,9 @@ law comes in for day labour.
   - Payroll's EMP201 says when a month has day wages it doesn't include; Home warns when salaries
     and day wages together over the last 12 months pass R500 000 with SDL off; the SDL hints say
     day wages count.
-  - The financial statements: leave pay, and UIF, PAYE and the Compensation Fund on day wages, are
-    listed for your accountant in a year with day labour of about 24 hours a month; employee costs
-    leave out subcontractors, shown on their own line.
+  - The financial statements: PAYE and the Compensation Fund on day wages are listed for your
+    accountant in a year with any day labour, and UIF and leave pay where it reached about 24 hours
+    a month; employee costs leave out subcontractors, shown on their own line.
   - These are reminders worked out from the days logged, not advice: Shap is free software from
     OpenWorks IT, who are not accountants or labour lawyers.
 - **A fifth review on every update**: the words on screen and what they promise (CPDAUDIT.md).
