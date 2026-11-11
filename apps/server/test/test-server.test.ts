@@ -452,6 +452,8 @@ async function checkMadeUp(env: TestEnv, owner: Awaited<ReturnType<typeof sessio
     const down = (c: number) => Math.floor(c / 10_000) * 10_000;
     const screen = async (asAt: string) => {
       const p = await owner.get(`/api/reports/provisional-tax?fyEnd=${fy.end}&asAt=${asAt}`);
+      // (A trust's distributions as they were on the day: the screen counts the whole year's.)
+      if (a.businessType === 'trust') p.distributedCents = num((await sql<{ t: string }[]>`select coalesce(sum(gross_cents), 0)::bigint as t from dividends where conduit and declared_on between ${fy.start}::date and ${asAt}::date`)[0]!.t);
       const sum = (k: string) => (p.lines as { type: string; projectedCents: number }[]).filter((l) => l.type === k).reduce((x, l) => x + Number(l.projectedCents), 0);
       return { p, est: estimateTax({ kind: p.kind as TaxEstimateFigures['kind'], profitCents: sum('income') - sum('cost_of_sales') - sum('expense'), assessedLossCents: Number(p.assessedLossCents), fyEnd: fy.end, sbc: p.sbc === true, distributedCents: Number(p.distributedCents), approvedPbo: p.approvedPbo, partners: p.partners }) };
     };
