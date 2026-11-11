@@ -58,6 +58,8 @@ export type EmployerAnswer = 'yes' | 'no' | 'unsure';
 export function setupCautions(a: {
   vatRegistered: boolean;
   employees: boolean;
+  /** Casual labour, paid by the day (Workers). */
+  casual?: boolean;
   payeRegistered?: EmployerAnswer | null;
   uifRegistered?: EmployerAnswer | null;
   sdl?: EmployerAnswer | null;
@@ -71,9 +73,11 @@ export function setupCautions(a: {
     if (a.payeRegistered !== 'yes')
       out.push('You said you’re not (or not sure if you’re) registered for PAYE. An employer must register with SARS within 21 business days of becoming an employer, unless none of its employees is liable for tax. Shap works out payslips, but won’t register you or pay SARS for you.');
     if (a.uifRegistered !== 'yes') out.push('You said you’re not (or not sure if you’re) registered for UIF. UIF applies to anyone employed for 24 hours a month or more: employers registered for PAYE register for UIF with SARS, others with the UI Commissioner. Shap works out the UIF, but declaring and paying it is up to you.');
-    if (a.sdl !== 'yes') out.push('You said you don’t pay SDL. That’s right while your total payroll is expected to stay under R500 000 over the next 12 months; once it isn’t, you must register and Shap must be told (Settings → What you use).');
+    if (a.sdl !== 'yes') out.push('You said you don’t pay SDL. That’s right while everything you pay your employees (salaries and day wages together) is expected to stay under R500 000 over the next 12 months; once it isn’t, you must register and Shap must be told (Settings → What you use).');
     out.push('Payroll: Shap prepares EMP201 and EMP501 figures and payslips from what you capture. Submitting them, issuing IRP5s and paying SARS are your responsibility.');
   }
+  if (a.casual)
+    out.push('You use casual labour: Shap records their days and pay, but doesn’t work out, deduct or pay UIF, PAYE or the Compensation Fund on day wages, or register you with anyone. Someone you pay by the day is usually your employee in the law: the national minimum wage applies to every worker, and UIF and the Basic Conditions of Employment Act’s rules on hours and leave from 24 hours a month. Keeping to these is up to you.');
   if (a.turnoverTax) out.push('You’re on turnover tax: Shap estimates it from your turnover, but the TT01 registration and the TT03 return are yours to file.');
   if (a.paysDividends) out.push('Dividends: each dividend paid is declared to SARS on the DTR01 and DTR02 by the last day of the next month (an exemption is claimed on the DTR01, so exempt dividends are declared too: confirm with your accountant). Shap records them and reminds you; declaring and paying is up to you.');
   return out;

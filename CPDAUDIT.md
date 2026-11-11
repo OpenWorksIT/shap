@@ -37,15 +37,22 @@ each review's findings are written up in section 7.
    signed.
 5. **Words on screen and liability** (from 1.26): everything Shap says to the people using it,
    on every screen, PDF, email, export, setup question and doc that changed, read as the owner
-   would read it, and as someone holding OpenWorks IT to it would. Shap is a free service from
+   would read it, and as someone holding OpenWorks IT to it would. Shap is free software from
    people who aren't accountants, tax practitioners, auditors or labour lawyers: nothing it says
-   reads as advice, a promise, or a figure to rely on. Tax and public benefit scores, estimates,
-   checks and reminders say they're estimates or aids (`ESTIMATE_NOTE`, `ESTIMATE_SHORT` in
-   `packages/shared/src/terms.ts`), and where the law is the business's to follow (payroll, day
-   labour, VAT, the Companies Act) the words say so and point to the accountant. The website's
-   disclaimer (openworks.co.za/shap/disclaimer) still covers what the update adds. The terms
-   (`terms.md`) aren't changed unless everyone is to accept them again. The rest is plain
-   English: clear, kind, no jargon without its meaning, the same word for the same thing.
+   reads as advice, a promise, a decision about someone, or a figure to rely on. Tax figures and
+   the public interest score, estimates and checks say they're estimates or aids (`ESTIMATE_NOTE`,
+   `ESTIMATE_SHORT` in `packages/shared/src/terms.ts`); reminders and flags, however short, say
+   they're worked out from what's captured and aren't advice, on screen or in the note beside them
+   (`casualLabourNote`, `lawMonthsNote` for day labour). Where the law is the business's to follow
+   (payroll, day labour, VAT, the Companies Act) the words say so and point to the accountant (a
+   labour practitioner for labour law). The points and cautions said back before the terms are
+   accepted (`termsPoints`, `setupCautions`) cover anything new the owner answers for. The
+   website's disclaimer (openworks.co.za/shap/disclaimer) still covers what the update adds: it
+   forms part of the terms (terms 8.3), so it's only clarified where the terms already cover it; a
+   new duty on the owner or a further limit on OpenWorks' liability is a terms change
+   (`TERMS_VERSION`, everyone accepts again). The terms (`terms.md`) aren't changed otherwise. The
+   rest is plain South African English: clear, kind, no jargon without its meaning, the same word
+   for the same thing, money as the app shows it (`formatZar`).
 
 Then:
 
@@ -487,6 +494,51 @@ the statements' checks):
   check found the year-end payment worked from the year to the month before (a trust's, after its
   distribution, came out well short): now the year as it stands that day. Also: the slip's VAT rate written in, trips before the vehicle
   was bought, the new hire's job, the wording on liability in the docs and changelog.
+
+### The five reviews of 1.26 (before release)
+
+VAT period locks for a VAT vendor that doesn't sell, day labour and the law, and the first words on
+screen and liability review. All fixed with tests (`apps/server/test/review-1.26/`; Pocket the
+same, `packages/engine/test/review-1.10-*`):
+
+- Security and privacy: nothing exploitable; the penetration test, 286 routes, nothing to fix. The
+  minimum wage's cited source wasn't on the privacy list (CI would have failed): now the Gazette
+  and the Minister's statement, `www.gov.za` listed, and a test that every cited source is. Books
+  from 1.25 that kept month end "by itself" after switching Sales off would have started locking
+  their VAT periods by themselves on the update (a migration puts them on "by hand"). A settings
+  change (Sales, VAT registration, the VAT category, the year end) could lock the books at once,
+  over a reopen: now a new way of closing starts by hand, a recut one carries on from its next
+  day, and the settings log says what changed.
+- IFRS for SMEs and company law: day labour of about 24 hours a month, employment in the law, didn't
+  bring the leave pay item (28.6, BCEA s19(1)) or the employee benefits policy, and nothing told the
+  accountant UIF, PAYE and the Compensation Fund on day wages aren't in the books (28.4): both now.
+  Employee costs included subcontractors (28.1): on their own line. Closing by VAT period closes
+  the year with its last period, before the accountant's year-end journals: said in setup, Locks
+  and docs/LOCKS.md, and switching to "by itself" asks first when it would close a year not agreed
+  or approved. The statements' page (and the partners' profit share, the archive, the books audit)
+  read the stored lock, not one due: now the lock as it stands.
+- SARS and tax: the VAT periods, every category, year end and lock day, are right. The day labour
+  note said 24 hours a month is where someone becomes an employee: that's only UIF's line and the
+  BCEA's hours and leave; the minimum wage, PAYE and the Compensation Fund have none. "Often a flat
+  25%" for PAYE: SARS's tables apply to most day labour (standard employment, or deemed: at least 5
+  hours a day for under R394 a day, 2026/27), now in the shared code and tied to `SARS_CHECKED_TO`.
+  The EMP201 and the SDL hints left out day wages: the EMP201 says so, the hints count them, and
+  Home warns when salaries and day wages pass R500 000 with SDL off. A lock day after the 25th can
+  come after the VAT201: Locks warns. Late supplier invoices once a period is closed: not filed,
+  reopen; filed, a later return within five years (s16(3)). docs/CASUAL_LABOUR.md's leave, records,
+  minimum wage and LRA rows corrected, with primary sources; category F and fixed-day period ends
+  under "Not modelled".
+- Accounting and arithmetic: `periodLockDue` and `nextPeriodLock` matched an independent version in
+  1.39 million cases. The workers' months came from the database's clock (and counted days logged
+  ahead as this month's): now Shap's own day, bounded. Home's month end now also names an older
+  month still open (pinned by a test). Locks shows each period's credit notes.
+- Words on screen and liability (the first): the day labour wording decided who's an employee
+  (on a named person, in bold), stated the law as a flag, and gave 24 hours as the line for all of
+  it; the reminders didn't say they're reminders, not advice. Now: "usually your employee in the
+  law", "may apply", "from the days logged", "a reminder, not advice", everywhere they show, and
+  among the cautions before the terms. The website's disclaimer said Payroll pays and files (it
+  doesn't), and didn't cover periods that lock by themselves: both clarified, within terms 2.2 and
+  3.2 (no re-acceptance). Its own brief tightened (section 1, item 5).
 
 ### Code scanning (CodeQL), first run
 

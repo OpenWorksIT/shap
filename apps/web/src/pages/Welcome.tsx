@@ -81,7 +81,15 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
         : { payeRegistered: null, payeRef: '', uifRegistered: null, uifRef: '', sdl: false };
       const { logoId: _l, termsAcceptedAt: _t, ...rest } = { ...f, ...employer, features, industry, usageConsent: Boolean(consent), marketConsent: market, marketNoticeSeen: true, setupDone: true, termsVersion: TERMS_VERSION, fyEndMonth: kind.febYearEnd ? 2 : f.fyEndMonth, turnoverTax: kind.turnoverTax && f.turnoverTax } as Settings & { logoId: string | null };
       await api('/api/settings', { method: 'PUT', body: rest });
-      if ((sales || f.vatRegistered) && monthEnd) await api('/api/periods/month-end', { method: 'PUT', body: { mode: monthEnd, day: monthEndDay } });
+      if ((sales || f.vatRegistered) && monthEnd) {
+        try {
+          await api('/api/periods/month-end', { method: 'PUT', body: { mode: monthEnd, day: monthEndDay } });
+        } catch (err) {
+          // Books with a year not yet agreed that locking by itself would close: by hand for now (Locks asks).
+          if (!(err instanceof ApiError && err.code === 'closes_year')) throw err;
+          await api('/api/periods/month-end', { method: 'PUT', body: { mode: 'manual', day: monthEndDay } });
+        }
+      }
       setTone(f.tone);
       // Moving from another package: straight to the screen that brings the books across.
       if (movingIn) navigate('/move-in', { replace: true });
@@ -271,10 +279,10 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
                 )}
                 <Answer q="SDL (Skills Development Levy)" value={sdl} onChange={setSdl} unsure={false} />
                 {sdl === 'yes' && paye === 'yes' && !payeProblem && <p className="xs muted">Your SDL reference is {sdlRefFor(f.payeRef)}: your PAYE reference with an L in front.</p>}
-                {sdl === 'no' && <p className="xs muted">That’s right while your total payroll is expected to stay under R500 000 over the next 12 months. Once it isn’t, register and switch SDL on in Settings.</p>}
+                {sdl === 'no' && <p className="xs muted">That’s right while everything you pay employees (salaries and day wages together) is expected to stay under R500 000 over the next 12 months. Once it isn’t, register and switch SDL on in Settings.</p>}
               </div>
             )}
-            <YesNo q="Do you use casual labour, paid by the day?" hint="Log the days they work on each job and what you’ve paid them. Shap keeps the record; UIF, tax and the minimum wage for them are yours to handle (someone working 24 hours a month or more is your employee in the law): Workers says more." value={casual} onChange={setCasual} />
+            <YesNo q="Do you use casual labour, paid by the day?" hint="Log the days they work on each job and what you’ve paid them. Shap keeps that record only: the minimum wage, UIF, PAYE and the Compensation Fund for them are yours to handle (Workers has reminders)." value={casual} onChange={setCasual} />
             {paysOut && dividendsAlways && (
               <p className="xs muted panel panel-pad">
                 {kind.the.charAt(0).toUpperCase() + kind.the.slice(1)} declares every {payoutWord(f.businessType)} it pays to SARS (the DTR01 and DTR02, by the end of the next month), so the {payoutWord(f.businessType)}s section is on, ready for when you pay one.
@@ -333,11 +341,11 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
             {sales === false && f.vatRegistered && (
               <div className="stack-sm">
                 <p className="strong">VAT period end: how should each VAT period be closed?</p>
-                <p className="small muted">Once a VAT period is closed, nothing dated in it can change, so what the VAT201 was worked out from stays as it was checked. Someone you allow can reopen it, with the reason, to put something right.</p>
+                <p className="small muted">Once a VAT period is closed, nothing dated in it can change, so what the VAT201 was worked out from stays as it was when it closed. The year end closes with the year’s last VAT period: your accountant’s year-end journals after that need a reopen. Someone you allow can reopen it, with the reason, to put something right.</p>
                 <Choice on={monthEnd === 'manual'} onClick={() => setMonthEnd('manual')} title="I’ll close each VAT period myself" hint="Accounts → Locks shows the period’s figures and a button to close it. Home reminds you while the last one is still open." />
                 <Choice on={monthEnd === 'auto'} onClick={() => setMonthEnd('auto')} title="Close it by itself" hint="Each VAT period locks itself on a day of the month after it ends, whether or not it’s been checked. You can still close one earlier." />
                 {monthEnd && (
-                  <Field label={monthEnd === 'auto' ? 'Day of the month after the period that it locks' : 'Day of the month after the period to remind me'} hint="1 to 28: before the VAT201 is due (the last business day of that month on eFiling)">
+                  <Field label={monthEnd === 'auto' ? 'Day of the month after the period that it locks' : 'Day of the month after the period to remind me'} hint="1 to 28. Pick a day before your VAT201 is due (on eFiling, the last business day of the month after the period; otherwise the 25th).">
                     {(p) => <input {...p} className="input" type="number" min={1} max={28} value={monthEndDay} onChange={(e) => setMonthEndDay(Math.min(28, Math.max(1, Number(e.target.value) || 1)))} style={{ width: 100 }} />}
                   </Field>
                 )}
@@ -429,7 +437,7 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
         {step === 'terms' && (
           <Q title="Last step: the terms of use" sub="Shap is free, and it’s yours to run. These are the few things that come with that.">
             <TermsReview
-              cautions={setupCautions({ vatRegistered: f.vatRegistered, employees: Boolean(employees), payeRegistered: paye, uifRegistered: uif, sdl, turnoverTax: kind.turnoverTax && f.turnoverTax, paysDividends: dividendsAlways || Boolean(dividends) })}
+              cautions={setupCautions({ vatRegistered: f.vatRegistered, employees: Boolean(employees), casual: Boolean(casual), payeRegistered: paye, uifRegistered: uif, sdl, turnoverTax: kind.turnoverTax && f.turnoverTax, paysDividends: dividendsAlways || Boolean(dividends) })}
               accepted={accepted}
               onAccepted={setAccepted}
             />

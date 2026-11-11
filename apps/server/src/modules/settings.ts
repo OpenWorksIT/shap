@@ -5,7 +5,7 @@ import { accessOf, canAny, checkNewPassword, confirmPassword, createUser, endOth
 import type { Ctx } from '../context.js';
 import { pgCode, PG, type Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
-import { applyBusinessType, getSettings, today } from '../lib/books.js';
+import { applyBusinessType, getSettings, lockAfterSettings, lockSettingsNow, today } from '../lib/books.js';
 import { checkInUsage } from './feedback.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
@@ -159,16 +159,31 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     delete (input as { lockDate?: unknown }).lockDate;
     // Accepting the terms: when, and in the audit log (below).
     const accepted = input.termsVersion && input.termsVersion !== before.termsVersion ? input.termsVersion : null;
+    let lockChange: Record<string, unknown> | null = null;
     await sql.begin(async (tx) => {
+      // How the books close, before: a change to it mustn't lock anything at once (lib/books.ts).
+      await tx`select 1 from settings where id for update`;
+      const closing = await lockSettingsNow(tx);
       const row: Record<string, unknown> = { ...input, ...(accepted ? { termsAcceptedAt: new Date() } : {}), features: tx.json(input.features as never), logoLayout: tx.json(input.logoLayout as never), updatedAt: new Date() };
       for (const k of Object.keys(row)) if (row[k] === undefined) delete row[k];
       await tx`update settings set ${tx(row as never)} where id`;
       // Selling at the counter takes money into the till: its account is there from then on.
       if ((input.features as Record<string, boolean> | undefined)?.sales) await tx`update payment_sources set active = true where till and not active`;
+      if (closing) lockChange = await lockAfterSettings(tx, closing);
       await applyBusinessType(tx, input.businessType);
       if (input.industry && input.industry !== before.industry) await applyIndustry(tx, input.industry);
     });
-    await audit(sql, { userId: user.id, action: 'update', entity: 'settings', ip: req.ip });
+    // What changed of what decides the books' VAT and how they close, so the log shows it.
+    const watched = ['vatRegistered', 'vatCategory', 'fyEndMonth', 'businessType'] as const;
+    const changed: Record<string, unknown> = {};
+    for (const k of watched) if (input[k] !== undefined && input[k] !== before[k]) changed[k] = { was: before[k], now: input[k] };
+    for (const f of ['sales', 'inventory'] as const) {
+      const was = Boolean(before.features?.[f]);
+      const now = Boolean((input.features as Record<string, boolean> | undefined)?.[f]);
+      if (input.features && was !== now) changed[f] = { was, now };
+    }
+    if (lockChange) changed.lock = lockChange;
+    await audit(sql, { userId: user.id, action: 'update', entity: 'settings', ip: req.ip, ...(Object.keys(changed).length ? { details: changed } : {}) });
     if (accepted) await audit(sql, { userId: user.id, action: 'accept_terms', entity: 'settings', ip: req.ip, details: { version: accepted, url: TERMS_URL } });
     const saved = await getSettings(sql);
     // The usage note goes out if the answers changed (it remembers what it last sent).

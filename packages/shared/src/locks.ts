@@ -66,4 +66,12 @@ export const reopenInput = z.object({
   to: monthEndDate.nullable(),
   reason: z.string().trim().min(3, 'Say why it’s reopened (it’s kept with the books)').max(300),
 });
-export const monthEndInput = z.object({ mode: z.enum(MONTH_END_MODES), day: z.number().int().min(1).max(28) });
+export const monthEndInput = z.object({
+  mode: z.enum(MONTH_END_MODES),
+  day: z.number().int().min(1).max(28),
+  /** Lock by itself even though that closes a year not yet agreed or approved (asked first). */
+  closeYears: z.boolean().optional(),
+});
+
+/** A VAT201 filed by hand is due by the 25th (on eFiling, the last business day of the month): a lock day after the 25th can come after it. */
+export const vatLockDayLate = (day: number) => day > 25;

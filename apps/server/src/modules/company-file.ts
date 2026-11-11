@@ -14,7 +14,7 @@ import { confirmPassword, requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Tx } from '../db/index.js';
 import { audit } from '../lib/audit.js';
-import { applyBusinessType, getSettings, noteShapFigures } from '../lib/books.js';
+import { applyBusinessType, getSettings, lockAfterSettings, lockSettingsNow, noteShapFigures } from '../lib/books.js';
 import { badRequest } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 import { cleanImage } from '../lib/images.js';
@@ -108,6 +108,8 @@ export async function restoreCompanyFile(tx: Tx, raw: unknown) {
   // An agreed year's figures don't go into a year already closed here (or signed): reopen it first.
   // The same year at the same figures (the file loaded back into the books it came from) is left be.
   const [before] = await tx<{ lockDate: string | null }[]>`select lock_date::text as lock_date from settings where id`;
+  // How the books close before the file's settings come in: a change to it locks nothing at once.
+  const closing = await lockSettingsNow(tx);
   const asAgreed = new Set<string>();
   for (const y of file.yearEnds) {
     const [signed] = await tx`select 1 from financial_statements where fy_end = ${y.fyEnd}::date and status = 'approved'`;
@@ -161,6 +163,7 @@ export async function restoreCompanyFile(tx: Tx, raw: unknown) {
     count('brands');
   }
   if (file.defaultBrand) await tx`update settings set default_brand_id = (select id from brands where name = ${file.defaultBrand}) where id`;
+  if (closing) await lockAfterSettings(tx, closing);
   // The placeholder trading name a new install starts with goes once real ones arrive.
   if (file.brands.length) {
     await tx`update brands set active = false where name = 'My company' and not exists (select 1 from documents d where d.brand_id = brands.id)

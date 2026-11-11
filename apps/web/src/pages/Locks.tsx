@@ -6,7 +6,7 @@
  * on a day of the next.
  */
 import { useState, type FormEvent } from 'react';
-import { addDays, formatDate, monthLabel } from '@shap/shared';
+import { addDays, formatDate, monthLabel, vatLockDayLate } from '@shap/shared';
 import { Empty, ErrorBox, Field, Loading, Money, Segmented, useToast } from '../components/ui';
 import { api, ApiError } from '../lib/api';
 import { useApi } from '../lib/hooks';
@@ -21,6 +21,8 @@ interface Period {
   salesCents: number;
   refundsCents: number;
   invoicedCents: number;
+  /** Credit notes issued in the period (a sale's refund's included). */
+  creditedCents: number;
   costsCents: number;
   bankOpen: number;
 }
@@ -47,7 +49,7 @@ export function Locks() {
   const mayLock = can('books.lock');
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   if (!data) return <Loading />;
-  const name = (p: { start: string; end: string }) => (data.closes === 'year' ? `the year to ${formatDate(p.end)}` : data.closes === 'vat' ? `the VAT period ${spanLabel(p)}` : spanLabel(p));
+  const name = (p: { start: string; end: string }) => (data.closes === 'year' ? `the year to ${formatDate(p.end)}` : data.closes === 'vat' ? `the VAT period ${spanLabel(p, true)}` : spanLabel(p));
   const run = async (what: () => Promise<unknown>, done: string) => {
     setBusy(true);
     setProblem('');
@@ -75,7 +77,7 @@ export function Locks() {
           {data.closes === 'month'
             ? 'A business that sells closes each month, so the takings, the VAT and the bank stay as they were checked.'
             : data.closes === 'vat'
-              ? 'A VAT vendor closes each VAT period, so what the VAT201 was worked out from stays as it was checked.'
+              ? 'Shap closes a VAT-registered business’s books one VAT period at a time, so what the VAT201 was worked out from stays as it was when the period closed. The year end closes with the year’s last VAT period: your accountant’s year-end journals after that need a reopen.'
               : 'Close a year once your accountant has signed it off.'}{' '}
           {mayLock ? 'To put something right in a closed period, reopen it with the reason (it’s kept with the books), then lock it again.' : 'Whoever may close and reopen months and years (People who sign in) locks and reopens them.'}
         </p>
@@ -117,6 +119,7 @@ export function Locks() {
               {data.sells && <th className="num">Sales</th>}
               {data.sells && <th className="num">Refunds</th>}
               <th className="num">Other invoices</th>
+              <th className="num hide-sm">Credit notes</th>
               <th className="num">Costs</th>
               {has('bank') && <th className="num">Bank lines not ticked off</th>}
               {mayLock && <th />}
@@ -137,6 +140,7 @@ export function Locks() {
                 <td className="num">
                   <Money cents={p.invoicedCents} />
                 </td>
+                <td className="num hide-sm">{p.creditedCents ? <Money cents={p.creditedCents} /> : ''}</td>
                 <td className="num">
                   <Money cents={p.costsCents} />
                 </td>
@@ -216,11 +220,11 @@ function Reopen({ period, label, vatPeriods, onCancel, onDone }: { period: { sta
               .reverse()
               .map((p) => `${formatDate(p.start)} to ${formatDate(p.end)}`)
               .join('; ')}
-            . If a VAT201 for one is filed, a change to it means a revised VAT201 (ask your accountant). SARS doesn’t take more input tax by revising a past period: a supplier invoice that came in late is claimed in the current one, so capture it dated in an open period, not by reopening.
+            . Not filed yet: put it right, lock it again, then file. Filed: a change to it means a revised VAT201 (ask your accountant); a supplier invoice that came in late can be claimed in a later return instead, within five years (VAT Act s16(3)), and across a year end your accountant says how it goes in the books.
           </span>
         </div>
       )}
-      <Field label="Why it’s reopened">{(p) => <input {...p} className="input" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={300} required placeholder="e.g. a supplier invoice dated in the month came in late" />}</Field>
+      <Field label="Why it’s reopened">{(p) => <input {...p} className="input" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={300} required placeholder="e.g. a cost was captured on the wrong date" />}</Field>
       {error && <div className="banner alert small">{error}</div>}
       <div className="row">
         <button type="button" className="btn quiet" onClick={onCancel}>
@@ -243,14 +247,18 @@ function MonthEndMode({ state, mayLock, onSaved }: { state: LockState; mayLock: 
   const dirty = mode !== state.monthEnd.mode || day !== state.monthEnd.day;
   const vat = state.closes === 'vat';
   const each = vat ? 'Each VAT period' : 'Each month';
-  const save = async () => {
+  const [closesYears, setClosesYears] = useState('');
+  const save = async (closeYears = false) => {
     setError('');
     try {
-      await api('/api/periods/month-end', { method: 'PUT', body: { mode, day } });
+      await api('/api/periods/month-end', { method: 'PUT', body: { mode, day, ...(closeYears ? { closeYears } : {}) } });
+      setClosesYears('');
       toast(mode === 'auto' ? `${each} locks itself on day ${day} of the month after it` : `${each} is closed by hand`);
       onSaved();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Couldn’t save');
+      // Locking by itself would close a year not yet agreed or approved: say so, and ask.
+      if (err instanceof ApiError && err.code === 'closes_year') setClosesYears(err.message);
+      else setError(err instanceof ApiError ? err.message : 'Couldn’t save');
     }
   };
   return (
@@ -266,16 +274,30 @@ function MonthEndMode({ state, mayLock, onSaved }: { state: LockState; mayLock: 
           { value: 'auto', label: 'By itself' },
         ]}
       />
-      <Field label={vat ? (mode === 'auto' ? 'Day of the month after the period that it locks' : 'Day of the month after the period that Home reminds you') : mode === 'auto' ? 'Day of the next month it locks' : 'Day of the next month Home reminds you'} hint={vat ? '1 to 28: before the VAT201 is due (the last business day of that month on eFiling), so the return is worked out from closed books' : '1 to 28'}>
+      <Field label={vat ? (mode === 'auto' ? 'Day of the month after the period that it locks' : 'Day of the month after the period that Home reminds you') : mode === 'auto' ? 'Day of the next month it locks' : 'Day of the next month Home reminds you'} hint={vat ? '1 to 28. Pick a day before your VAT201 is due (on eFiling, the last business day of the month after the period; otherwise the 25th), so it’s worked out from closed books.' : '1 to 28'}>
         {(p) => <input {...p} className="input" type="number" min={1} max={28} value={day} disabled={!mayLock} onChange={(e) => setDay(Math.min(28, Math.max(1, Number(e.target.value) || 1)))} style={{ width: 100 }} />}
       </Field>
+      {vat && vatLockDayLate(day) && <p className="xs warn-text">After the 25th: a VAT201 filed other than on eFiling is due by the 25th, and in some months eFiling’s due date comes before the 28th.</p>}
       {state.monthEnd.next && !dirty && (
         <p className="small muted">
-          Next: {vat ? `the VAT period to ${formatDate(state.monthEnd.next.through)}` : monthLabel(state.monthEnd.next.through.slice(0, 7))} locks itself on {formatDate(state.monthEnd.next.on)}, whether or not it’s been checked. You can close it earlier.
+          Next: {vat ? `the VAT period ending ${formatDate(state.monthEnd.next.through)}` : monthLabel(state.monthEnd.next.through.slice(0, 7))} locks itself on {formatDate(state.monthEnd.next.on)}, whether or not it’s been checked. You can close it earlier.
         </p>
       )}
       {error && <div className="banner alert small">{error}</div>}
-      {mayLock && dirty && (
+      {closesYears && (
+        <div className="banner signal small stack-sm">
+          <span>{closesYears}</span>
+          <div className="row wrap">
+            <button type="button" className="btn small" onClick={() => void save(true)}>
+              Lock by itself anyway
+            </button>
+            <button type="button" className="btn small quiet" onClick={() => (setClosesYears(''), setMode('manual'))}>
+              Keep closing by hand
+            </button>
+          </div>
+        </div>
+      )}
+      {mayLock && dirty && !closesYears && (
         <div>
           <button type="button" className="btn primary small" onClick={() => void save()}>
             Save
@@ -286,9 +308,10 @@ function MonthEndMode({ state, mayLock, onSaved }: { state: LockState; mayLock: 
   );
 }
 
-/** A month ("Mar 26"), or a VAT period of months ("Jan to Feb 26"). */
-function spanLabel(p: { start: string; end: string }): string {
-  const to = monthLabel(p.end.slice(0, 7));
+/** A month ("Mar 26"), or a VAT period of months ("Jan to Feb 26"); `fullYear` on a button ("Jan to Feb 2026"). */
+function spanLabel(p: { start: string; end: string }, fullYear = false): string {
+  const label = (ym: string, year: boolean) => (fullYear && year ? `${monthLabel(ym, false)} ${ym.slice(0, 4)}` : monthLabel(ym, year));
+  const to = label(p.end.slice(0, 7), true);
   if (p.start.slice(0, 7) === p.end.slice(0, 7)) return to;
-  return `${monthLabel(p.start.slice(0, 7), p.start.slice(0, 4) !== p.end.slice(0, 4))} to ${to}`;
+  return `${label(p.start.slice(0, 7), p.start.slice(0, 4) !== p.end.slice(0, 4))} to ${to}`;
 }

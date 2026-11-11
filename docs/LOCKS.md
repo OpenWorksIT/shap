@@ -27,13 +27,30 @@ end & locks**):
 
 ## A VAT vendor that doesn't sell: each VAT period
 
-Registered for VAT without Sales, each VAT period is closed the same way (setup asks how; change it
-under **Accounts → Locks**): **by hand**, with Home reminding you from the day you choose of the
-month after the period ends while it's still open; or **by itself** on that day, whether or not it's
-been checked ("VAT period end, by itself" in the audit log). Choose a day before the VAT201 is due
-(the last business day of that month on eFiling), so the return is worked out from closed books.
-The screen shows each VAT period's invoices, costs and the bank lines not yet ticked off. A VAT
-vendor that sells closes each month instead (its VAT periods are made of months).
+Registered for VAT, without Sales switched on, each VAT period is closed the same way (setup asks
+how; change it under **Accounts → Locks**): **by hand**, with Home reminding you from a day you
+choose in the month after the period ends while it's still open; or **by itself** on that day,
+whether or not it's been checked ("VAT period end, by itself" in the audit log). Pick a day before
+your VAT201 is due (on eFiling, the last business day of the month after the period; otherwise the
+25th), so it's worked out from closed books: Locks warns after the 25th. The screen shows each VAT
+period's invoices, credit notes, costs and the bank lines not yet ticked off. A VAT vendor that
+sells closes each month instead (its VAT periods are made of months).
+
+- **The year end** closes with the year's last VAT period, as it does with its last month: your
+  accountant's year-end journals (the tax, their adjustments) after that need a reopen, which
+  opens the VAT periods since again. Switching to "by itself" when that would close a year not yet
+  agreed with your accountant, or whose statements aren't approved, asks first; you can close by
+  hand until the year's done.
+- **A supplier invoice that came in late**, for a closed VAT period: not filed yet, reopen, capture
+  it on its date, lock it again, then file. Filed: it can be claimed in a later return, within
+  five years (VAT Act s16(3)); a cost for a closed year captured later moves it into the next one,
+  so across a year end your accountant accrues it.
+- **Changing how the books close** (switching Sales on or off, or VAT registration) starts the new
+  way by hand, for you to choose again under Locks: a month end that locked by itself was a choice
+  about months, not VAT periods. Changing the VAT category or the year end, set to lock by itself,
+  carries on from the next period's day. Either way nothing locks at once, and books reopened to
+  put something right stay open. Books from before 1.26 that weren't selling close their VAT
+  periods by hand from the update.
 
 ## Any other business: the year
 

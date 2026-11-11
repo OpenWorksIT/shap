@@ -5,27 +5,53 @@ entries newer than the version you're running before you update.
 
 ## 1.26.0 (11 November 2026)
 
-A VAT vendor closes each VAT period, and Workers says where the law starts for day labour.
+A VAT-registered business without Sales closes each VAT period, and Workers reminds you where the
+law comes in for day labour.
 
-- **VAT period end** (a VAT vendor that doesn't sell, on the owner's call): the books close VAT
-  period by VAT period, as a business that sells closes each month. By hand (Accounts → Locks
-  shows each VAT period's figures; Home reminds you from the day you choose of the month after it
-  ends, while it's still open), or by itself on that day, whether or not it's been checked. Choose
-  a day before the VAT201 is due, so it's worked out from closed books. Setup asks; it was the
-  year's lock before. A business that sells still closes each month, and one neither selling nor
+- **VAT period end** (registered for VAT, without Sales switched on): the books close VAT period by
+  VAT period, as a business that sells closes each month. By hand (Accounts → Locks shows each VAT
+  period's figures, credit notes now among them; Home reminds you from a day you choose in the
+  month after it ends, while it's still open), or by itself on that day, whether or not it's been
+  checked. Pick a day before your VAT201 is due (on eFiling, the last business day of the month
+  after the period; otherwise the 25th): Locks warns after the 25th. Setup asks; it was the year's
+  lock before. A business that sells still closes each month, and one neither selling nor
   registered for VAT its years.
-- **Day labour and the law** (docs/CASUAL_LABOUR.md): someone who works for you 24 hours or more a
-  month is your employee in the law, for UIF (1% each) and the Basic Conditions of Employment Act,
-  and the national minimum wage (R30.23 an hour from 1 March 2026) and employees' tax apply to
-  them. Workers now says so: on the list (about how many hours a month, and a day rate under the
-  minimum wage for a full day), on each worker's page (the months they reached 24 hours), and when
-  adding one. Shap still records the days and pay only: it doesn't work out or pay UIF or tax on
-  day wages, and someone who works for you regularly belongs on Payroll. A subcontractor gets the
-  note on when SARS may see them as an employee. These are reminders worked out from the days
-  logged, not advice: Shap is free software from OpenWorks IT, who are not accountants or labour
-  lawyers.
+  - The year end closes with the year's last VAT period, as it does with its last month: your
+    accountant's year-end journals after that need a reopen. Switching to "by itself" when that
+    would close a year not yet agreed or approved asks first.
+  - **Books already set up**: each VAT period is closed by hand, with Home reminding you from the
+    7th of the month after it (change it under Accounts → Locks). A month end that was set to lock
+    by itself while Sales was on, then Sales switched off, is by hand now too: it was a choice
+    about months. Switching Sales or VAT registration on or off from now starts the new way by
+    hand, and changing the VAT category or the year end never locks anything at once or over a
+    reopen.
+  - A business that sells: Home now also reminds you of an older month still open, before this
+    month's day.
+  - The financial statements' page, the partners' profit share, the archive and the books audit see
+    a period that has locked itself before the next change is saved.
+- **Day labour and the law** (docs/CASUAL_LABOUR.md): Workers now reminds you, from the days logged,
+  where labour law comes in. Someone you pay by the day is usually your employee in the law: the
+  national minimum wage (R30.23 an hour from 1 March 2026) applies to every worker, and PAYE and
+  the Compensation Fund to employees' pay; from 24 hours a month, UIF (1% each) and the Basic
+  Conditions of Employment Act's rules on hours and leave too. For PAYE, SARS's tables usually
+  apply to day labour (22 hours a week or more, or at least 5 hours a day for under R394 a day),
+  so a low wage may come to no tax; otherwise a flat 25%. On the list (about how many hours logged
+  in a month, and a day rate under the minimum wage for an 8-hour day), on each worker's page (the
+  months they reached about 24 hours), when adding one, and in setup's cautions. Shap still
+  records the days and pay only: it doesn't work out, deduct or pay UIF, PAYE or the Compensation
+  Fund on day wages. A subcontractor gets the note on when SARS and the labour laws may see them as
+  an employee.
+  - Payroll's EMP201 says when a month has day wages it doesn't include; Home warns when salaries
+    and day wages together over the last 12 months pass R500 000 with SDL off; the SDL hints say
+    day wages count.
+  - The financial statements: leave pay, and UIF, PAYE and the Compensation Fund on day wages, are
+    listed for your accountant in a year with day labour of about 24 hours a month; employee costs
+    leave out subcontractors, shown on their own line.
+  - These are reminders worked out from the days logged, not advice: Shap is free software from
+    OpenWorks IT, who are not accountants or labour lawyers.
 - **A fifth review on every update**: the words on screen and what they promise (CPDAUDIT.md).
-- The national minimum wage is checked each year with the SARS tables.
+- The national minimum wage and SARS's deemed standard employment day pay are checked each year
+  with the SARS tables.
 
 ## 1.25.0 (11 November 2026)
 

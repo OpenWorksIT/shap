@@ -76,6 +76,18 @@ promulgated, check the figures against them (the standard update). The 2025/26 t
 | EMP201 by the 7th (earlier on a weekend or holiday); EMP501 interim September/October, annual April/May | `payroll.ts` `emp201Due`, EMP501 | all | [EMP501 interim 2026](https://www.sars.gov.za/latest-news/employer-interim-declarations-emp501-21-september-to-october-2026/), [SMME Connect 14](https://www.sars.gov.za/businesses-and-employers/small-businesses-taxpayers/smme-connect-issue-14-april-2026/) |
 | IRP5 codes (3601, 3605–3607, 3699, 4102, 4141, 4142…) | `payroll.ts` (server) | all | [SARS employers' guide 2027](https://www.sars.gov.za/guide-for-employers-in-respect-of-employees-tax-2027/) |
 
+### Day labour (Workers: reminders only, docs/CASUAL_LABOUR.md)
+
+Shap doesn't work out PAYE, UIF or SDL on day wages: these are the figures its reminders rely on.
+Checked 11 November 2026.
+
+| Figure | Where | Years | Source |
+| --- | --- | --- | --- |
+| Standard employment: 22 hours a week or more for one employer; deemed: at least 5 hours a day for under R394 a day (2026/27), or a written declaration of no other employer; otherwise 25% | `labour.ts` `DEEMED_STANDARD_DAY`, `casualLabourNote` | 2027 (tied to `SARS_CHECKED_TO`) | [SARS: guide for employers 2027](https://www.sars.gov.za/paye-gen-01-g21-guide-for-employers-iro-employees-tax-for-2027-external-guide/) |
+| UIF from 24 hours a month with one employer (UICA s4(1)(a)) | `labour.ts` `LAW_HOURS_A_MONTH` | all | [UICA s4](https://source.acts.co.za/unemployment-insurance-contributions-act-2002/4__application_of_act.php) |
+| The national minimum wage: R28.79 from 1 March 2025, R30.23 from 1 March 2026 (not SARS's: the Department of Employment and Labour's, checked with these each year) | `labour.ts` `NATIONAL_MINIMUM_WAGE` | 2026, 2027 | [GN R.7083](https://www.gov.za/sites/default/files/gcis_document/202602/54075rg11941gon7083.pdf) |
+| SDL counts day wages with salaries (Home's warning) | `payroll.ts` (server) `sdlLine` | all | [SARS: SDL](https://www.sars.gov.za/types-of-tax/skills-development-levy/) |
+
 ## Dividends
 
 | Figure | Where | Years | Source |
@@ -88,6 +100,12 @@ promulgated, check the figures against them (the standard update). The 2025/26 t
 - Provisional tax underestimation penalties (the 80% and 90% rules, the basic amount).
 - VAT s22(3): input tax repaid on bills still unpaid 12 months after the period.
 - The employment tax incentive (ETI).
+- VAT category F (four-monthly, VAT Act s27(4B): SARS offers A to E only) and tax periods ending on
+  a fixed day within 10 days of a month end (s27(6) proviso; Interpretation Note 52): Shap's VAT
+  periods end on month ends.
+- PAYE, UIF and SDL on day wages (Workers): Shap reminds, the business works them out.
+- A "VAT claimed on" date for a supplier invoice claimed in a later period (s16(3)): the cost keeps
+  its own date, and the VAT goes in the period it's dated in.
 - Capital gains (the inclusion rate) and non-deductible items (fines, s23(o)) in the income tax
   estimate.
 - Individual tables before the 2023 year (earlier years use 2023's), medical credits before the
