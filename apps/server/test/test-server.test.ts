@@ -5,7 +5,7 @@
  * the same setup always gets the same books.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { addDays, addMonths, estimateTax, extrasFor, featuresFor, financialYear, idNumberProblem, isBusinessDay, monthEnd, taxNumberProblem, turnoverTax, turnoverTaxLimit, vat201Due, vatNumberProblem, vatPeriod, vatThresholds, type SetupExtras, type TaxEstimateFigures } from '@shap/shared';
+import { addDays, addMonths, estimateTax, provisionalPayable, extrasFor, featuresFor, financialYear, idNumberProblem, isBusinessDay, monthEnd, taxNumberProblem, turnoverTax, turnoverTaxLimit, vat201Due, vatNumberProblem, vatPeriod, vatThresholds, type SetupExtras, type TaxEstimateFigures } from '@shap/shared';
 import { buildApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { today } from '../src/lib/books.js';
@@ -441,30 +441,54 @@ async function checkMadeUp(env: TestEnv, owner: Awaited<ReturnType<typeof sessio
     }
     expect(checked).toBeGreaterThan(0);
   }
-  // The last full year's provisional tax (or the owners' own, as drawings) and turnover tax's
-  // interim payments: about the year's tax, as Shap works it out on the year's own figures.
+  // The last full year's provisional tax (or the owners' own, as drawings): each payment what
+  // Shap's own provisional tax screen gives on its day (six months in: the months so far; at the
+  // year end: the year as it stands; the partners each on their share, a trust on what it keeps),
+  // half at six months and the rest less what was paid, rounded down to R100. Turnover tax's
+  // interim payments: about the year's turnover tax.
   {
-    const fy = financialYear(addDays(financialYear(t, a.fyEndMonth ?? 2).start, -1), a.fyEndMonth ?? 2);
-    const p = await owner.get(`/api/reports/provisional-tax?fyEnd=${fy.end}&asAt=${fy.end}`);
-    const sum = (k: string) => (p.lines as { type: string; projectedCents: number }[]).filter((l) => l.type === k).reduce((x, l) => x + Number(l.projectedCents), 0);
-    const est = estimateTax({ kind: p.kind as TaxEstimateFigures['kind'], profitCents: sum('income') - sum('cost_of_sales') - sum('expense'), assessedLossCents: Number(p.assessedLossCents), fyEnd: fy.end, sbc: p.sbc === true, distributedCents: Number(p.distributedCents), approvedPbo: p.approvedPbo, partners: p.partners });
-    const near = (paid: number, tax: number, what: string) => expect(Math.abs(paid - tax), `${what}: paid ${paid}, the year's tax ${tax}`).toBeLessThanOrEqual(Math.max(100_000, tax * 0.15));
+    const fyEndMonth = a.fyEndMonth ?? 2;
+    const fy = financialYear(addDays(financialYear(t, fyEndMonth).start, -1), fyEndMonth);
+    const down = (c: number) => Math.floor(c / 10_000) * 10_000;
+    const screen = async (asAt: string) => {
+      const p = await owner.get(`/api/reports/provisional-tax?fyEnd=${fy.end}&asAt=${asAt}`);
+      const sum = (k: string) => (p.lines as { type: string; projectedCents: number }[]).filter((l) => l.type === k).reduce((x, l) => x + Number(l.projectedCents), 0);
+      return { p, est: estimateTax({ kind: p.kind as TaxEstimateFigures['kind'], profitCents: sum('income') - sum('cost_of_sales') - sum('expense'), assessedLossCents: Number(p.assessedLossCents), fyEnd: fy.end, sbc: p.sbc === true, distributedCents: Number(p.distributedCents), approvedPbo: p.approvedPbo, partners: p.partners }) };
+    };
+    const sixthDue = (() => {
+      const m = monthEnd(addMonths(fy.start, 5));
+      let d = m;
+      while (!isBusinessDay(d)) d = addDays(d, -1);
+      return d;
+    })();
+    let yearDue = fy.end;
+    while (!isBusinessDay(yearDue)) yearDue = addDays(yearDue, -1);
+    const firstAsAt = monthEnd(addMonths(sixthDue, -1));
     if (a.turnoverTax) {
       if (['sole_prop', 'partnership'].includes(a.businessType)) {
         const [income] = await sql<{ t: string }[]>`select coalesce(-sum(l.amount_cents), 0)::bigint as t from ledger l join accounts a on a.id = l.account_id where a.type = 'income' and coalesce(a.system_key, '') not in ('disposal_gain_loss', 'interest_income') and l.date between ${fy.start}::date and ${fy.end}::date`;
         const tax = turnoverTax(num(income!.t), fy.end);
         const tt = await sql<{ n: number; paid: string }[]>`select count(*)::int as n, coalesce(sum(amount_cents), 0)::bigint as paid from costs where description like 'Turnover tax (TT02) interim payment%' and date between ${fy.start}::date and ${fy.end}::date`;
         if (tax > 50_000) expect(tt[0]!.n).toBe(2);
-        near(num(tt[0]!.paid), tax, 'TT02');
+        expect(Math.abs(num(tt[0]!.paid) - tax), `TT02: paid ${tt[0]!.paid}, the year's ${tax}`).toBeLessThanOrEqual(Math.max(100_000, tax * 0.15));
       }
     } else if (['sole_prop', 'partnership'].includes(a.businessType)) {
-      for (const x of est.partners ?? [{ name: '', taxCents: est.taxCents }]) {
-        const [own] = await sql<{ paid: string }[]>`select coalesce(sum(amount_cents), 0)::bigint as paid from costs where description like ${`Provisional tax (IRP6) for ${x.name}%`} and date between ${fy.start}::date and ${fy.end}::date`;
-        near(num(own!.paid), Math.max(0, x.taxCents), `IRP6 for ${x.name || 'the owner'}`);
+      const first = (await screen(firstAsAt)).est;
+      const second = (await screen(yearDue)).est;
+      for (const [i, x] of (first.partners ?? [{ name: '', taxCents: first.taxCents }]).entries()) {
+        const rows = await sql<{ date: string; amt: string }[]>`select date::text as date, amount_cents::bigint as amt from costs where description like ${`Provisional tax (IRP6) for ${x.name}%`} and date between ${fy.start}::date and ${fy.end}::date order by date`;
+        const one = down(x.taxCents / 2);
+        const yearTax = (second.partners?.[i]?.taxCents ?? second.taxCents);
+        const two = down(yearTax - Math.max(0, one));
+        const want = [...(one > 0 ? [[sixthDue, one]] : []), ...(two > 0 ? [[yearDue, two]] : [])];
+        expect(rows.map((r) => [r.date, num(r.amt)]), `IRP6 for ${x.name || 'the owner'}`).toEqual(want);
       }
-    } else if (!(a.businessType === 'npc' && p.approvedPbo)) {
-      const [irp6] = await sql<{ paid: string }[]>`select coalesce(sum(amount_cents), 0)::bigint as paid from sars_payments where kind = 'irp6' and period = ${fy.end.slice(0, 7)}`;
-      near(num(irp6!.paid), Math.max(0, est.taxCents), 'IRP6');
+    } else if (!(a.businessType === 'npc' && (await screen(fy.end)).p.approvedPbo)) {
+      const rows = await sql<{ date: string; amt: string }[]>`select date::text as date, amount_cents::bigint as amt from sars_payments where kind = 'irp6' and period = ${fy.end.slice(0, 7)} order by date`;
+      const one = down(provisionalPayable({ taxCents: (await screen(firstAsAt)).est.taxCents, period: 1, paidCents: 0 }).payableCents);
+      const two = down(provisionalPayable({ taxCents: (await screen(yearDue)).est.taxCents, period: 2, paidCents: Math.max(0, one) }).payableCents);
+      const want = [...(one > 0 ? [[sixthDue, one]] : []), ...(two > 0 ? [[yearDue, two]] : [])];
+      expect(rows.map((r) => [r.date, num(r.amt)]), 'IRP6').toEqual(want);
     }
   }
   // Someone new starts on the first business day after the leaver's last.

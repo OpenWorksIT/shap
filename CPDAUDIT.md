@@ -468,8 +468,10 @@ the statements' checks):
   before putting month end back, and failing before it began left its sign-in, month end aside and
   the books "busy"; a browser could sign in as the filling's sign-in. Tests that couldn't fail now
   can: the limits (at a fifth of the size nothing reached them), the logbook (an empty year was
-  skipped), each VAT201 against field 20 and its due date, provisional tax and TT02 against the
-  year's tax, the new hire's start. Also: the slip's VAT rate written in, trips before the vehicle
+  skipped), each VAT201 against field 20 and its due date, each provisional payment against Shap's
+  own screen on its day and TT02 against the year's turnover tax, the new hire's start. That last
+  check found the year-end payment worked from the year to the month before (a trust's, after its
+  distribution, came out well short): now the year as it stands that day. Also: the slip's VAT rate written in, trips before the vehicle
   was bought, the new hire's job, the wording on liability in the docs and changelog.
 
 ### Code scanning (CodeQL), first run
