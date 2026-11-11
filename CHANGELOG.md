@@ -3,6 +3,30 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.26.0 (11 November 2026)
+
+A VAT vendor closes each VAT period, and Workers says where the law starts for day labour.
+
+- **VAT period end** (a VAT vendor that doesn't sell, on the owner's call): the books close VAT
+  period by VAT period, as a business that sells closes each month. By hand (Accounts → Locks
+  shows each VAT period's figures; Home reminds you from the day you choose of the month after it
+  ends, while it's still open), or by itself on that day, whether or not it's been checked. Choose
+  a day before the VAT201 is due, so it's worked out from closed books. Setup asks; it was the
+  year's lock before. A business that sells still closes each month, and one neither selling nor
+  registered for VAT its years.
+- **Day labour and the law** (docs/CASUAL_LABOUR.md): someone who works for you 24 hours or more a
+  month is your employee in the law, for UIF (1% each) and the Basic Conditions of Employment Act,
+  and the national minimum wage (R30.23 an hour from 1 March 2026) and employees' tax apply to
+  them. Workers now says so: on the list (about how many hours a month, and a day rate under the
+  minimum wage for a full day), on each worker's page (the months they reached 24 hours), and when
+  adding one. Shap still records the days and pay only: it doesn't work out or pay UIF or tax on
+  day wages, and someone who works for you regularly belongs on Payroll. A subcontractor gets the
+  note on when SARS may see them as an employee. These are reminders worked out from the days
+  logged, not advice: Shap is free software from OpenWorks IT, who are not accountants or labour
+  lawyers.
+- **A fifth review on every update**: the words on screen and what they promise (CPDAUDIT.md).
+- The national minimum wage is checked each year with the SARS tables.
+
 ## 1.25.0 (11 November 2026)
 
 A test server: made-up books for any kind of business, to try Shap out or check its figures.

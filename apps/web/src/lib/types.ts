@@ -72,7 +72,7 @@ export interface Settings {
   defaultWageSourceId: string | null;
   defaultCostSourceId: string | null;
   lockDate: string | null;
-  /** Month end (a business that sells): closed by hand, or locks itself on monthEndDay of the next month. */
+  /** Month end (a business that sells), or VAT period end (a VAT vendor that doesn't): closed by hand, or locks itself on monthEndDay of the month after. */
   monthEndMode?: 'manual' | 'auto';
   monthEndDay?: number;
   defaultBrandId: string | null;
@@ -203,7 +203,10 @@ export interface WorkerRow {
   balanceCents: number;
   savingsCents: number;
   daysThisMonth: number;
+  daysLastMonth?: number;
   lastWorked: string | null;
+  /** Where the law starts to apply, from the busier of this month and last (docs/CASUAL_LABOUR.md). */
+  law?: { employee: boolean; hours: number; lawApplies: boolean; minimumDayCents: number; belowMinimumWage: boolean };
 }
 
 export interface LabourEntry {

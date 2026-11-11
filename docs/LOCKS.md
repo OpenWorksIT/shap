@@ -1,4 +1,4 @@
-# Locks: month end and closed years
+# Locks: month end, VAT periods and closed years
 
 Once a period is closed, nothing dated in it can change: no sale, invoice, cost, payment, journal
 or stock movement, whoever tries (the owner too). That's what keeps the takings, the VAT returns,
@@ -25,7 +25,17 @@ end & locks**):
   both. A year end locks with its last month: a journal for the year (the tax, the accountant's
   adjustments) after that needs a reopen.
 
-## A business that doesn't sell: the year
+## A VAT vendor that doesn't sell: each VAT period
+
+Registered for VAT without Sales, each VAT period is closed the same way (setup asks how; change it
+under **Accounts → Locks**): **by hand**, with Home reminding you from the day you choose of the
+month after the period ends while it's still open; or **by itself** on that day, whether or not it's
+been checked ("VAT period end, by itself" in the audit log). Choose a day before the VAT201 is due
+(the last business day of that month on eFiling), so the return is worked out from closed books.
+The screen shows each VAT period's invoices, costs and the bank lines not yet ticked off. A VAT
+vendor that sells closes each month instead (its VAT periods are made of months).
+
+## Any other business: the year
 
 The year is closed once the accountant has signed it off: under Accounts → Locks, or with the year
 end ("lock the books"), or when the financial statements are approved.
@@ -54,7 +64,7 @@ owner and the accountant). Put it right, then **Lock it again** (back to where i
 
 The lock date moves forward also when the year end is locked (Year end), the financial statements
 are approved, a company file or a move-in brings a closed year in, and month end locks a month by
-itself: each is in the audit log. Nothing moves it back except a reopen.
+itself (or a VAT period by itself): each is in the audit log. Nothing moves it back except a reopen.
 
 On purpose, past a lock: agreeing a closed year with the accountant the first time (how a closed
 year gets their figures); matching a captured cost to a bank line inside an agreed year (the

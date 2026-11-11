@@ -1,5 +1,5 @@
 import type { FastifyRequest } from 'fastify';
-import { assessedLossCarried, entity, featureOn, financialYear, monthLockDue, safeText, standardNames, todayIso, type BusinessType, type TaxEstimateFigures, type VatCategory } from '@shap/shared';
+import { assessedLossCarried, closesBy, entity, featureOn, financialYear, periodLockDue, safeText, standardNames, todayIso, type BusinessType, type TaxEstimateFigures, type VatCategory } from '@shap/shared';
 import type { Db } from '../db/index.js';
 import { audit } from './audit.js';
 import { badRequest } from './errors.js';
@@ -133,17 +133,40 @@ export async function getSettings(db: Db): Promise<SettingsRow> {
   return s!;
 }
 
+interface LockSettings {
+  lockDate: string | null;
+  monthEndMode: string;
+  monthEndDay: number;
+  monthLockedThrough: string | null;
+  features: Record<string, boolean> | null;
+  vatRegistered: boolean;
+  vatCategory: VatCategory;
+  fyEndMonth: number;
+}
+async function lockSettings(db: Db): Promise<LockSettings | undefined> {
+  const [s] = await db<LockSettings[]>`
+    select lock_date::text as lock_date, month_end_mode, month_end_day, month_locked_through::text as month_locked_through, features, vat_registered, vat_category, fy_end_month from settings where id`;
+  return s;
+}
+/** What this business closes as it goes: months (it sells), VAT periods (a VAT vendor), or years. */
+export const closesOf = (s: { features: Record<string, boolean> | null; vatRegistered: boolean }) => closesBy({ sells: featureOn(s.features, 'sales'), vatRegistered: s.vatRegistered });
+/** The period end due to have locked itself by today, when it's set to lock by itself and that's not done yet. */
+function lockDueBySelf(s: LockSettings): string | null {
+  const closes = closesOf(s);
+  if (s.monthEndMode !== 'auto' || closes === 'year') return null;
+  const due = periodLockDue(today(), s.monthEndDay, closes, s.vatCategory, s.fyEndMonth);
+  return s.monthLockedThrough && s.monthLockedThrough >= due ? null : due;
+}
+
 /**
- * Month end set to lock itself (a business that sells): the months due by today locked, once each
- * (a month reopened isn't locked again until the next one's day). Returns the lock date.
+ * Month end (or VAT period end) set to lock itself: the periods due by today locked, once each (a
+ * period reopened isn't locked again until the next one's day). Returns the lock date.
  */
 export async function applyMonthLock(db: Db): Promise<string | null> {
-  const [s] = await db<{ lockDate: string | null; monthEndMode: string; monthEndDay: number; monthLockedThrough: string | null; features: Record<string, boolean> | null }[]>`
-    select lock_date::text as lock_date, month_end_mode, month_end_day, month_locked_through::text as month_locked_through, features from settings where id`;
+  const s = await lockSettings(db);
   if (!s) return null;
-  if (s.monthEndMode !== 'auto' || !featureOn(s.features, 'sales')) return s.lockDate;
-  const due = monthLockDue(today(), s.monthEndDay);
-  if (s.monthLockedThrough && s.monthLockedThrough >= due) return s.lockDate;
+  const due = lockDueBySelf(s);
+  if (!due) return s.lockDate;
   const [u] = await db<{ lockDate: string }[]>`
     update settings set lock_date = greatest(coalesce(lock_date, ${due}::date), ${due}::date),
       relock_date = case when relock_date <= greatest(coalesce(lock_date, ${due}::date), ${due}::date) then null else relock_date end,
@@ -151,7 +174,7 @@ export async function applyMonthLock(db: Db): Promise<string | null> {
     where id and (month_locked_through is null or month_locked_through < ${due}::date)
     returning lock_date::text as lock_date`;
   if (u && u.lockDate !== s.lockDate) {
-    await audit(db, { actor: 'system', action: 'lock', entity: 'period', details: { through: u.lockDate, was: s.lockDate, by: 'month end, by itself' } });
+    await audit(db, { actor: 'system', action: 'lock', entity: 'period', details: { through: u.lockDate, was: s.lockDate, by: closesOf(s) === 'vat' ? 'VAT period end, by itself' : 'month end, by itself' } });
   }
   if (u) return u.lockDate;
   // Another request locked it first (this one waited on the row): the lock as it is now.
@@ -164,16 +187,14 @@ export async function applyMonthLock(db: Db): Promise<string | null> {
  * shows (a look changes nothing; the next change made locks it: applyMonthLock).
  */
 export async function effectiveLock(db: Db): Promise<string | null> {
-  const [s] = await db<{ lockDate: string | null; monthEndMode: string; monthEndDay: number; monthLockedThrough: string | null; features: Record<string, boolean> | null }[]>`
-    select lock_date::text as lock_date, month_end_mode, month_end_day, month_locked_through::text as month_locked_through, features from settings where id`;
+  const s = await lockSettings(db);
   if (!s) return null;
-  if (s.monthEndMode !== 'auto' || !featureOn(s.features, 'sales')) return s.lockDate;
-  const due = monthLockDue(today(), s.monthEndDay);
-  if (s.monthLockedThrough && s.monthLockedThrough >= due) return s.lockDate;
+  const due = lockDueBySelf(s);
+  if (!due) return s.lockDate;
   return !s.lockDate || s.lockDate < due ? due : s.lockDate;
 }
 
-/** Refuse changes dated on or before the lock date (a closed month or year). */
+/** Refuse changes dated on or before the lock date (a closed month, VAT period or year). */
 export async function assertOpen(db: Db, ...dates: (string | null | undefined)[]): Promise<void> {
   const lock = await applyMonthLock(db);
   if (!lock) return;

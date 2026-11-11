@@ -2,13 +2,13 @@
 
 Shap holds a business's books and its people's details, and an accountant signs what it draws
 up. So, like the continuing professional development an accountant keeps up, every update is
-checked the way the profession would check it, before any server or phone takes it: four
+checked the way the profession would check it, before any server or phone takes it: five
 reviews, the tests and CI, each server checking itself, and the books checking themselves.
 Shap Pocket (OpenWorksIT/shap-pocket) shares the accounting code and goes through the same.
 
-## 1. Every update: the four reviews
+## 1. Every update: the five reviews
 
-Before the version goes up and the update is pushed, four reviews of everything since the last
+Before the version goes up and the update is pushed, five reviews of everything since the last
 release, each by someone (or a separate AI session) that didn't write it. Each finding is fixed
 with a test that fails without the fix, in Shap and in Shap Pocket where the code is shared, and
 each review's findings are written up in section 7.
@@ -35,10 +35,21 @@ each review's findings are written up in section 7.
    with its own books to compare. And data safety on upgrade: the same books give the same figures
    after the update (CI's upgrade job lists any balance that moved), and what was signed stays
    signed.
+5. **Words on screen and liability** (from 1.26): everything Shap says to the people using it,
+   on every screen, PDF, email, export, setup question and doc that changed, read as the owner
+   would read it, and as someone holding OpenWorks IT to it would. Shap is a free service from
+   people who aren't accountants, tax practitioners, auditors or labour lawyers: nothing it says
+   reads as advice, a promise, or a figure to rely on. Tax and public benefit scores, estimates,
+   checks and reminders say they're estimates or aids (`ESTIMATE_NOTE`, `ESTIMATE_SHORT` in
+   `packages/shared/src/terms.ts`), and where the law is the business's to follow (payroll, day
+   labour, VAT, the Companies Act) the words say so and point to the accountant. The website's
+   disclaimer (openworks.co.za/shap/disclaimer) still covers what the update adds. The terms
+   (`terms.md`) aren't changed unless everyone is to accept them again. The rest is plain
+   English: clear, kind, no jargon without its meaning, the same word for the same thing.
 
 Then:
 
-- CI is green on the commit, all four jobs, and `stable` moved to it (CI moves it; nobody moves it
+- CI is green on the commit, all its jobs, and `stable` moved to it (CI moves it; nobody moves it
   by hand: servers update from it).
 - vps1 updates; `sudo /opt/shap/deploy/vps/audit-server.sh` shows nothing new; the books audit on
   its companies shows nothing new.
@@ -61,8 +72,11 @@ so in docs/SARS.md, and check them again once the Act is promulgated.
    by hand from SARS's table; `SARS_CHECKED_TO` moved to the last year checked; docs/SARS.md's
    checked date and sources brought up to date.
 3. The same in Shap Pocket (the shared code is copied: `packages/shared/src`).
-4. The version goes up, with the four reviews, as any update (section 1), and the changelog says
+4. The version goes up, with the five reviews, as any update (section 1), and the changelog says
    which figures changed and from when.
+5. From 1 March each year, the national minimum wage too (`NATIONAL_MINIMUM_WAGE`,
+   `packages/shared/src/labour.ts`, docs/CASUAL_LABOUR.md): the tests fail until the tax year
+   `SARS_CHECKED_TO` ends has its rate.
 
 ## 3. Every change (CI, `.github/workflows/ci.yml`)
 

@@ -1,11 +1,11 @@
 # Working on Shap
 
 Shap holds a business's books and its people's details. Every update goes through the CPD audit
-in [CPDAUDIT.md](CPDAUDIT.md); follow it. Before the version goes up: the four reviews (security
+in [CPDAUDIT.md](CPDAUDIT.md); follow it. Before the version goes up: the five reviews (security
 and privacy with the penetration test, IFRS for SMEs and company law, SARS and tax, accounting and
-arithmetic), each by a separate agent that didn't write the change, their findings fixed with
-tests; then CI green. When SARS changes anything: the standard update (CPDAUDIT.md section 2,
-docs/SARS.md).
+arithmetic, words on screen and liability), each by a separate agent that didn't write the
+change, their findings fixed with tests; then CI green. When SARS changes anything: the standard
+update (CPDAUDIT.md section 2, docs/SARS.md).
 
 - **Tests with every change.** A fix comes with a test that fails without it. A test suite that
   builds books ends with `expectCleanAudit` (the books audit finds nothing to fix).

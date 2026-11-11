@@ -44,8 +44,9 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
   const [sales, setSales] = useState<boolean | null>(settings.features.sales ? true : null);
   const [inventory, setInventory] = useState<boolean | null>(settings.features.inventory ? true : null);
   const [statements, setStatements] = useState<boolean | null>(settings.features.statements ? true : null);
-  // Selling: how each month is closed (month end): by hand, or it locks itself on a day of the next month.
-  const [monthEnd, setMonthEnd] = useState<'manual' | 'auto' | null>(settings.features.sales ? settings.monthEndMode ?? null : null);
+  // Selling: how each month is closed (month end); a VAT vendor that doesn't sell, each VAT period:
+  // by hand, or it locks itself on a day of the month after.
+  const [monthEnd, setMonthEnd] = useState<'manual' | 'auto' | null>(settings.features.sales || settings.vatRegistered ? settings.monthEndMode ?? null : null);
   const [monthEndDay, setMonthEndDay] = useState(settings.monthEndDay ?? 7);
   const extra = (k: keyof SetupExtras) => (v: boolean) => setExtras((x) => ({ ...x, [k]: v }));
   const [error, setError] = useState('');
@@ -80,7 +81,7 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
         : { payeRegistered: null, payeRef: '', uifRegistered: null, uifRef: '', sdl: false };
       const { logoId: _l, termsAcceptedAt: _t, ...rest } = { ...f, ...employer, features, industry, usageConsent: Boolean(consent), marketConsent: market, marketNoticeSeen: true, setupDone: true, termsVersion: TERMS_VERSION, fyEndMonth: kind.febYearEnd ? 2 : f.fyEndMonth, turnoverTax: kind.turnoverTax && f.turnoverTax } as Settings & { logoId: string | null };
       await api('/api/settings', { method: 'PUT', body: rest });
-      if (sales && monthEnd) await api('/api/periods/month-end', { method: 'PUT', body: { mode: monthEnd, day: monthEndDay } });
+      if ((sales || f.vatRegistered) && monthEnd) await api('/api/periods/month-end', { method: 'PUT', body: { mode: monthEnd, day: monthEndDay } });
       setTone(f.tone);
       // Moving from another package: straight to the screen that brings the books across.
       if (movingIn) navigate('/move-in', { replace: true });
@@ -273,7 +274,7 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
                 {sdl === 'no' && <p className="xs muted">That’s right while your total payroll is expected to stay under R500 000 over the next 12 months. Once it isn’t, register and switch SDL on in Settings.</p>}
               </div>
             )}
-            <YesNo q="Do you use casual labour, paid by the day?" hint="Log the days they work on each job and what you’ve paid them." value={casual} onChange={setCasual} />
+            <YesNo q="Do you use casual labour, paid by the day?" hint="Log the days they work on each job and what you’ve paid them. Shap keeps the record; UIF, tax and the minimum wage for them are yours to handle (someone working 24 hours a month or more is your employee in the law): Workers says more." value={casual} onChange={setCasual} />
             {paysOut && dividendsAlways && (
               <p className="xs muted panel panel-pad">
                 {kind.the.charAt(0).toUpperCase() + kind.the.slice(1)} declares every {payoutWord(f.businessType)} it pays to SARS (the DTR01 and DTR02, by the end of the next month), so the {payoutWord(f.businessType)}s section is on, ready for when you pay one.
@@ -329,7 +330,20 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
                 )}
               </div>
             )}
-            {nav(sales === false || (sales === true && inventory !== null && monthEnd !== null))}
+            {sales === false && f.vatRegistered && (
+              <div className="stack-sm">
+                <p className="strong">VAT period end: how should each VAT period be closed?</p>
+                <p className="small muted">Once a VAT period is closed, nothing dated in it can change, so what the VAT201 was worked out from stays as it was checked. Someone you allow can reopen it, with the reason, to put something right.</p>
+                <Choice on={monthEnd === 'manual'} onClick={() => setMonthEnd('manual')} title="I’ll close each VAT period myself" hint="Accounts → Locks shows the period’s figures and a button to close it. Home reminds you while the last one is still open." />
+                <Choice on={monthEnd === 'auto'} onClick={() => setMonthEnd('auto')} title="Close it by itself" hint="Each VAT period locks itself on a day of the month after it ends, whether or not it’s been checked. You can still close one earlier." />
+                {monthEnd && (
+                  <Field label={monthEnd === 'auto' ? 'Day of the month after the period that it locks' : 'Day of the month after the period to remind me'} hint="1 to 28: before the VAT201 is due (the last business day of that month on eFiling)">
+                    {(p) => <input {...p} className="input" type="number" min={1} max={28} value={monthEndDay} onChange={(e) => setMonthEndDay(Math.min(28, Math.max(1, Number(e.target.value) || 1)))} style={{ width: 100 }} />}
+                  </Field>
+                )}
+              </div>
+            )}
+            {nav((sales === false && (!f.vatRegistered || monthEnd !== null)) || (sales === true && inventory !== null && monthEnd !== null))}
           </Q>
         )}
 

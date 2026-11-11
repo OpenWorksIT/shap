@@ -1,11 +1,43 @@
 /**
  * Locked periods (docs/LOCKS.md): everything dated on or before the lock date is closed, for
  * everyone. Someone who may close and reopen periods (the "books.lock" task) reopens it with a
- * reason, puts it right, and locks it again. A business that sells closes each month (month end),
- * by hand or on a day of the next month by itself; one that doesn't closes its years.
+ * reason, puts it right, and locks it again. A business that sells closes each month (month end);
+ * a VAT vendor that doesn't sell, each VAT period: by hand, or on a day of the month after by
+ * itself. Any other business closes its years.
  */
-import { addMonths, monthEnd } from './dates.js';
+import { addDays, addMonths, monthEnd } from './dates.js';
+import { vatPeriod, type VatCategory } from './tax.js';
 import { z } from 'zod';
+
+/** What a business closes as it goes: each month (it sells), each VAT period (a VAT vendor), or each year. */
+export type ClosesBy = 'month' | 'vat' | 'year';
+export function closesBy(s: { sells: boolean; vatRegistered: boolean }): ClosesBy {
+  return s.sells ? 'month' : s.vatRegistered ? 'vat' : 'year';
+}
+
+/** The period a date is in, for a business that closes by month or VAT period. */
+export function lockPeriod(on: string, closes: Exclude<ClosesBy, 'year'>, vatCategory: VatCategory, fyEndMonth: number): { start: string; end: string } {
+  return closes === 'month' ? { start: `${on.slice(0, 8)}01`, end: monthEnd(on) } : vatPeriod(on, vatCategory, fyEndMonth);
+}
+
+/**
+ * The last period end that has locked itself by `today` (locking on `day` of the month after the
+ * period ends): a month end, or a VAT period's.
+ */
+export function periodLockDue(today: string, day: number, closes: Exclude<ClosesBy, 'year'>, vatCategory: VatCategory, fyEndMonth: number): string {
+  const m = monthLockDue(today, day);
+  if (closes === 'month') return m;
+  // The last VAT period ended on or before that month end.
+  const p = vatPeriod(m, vatCategory, fyEndMonth);
+  return p.end === m ? m : vatPeriod(addDays(p.start, -1), vatCategory, fyEndMonth).end;
+}
+
+/** When the next period locks itself, and which period end that is. */
+export function nextPeriodLock(today: string, day: number, closes: Exclude<ClosesBy, 'year'>, vatCategory: VatCategory, fyEndMonth: number): { on: string; through: string } {
+  if (closes === 'month') return nextMonthLock(today, day);
+  const through = vatPeriod(addDays(periodLockDue(today, day, closes, vatCategory, fyEndMonth), 1), vatCategory, fyEndMonth).end;
+  return { on: `${addMonths(`${through.slice(0, 8)}01`, 1).slice(0, 8)}${String(day).padStart(2, '0')}`, through };
+}
 
 export const MONTH_END_MODES = ['manual', 'auto'] as const;
 export type MonthEndMode = (typeof MONTH_END_MODES)[number];
