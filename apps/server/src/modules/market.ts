@@ -68,6 +68,8 @@ async function send(url: string, body: unknown): Promise<boolean> {
  * standard items is marked done with nothing sent.
  */
 export async function shareMarketRates(ctx: Ctx, db: Db, log: { warn: (o: object, m: string) => void }): Promise<'off' | 'done' | 'sent' | 'nothing' | 'failed'> {
+  // A test server's books are made up: their prices never go anywhere (docs/TEST_SERVER.md).
+  if (ctx.config.TEST_SERVER) return 'off';
   const s = await getSettings(db);
   // On unless switched off, but nothing goes until the owner has been told (setup, or Home's note).
   if (!s.marketConsent || !s.marketNoticeSeen || !s.setupDone) return 'off';

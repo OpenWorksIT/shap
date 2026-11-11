@@ -9,6 +9,7 @@ import type { Settings } from './lib/types';
 import { Loading } from './components/ui';
 import { SessionProvider, useSession } from './lib/session';
 import { LoginPage } from './pages/Login';
+import { TestServerBanner } from './components/TestServer';
 
 const HomePage = lazy(() => import('./pages/Home'));
 const LogPage = lazy(() => import('./pages/Log'));
@@ -59,7 +60,13 @@ function Authed() {
   const can = (t: Task) => user.role === 'owner' || (user.access ?? []).includes(t);
   const may = screensFor(user, can, has, settings.businessType);
   // New books: the owner answers the first-run questions; everyone else waits for that.
-  if (!settings.setupDone && user.role === 'owner') return <WelcomePage canRestore={false} />;
+  if (!settings.setupDone && user.role === 'owner')
+    return (
+      <>
+        <TestServerBanner />
+        <WelcomePage canRestore={false} />
+      </>
+    );
   // The terms of use, accepted at the end of setup: again whenever the published terms change.
   if (user.role === 'owner' && settings.termsVersion !== TERMS_VERSION) return <TermsGate />;
   return (

@@ -3,6 +3,23 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.25.0 (11 November 2026)
+
+A test server: made-up books for any kind of business, to try Shap out or check its figures.
+
+- **Test server** (switched on on the server, `TEST_SERVER=true`; see docs/TEST_SERVER.md). Set it
+  up as any kind of business, then Home → *Fill with made-up data*: the last full financial year
+  and this one to date, captured through Shap's own screens as the owner would have: clients,
+  quotes, jobs and invoices, payments (some late, some never), costs with made-up slips, and
+  whatever the setup uses (payroll and EMP201s, casual workers, counter sales, the till and stock,
+  supplier bills, the time tracker, the travel logbook, pro-formas, VAT201s paid, provisional tax,
+  dividends, distributions or drawings). The same setup always gets the same books. *Wipe and start
+  again* goes back to the setup questions; sign-ins stay. A banner on every screen says it's a test
+  server, and nothing is shared from it (no anonymous prices or usage notes). On every other Shap
+  this does nothing.
+- `add-company.sh` takes `--test-server` to set one up next to your own Shap, and now adds its
+  companies to a `COMPOSE_FILE` that's already set (for `edge.yml`, say) instead of leaving them out.
+
 ## 1.24.0 (10 November 2026)
 
 Every sale is a tax invoice, and the books lock month by month for a business that sells.

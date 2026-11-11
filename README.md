@@ -89,6 +89,8 @@ The name is the shaka: thumb and pinky out, *shap, all good*.
   to the tracker's client codes with a list you check first.
 - **More than one company.** A friend's business can run on the same server with its own
   database, login and address ([deployment](docs/deployment.md#another-company-on-the-same-server)).
+  A **test server** fills its books with a year and more of made-up data for any setup, for trying
+  Shap out or checking its figures, and wipes them again ([docs/TEST_SERVER.md](docs/TEST_SERVER.md)).
   A **company file** carries a whole setup (trading names, logos, clients, agreed year ends)
   from one server to another.
 

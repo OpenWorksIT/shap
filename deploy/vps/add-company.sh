@@ -3,8 +3,12 @@
 # sharing the Postgres and Caddy that are already running. Nothing is shared between companies
 # except the machine: each one's data sits in its own database, under its own database login.
 #
-#   ./add-company.sh <short-name> <domain>
+#   ./add-company.sh <short-name> <domain> [--test-server]
 #   ./add-company.sh friend shap.friendsbuilding.co.za
+#   ./add-company.sh test shaptest.yourcompany.co.za --test-server
+#
+# --test-server: a Shap for trying Shap out with made-up books (docs/TEST_SERVER.md). Its owner
+# fills the books with made-up data for any setup and wipes them again; nothing is shared from it.
 #
 # Point the domain's DNS A record at this VPS first, so Caddy can get its certificate.
 # SPDX-License-Identifier: AGPL-3.0-or-later
@@ -13,6 +17,12 @@ cd "$(dirname "$0")"
 
 SLUG="${1:-}"
 DOMAIN="${2:-}"
+TEST_SERVER=false
+case "${3:-}" in
+  '') ;;
+  --test-server) TEST_SERVER=true ;;
+  *) echo "Unknown option: $3 (the only one is --test-server)" >&2; exit 1 ;;
+esac
 if ! [[ "$SLUG" =~ ^[a-z][a-z0-9]{1,19}$ ]] || ! [[ "$DOMAIN" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$ ]]; then
   # The domain is validated (not just non-empty) because it's written into an env file and the
   # Caddy config: a newline or stray character could inject a second DATABASE_URL or a Caddy
@@ -51,6 +61,14 @@ SESSION_TTL_HOURS=720
 # SMTP_URL=smtp://user:password@smtp.example.co.za:587
 # MAIL_FROM=Their Company <accounts@theircompany.co.za>
 ENV
+if [ "$TEST_SERVER" = true ]; then
+  cat >> "companies/$SLUG.env" <<ENV
+# A test server: made-up books only (docs/TEST_SERVER.md). Nothing goes from it to OpenWorks:
+# no anonymous prices, usage notes or feedback. Leave SMTP_URL unset: its clients are made up.
+TEST_SERVER=true
+COLLECTOR_URL=off
+ENV
+fi
 umask 022
 
 # 3. Its own app container (the same image as yours: updates reach every company at once).
@@ -86,7 +104,12 @@ cat >> companies.yml <<YML
       db:
         condition: service_healthy
 YML
-grep -q '^COMPOSE_FILE=' .env || printf '\n# Your company plus the ones add-company.sh added.\nCOMPOSE_FILE=docker-compose.yml:companies.yml\n' >> .env
+if grep -q '^COMPOSE_FILE=' .env; then
+  # Already set (for edge.yml, say): companies.yml goes on the end of it, once.
+  grep -q '^COMPOSE_FILE=.*companies\.yml' .env || sed -i '/^COMPOSE_FILE=/s/$/:companies.yml/' .env
+else
+  printf '\n# Your company plus the ones add-company.sh added.\nCOMPOSE_FILE=docker-compose.yml:companies.yml\n' >> .env
+fi
 
 # 4. Its web address.
 mkdir -p sites

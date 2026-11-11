@@ -1848,6 +1848,23 @@ button.list-row {
   border-bottom: 1px solid var(--line, rgba(0, 0, 0, 0.08));
 }
 
+/* A test server (docs/TEST_SERVER.md): made-up books, on every screen. */
+.test-banner {
+  position: sticky;
+  top: 0;
+  z-index: 58;
+  margin: 0 0 12px;
+  border-radius: 10px;
+  padding: 6px 16px;
+  font-size: var(--fs-sm);
+  background: #6b3fa0;
+  color: #fff;
+  text-align: center;
+}
+.test-panel {
+  border-left: 4px solid #6b3fa0;
+}
+
 /* The demo company is showing: made-up figures. */
 .demo-banner {
   position: sticky;

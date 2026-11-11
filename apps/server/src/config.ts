@@ -52,6 +52,12 @@ const envSchema = z.object({
   MAIL_FROM: z.string().default('Shap <no-reply@example.com>'),
   /** Largest upload (tracker import, receipt photo), in megabytes. */
   UPLOAD_MB: z.coerce.number().int().min(1).max(100).default(25),
+  /**
+   * A test server (docs/TEST_SERVER.md): made-up books only. Its owner can fill the books with a
+   * year and more of made-up data for the setup chosen, and wipe them to start again; nothing is
+   * shared from it (no anonymous prices or usage notes). Set on the server, never from the app.
+   */
+  TEST_SERVER: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
 });
 
 export type Config = Omit<z.infer<typeof envSchema>, 'MFA_REQUIRED'> & {

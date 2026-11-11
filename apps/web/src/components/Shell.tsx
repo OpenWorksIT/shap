@@ -1,5 +1,6 @@
 import { Notices } from './Notices';
 import { ScreenClip } from './HowItWorks';
+import { TestServerBanner } from './TestServer';
 import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { ROLE_LABELS } from '@shap/shared';
@@ -86,6 +87,7 @@ export function Shell({ children }: { children: ReactNode }) {
       </header>
 
       <main className="main" id="main">
+        <TestServerBanner />
         <Notices />
         <ScreenClip />
         {children}

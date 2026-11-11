@@ -69,6 +69,8 @@ describe('every door, for every task', () => {
   const ANYONE = new Set([
     'GET /api/reference', 'GET /api/live', 'GET /api/notice', 'GET /api/dashboard', 'GET /api/clients',
     'GET /api/workers', 'GET /api/costs/suppliers', 'GET /api/costs/:id', 'GET /api/costs/vat-in', 'GET /api/attachments/:id', 'POST /api/feedback',
+    // Whether this is a test server (the banner on every screen): no figures.
+    'GET /api/test-server',
   ]);
 
   it('gives every route a door: some roles, some tasks, or anyone signed in on purpose', () => {

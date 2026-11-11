@@ -122,6 +122,15 @@ Backups include every company's database. To take a company off the server, stop
 (`docker compose rm -sf app-friend`), delete its block from `companies.yml`, its `sites/friend.caddy`
 and `companies/friend.env`, and drop the database once you have a backup.
 
+### A test server
+
+A Shap with made-up books, for trying Shap out or checking its figures: the same command with
+`--test-server` (see [TEST_SERVER.md](TEST_SERVER.md)).
+
+```bash
+sudo ./add-company.sh test shaptest.yourcompany.co.za --test-server
+```
+
 ## Other apps on the same server
 
 Shap's Caddy can also be the front door for other apps on the VPS (on vps1: Steady), so they

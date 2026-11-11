@@ -425,7 +425,8 @@ export function registerFeedbackRoutes(app: FastifyInstance, ctx: Ctx): void {
 
 /** This Shap's own anonymous note, when its owner agreed (sent to OpenWorks, or kept if it is OpenWorks'). */
 export async function reportUsage(ctx: Ctx, s: { usageConsent: boolean; installId: string; businessType: BusinessType; industry: string; features: string[]; vatRegistered: boolean; tone: 'casual' | 'formal' }, log: { warn: (o: object, m: string) => void }): Promise<boolean> {
-  if (!s.usageConsent) return false;
+  // A test server's setups are made up: they aren't counted (docs/TEST_SERVER.md).
+  if (!s.usageConsent || ctx.config.TEST_SERVER) return false;
   const note = { app: 'shap' as const, version: appVersion(), installId: s.installId, platform: 'server', businessType: s.businessType, industry: s.industry, features: s.features, vatRegistered: s.vatRegistered, tone: s.tone };
   const { installId, ...kept } = note;
   if (ctx.config.COLLECT) {

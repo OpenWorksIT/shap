@@ -9,6 +9,7 @@ import { ApiError } from '../lib/api';
 import { reminderToast, sendReminder, type Remindable } from '../lib/reminders';
 import { hoursLabel, minutesSince } from '../lib/time';
 import { MarketNote } from '../components/MarketShare';
+import { TestServerPanel, useTestServer } from '../components/TestServer';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
 import { screensFor } from '../lib/screens';
@@ -114,6 +115,8 @@ function OwnerHome() {
   const logs = screensFor(user, can, has, settings.businessType)['/log'];
   const { data, error, reload } = useApi<Dashboard>('/api/dashboard');
   const toast = useToast();
+  // A test server shares nothing: no note about sharing prices.
+  const [testServer] = useTestServer();
   useMinuteTick();
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   if (!data) return <Loading />;
@@ -357,6 +360,7 @@ function OwnerHome() {
         }
       />
 
+      <TestServerPanel />
       <div className="kpis">
         <Kpi label={`Invoiced ${data.financialYear.label} to date`} value={<Money cents={data.yearToDate.incomeCents} whole />} sub={`${data.thisMonth.label}: ${formatZar(data.thisMonth.incomeCents, { cents: false })}`} />
         <Kpi label="Gross profit" value={<Money cents={data.yearToDate.grossProfitCents} whole />} sub={`${formatPercent(ytdMargin)} of invoiced`} />
@@ -369,7 +373,7 @@ function OwnerHome() {
         />}
       </div>
 
-      <MarketNote />
+      {!testServer?.on && <MarketNote />}
       {needs.length > 0 && <div className="stack" style={{ gap: 8 }}>{needs}</div>}
 
       {isOwner && has('reminders') && (data.overdue ?? []).length > 0 && <Reminders invoices={data.overdue!} today={data.today} onSent={reload} />}

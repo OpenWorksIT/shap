@@ -55,6 +55,7 @@ import { LiveBus } from './lib/live.js';
 import { registerBankRoutes } from './modules/bank/routes.js';
 import { appVersion, registerSystemRoutes } from './modules/system.js';
 import { DEMO_COOKIE, registerDemoRoutes } from './modules/demo.js';
+import { isInternal, registerTestServerRoutes } from './modules/test-server.js';
 import { dbScope, DemoUnavailable, inDemo, routedDb } from './db/routing.js';
 import { registerStatementRoutes } from './modules/statements.js';
 import { registerCompanyFileRoutes } from './modules/company-file.js';
@@ -132,7 +133,8 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   app.addHook('onResponse', async (req, reply) => {
     if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS' || reply.statusCode >= 400) return;
     const p = routePath(req);
-    if (!p.startsWith('/api/') || p.startsWith('/api/auth') || p.startsWith('/api/feedback') || p.startsWith('/api/demo')) return;
+    // The test server's filling makes thousands of saves: one "changed" when it's done is enough.
+    if (!p.startsWith('/api/') || p.startsWith('/api/auth') || p.startsWith('/api/feedback') || p.startsWith('/api/demo') || isInternal(req)) return;
     bus.publish({ type: 'changed', by: req.user?.id ?? null, demo: req.cookies?.shap_demo === '1', at: Date.now() });
   });
 
@@ -235,6 +237,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
 
   registerAuth(app, ctx);
   registerDemoRoutes(app, ctx);
+  registerTestServerRoutes(app, ctx);
   registerSettingsRoutes(app, ctx);
   registerDashboardRoutes(app, ctx);
   registerClientRoutes(app, ctx);
