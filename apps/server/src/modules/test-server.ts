@@ -122,7 +122,7 @@ export function registerTestServerRoutes(app: FastifyInstance, ctx: Ctx, bus: Li
     const user = userOrThrow(req);
     if (req.cookies?.[DEMO_COOKIE] === '1') throw badRequest('Leave the demo company first');
     // (A second request while this one runs never gets here: it's held back above.)
-    if (busy) throw badRequest('The books are already being filled');
+    if (busy) throw badRequest(busy === 'wiping' ? 'The books are being wiped: wait till that’s done' : 'The books are already being filled');
     busy = 'filling';
     let started = false;
     try {
@@ -186,7 +186,7 @@ export function registerTestServerRoutes(app: FastifyInstance, ctx: Ctx, bus: Li
     if (!on) throw notHere();
     const user = userOrThrow(req);
     if (req.cookies?.[DEMO_COOKIE] === '1') throw badRequest('Leave the demo company first');
-    if (busy) throw badRequest('Wait till the books are filled, then wipe them');
+    if (busy) throw badRequest(busy === 'wiping' ? 'The books are already being wiped' : 'Wait till the books are filled, then wipe them');
     busy = 'wiping';
     try {
       const { confirm, password } = parse(z.object({ confirm: z.string().max(20), password: z.string().max(200).optional() }), req.body);

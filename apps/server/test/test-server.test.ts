@@ -165,16 +165,22 @@ describe('test server: filling, refusing, wiping', () => {
 
   it('fills new books in the background, holding other changes back till it’s done', async () => {
     // A business that sells, its months set to lock by themselves (setup's own answer, through the API).
-    const owner = await setUp(env, { businessType: 'sole_prop', industry: 'consulting', workflow: 'quote_invoice', sales: true, monthEnd: 'auto', extras: { hourly: true } });
+    const answers: Answers = { businessType: 'sole_prop', industry: 'consulting', workflow: 'quote_invoice', sales: true, monthEnd: 'auto', extras: { hourly: true } };
+    let owner = await setUp(env, answers);
     expect(await owner.get('/api/test-server')).toMatchObject({ on: true, setupDone: true, empty: true });
-    // Two at once (two tabs, a retry), and a wipe with them: exactly one gets going.
+    // Two at once (two tabs, a retry), and a wipe with them: exactly one gets going, the others are told why.
     const tries = await Promise.all([
       owner.call({ method: 'POST', url: '/api/test-server/populate', payload: {} }),
       owner.call({ method: 'POST', url: '/api/test-server/populate', payload: {} }),
       owner.call({ method: 'POST', url: '/api/test-server/wipe', payload: { confirm: 'WIPE', password: 'test-password-1' } }),
     ]);
     expect(tries.map((t) => t.statusCode).filter((c) => c === 200)).toHaveLength(1);
-    expect(tries[0]!.statusCode === 200 || tries[1]!.statusCode === 200).toBe(true);
+    for (const t of tries.filter((x) => x.statusCode !== 200)) expect(t.json().error).toMatch(tries[2]!.statusCode === 200 ? /being wiped|Set the business up first/ : /being filled|Wait till the books are filled/);
+    if (tries[2]!.statusCode === 200) {
+      // The wipe got there first (it can, on a busy machine): set up again, and fill.
+      owner = await setUp(env, answers);
+      expect((await owner.call({ method: 'POST', url: '/api/test-server/populate', payload: {} })).statusCode).toBe(200);
+    }
     // While it fills: changes wait (even one claiming to be the filling's own), and it won't start twice.
     const held = await owner.call({ method: 'POST', url: '/api/clients', payload: { name: 'Squeezed in (made up)' }, headers: { 'x-shap-internal': 'guess' } });
     expect(held.statusCode).toBe(423);
@@ -212,10 +218,11 @@ describe('test server: filling, refusing, wiping', () => {
       expect((await owner.call({ method: 'POST', url: '/api/test-server/wipe', payload: { confirm: 'WIPE', password } })).statusCode).toBeGreaterThanOrEqual(400);
       expect(await owner.get('/api/test-server')).toMatchObject({ empty: false });
     }
+    const wipes = (await env.sql`select 1 from audit_log where action = 'test_wipe'`).length;
     await owner.post('/api/test-server/wipe', { confirm: 'wipe', password: 'test-password-1' });
     expect(await owner.get('/api/test-server')).toMatchObject({ on: true, setupDone: false, empty: true });
     expect((await env.sql`select count(*)::int as n from users`)[0]!.n).toBe(3);
-    expect((await env.sql`select 1 from audit_log where action = 'test_wipe'`).length).toBe(1);
+    expect((await env.sql`select 1 from audit_log where action = 'test_wipe'`).length).toBe(wipes + 1);
     // Set up again as something else: new books, ready to fill.
     const again = await setUp(env, { businessType: 'company', industry: 'design', vat: true, workflow: 'quote_invoice' });
     expect((await again.get('/api/test-server')).empty).toBe(true);
