@@ -133,7 +133,7 @@ export async function getSettings(db: Db): Promise<SettingsRow> {
   return s!;
 }
 
-interface LockSettings {
+export interface LockSettings {
   lockDate: string | null;
   monthEndMode: string;
   monthEndDay: number;
@@ -156,6 +156,35 @@ function lockDueBySelf(s: LockSettings): string | null {
   if (s.monthEndMode !== 'auto' || closes === 'year') return null;
   const due = periodLockDue(today(), s.monthEndDay, closes, s.vatCategory, s.fyEndMonth);
   return s.monthLockedThrough && s.monthLockedThrough >= due ? null : due;
+}
+
+/** How the books close as they stand: for comparing before and after a settings change. */
+export async function lockSettingsNow(db: Db): Promise<LockSettings | undefined> {
+  return lockSettings(db);
+}
+
+/**
+ * After a change to what decides how the books close (Sales, VAT registration, the VAT category,
+ * the year end), within the same transaction: a new way of closing starts by hand, for the owner to
+ * choose again under Accounts → Locks (a month end that locked by itself was never a choice about
+ * VAT periods); the same VAT periods, differently cut, carry on by themselves from the next one's
+ * day. Either way nothing locks at once, and a reopen stays open. Returns what changed, for the log.
+ */
+export async function lockAfterSettings(db: Db, before: LockSettings): Promise<Record<string, unknown> | null> {
+  const after = await lockSettings(db);
+  if (!after) return null;
+  const was = closesOf(before);
+  const now = closesOf(after);
+  if (was !== now) {
+    if (after.monthEndMode === 'auto') await db`update settings set month_end_mode = 'manual' where id`;
+    return { closes: { was, now }, ...(after.monthEndMode === 'auto' ? { monthEnd: 'by hand from now: choose again under Accounts → Locks' } : {}) };
+  }
+  if (now === 'vat' && after.monthEndMode === 'auto' && (before.vatCategory !== after.vatCategory || before.fyEndMonth !== after.fyEndMonth)) {
+    const due = periodLockDue(today(), after.monthEndDay, 'vat', after.vatCategory, after.fyEndMonth);
+    await db`update settings set month_locked_through = greatest(coalesce(month_locked_through, ${due}::date), ${due}::date) where id`;
+    return { vatPeriods: { was: before.vatCategory, now: after.vatCategory, fyEndMonth: after.fyEndMonth } };
+  }
+  return null;
 }
 
 /**

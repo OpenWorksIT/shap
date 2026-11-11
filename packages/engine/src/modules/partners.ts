@@ -19,7 +19,7 @@ import { requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db, Tx } from '../db/index.js';
 import { audit } from '../lib/audit.js';
-import { assertOpen, freshTotals, getSettings, isIsoDate, today } from '../lib/books.js';
+import { assertOpen, effectiveLock, freshTotals, getSettings, isIsoDate, today } from '../lib/books.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 
@@ -137,6 +137,7 @@ export function registerPartnerRoutes(app: FastifyInstance, ctx: Ctx): void {
   /** A year's profit, how it would be (or was) shared, and whether it has been. */
   app.get('/api/partners/profit-share', readers, async (req) => {
     const s = await getSettings(sql);
+    const lock = await effectiveLock(sql);
     const fy = yearFor(s.fyEndMonth, (req.query as { fyEnd?: string }).fyEnd);
     const partners = (await listPartners(sql)).filter((p) => p.active);
     const profitCents = await yearProfit(sql, fy.start, fy.end);
@@ -148,7 +149,7 @@ export function registerPartnerRoutes(app: FastifyInstance, ctx: Ctx): void {
       totalBp,
       parts: splitByShares(profitCents, partners).map((x) => ({ partnerId: x.partner.id, name: x.partner.name, shareBp: x.partner.shareBp, cents: x.cents })),
       posted: posted ?? null,
-      locked: Boolean(s.lockDate && s.lockDate >= fy.end),
+      locked: Boolean(lock && lock >= fy.end),
     };
   });
 

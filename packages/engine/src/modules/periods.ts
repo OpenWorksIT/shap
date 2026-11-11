@@ -6,13 +6,13 @@
  * month after it (lib/books.ts applyMonthLock). Any other business closes its years.
  */
 import type { App as FastifyInstance } from '../http.js';
-import { addDays, addMonths, featureOn, financialYear, lockInput, lockPeriod, monthEnd, monthEndInput, nextPeriodLock, periodLockDue, reopenInput, vatPeriod, type VatCategory } from '@shap/shared';
+import { addDays, addMonths, featureOn, financialYear, formatDate, lockInput, lockPeriod, monthEnd, monthEndInput, nextPeriodLock, periodLockDue, reopenInput, vatPeriod, type VatCategory } from '@shap/shared';
 import { requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
 import { applyMonthLock, closesOf, effectiveLock, getSettings, today } from '../lib/books.js';
-import { badRequest } from '../lib/errors.js';
+import { badRequest, HttpError } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 
 /** A year whose financial statements were approved and signed stays closed until they're reopened. */
@@ -86,13 +86,14 @@ export function registerPeriodRoutes(app: FastifyInstance, ctx: Ctx): void {
     else for (let p = lockPeriod(t, state.closes, s.vatCategory, s.fyEndMonth); spans.length < (state.closes === 'month' ? 12 : 8); p = lockPeriod(addDays(p.start, -1), state.closes, s.vatCategory, s.fyEndMonth)) spans.push(p);
     const periods = [];
     for (const { start, end } of spans) {
-      const [f] = await sql<{ salesCount: number; salesCents: string; refundsCents: string; invoicedCents: string; costsCents: string; bankOpen: number }[]>`
+      const [f] = await sql<{ salesCount: number; salesCents: string; refundsCents: string; invoicedCents: string; creditedCents: string; costsCents: string; bankOpen: number }[]>`
         select
           (select count(*)::int from documents where counter and status = 'issued' and issue_date between ${start}::date and ${end}::date) as sales_count,
           (select coalesce(sum(total_cents), 0) from documents where counter and status = 'issued' and issue_date between ${start}::date and ${end}::date) as sales_cents,
           (select coalesce(sum(rf.amount_cents), 0) from refunds rf join documents cn on cn.id = rf.credit_note_id join documents s on s.id = cn.credited_invoice_id
              where s.counter and rf.date between ${start}::date and ${end}::date) as refunds_cents,
           (select coalesce(sum(total_cents), 0) from documents where kind = 'invoice' and not counter and status = 'issued' and issue_date between ${start}::date and ${end}::date) as invoiced_cents,
+          (select coalesce(sum(total_cents), 0) from documents where kind = 'credit_note' and status = 'issued' and issue_date between ${start}::date and ${end}::date) as credited_cents,
           (select coalesce(sum(amount_cents), 0) from costs where date between ${start}::date and ${end}::date) as costs_cents,
           (select count(*)::int from bank_lines l where l.date between ${start}::date and ${end}::date and not l.ignored
              and not exists (select 1 from bank_matches m where m.bank_line_id = l.id)) as bank_open`;
@@ -105,6 +106,7 @@ export function registerPeriodRoutes(app: FastifyInstance, ctx: Ctx): void {
         salesCents: Number(f!.salesCents),
         refundsCents: Number(f!.refundsCents),
         invoicedCents: Number(f!.invoicedCents),
+        creditedCents: Number(f!.creditedCents),
         costsCents: Number(f!.costsCents),
         bankOpen: f!.bankOpen,
       });
@@ -154,13 +156,35 @@ export function registerPeriodRoutes(app: FastifyInstance, ctx: Ctx): void {
   /** Month end (VAT period end): closed by hand, or each period locks itself on a day of the month after it. */
   app.put('/api/periods/month-end', { preHandler: requireRole('owner') }, async (req) => {
     const user = userOrThrow(req);
-    const { mode, day } = parse(monthEndInput, req.body);
+    const { mode, day, closeYears } = parse(monthEndInput, req.body);
     const before = await getSettings(sql);
     const closes = closesOf(before);
-    if (closes === 'year') throw badRequest('Month end is for a business that sells, or one registered for VAT (each VAT period): otherwise the books close by the year');
+    if (closes === 'year') throw badRequest('Month end is for a business with Sales switched on, and VAT period end for one registered for VAT. Other books are closed a year at a time, once your accountant has signed the year off.');
     // Switched to locking by itself: the periods due lock now, unless the books are reopened (then
     // from the next period's day, so what's being put right isn't closed under someone).
     const due = periodLockDue(today(), day, closes, before.vatCategory, before.fyEndMonth);
+    // Locking by itself now would close a year the accountant hasn't agreed yet, or whose statements
+    // aren't approved: their year-end journals would then need a reopen. Asked first.
+    if (mode === 'auto' && !closeYears) {
+      const reopened = before.relockDate && (!before.lockDate || String(before.relockDate) > String(before.lockDate));
+      const lock = await effectiveLock(sql);
+      const [first] = await sql<{ d: string | null }[]>`select min(date)::text as d from ledger`;
+      const open: string[] = [];
+      if (!reopened && first?.d) {
+        for (let end = financialYear(due, before.fyEndMonth).end; end >= financialYear(first.d, before.fyEndMonth).end; end = financialYear(addDays(financialYear(end, before.fyEndMonth).start, -1), before.fyEndMonth).end) {
+          if (end > due || (lock && end <= lock)) continue;
+          const [done] = await sql`select 1 from year_ends where fy_end = ${end}::date union all select 1 from financial_statements where fy_end = ${end}::date and status = 'approved' limit 1`;
+          if (!done) open.push(end);
+        }
+      }
+      if (open.length)
+        throw new HttpError(
+          400,
+          `Locking by itself from now closes the year to ${open.map((e) => formatDate(e)).join(' and the year to ')}, not yet agreed with your accountant or approved: their year-end journals (the tax, their adjustments) would need a reopen. Lock by itself anyway, or close each ${closes === 'vat' ? 'VAT period' : 'month'} by hand until the year's done.`,
+          'closes_year',
+          { years: open },
+        );
+    }
     await sql`update settings set month_end_mode = ${mode}, month_end_day = ${day}, updated_at = now(),
       month_locked_through = case when ${mode} = 'auto' and relock_date is not null and (lock_date is null or relock_date > lock_date)
         then greatest(coalesce(month_locked_through, ${due}::date), ${due}::date) else month_locked_through end

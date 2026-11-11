@@ -45,6 +45,7 @@ interface Dashboard {
   /** This version's SARS tables were checked up to this year end, before the tax year we're in. */
   sarsCheckedTo?: string | null;
   /** For whoever may lock the books: month end due (last month still open), or the books reopened. */
+  sdlLine?: { payrollCents: number; dayWagesCents: number } | null;
   periods?: { monthDue: string | null; closes?: 'month' | 'vat' | 'year'; reopened: { relockDate: string; reason: string } | null; lockDate: string | null } | null;
   bankCents: number;
   ownerLoanCents: number;
@@ -121,7 +122,7 @@ function OwnerHome() {
         <span className="grow">
           {data.periods.closes === 'vat' ? (
             <>
-              <strong>VAT period end</strong>: the VAT period to {formatDate(data.periods.monthDue)} is still open. Check it over and close it before the VAT201.
+              <strong>VAT period end</strong>: the VAT period ending {formatDate(data.periods.monthDue)} is still open. Check it over and close it before you work out its VAT201.
             </>
           ) : (
             <>
@@ -134,6 +135,16 @@ function OwnerHome() {
       </Link>
     ),
     // This version's SARS tables end before the tax year we're in (SARS_CHECKED_TO).
+    data.sdlLine && (
+      <Link key="sdl" to="/settings?tab=sections" className="attention">
+        <Icon name="alert" size={18} />
+        <span className="grow">
+          <strong>SDL may be due</strong>: over the last 12 months you paid employees about {formatZar(data.sdlLine.payrollCents + data.sdlLine.dayWagesCents, { cents: false })} (salaries {formatZar(data.sdlLine.payrollCents, { cents: false })}, day wages {formatZar(data.sdlLine.dayWagesCents, { cents: false })}), over R500 000. Once you expect that, SDL (1%) applies: register with SARS, then switch SDL on in Settings. Worked out from what you’ve captured, not advice: check with your accountant.
+        </span>
+        Settings
+        <Icon name="chevronRight" size={16} />
+      </Link>
+    ),
     data.sarsCheckedTo && (
       <div key="sars-tables" className="attention">
         <Icon name="alert" size={18} />

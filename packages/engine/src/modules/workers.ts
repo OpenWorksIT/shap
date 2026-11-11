@@ -1,5 +1,5 @@
 import type { App as FastifyInstance } from '../http.js';
-import { allocateInput, labourBatchInput, labourEntryInput, labourLooks, savingsInput, wagePaymentInput, workerInput, type WorkerKind } from '@shap/shared';
+import { addMonths, allocateInput, labourBatchInput, labourEntryInput, labourLooks, savingsInput, wagePaymentInput, workerInput, type WorkerKind } from '@shap/shared';
 import { z } from 'zod';
 import { requireRole, seesMoney, userOrThrow, type AuthUser } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -28,6 +28,11 @@ export function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/workers', { preHandler: requireRole() }, async (req) => {
     const user = userOrThrow(req);
     if (!seesMoney(user)) return sql`select id, name, kind, active from workers order by active desc, name`;
+    // This month and last by Shap's day (South Africa's), not the database's clock; days logged ahead aren't this month's.
+    const on = today();
+    const thisMonth = `${on.slice(0, 8)}01`;
+    const nextMonth = addMonths(thisMonth, 1);
+    const lastMonth = addMonths(thisMonth, -1);
     const rows = await sql<{ kind: string; dayRateCents: number; daysThisMonth: number; daysLastMonth: number }[]>`
       select w.*,
         coalesce(e.earned, 0)::bigint as earned_cents,
@@ -41,13 +46,11 @@ export function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx): void {
       left join lateral (select sum(wage_cents + allowance_cents) as earned, max(date) as last_date from labour_entries where worker_id = w.id) e on true
       left join lateral (select sum(amount_cents) as paid from wage_payments where worker_id = w.id) p on true
       left join lateral (select sum(amount_cents) as held from worker_savings where worker_id = w.id) sv on true
-      left join lateral (select sum(days) as days from labour_entries where worker_id = w.id and date >= date_trunc('month', current_date)) m on true
-      left join lateral (select sum(days) as days from labour_entries where worker_id = w.id
-        and date >= date_trunc('month', current_date) - interval '1 month' and date < date_trunc('month', current_date)) lm on true
+      left join lateral (select sum(days) as days from labour_entries where worker_id = w.id and date >= ${thisMonth}::date and date < ${nextMonth}::date) m on true
+      left join lateral (select sum(days) as days from labour_entries where worker_id = w.id and date >= ${lastMonth}::date and date < ${thisMonth}::date) lm on true
       order by w.active desc, e.last_date desc nulls last, w.name
     `;
-    // Where the law starts to apply (docs/CASUAL_LABOUR.md): from the busier of this month and last.
-    const on = today();
+    // Where the law comes in (docs/CASUAL_LABOUR.md): from the busier of this month and last.
     return rows.map((w) => ({ ...w, law: labourLooks({ kind: w.kind as WorkerKind, dayRateCents: Number(w.dayRateCents), daysInMonth: Math.max(Number(w.daysThisMonth), Number(w.daysLastMonth)), on }) }));
   });
 

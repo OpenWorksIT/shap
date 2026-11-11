@@ -256,7 +256,7 @@ function RunDrawer({ id, onClose }: { id: string; onClose: () => void }) {
         </div>
         <p className="xs muted">
           Also paid by you: UIF {formatZar(total('uifEmployerCents'))}
-          {total('sdlCents') ? `, SDL ${formatZar(total('sdlCents'))}` : ''}. SARS is owed {formatZar(total('payeCents') + total('uifEmployeeCents') + total('uifEmployerCents') + total('sdlCents'))} for this month (EMP201), by the 7th.
+          {total('sdlCents') ? `, SDL ${formatZar(total('sdlCents'))}` : ''}. SARS is owed {formatZar(total('payeCents') + total('uifEmployeeCents') + total('uifEmployerCents') + total('sdlCents'))} for this pay run (on the EMP201), by the 7th of next month. Day wages logged under Workers aren’t in it.
         </p>
         {draft ? (
           <div className="row wrap">
@@ -446,7 +446,7 @@ function EmployeeDrawer({ employee: e, onClose, onSaved }: { employee: Employee 
 
 /* ---------------------------------------------------------------- SARS */
 interface SarsData {
-  emp201: { period: string; payeCents: number; uifCents: number; sdlCents: number; totalCents: number; paidCents: number; dueOn: string }[];
+  emp201: { period: string; payeCents: number; uifCents: number; sdlCents: number; totalCents: number; paidCents: number; dueOn: string; dayWagesCents?: number }[];
   dividendsTax: { period: string; dwtCents: number; paidCents: number; dueOn: string }[];
 }
 function Sars() {
@@ -457,7 +457,7 @@ function Sars() {
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   if (!data) return <Loading />;
   const today = todayIso();
-  const row = (kind: 'emp201' | 'dwt', period: string, label: string, total: number, paid: number, dueOn: string) => {
+  const row = (kind: 'emp201' | 'dwt', period: string, label: string, total: number, paid: number, dueOn: string, dayWages = 0) => {
     const owing = total - paid;
     return (
       <li key={`${kind}-${period}`} className="list-row">
@@ -466,6 +466,7 @@ function Sars() {
           <div className={`xs ${owing > 0 && dueOn < today ? 'warn-text' : 'muted'}`}>
             {owing > 0 ? `${formatZar(owing)} due by ${formatDate(dueOn)}${dueOn < today ? ' (late)' : ''}` : `Paid ${formatZar(paid)}`}
           </div>
+          {dayWages > 0 && <div className="xs muted">Payroll only: day wages logged under Workers this month ({formatZar(dayWages)}) aren’t in it. PAYE and UIF may be due on them too: check with your accountant.</div>}
         </span>
         {owing > 0 && (
           <button className="btn small" onClick={() => setPay({ kind, period, owing })}>
@@ -483,7 +484,7 @@ function Sars() {
       ) : (
         <section className="panel">
           <ul className="list">
-            {data.emp201.map((r) => row('emp201', r.period, `${monthName(r.period)}: PAYE ${formatZar(r.payeCents)}, UIF ${formatZar(r.uifCents)}${r.sdlCents ? `, SDL ${formatZar(r.sdlCents)}` : ''}`, r.totalCents, r.paidCents, r.dueOn))}
+            {data.emp201.map((r) => row('emp201', r.period, `${monthName(r.period)}: PAYE ${formatZar(r.payeCents)}, UIF ${formatZar(r.uifCents)}${r.sdlCents ? `, SDL ${formatZar(r.sdlCents)}` : ''}`, r.totalCents, r.paidCents, r.dueOn, r.dayWagesCents))}
             {data.dividendsTax.map((r) => row('dwt', r.period, `Dividends tax, ${monthName(r.period)}`, r.dwtCents, r.paidCents, r.dueOn))}
           </ul>
         </section>

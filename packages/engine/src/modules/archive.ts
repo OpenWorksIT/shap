@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { requireRole, userOrThrow } from '../auth.js';
 import { audit } from '../lib/audit.js';
 import type { Ctx } from '../context.js';
-import { getSettings } from '../lib/books.js';
+import { effectiveLock, getSettings } from '../lib/books.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 import { wholeJpeg } from '../lib/images.js';
@@ -24,6 +24,7 @@ export function registerArchiveRoutes(app: FastifyInstance, ctx: Ctx): void {
   /** Each financial year with slips: how many, how much space, locked, archived. */
   app.get('/api/archive', owner, async () => {
     const settings = await getSettings(sql);
+    const lock = await effectiveLock(sql);
     const rows = await sql<{ date: string; size: number; mime: string }[]>`
       select c.date, a.size, a.mime from costs c join attachments a on a.id = c.receipt_id`;
     const archived = await sql<{ fyEnd: string; archivedAt: string; photos: number; bytesBefore: number; bytesAfter: number }[]>`select * from archived_years`;
@@ -41,7 +42,7 @@ export function registerArchiveRoutes(app: FastifyInstance, ctx: Ctx): void {
       totalBytes: Number(total!.bytes),
       years: [...years.values()]
         .sort((a, b) => b.fyEnd.localeCompare(a.fyEnd))
-        .map((y) => ({ ...y, locked: Boolean(settings.lockDate && settings.lockDate >= y.fyEnd), archived: archived.find((a) => a.fyEnd === y.fyEnd) ?? null })),
+        .map((y) => ({ ...y, locked: Boolean(lock && lock >= y.fyEnd), archived: archived.find((a) => a.fyEnd === y.fyEnd) ?? null })),
     };
   });
 

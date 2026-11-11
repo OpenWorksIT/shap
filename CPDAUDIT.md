@@ -64,3 +64,8 @@ Shap's CPD audit (section 7) has each review; what was Pocket's own:
   CC's, trust's or co-op's capital, with the tests in
   `packages/engine/test/review-1.9-statements-checks.test.ts`. Shap 1.25's test server (made-up
   books, filled and wiped on a server) is Shap's only: nothing of it is in Pocket.
+- **1.10.0**: Shap 1.26's five reviews (Shap's section 7) apply here: the same code, fixed the same
+  way (migration `043_vat_period_locks.sql`), with the tests in
+  `packages/engine/test/review-1.10-vat-period-locks.test.ts` and
+  `review-1.10-casual-labour.test.ts`. The first words on screen and liability review read
+  Pocket's screens too.

@@ -4,19 +4,26 @@ What changed in each version of Shap Pocket, newest first.
 
 ## 1.10.0 (11 November 2026)
 
-A VAT vendor closes each VAT period, and Workers says where the law starts for day labour (from
-Shap 1.26).
+A VAT-registered business without Sales closes each VAT period, and Workers reminds you where the
+law comes in for day labour (from Shap 1.26).
 
-- **VAT period end** (a VAT vendor that doesn't sell): the books close VAT period by VAT period, as
-  a business that sells closes each month: by hand (Home reminds you from the day you choose of
-  the month after the period, while it's still open), or by itself on that day. Choose a day
-  before the VAT201 is due. Setup asks; it was the year's lock before.
-- **Day labour and the law**: someone who works for you 24 hours or more a month is your employee
-  in the law (UIF, the Basic Conditions of Employment Act, the national minimum wage, employees'
-  tax). Workers says so on the list, on each worker and when adding one, with a day rate under the
-  minimum wage for a full day. Pocket records the days and pay only: it doesn't work out or pay
-  UIF or tax on day wages. Reminders, not advice: Shap Pocket is free software from OpenWorks IT,
-  who are not accountants or labour lawyers.
+- **VAT period end** (registered for VAT, without Sales switched on): the books close VAT period by
+  VAT period, as a business that sells closes each month: by hand (Home reminds you from a day you
+  choose in the month after the period, while it's still open), or by itself on that day. Pick a
+  day before your VAT201 is due (on eFiling, the last business day of the month after the period;
+  otherwise the 25th). Setup asks; it was the year's lock before. The year end closes with its last
+  VAT period, so year-end journals after it need a reopen, and switching to "by itself" asks first
+  when it would close a year not yet agreed or approved. Books already set up close each VAT
+  period by hand from this update (a month end set to lock by itself while Sales was on included);
+  switching Sales or VAT registration starts the new way by hand, and nothing locks at once.
+- **Day labour and the law**: someone you pay by the day is usually your employee in the law (the
+  national minimum wage for every worker; PAYE and the Compensation Fund; from 24 hours a month,
+  UIF and the BCEA's hours and leave). Workers reminds you on the list, on each worker and when
+  adding one; Payroll's EMP201 says day wages aren't in it, Home warns when SDL may be due, and
+  the statements list leave pay and UIF, PAYE and the Compensation Fund on day wages for your
+  accountant, with subcontractors out of employee costs. Pocket records the days and pay only.
+  Reminders, not advice: Shap Pocket is free software from OpenWorks IT, who are not accountants
+  or labour lawyers.
 
 ## 1.9.0 (11 November 2026)
 

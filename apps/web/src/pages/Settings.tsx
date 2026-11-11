@@ -244,7 +244,7 @@ function Sections() {
                     <input type="checkbox" checked={prefs.sdl} onChange={(e) => void pref('sdl', e.target.checked)} />
                     <span>
                       Registered for the Skills Development Levy
-                      <div className="xs muted">Once your payroll is expected to pass R500 000 over the next 12 months: 1% of salaries, paid by you.</div>
+                      <div className="xs muted">Once everything you pay employees (salaries and day wages together) is expected to pass R500 000 over the next 12 months: 1% of it, paid by you.</div>
                     </span>
                   </label>
                 </li>

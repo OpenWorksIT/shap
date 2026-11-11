@@ -13,7 +13,7 @@
  *     SDL owed                             Cr SDL
  *     the bank (or wherever it's paid from) Cr net pay
  */
-import { compact, keptNumber, uifSarsRefFor, payeRefProblem, taxNumberProblem, idNumberProblem, sdlRefFor, dividendInput, dividendTax, financialYear, microDividendTax, dwtDue, emp201Due, employeeInput, payLine, payLineInput, payRunInput, sarsPaymentInput, taxYearEnd, type AgeBand, entity, paysOutProfit, payoutWord } from '@shap/shared';
+import { addDays, addMonths, SDL_THRESHOLD_CENTS, compact, keptNumber, uifSarsRefFor, payeRefProblem, taxNumberProblem, idNumberProblem, sdlRefFor, dividendInput, dividendTax, financialYear, microDividendTax, dwtDue, emp201Due, employeeInput, payLine, payLineInput, payRunInput, sarsPaymentInput, taxYearEnd, type AgeBand, entity, paysOutProfit, payoutWord } from '@shap/shared';
 import PDFDocument from 'pdfkit';
 import { z } from 'zod';
 import { requireRole, userOrThrow } from '../auth.js';
@@ -115,10 +115,35 @@ export async function sarsSummary(db: Db) {
     from (select to_char(d.paid_on, 'YYYY-MM') as period, sum(d.dwt_cents)::bigint as dwt_cents
           from dividends d where d.paid_on is not null and d.dwt_cents > 0 group by 1) m
     order by m.period desc`);
+  // Day wages logged under Workers (not subcontractors), by month: not in the EMP201 Payroll works
+  // out, though PAYE and UIF may be due on them (docs/CASUAL_LABOUR.md).
+  const day = await db.unsafe<{ period: string; dayWagesCents: number }[]>(`
+    select to_char(e.date, 'YYYY-MM') as period, sum(e.wage_cents)::bigint as day_wages_cents
+    from labour_entries e join workers w on w.id = e.worker_id where w.kind <> 'subcontractor' group by 1`);
+  const dayWages = new Map(day.map((d) => [d.period, Number(d.dayWagesCents)]));
   return {
-    emp201: emp.map((r) => ({ ...r, totalCents: r.payeCents + r.uifCents + r.sdlCents, dueOn: emp201Due(r.period) })),
+    emp201: emp.map((r) => ({ ...r, totalCents: r.payeCents + r.uifCents + r.sdlCents, dueOn: emp201Due(r.period), dayWagesCents: dayWages.get(r.period) ?? 0 })),
     dividendsTax: dwt.map((r) => ({ ...r, dueOn: dwtDue(`${r.period}-01`) })),
   };
+}
+
+/**
+ * SDL is off, but what was paid to employees over the last 12 months, salaries and day wages
+ * together (not subcontractors), came to more than R500 000: SDL may be due (Skills Development
+ * Levies Act; SARS). From what's captured: an estimate.
+ */
+export async function sdlLine(db: Db, sdlOn: boolean, now: string): Promise<{ payrollCents: number; dayWagesCents: number } | null> {
+  if (sdlOn) return null;
+  const from = addDays(addMonths(now, -12), 1);
+  const [r] = await db<{ payroll: string; day: string }[]>`
+    select
+      (select coalesce(sum(l.salary_cents + l.overtime_cents + l.commission_cents + l.extra_cents), 0) from pay_lines l join pay_runs r on r.id = l.run_id
+        where r.status = 'final' and r.pay_date between ${from}::date and ${now}::date)::bigint as payroll,
+      (select coalesce(sum(e.wage_cents), 0) from labour_entries e join workers w on w.id = e.worker_id
+        where w.kind <> 'subcontractor' and e.date between ${from}::date and ${now}::date)::bigint as day`;
+  const payrollCents = Number(r!.payroll);
+  const dayWagesCents = Number(r!.day);
+  return payrollCents + dayWagesCents > SDL_THRESHOLD_CENTS ? { payrollCents, dayWagesCents } : null;
 }
 
 /**

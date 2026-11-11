@@ -9,7 +9,7 @@ import { missingStatements } from './statements.js';
 import { findDuplicates } from './duplicates.js';
 import { findRecurring } from './recurring.js';
 import { vatStatus } from './vat.js';
-import { payrollAttention } from './payroll.js';
+import { payrollAttention, sdlLine } from './payroll.js';
 import { bills } from './bills.js';
 import { projectSummarySql, totals, type ProjectSummary } from './projects.js';
 
@@ -128,6 +128,8 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
       taxDue: taxDue(settings, now),
       // This version's SARS tables were checked up to SARS_CHECKED_TO: a later tax year needs an update.
       sarsCheckedTo: taxYearEnd(now) > SARS_CHECKED_TO ? SARS_CHECKED_TO : null,
+      // SDL off, but salaries and day wages over the last 12 months passed R500 000.
+      sdlLine: await sdlLine(sql, settings.sdl, now),
       // Month end due (last month still open) or the books reopened: for whoever may lock them.
       periods: await (async () => { const p = await lockState(sql); return { monthDue: p.monthDue, closes: p.closes, reopened: p.reopened, lockDate: p.lockDate }; })(),
       bankCents: bal('bank'),

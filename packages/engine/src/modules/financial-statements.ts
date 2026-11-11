@@ -29,7 +29,7 @@ import { requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
-import { freshTotals, getSettings, today } from '../lib/books.js';
+import { effectiveLock, freshTotals, getSettings, today } from '../lib/books.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 import { auditBooks } from '../audit/books.js';
@@ -184,8 +184,9 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
     // move them), or a later year is (a journal here would move what it was agreed at), or closed
     // (nothing more is posted into it): the year's tax goes in another way.
     const [agreed] = await sql`select 1 from year_ends where fy_end >= ${fyEnd}::date limit 1`;
-    const settings = await getSettings(sql);
-    const yearClosed = Boolean(settings.lockDate && String(settings.lockDate) >= fyEnd);
+    // The lock as it stands, a period due to have locked itself included.
+    const lock = await effectiveLock(sql);
+    const yearClosed = Boolean(lock && lock >= fyEnd);
     // The sets signed before and reopened since, kept as they were signed.
     const versions = await sql`
       select v.id, v.reopened_at, v.reason, u.name as reopened_by_name, v.signed->>'status' as status, v.signed->>'approved_on' as approved_on,

@@ -78,8 +78,8 @@ export default function WorkersPage() {
                               {WORKER_KIND_LABELS[w.kind]}
                               {w.active ? '' : ' · not active'}
                             </div>
-                            {w.law?.lawApplies && <div className="xs warn-text">About {w.law.hours} hours a month: UIF and the BCEA apply</div>}
-                            {w.law?.belowMinimumWage && <div className="xs warn-text">Day rate under the minimum wage for a full day ({formatZar(w.law.minimumDayCents)})</div>}
+                            {w.law?.lawApplies && <div className="xs warn-text">About {w.law.hours} hours logged in a month: UIF and the BCEA may apply</div>}
+                            {w.law?.belowMinimumWage && <div className="xs warn-text">Day rate under the minimum wage for an {HOURS_A_DAY}-hour day ({formatZar(w.law.minimumDayCents)})</div>}
                           </span>
                         </Link>
                       </td>
@@ -98,7 +98,7 @@ export default function WorkersPage() {
                 </tbody>
               </table>
               <p className="xs muted panel-pad">Owed is what they’ve earned and not been paid yet. Brackets mean you’ve paid ahead (an advance).</p>
-              <p className="xs muted panel-pad">{casualLabourNote(todayIso())} Hours are worked out from the days logged, at {HOURS_A_DAY} hours a day.</p>
+              <p className="xs muted panel-pad">Hours are worked out from the days logged (this month or last, whichever is more), at {HOURS_A_DAY} hours a day. {casualLabourNote(todayIso())}</p>
             </div>
           )}
         </>
@@ -248,7 +248,7 @@ export function WorkerDrawer({ worker, onClose, onSaved }: { worker?: WorkerRow;
             label="Day rate"
             hint={
               f.kind !== 'subcontractor' && labourLooks({ kind: f.kind, dayRateCents: f.dayRateCents, daysInMonth: 0, on: todayIso() }).belowMinimumWage
-                ? `Under the national minimum wage for a full day (${formatZar(labourLooks({ kind: f.kind, dayRateCents: 0, daysInMonth: 0, on: todayIso() }).minimumDayCents)} for ${HOURS_A_DAY} hours). Used for new days.`
+                ? `Under the national minimum wage for an ${HOURS_A_DAY}-hour day (${formatZar(labourLooks({ kind: f.kind, dayRateCents: 0, daysInMonth: 0, on: todayIso() }).minimumDayCents)}). Used for new days.`
                 : 'Used for new days. Past days keep what they were.'
             }
           >

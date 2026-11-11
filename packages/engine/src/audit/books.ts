@@ -28,7 +28,7 @@ import type { Ctx } from '../context.js';
 type Db = Ctx['sql'];
 /** Journals typed in, not made by the app from a pay run, a SARS payment, a dividend or a profit share. */
 const BY_HAND = ['manual', 'opening', 'import', 'adjustment'];
-import { freshTotals, getSettings, today } from '../lib/books.js';
+import { effectiveLock, freshTotals, getSettings, today } from '../lib/books.js';
 import { FULL_TAX_INVOICE_CENTS } from '../modules/documents.js';
 import { balanceSheet, trialBalance } from '../modules/reports.js';
 import { vat201 } from '../modules/taxforms.js';
@@ -52,6 +52,8 @@ export async function auditBooks(db: Db, on = today()): Promise<AuditItem[]> {
   const warn = (text: string) => items.push({ level: 'warn', section, text });
   const fail = (text: string) => items.push({ level: 'fail', section, text });
   const settings = await getSettings(db);
+  // The lock as it stands, a period due to have locked itself included.
+  const lock = await effectiveLock(db);
   await freshTotals(db);
 
   // ---------------------------------------------------------------- the ledger
@@ -192,7 +194,7 @@ export async function auditBooks(db: Db, on = today()): Promise<AuditItem[]> {
       order by a.code`;
     const moved = figures.filter((m) => m.target != null && n(m.now) !== n(m.target));
     const late = figures.filter((m) => (m.target == null ? n(m.own) !== 0 : m.shap != null && n(m.own) !== n(m.shap)));
-    const closed = !!settings.lockDate && String(settings.lockDate).slice(0, 10) >= y.fyEnd;
+    const closed = !!lock && lock >= y.fyEnd;
     if (moved.length) fail(`the year to ${y.fyEnd} no longer shows the figures it was agreed at: ${few(moved.map((c) => `${c.name} (${rand(n(c.now) - n(c.target))})`), 4)}`);
     else if (late.length)
       (closed ? fail : warn)(

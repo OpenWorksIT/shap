@@ -489,9 +489,16 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
     select initcap(replace(category, '_', ' ')) as category, max(life_months)::int as months from assets
     where purchase_date <= ${fyEnd}::date and (disposed_on is null or disposed_on > ${priorStart}::date) group by category order by category`;
   const moved = (keys: string[]) => plAccounts.some((a) => keys.includes(a.systemKey ?? '') && (val(a, 'mvCur') !== 0 || val(a, 'mvPrior') !== 0));
+  // Day labour that reached about 24 hours (3 days logged) in a month of the year, not subcontractors:
+  // employees in the law, for UIF and the BCEA's leave (docs/CASUAL_LABOUR.md), though not on Payroll.
+  const [dayLabour] = await db<{ months: number; wages: string }[]>`
+    select count(*)::int as months, coalesce(sum(wages), 0)::bigint as wages from (
+      select e.worker_id, to_char(e.date, 'YYYY-MM'), sum(e.wage_cents) as wages from labour_entries e join workers w on w.id = e.worker_id
+      where w.kind <> 'subcontractor' and e.date between ${fyStart}::date and ${fyEnd}::date group by 1, 2 having sum(e.days) >= 3) x`;
+  const dayEmployees = dayLabour!.months > 0;
   const policyDefaults = defaultPolicies(bt, {
     lives,
-    employees: moved(['salaries', 'director_salary', 'payroll_levies']),
+    employees: moved(['salaries', 'director_salary', 'payroll_levies']) || dayEmployees,
     leases: moved(['rent']),
     deferredTax: lineTotals.has('deferred_tax_asset') || lineTotals.has('deferred_tax_liability'),
     edition: editionFor(fyStart),
@@ -601,14 +608,26 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
   };
   if (revenue.length) addNote({ key: 'revenue', title: 'Revenue', paragraphs: [], tables: [plTable('revenue')] });
   const byKey = (keys: string[], mv: 'mvPrior' | 'mvCur') => sum(plAccounts.filter((a) => keys.includes(a.systemKey ?? '')).map((a) => val(a, mv)));
+  // Subcontractors run their own businesses: their days are labour in the books, not employee costs (28.1).
+  const [sub] = await db<{ cur: string; prior: string }[]>`
+    select coalesce(sum(l.amount_cents) filter (where l.date between ${fyStart}::date and ${fyEnd}::date), 0)::bigint as cur,
+           coalesce(sum(l.amount_cents) filter (where l.date between ${priorStart}::date and ${priorEnd}::date), 0)::bigint as prior
+    from ledger l join accounts a on a.id = l.account_id join workers w on w.id = l.worker_id
+    where w.kind = 'subcontractor' and a.system_key in ('general_labour', 'cos_labour')`;
+  const subcontracted = { mvCur: Number(sub!.cur), mvPrior: Number(sub!.prior) };
   const stated = [
     { label: 'Depreciation and amortisation', keys: ['depreciation', 'amortisation'] },
-    { label: 'Employee costs', keys: ['salaries', 'payroll_levies', 'general_labour', 'cos_labour'] },
+    { label: 'Employee costs', keys: ['salaries', 'payroll_levies', 'general_labour', 'cos_labour'], less: subcontracted },
+    { label: 'Subcontractors', keys: [], add: subcontracted },
     { label: `${entity(bt).accounts.director_salary}`, keys: ['director_salary'] },
     { label: 'Rent (operating leases)', keys: ['rent'] },
     { label: 'Bad debts written off', keys: ['bad_debts'] },
   ]
-    .map((s) => ({ label: s.label, current: byKey(s.keys, 'mvCur'), prior: byKey(s.keys, 'mvPrior') }))
+    .map((s: { label: string; keys: string[]; less?: { mvCur: number; mvPrior: number }; add?: { mvCur: number; mvPrior: number } }) => ({
+      label: s.label,
+      current: byKey(s.keys, 'mvCur') - (s.less?.mvCur ?? 0) + (s.add?.mvCur ?? 0),
+      prior: byKey(s.keys, 'mvPrior') - (s.less?.mvPrior ?? 0) + (s.add?.mvPrior ?? 0),
+    }))
     .filter((s) => s.current !== 0 || s.prior !== 0);
   if (stated.length) addNote({ key: 'operating_profit', title: 'Operating profit', paragraphs: ['Operating profit for the year is stated after:'], tables: [{ rows: stated }] });
   if (financeCosts.length) addNote({ key: 'finance_costs', title: 'Finance costs', paragraphs: [], tables: [plTable('finance_costs')] });
@@ -786,7 +805,9 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
         and (d.written_off_on is null or d.written_off_on > ${fyEnd}::date) and coalesce(d.due_date, d.issue_date) < (${fyEnd}::date - 365)) x where owing > 0`;
   look('Receivables will be recovered (IFRS for SMEs 11.21)', old!.n === 0, old!.n ? `${old!.n} invoice${old!.n === 1 ? '' : 's'} more than a year overdue at the year end (${formatZar(Number(old!.owing))}): if they won’t be paid, mark them delinquent (written off as bad debts).` : 'nothing more than a year overdue');
   // Leave pay and bonuses owed at the year end (28.6, 28.8): Shap's payroll doesn't keep leave balances.
-  if (moved(['salaries'])) look('Leave pay and bonuses owed to employees at the year end are provided for (IFRS for SMEs 28.6)', false, 'Shap’s payroll doesn’t keep leave balances: if employees have leave owing (or a bonus earned) at the year end, your accountant provides for it with a journal.');
+  if (moved(['salaries']) || dayEmployees) look('Leave pay and bonuses owed to employees at the year end are provided for (IFRS for SMEs 28.6)', false, `Shap’s payroll doesn’t keep leave balances${dayEmployees ? ', and Workers doesn’t for day labour (from 24 hours a month, the BCEA’s leave applies: s19(1))' : ''}: if employees have leave owing (or a bonus earned) at the year end, your accountant provides for it with a journal.`);
+  // Day labour that's employment in the law, paid outside Payroll (28.4(a)): what's owed on it isn't in the books.
+  if (dayEmployees) look('UIF, PAYE and the Compensation Fund on day wages are provided for (IFRS for SMEs 28.4)', false, `Day labour reached about 24 hours in a month ${dayLabour!.months} time${dayLabour!.months === 1 ? '' : 's'} in the year (${formatZar(Number(dayLabour!.wages))} of day wages in those months). Shap doesn’t work out UIF, PAYE or the Compensation Fund on day wages: if any is owing at the year end, your accountant provides for it. A reminder from the days logged, not advice.`);
 
   // The public interest score (regulations 26 to 29) and what the business needs for it.
   let publicInterest: Statements['publicInterest'] = null;
