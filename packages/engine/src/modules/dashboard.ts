@@ -131,7 +131,7 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
       // SDL off, but salaries and day wages over the last 12 months passed R500 000.
       sdlLine: await sdlLine(sql, settings.sdl, now),
       // Month end due (last month still open) or the books reopened: for whoever may lock them.
-      periods: await (async () => { const p = await lockState(sql); return { monthDue: p.monthDue, closes: p.closes, reopened: p.reopened, lockDate: p.lockDate }; })(),
+      periods: await (async () => { const p = await lockState(sql); return { monthDue: p.monthDue, closes: p.closes, reopened: p.reopened, lockDate: p.lockDate, next: p.monthEnd.next }; })(),
       bankCents: bal('bank'),
       ownerLoanCents: -bal('owner_loan'),
       projects: projects.map((p) => ({ ...p, ...totals(p as unknown as ProjectSummary) })),

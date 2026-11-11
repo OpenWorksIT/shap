@@ -489,13 +489,18 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
     select initcap(replace(category, '_', ' ')) as category, max(life_months)::int as months from assets
     where purchase_date <= ${fyEnd}::date and (disposed_on is null or disposed_on > ${priorStart}::date) group by category order by category`;
   const moved = (keys: string[]) => plAccounts.some((a) => keys.includes(a.systemKey ?? '') && (val(a, 'mvCur') !== 0 || val(a, 'mvPrior') !== 0));
-  // Day labour that reached about 24 hours (3 days logged) in a month of the year, not subcontractors:
-  // employees in the law, for UIF and the BCEA's leave (docs/CASUAL_LABOUR.md), though not on Payroll.
-  const [dayLabour] = await db<{ months: number; wages: string }[]>`
-    select count(*)::int as months, coalesce(sum(wages), 0)::bigint as wages from (
-      select e.worker_id, to_char(e.date, 'YYYY-MM'), sum(e.wage_cents) as wages from labour_entries e join workers w on w.id = e.worker_id
-      where w.kind <> 'subcontractor' and e.date between ${fyStart}::date and ${fyEnd}::date group by 1, 2 having sum(e.days) >= 3) x`;
-  const dayEmployees = dayLabour!.months > 0;
+  // Day labour in the year, not subcontractors: usually employment in the law, with PAYE and the
+  // Compensation Fund on its pay whatever the hours; and the months it reached about 24 hours (3 days
+  // logged), when UIF and the BCEA's leave apply too (docs/CASUAL_LABOUR.md). Not on Payroll.
+  const [dayLabour] = await db<{ wages: string; months: number; monthWages: string }[]>`
+    select coalesce(sum(wages), 0)::bigint as wages,
+           count(*) filter (where days >= 3)::int as months,
+           coalesce(sum(wages) filter (where days >= 3), 0)::bigint as month_wages from (
+      select e.worker_id, to_char(e.date, 'YYYY-MM'), sum(e.days) as days, sum(e.wage_cents) as wages from labour_entries e join workers w on w.id = e.worker_id
+      where w.kind <> 'subcontractor' and e.date between ${fyStart}::date and ${fyEnd}::date group by 1, 2) x`;
+  const dayWages = Number(dayLabour!.wages);
+  const dayEmployees = dayWages > 0;
+  const dayMonths = dayLabour!.months;
   const policyDefaults = defaultPolicies(bt, {
     lives,
     employees: moved(['salaries', 'director_salary', 'payroll_levies']) || dayEmployees,
@@ -805,9 +810,14 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
         and (d.written_off_on is null or d.written_off_on > ${fyEnd}::date) and coalesce(d.due_date, d.issue_date) < (${fyEnd}::date - 365)) x where owing > 0`;
   look('Receivables will be recovered (IFRS for SMEs 11.21)', old!.n === 0, old!.n ? `${old!.n} invoice${old!.n === 1 ? '' : 's'} more than a year overdue at the year end (${formatZar(Number(old!.owing))}): if they won’t be paid, mark them delinquent (written off as bad debts).` : 'nothing more than a year overdue');
   // Leave pay and bonuses owed at the year end (28.6, 28.8): Shap's payroll doesn't keep leave balances.
-  if (moved(['salaries']) || dayEmployees) look('Leave pay and bonuses owed to employees at the year end are provided for (IFRS for SMEs 28.6)', false, `Shap’s payroll doesn’t keep leave balances${dayEmployees ? ', and Workers doesn’t for day labour (from 24 hours a month, the BCEA’s leave applies: s19(1))' : ''}: if employees have leave owing (or a bonus earned) at the year end, your accountant provides for it with a journal.`);
-  // Day labour that's employment in the law, paid outside Payroll (28.4(a)): what's owed on it isn't in the books.
-  if (dayEmployees) look('UIF, PAYE and the Compensation Fund on day wages are provided for (IFRS for SMEs 28.4)', false, `Day labour reached about 24 hours in a month ${dayLabour!.months} time${dayLabour!.months === 1 ? '' : 's'} in the year (${formatZar(Number(dayLabour!.wages))} of day wages in those months). Shap doesn’t work out UIF, PAYE or the Compensation Fund on day wages: if any is owing at the year end, your accountant provides for it. A reminder from the days logged, not advice.`);
+  if (moved(['salaries']) || dayMonths > 0) look('Leave pay and bonuses owed to employees at the year end are provided for (IFRS for SMEs 28.6)', false, `Shap’s payroll doesn’t keep leave balances${dayMonths > 0 ? ', and Workers doesn’t for day labour (from 24 hours a month, the BCEA’s leave applies: s19(1))' : ''}: if employees have leave owing (or a bonus earned) at the year end, your accountant provides for it with a journal.`);
+  // Day labour, usually employment in the law, paid outside Payroll (28.4(a)): what's owed on it isn't in the books.
+  if (dayEmployees)
+    look(
+      'PAYE, UIF and the Compensation Fund on day wages are provided for (IFRS for SMEs 28.4)',
+      false,
+      `${formatZar(dayWages)} of day wages in the year: PAYE and the Compensation Fund may apply to them${dayMonths > 0 ? `, and UIF in the ${dayMonths} time${dayMonths === 1 ? '' : 's'} day labour reached about 24 hours in a month (${formatZar(Number(dayLabour!.monthWages))} of it)` : ''}. Shap doesn’t work out PAYE, UIF or the Compensation Fund on day wages: if any is owing at the year end, your accountant provides for it. A reminder from the days logged, not advice.`,
+    );
 
   // The public interest score (regulations 26 to 29) and what the business needs for it.
   let publicInterest: Statements['publicInterest'] = null;

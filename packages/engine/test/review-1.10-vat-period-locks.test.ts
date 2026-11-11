@@ -72,7 +72,7 @@ describe('a VAT vendor that doesn’t sell closes each VAT period', () => {
   it('by itself: each VAT period locks on its day of the month after, once', async () => {
     vi.setSystemTime(new Date('2026-11-05T08:00:00Z'));
     const s = await me.post('/api/periods/month-end', { mode: 'auto', day: 7 }, 'PUT');
-    expect(s.monthEnd.next).toEqual({ through: '2026-10-31', on: '2026-11-07' });
+    expect(s.monthEnd.next).toEqual({ through: '2026-10-31', on: '2026-11-07', closesYears: [] });
     expect((await cost('2026-10-21')).statusCode).toBe(200);
     vi.setSystemTime(new Date('2026-11-07T08:00:00Z'));
     const r = await cost('2026-10-22');
@@ -150,23 +150,90 @@ describe('changing how the books close locks nothing at once', () => {
     vi.useRealTimers();
   });
 
-  it('a new VAT category while the books are reopened doesn’t lock them again under whoever’s putting them right', async () => {
-    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-11-09T08:00:00Z') });
-    await settings({ vatCategory: 'D' });
-    await me.post('/api/periods/month-end', { mode: 'auto', day: 7, closeYears: true }, 'PUT');
-    // (Closed to 31 October by the months before: category D's six months to August are within it.)
-    expect((await me.get('/api/periods')).lockDate).toBe('2026-10-31');
-    await me.post('/api/periods/reopen', { to: '2026-02-28', reason: 'A cost on the wrong date (made up)' });
-    await settings({ vatCategory: 'B' });
-    expect((await cost('2026-06-11')).statusCode).toBe(200);
-    const p = await me.get('/api/periods');
-    expect(p.lockDate).toBe('2026-02-28');
-    expect(p.reopened).toMatchObject({ relockDate: '2026-10-31' });
-    vi.useRealTimers();
+});
+
+describe('a new VAT category, set to lock by itself, carries on from the next period’s day', () => {
+  it('locks nothing at once, through the settings or a company file', async () => {
+    const env = await setup();
+    try {
+      const me = await login(env.app);
+      const r = await ref(env.sql);
+      const cost = async (date: string) =>
+        me.call({ method: 'POST', url: '/api/costs', payload: { date, description: 'Stationery (made up)', amountCents: 11_500, vatCents: 1_500, vatCode: 'standard', categoryId: await r.cat('Sundry'), sourceId: await r.src('Business bank') } });
+      const { settings } = await me.get('/api/reference');
+      const { termsAcceptedAt: _t, logoId: _l, ...rest } = settings;
+      await me.post('/api/settings', { ...rest, vatRegistered: true, vatNumber: '4740101508', vatCategory: 'D', fyEndMonth: 2 }, 'PUT');
+      vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-11-09T08:00:00Z') });
+      // Category D (six months to February and August), by itself on the 7th: closed to 31 August.
+      await me.post('/api/periods/month-end', { mode: 'auto', day: 7, closeYears: true }, 'PUT');
+      expect((await cost('2026-10-15')).statusCode).toBe(200);
+      expect((await me.get('/api/periods')).lockDate).toBe('2026-08-31');
+      // Category B (two months to October): its September to October period doesn't lock at once.
+      await me.post('/api/settings', { ...rest, vatRegistered: true, vatNumber: '4740101508', vatCategory: 'B', fyEndMonth: 2 }, 'PUT');
+      expect((await cost('2026-10-16')).statusCode).toBe(200);
+      expect((await me.get('/api/periods')).lockDate).toBe('2026-08-31');
+      // The same through a company file that brings category D back, then B.
+      for (const cat of ['D', 'B']) {
+        // (Pocket's company file needs no download link or password: one person, on their phone.)
+        const file = (await me.call({ method: 'GET', url: '/api/company-file' })).json();
+        file.settings.vatCategory = cat;
+        await me.post('/api/company-file', { file });
+      }
+      expect((await cost('2026-10-17')).statusCode).toBe(200);
+      vi.useRealTimers();
+      await expectCleanAudit(env.sql);
+    } finally {
+      vi.useRealTimers();
+      await env.close();
+    }
   });
 });
 
 describe('locking by itself asks before it closes a year not yet agreed or approved', () => {
+  const vendor = async (env: TestEnv) => {
+    const me = await login(env.app);
+    const { settings } = await me.get('/api/reference');
+    await me.post('/api/settings', { ...settings, vatRegistered: true, vatNumber: '4740101508', vatCategory: 'B', fyEndMonth: 2 }, 'PUT');
+    const r = await ref(env.sql);
+    await me.post('/api/costs', { date: '2025-06-01', description: 'Stationery (made up)', amountCents: 11_500, vatCents: 1_500, vatCode: 'standard', categoryId: await r.cat('Sundry'), sourceId: await r.src('Business bank') });
+    return me;
+  };
+
+  it('asks about the year the next lock closes, not only the one due now', async () => {
+    const env = await setup();
+    try {
+      const me = await vendor(env);
+      // 3 March 2026: nothing due yet past December, but on 7 March the year to February closes.
+      vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-03-03T08:00:00Z') });
+      const asked = await me.call({ method: 'PUT', url: '/api/periods/month-end', payload: { mode: 'auto', day: 7 } });
+      expect(asked.statusCode).toBe(400);
+      expect(asked.json().error).toMatch(/closes the year to 28 Feb 2026 by 7 Mar 2026/);
+      vi.useRealTimers();
+      await expectCleanAudit(env.sql);
+    } finally {
+      vi.useRealTimers();
+      await env.close();
+    }
+  });
+
+  it('asks while the books are reopened too', async () => {
+    const env = await setup();
+    try {
+      const me = await vendor(env);
+      await me.post('/api/periods/lock', { through: '2025-12-31' });
+      await me.post('/api/periods/reopen', { to: '2025-10-31', reason: 'A cost on the wrong date (made up)' });
+      vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-11-11T08:00:00Z') });
+      const asked = await me.call({ method: 'PUT', url: '/api/periods/month-end', payload: { mode: 'auto', day: 7 } });
+      expect(asked.statusCode).toBe(400);
+      expect(asked.json()).toMatchObject({ code: 'closes_year' });
+      vi.useRealTimers();
+      await expectCleanAudit(env.sql);
+    } finally {
+      vi.useRealTimers();
+      await env.close();
+    }
+  });
+
   it('names the year, and locks once asked again', async () => {
     const env = await setup();
     try {
@@ -179,7 +246,7 @@ describe('locking by itself asks before it closes a year not yet agreed or appro
       const asked = await me.call({ method: 'PUT', url: '/api/periods/month-end', payload: { mode: 'auto', day: 7 } });
       expect(asked.statusCode).toBe(400);
       expect(asked.json()).toMatchObject({ code: 'closes_year' });
-      expect(asked.json().error).toMatch(/closes the year to 28 Feb 2026, not yet agreed with your accountant or approved/);
+      expect(asked.json().error).toMatch(/closes the year to 28 Feb 2026 by 7 Jan 2027, not yet agreed with your accountant or approved/);
       expect((await me.get('/api/periods')).monthEnd.mode).toBe('manual');
       // The statements' page sees a period that has locked itself, before anything is saved.
       await me.post('/api/periods/month-end', { mode: 'auto', day: 7, closeYears: true }, 'PUT');

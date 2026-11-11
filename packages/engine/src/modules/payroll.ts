@@ -99,7 +99,8 @@ const runTotals = `
   coalesce(sum(l.net_cents), 0)::bigint as net_cents, count(l.id)::int as people`;
 
 /** What's owed to SARS, month by month: payroll (EMP201) and dividends tax. */
-export async function sarsSummary(db: Db) {
+/** What's owed to SARS from payroll; with `dayWages`, each month's day wages too. */
+export async function sarsSummary(db: Db, dayWagesToo = false) {
   const emp = await db.unsafe<{ period: string; payeCents: number; uifCents: number; sdlCents: number; paidCents: number }[]>(`
     select m.period, m.paye_cents, m.uif_cents, m.sdl_cents,
       coalesce((select sum(p.amount_cents) from sars_payments p where p.kind = 'emp201' and p.period = m.period), 0)::bigint as paid_cents
@@ -117,7 +118,7 @@ export async function sarsSummary(db: Db) {
     order by m.period desc`);
   // Day wages logged under Workers (not subcontractors), by month: not in the EMP201 Payroll works
   // out, though PAYE and UIF may be due on them (docs/CASUAL_LABOUR.md).
-  const day = await db.unsafe<{ period: string; dayWagesCents: number }[]>(`
+  const day = !dayWagesToo ? [] : await db.unsafe<{ period: string; dayWagesCents: number }[]>(`
     select to_char(e.date, 'YYYY-MM') as period, sum(e.wage_cents)::bigint as day_wages_cents
     from labour_entries e join workers w on w.id = e.worker_id where w.kind <> 'subcontractor' group by 1`);
   const dayWages = new Map(day.map((d) => [d.period, Number(d.dayWagesCents)]));
@@ -450,7 +451,7 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   // ---------------------------------------------------------------- SARS
-  app.get('/api/payroll/sars', readers, async () => sarsSummary(sql));
+  app.get('/api/payroll/sars', readers, async () => sarsSummary(sql, true));
 
   app.post('/api/sars-payments', owner, async (req) => {
     const user = userOrThrow(req);

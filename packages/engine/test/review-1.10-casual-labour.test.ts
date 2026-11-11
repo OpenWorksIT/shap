@@ -56,11 +56,13 @@ describe('where the law comes in for day labour', () => {
     const note = casualLabourNote('2026-11-11');
     expect(note).not.toMatch(/24 hours or more a month is your employee/);
     expect(note).toMatch(/usually your employee in the law, however few days they work/);
-    expect(note).toMatch(/national minimum wage \(R 30\.23 an hour now\) applies to every worker/);
+    expect(note).toMatch(/national minimum wage \(R 30\.23 an hour from 1 Mar 2026\) applies to every worker/);
+    expect(note).not.toMatch(/'/);
     expect(note).toMatch(/from 24 hours a month with you, UIF/);
     // PAYE: SARS's tables for most day labour, not "often 25%".
     expect(note).not.toMatch(/often a flat 25%/);
-    expect(note).toMatch(/22 hours a week or more for you, or at least 5 hours a day for under R 394 a day/);
+    expect(note).toMatch(/SARS’s tables apply to someone working 22 hours a week or more for you, or at least 5 hours a day for under R 394 a day/);
+    expect(note).not.toMatch(/usually apply/);
     expect(note).toMatch(/reminder worked out from the days logged, not advice/);
     expect(note).toMatch(/free software from OpenWorks IT, who are not accountants or labour lawyers/);
     expect(note).not.toMatch(/belongs on Payroll/);
@@ -73,8 +75,13 @@ describe('where the law comes in for day labour', () => {
 
   it('setup says it among the cautions before the terms, and SDL counts day wages', () => {
     const cautions = setupCautions({ vatRegistered: true, employees: true, casual: true, sdl: 'no' });
-    expect(cautions.some((c) => /You use casual labour: Shap records their days and pay, but doesn’t work out, deduct or pay UIF, PAYE or the Compensation Fund/.test(c))).toBe(true);
+    const casual = cautions.find((c) => c.startsWith('You use casual labour'))!;
+    expect(casual).toMatch(/doesn’t work out, deduct or pay PAYE, UIF or the Compensation Fund on day wages/);
+    expect(casual).toMatch(/so these may apply: the national minimum wage to every worker, PAYE and the Compensation Fund to employees’ pay, and UIF/);
+    expect(casual).toMatch(/check with your accountant or a labour practitioner/);
     expect(cautions.some((c) => /salaries and day wages together/.test(c))).toBe(true);
+    // Casual labour without Payroll: SDL said too.
+    expect(setupCautions({ vatRegistered: false, employees: false, casual: true }).some((c) => /^SDL: once everything you pay employees \(day wages included\)/.test(c))).toBe(true);
     expect(setupCautions({ vatRegistered: true, employees: false }).some((c) => /casual labour/.test(c))).toBe(false);
   });
 });
@@ -131,6 +138,30 @@ describe('the workers list, Payroll and Home', () => {
     await me.post('/api/labour', { date: '2026-10-06', entries: [{ workerId: w.id, days: 30, wageCents: 49_000_000 }] });
     const sdl = (await me.get('/api/dashboard')).sdlLine;
     expect(sdl).toMatchObject({ payrollCents: 3_000_000, dayWagesCents: 49_050_000 });
+    // (One person signs in to Pocket: no one else to keep the day wages from.)
+  });
+});
+
+describe('the statements: day labour under 24 hours a month', () => {
+  it('PAYE and the Compensation Fund, and the employee benefits policy, whatever the hours; no leave item', async () => {
+    const env = await setup();
+    try {
+      const me = await login(env.app);
+      const { settings } = await me.get('/api/reference');
+      const { termsAcceptedAt: _t, logoId: _l, ...rest } = settings;
+      await me.post('/api/settings', { ...rest, companyName: 'Fictional Works (made up)', businessType: 'company', fyEndMonth: 2, features: { ...settings.features, statements: true } }, 'PUT');
+      await env.sql`delete from workers`;
+      const helper = await me.post('/api/workers', { name: 'Sipho Helper (made up)', kind: 'casual', dayRateCents: 30_000 });
+      for (const m of ['2025-04', '2025-05']) await me.post('/api/labour', { date: `${m}-10`, entries: [{ workerId: helper.id, days: 2, wageCents: 60_000 }] });
+      const s = await buildStatements(env.sql, '2026-02-28');
+      const item = s.checks.find((c) => c.label.startsWith('PAYE, UIF and the Compensation Fund on day wages'))!;
+      expect(item.detail).toMatch(/^R\s?1 200\.00 of day wages in the year: PAYE and the Compensation Fund may apply to them\. Shap/);
+      expect(s.checks.find((c) => c.label.startsWith('Leave pay and bonuses owed'))).toBeUndefined();
+      expect(s.policyDefaults.employee_benefits).toMatch(/short-term employee benefits/);
+      await expectCleanAudit(env.sql);
+    } finally {
+      await env.close();
+    }
   });
 });
 
@@ -150,9 +181,9 @@ describe('the statements: day labour that’s employment in the law, and subcont
       const s = await buildStatements(env.sql, '2026-02-28');
       const look = (start: string) => s.checks.find((c) => c.label.startsWith(start));
       expect(look('Leave pay and bonuses owed to employees')!.detail).toMatch(/Workers doesn’t for day labour/);
-      const uif = look('UIF, PAYE and the Compensation Fund on day wages')!;
+      const uif = look('PAYE, UIF and the Compensation Fund on day wages')!;
       expect(uif.ok).toBe(false);
-      expect(uif.detail).toMatch(/3 times in the year \(R\s?2 700\.00/);
+      expect(uif.detail).toMatch(/and UIF in the 3 times day labour reached about 24 hours in a month \(R\s?2 700\.00 of it\)/);
       expect(s.policyDefaults.employee_benefits).toMatch(/short-term employee benefits/);
       const stated = s.notes.find((n) => n.key === 'operating_profit')!.tables[0]!.rows;
       expect(stated.find((r) => r.label === 'Employee costs')!.current).toBe(270_000);

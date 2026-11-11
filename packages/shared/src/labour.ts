@@ -5,6 +5,7 @@
  * the law comes in, worked out from the days logged: not advice, and the business's own to check.
  */
 import type { WorkerKind } from './enums.js';
+import { formatDate } from './dates.js';
 import { formatZar } from './money.js';
 import { taxYearEnd } from './payroll.js';
 
@@ -83,17 +84,18 @@ export function labourLooks(w: { kind: WorkerKind; dayRateCents: number; daysInM
  */
 export function casualLabourNote(on: string): string {
   const day = deemedStandardDayOn(on);
+  const rate = [...NATIONAL_MINIMUM_WAGE].reverse().find((r) => on >= r.from) ?? NATIONAL_MINIMUM_WAGE[0]!;
   const deemed = day ? `, or at least 5 hours a day for under ${formatZar(day, { cents: false })} a day` : ', or at least 5 hours a day for a low day wage';
   return [
-    `Someone you pay by the day is usually your employee in the law, however few days they work. The national minimum wage (${formatZar(minimumWageOn(on))} an hour now) applies to every worker, and PAYE and the Compensation Fund to employees' pay; from 24 hours a month with you, UIF (1% from them and 1% from you) and the Basic Conditions of Employment Act's rules on working hours and leave too.`,
-    `For PAYE, SARS's tables usually apply to day labour (22 hours a week or more for you${deemed}), and a low wage may come to no tax; otherwise it's a flat 25%, unless they give you a written declaration that they work for no other employer.`,
+    `Someone you pay by the day is usually your employee in the law, however few days they work. The national minimum wage (${formatZar(rate.centsPerHour)} an hour from ${formatDate(rate.from)}) applies to every worker, and PAYE and the Compensation Fund to employees’ pay; from 24 hours a month with you, UIF (1% from them and 1% from you) and the Basic Conditions of Employment Act’s rules on working hours and leave too.`,
+    `For PAYE, SARS’s tables apply to someone working 22 hours a week or more for you${deemed}, and a low wage may come to no tax; otherwise it’s a flat 25%, unless they give you a written declaration that they work for no other employer.`,
     'Shap records their days and pay only: it doesn’t work out, deduct or pay UIF, PAYE or the Compensation Fund for them. What Workers flags is a reminder worked out from the days logged, not advice: Shap is free software from OpenWorks IT, who are not accountants or labour lawyers. Check how you employ and pay your workers with your accountant or a labour practitioner.',
   ].join(' ');
 }
 
 /** On a worker's page: the months, from the days logged, that UIF and the BCEA's hours and leave may apply. */
 export function lawMonthsNote(name: string, months: number): string {
-  return `From the days logged, ${name} worked about ${LAW_HOURS_A_MONTH} hours or more in ${months} month${months === 1 ? '' : 's'} (marked ●, at ${HOURS_A_DAY} hours a day). From that much work with you, UIF and the Basic Conditions of Employment Act's rules on working hours and leave apply to an employee. A reminder, not advice: check with your accountant or a labour practitioner.`;
+  return `From the days logged, ${name} worked about ${LAW_HOURS_A_MONTH} hours or more in ${months} month${months === 1 ? '' : 's'} (marked ●, at ${HOURS_A_DAY} hours a day). From that much work with you, UIF and the Basic Conditions of Employment Act’s rules on working hours and leave apply to an employee. A reminder, not advice: check with your accountant or a labour practitioner.`;
 }
 
 /** Said of a subcontractor: someone else's business, unless you run their work. */
