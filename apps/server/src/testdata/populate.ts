@@ -802,7 +802,9 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
    */
   const provisional = async (date: string, fy: { start: string; end: string }, second: boolean) => {
     if (s.turnoverTax || (kind.taxedAs === 'npc' && s.approvedPbo)) return;
-    const asAt = monthEnd(addMonths(date, -1)) < fy.start ? date : monthEnd(addMonths(date, -1));
+    // At six months, the months so far; at the year end, the year as it stands that day (the owners
+    // know it nearly whole by then).
+    const asAt = second || monthEnd(addMonths(date, -1)) < fy.start ? date : monthEnd(addMonths(date, -1));
     const p = await io.get<{ fy: { end: string }; lines: { type: string; projectedCents: number }[]; assessedLossCents: number; kind: TaxEstimateFigures['kind']; approvedPbo: boolean; sbc: boolean | null; partners: { name: string; shareBp: number }[]; distributedCents: number; payments: { amountCents: number }[] }>(
       `/api/reports/provisional-tax?fyEnd=${fy.end}&asAt=${asAt}`,
     );
