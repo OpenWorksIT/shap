@@ -814,9 +814,9 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
   // Day labour, usually employment in the law, paid outside Payroll (28.4(a)): what's owed on it isn't in the books.
   if (dayEmployees)
     look(
-      'PAYE, UIF and the Compensation Fund on day wages are provided for (IFRS for SMEs 28.4)',
+      `${dayMonths > 0 ? 'PAYE, UIF' : 'PAYE'} and the Compensation Fund on day wages are provided for (IFRS for SMEs 28.4)`,
       false,
-      `${formatZar(dayWages)} of day wages in the year: PAYE and the Compensation Fund may apply to them${dayMonths > 0 ? `, and UIF in the ${dayMonths} time${dayMonths === 1 ? '' : 's'} day labour reached about 24 hours in a month (${formatZar(Number(dayLabour!.monthWages))} of it)` : ''}. Shap doesn’t work out PAYE, UIF or the Compensation Fund on day wages: if any is owing at the year end, your accountant provides for it. A reminder from the days logged, not advice.`,
+      `${formatZar(dayWages)} of day wages in the year: PAYE and the Compensation Fund may apply to them${dayMonths > 0 ? `, and UIF to the ${formatZar(Number(dayLabour!.monthWages))} earned in the ${dayMonths} month${dayMonths === 1 ? '' : 's'} a worker reached about 24 hours (counting each worker’s months)` : ''}. Shap doesn’t work out PAYE, UIF or the Compensation Fund on day wages: if any is owing at the year end, your accountant provides for it. A reminder from the days logged, not advice.`,
     );
 
   // The public interest score (regulations 26 to 29) and what the business needs for it.

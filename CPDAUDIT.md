@@ -552,6 +552,13 @@ same, `packages/engine/test/review-1.10-*`):
   wages with the EMP201 and SDL showed to staff who see payroll but not wages (now labour.view too).
   "SARS's tables usually apply" too sure; the minimum wage "now" goes stale (now with its date).
   The test server's salaries without SDL left day wages out of the R500 000.
+- And checked again: the company file's and the test server's fixes had tests that passed without
+  them (now ones that fail: a company file with a new VAT category from "by itself" locked to
+  August; a builder company filled at full size); setup's hint promised Locks would ask (it asks
+  when "by itself" is chosen again: said so); with SDL on, nothing said Payroll's SDL leaves day
+  wages out (Home says so now, and the EMP201's day wages line names SDL); SDL stated as due
+  without its exemptions or the accountant; the statements' item named UIF with no month at 24
+  hours.
 
 ### Code scanning (CodeQL), first run
 

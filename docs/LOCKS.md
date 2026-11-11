@@ -39,8 +39,9 @@ sells closes each month instead (its VAT periods are made of months).
 - **The year end** closes with the year's last VAT period, as it does with its last month: your
   accountant's year-end journals (the tax, their adjustments) after that need a reopen, which
   opens the VAT periods since again. Switching to "by itself" when that would close a year not yet
-  agreed with your accountant, or whose statements aren't approved, asks first; you can close by
-  hand until the year's done.
+  agreed with your accountant, or whose statements aren't approved (now or at the next period's
+  day), asks first; you can close by hand until the year's done. Locks says when the next lock
+  closes such a year, and Home warns three weeks before.
 - **A supplier invoice that came in late**, for a closed VAT period: not filed yet, reopen, capture
   it on its date, lock it again, then file. Filed: it can be claimed in a later return, within
   five years (VAT Act s16(3)); a cost for a closed year captured later moves it into the next one,

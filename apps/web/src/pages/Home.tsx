@@ -44,7 +44,7 @@ interface Dashboard {
   /** This version's SARS tables were checked up to this year end, before the tax year we're in. */
   sarsCheckedTo?: string | null;
   /** For whoever may lock the books: month end due (last month still open), or the books reopened. */
-  sdlLine?: { payrollCents: number; dayWagesCents: number } | null;
+  sdlLine?: { payrollCents: number; dayWagesCents: number; sdlOn?: boolean } | null;
   periods?: { monthDue: string | null; closes?: 'month' | 'vat' | 'year'; next?: { on: string; through: string; closesYears?: string[] } | null; reopened: { relockDate: string; reason: string } | null; lockDate: string | null } | null;
   bankCents: number;
   ownerLoanCents: number;
@@ -187,8 +187,16 @@ function OwnerHome() {
       <Link key="sdl" to="/settings?tab=sections" className="attention">
         <Icon name="alert" size={18} />
         <span className="grow">
-          <strong>SDL may be due</strong>: over the last 12 months you paid employees about {formatZar(data.sdlLine.payrollCents + data.sdlLine.dayWagesCents, { cents: false })} (salaries {formatZar(data.sdlLine.payrollCents, { cents: false })}, day wages {formatZar(data.sdlLine.dayWagesCents, { cents: false })}), over R500 000. Once you expect more than that over the next 12 months, SDL (1% of it) is due: you register with SARS.{' '}
-          {has('payroll') ? 'Then switch SDL on in Settings: Shap works it out on Payroll’s salaries only, not on day wages.' : 'Shap works out SDL only on Payroll’s salaries, not on day wages.'} Worked out from what you’ve captured, not advice: check with your accountant.
+          {data.sdlLine.sdlOn ? (
+            <>
+              <strong>SDL on day wages</strong>: Shap works out SDL on Payroll’s salaries only, not on the {formatZar(data.sdlLine.dayWagesCents, { cents: false })} of day wages over the last 12 months. If SDL is due on those too, add it to your EMP201. Worked out from what you’ve captured, not advice: check with your accountant.
+            </>
+          ) : (
+            <>
+              <strong>SDL may be due</strong>: over the last 12 months you paid employees about {formatZar(data.sdlLine.payrollCents + data.sdlLine.dayWagesCents, { cents: false })} (salaries {formatZar(data.sdlLine.payrollCents, { cents: false })}, day wages {formatZar(data.sdlLine.dayWagesCents, { cents: false })}), over R500 000. Once you expect more than that over the next 12 months, SDL (1% of it) is usually due, registered with SARS (some employers, such as qualifying public benefit organisations, are exempt).{' '}
+              {has('payroll') ? 'Once registered, switch SDL on in Settings: Shap works it out on Payroll’s salaries only, not on day wages.' : 'Shap works out SDL only on Payroll’s salaries, not on day wages.'} Worked out from what you’ve captured, not advice: check with your accountant.
+            </>
+          )}
         </span>
         Settings
         <Icon name="chevronRight" size={16} />

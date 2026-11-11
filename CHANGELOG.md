@@ -34,17 +34,17 @@ law comes in for day labour.
   where labour law comes in. Someone you pay by the day is usually your employee in the law: the
   national minimum wage (R30.23 an hour from 1 March 2026) applies to every worker, and PAYE and
   the Compensation Fund to employees' pay; from 24 hours a month, UIF (1% each) and the Basic
-  Conditions of Employment Act's rules on hours and leave too. For PAYE, SARS's tables usually
-  apply to someone working 22 hours a week or more for you, or at least 5 hours a day for under
-  R394 a day, and a low wage may come to no tax; otherwise a flat 25%. On the list (about how many hours logged
+  Conditions of Employment Act's rules on hours and leave too. For PAYE, SARS's tables apply
+  to someone working 22 hours a week or more for you, or at least 5 hours a day for under R394 a
+  day, and a low wage may come to no tax; otherwise a flat 25%. On the list (about how many hours logged
   in a month, and a day rate under the minimum wage for an 8-hour day), on each worker's page (the
   months they reached about 24 hours), when adding one, and in setup's cautions. Shap still
   records the days and pay only: it doesn't work out, deduct or pay UIF, PAYE or the Compensation
   Fund on day wages. A subcontractor gets the note on when SARS and the labour laws may see them as
   an employee.
   - Payroll's EMP201 says when a month has day wages it doesn't include; Home warns when salaries
-    and day wages together over the last 12 months pass R500 000 with SDL off; the SDL hints say
-    day wages count.
+    and day wages together over the last 12 months pass R500 000 with SDL off, and with SDL on,
+    that Payroll's SDL leaves day wages out; the SDL hints say day wages count.
   - The financial statements: PAYE and the Compensation Fund on day wages are listed for your
     accountant in a year with any day labour, and UIF and leave pay where it reached about 24 hours
     a month; employee costs leave out subcontractors, shown on their own line.

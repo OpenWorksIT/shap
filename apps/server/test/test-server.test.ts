@@ -386,6 +386,32 @@ describe('test server: kept under turnover tax’s limit, it trades to the end o
   }, 600_000);
 });
 
+describe('test server: salaries and day wages together under the SDL line, at full size', () => {
+  it('a builder company with payroll and casual workers, without SDL', async () => {
+    const env = await setup({ env: { TEST_SERVER: 'true' } });
+    try {
+      await env.sql`delete from workers`;
+      const owner = await setUp(env, { businessType: 'company', industry: 'builder', vat: true, workflow: 'quote_job_invoice', employees: true, casual: true });
+      const monthEnd = await setMonthEndAside(env.sql);
+      await populate(io(owner), env.sql, { today: today(), scale: 1 });
+      await monthEnd.restore();
+      const years = await env.sql<{ y: number; gross: string }[]>`
+        select y, sum(gross)::bigint as gross from (
+          select case when substr(r.period, 6, 2)::int >= 3 then substr(r.period, 1, 4)::int + 1 else substr(r.period, 1, 4)::int end as y,
+                 l.salary_cents + l.overtime_cents + l.commission_cents + l.extra_cents as gross
+          from pay_lines l join pay_runs r on r.id = l.run_id where r.status = 'final'
+          union all
+          select case when extract(month from e.date) >= 3 then extract(year from e.date)::int + 1 else extract(year from e.date)::int end, e.wage_cents
+          from labour_entries e join workers w on w.id = e.worker_id where w.kind <> 'subcontractor') x group by 1`;
+      expect(years.length).toBeGreaterThan(0);
+      for (const y of years) expect(Number(y.gross), `salaries and day wages, the tax year to ${y.y}`).toBeLessThan(500_000_00);
+      await expectCleanAudit(env.sql);
+    } finally {
+      await env.close();
+    }
+  }, 900_000);
+});
+
 /** What the four reviews of 1.25 found the filling got wrong, checked on every setup's books. */
 async function checkMadeUp(env: TestEnv, owner: Awaited<ReturnType<typeof sessionFor>>, a: Answers, from: string) {
   const t = today();

@@ -36,9 +36,10 @@ The name is the shaka: thumb and pinky out, *shap, all good*.
   saved/(advance) by month and year, plus a per-job breakdown. **Savings** you hold for a worker
   are kept as a memo, separate from the company's money. Staff on the *Site staff* profile log
   days at the worker's rate without seeing any money. Workers reminds you, from the days logged,
-  where labour law comes in (the national minimum wage for every worker; UIF and the BCEA's
-  working-hours and leave rules from 24 hours a month), but doesn't work out UIF or PAYE on day
-  wages and isn't advice: see [docs/CASUAL_LABOUR.md](docs/CASUAL_LABOUR.md).
+  where labour law comes in (the national minimum wage for every worker; PAYE and the
+  Compensation Fund on employees' pay; UIF and the BCEA's working-hours and leave rules from 24
+  hours a month), but doesn't work out PAYE, UIF or the Compensation Fund on day wages and isn't
+  advice: see [docs/CASUAL_LABOUR.md](docs/CASUAL_LABOUR.md).
 - **People who sign in.** Everyone signs in as themselves: the owner, the accountant (read only),
   or staff who do only the jobs ticked for them, from a profile (Teller, Admin, Site staff, or one
   you make) changed for them if need be. Change a profile and everyone on it has the change at
