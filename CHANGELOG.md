@@ -13,7 +13,8 @@ law comes in for day labour (from Shap 1.26).
   day before your VAT201 is due (on eFiling, the last business day of the month after the period;
   otherwise the 25th). Setup asks; it was the year's lock before. The year end closes with its last
   VAT period, so year-end journals after it need a reopen, and switching to "by itself" asks first
-  when it would close a year not yet agreed or approved. Books already set up close each VAT
+  when it would close a year not yet agreed or approved, and Locks and Home say when the next
+  lock closes one. Books already set up close each VAT
   period by hand from this update, including those whose month end was left set to lock by itself
   after Sales was switched off; switching Sales or VAT registration starts the new way by hand,
   and nothing locks at once.

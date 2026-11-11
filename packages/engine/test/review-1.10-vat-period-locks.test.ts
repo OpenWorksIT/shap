@@ -153,7 +153,7 @@ describe('changing how the books close locks nothing at once', () => {
 });
 
 describe('a new VAT category, set to lock by itself, carries on from the next period’s day', () => {
-  it('locks nothing at once, through the settings or a company file', async () => {
+  it('locks nothing at once, through the settings', async () => {
     const env = await setup();
     try {
       const me = await login(env.app);
@@ -172,14 +172,36 @@ describe('a new VAT category, set to lock by itself, carries on from the next pe
       await me.post('/api/settings', { ...rest, vatRegistered: true, vatNumber: '4740101508', vatCategory: 'B', fyEndMonth: 2 }, 'PUT');
       expect((await cost('2026-10-16')).statusCode).toBe(200);
       expect((await me.get('/api/periods')).lockDate).toBe('2026-08-31');
-      // The same through a company file that brings category D back, then B.
-      for (const cat of ['D', 'B']) {
-        // (Pocket's company file needs no download link or password: one person, on their phone.)
-        const file = (await me.call({ method: 'GET', url: '/api/company-file' })).json();
-        file.settings.vatCategory = cat;
-        await me.post('/api/company-file', { file });
-      }
-      expect((await cost('2026-10-17')).statusCode).toBe(200);
+      vi.useRealTimers();
+      await expectCleanAudit(env.sql);
+    } finally {
+      vi.useRealTimers();
+      await env.close();
+    }
+  });
+});
+
+describe('a new VAT category from a company file, set to lock by itself, carries on from the next period’s day', () => {
+  it('locks nothing at once', async () => {
+    const env = await setup();
+    try {
+      const me = await login(env.app);
+      const r = await ref(env.sql);
+      const cost = async (date: string) =>
+        me.call({ method: 'POST', url: '/api/costs', payload: { date, description: 'Stationery (made up)', amountCents: 11_500, vatCents: 1_500, vatCode: 'standard', categoryId: await r.cat('Sundry'), sourceId: await r.src('Business bank') } });
+      const { settings } = await me.get('/api/reference');
+      await me.post('/api/settings', { ...settings, vatRegistered: true, vatNumber: '4740101508', vatCategory: 'D', fyEndMonth: 2 }, 'PUT');
+      vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-11-09T08:00:00Z') });
+      await me.post('/api/periods/month-end', { mode: 'auto', day: 7, closeYears: true }, 'PUT');
+      expect((await cost('2026-10-15')).statusCode).toBe(200);
+      expect((await me.get('/api/periods')).lockDate).toBe('2026-08-31');
+      // A company file with category B (two months to October).
+      // (Pocket's company file needs no download link or password: one person, on their phone.)
+      const file = (await me.call({ method: 'GET', url: '/api/company-file' })).json();
+      file.settings.vatCategory = 'B';
+      await me.post('/api/company-file', { file });
+      expect((await cost('2026-10-16')).statusCode).toBe(200);
+      expect((await me.get('/api/periods')).lockDate).toBe('2026-08-31');
       vi.useRealTimers();
       await expectCleanAudit(env.sql);
     } finally {
@@ -208,6 +230,10 @@ describe('locking by itself asks before it closes a year not yet agreed or appro
       const asked = await me.call({ method: 'PUT', url: '/api/periods/month-end', payload: { mode: 'auto', day: 7 } });
       expect(asked.statusCode).toBe(400);
       expect(asked.json().error).toMatch(/closes the year to 28 Feb 2026 by 7 Mar 2026/);
+      // Locking by itself anyway: Locks and Home say the next lock closes the year.
+      await me.post('/api/periods/month-end', { mode: 'auto', day: 7, closeYears: true }, 'PUT');
+      expect((await me.get('/api/periods')).monthEnd.next).toMatchObject({ on: '2026-03-07', through: '2026-02-28', closesYears: ['2026-02-28'] });
+      expect((await me.get('/api/dashboard')).periods.next).toMatchObject({ closesYears: ['2026-02-28'] });
       vi.useRealTimers();
       await expectCleanAudit(env.sql);
     } finally {

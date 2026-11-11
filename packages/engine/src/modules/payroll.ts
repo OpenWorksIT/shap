@@ -131,10 +131,10 @@ export async function sarsSummary(db: Db, dayWagesToo = false) {
 /**
  * SDL is off, but what was paid to employees over the last 12 months, salaries and day wages
  * together (not subcontractors), came to more than R500 000: SDL may be due (Skills Development
- * Levies Act; SARS). From what's captured: an estimate.
+ * Levies Act; SARS). Or SDL is on, and there are day wages Payroll's SDL doesn't cover. From
+ * what's captured: an estimate.
  */
-export async function sdlLine(db: Db, sdlOn: boolean, now: string): Promise<{ payrollCents: number; dayWagesCents: number } | null> {
-  if (sdlOn) return null;
+export async function sdlLine(db: Db, sdlOn: boolean, now: string): Promise<{ payrollCents: number; dayWagesCents: number; sdlOn: boolean } | null> {
   const from = addDays(addMonths(now, -12), 1);
   const [r] = await db<{ payroll: string; day: string }[]>`
     select
@@ -144,7 +144,9 @@ export async function sdlLine(db: Db, sdlOn: boolean, now: string): Promise<{ pa
         where w.kind <> 'subcontractor' and e.date between ${from}::date and ${now}::date)::bigint as day`;
   const payrollCents = Number(r!.payroll);
   const dayWagesCents = Number(r!.day);
-  return payrollCents + dayWagesCents > SDL_THRESHOLD_CENTS ? { payrollCents, dayWagesCents } : null;
+  // With SDL on: Payroll works it out on salaries only, so day wages are a reminder of their own.
+  if (sdlOn) return dayWagesCents > 0 ? { payrollCents, dayWagesCents, sdlOn } : null;
+  return payrollCents + dayWagesCents > SDL_THRESHOLD_CENTS ? { payrollCents, dayWagesCents, sdlOn } : null;
 }
 
 /**

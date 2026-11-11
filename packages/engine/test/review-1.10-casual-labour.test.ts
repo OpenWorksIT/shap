@@ -137,7 +137,11 @@ describe('the workers list, Payroll and Home', () => {
     // Day wages that take the year past R500 000 (made up, in one go).
     await me.post('/api/labour', { date: '2026-10-06', entries: [{ workerId: w.id, days: 30, wageCents: 49_000_000 }] });
     const sdl = (await me.get('/api/dashboard')).sdlLine;
-    expect(sdl).toMatchObject({ payrollCents: 3_000_000, dayWagesCents: 49_050_000 });
+    expect(sdl).toMatchObject({ payrollCents: 3_000_000, dayWagesCents: 49_050_000, sdlOn: false });
+    // With SDL on, Payroll's SDL covers salaries only: the day wages are a reminder of their own.
+    await env.sql`update settings set sdl = true`;
+    expect((await me.get('/api/dashboard')).sdlLine).toMatchObject({ sdlOn: true, dayWagesCents: 49_050_000 });
+    await env.sql`update settings set sdl = false`;
     // (One person signs in to Pocket: no one else to keep the day wages from.)
   });
 });
@@ -154,7 +158,7 @@ describe('the statements: day labour under 24 hours a month', () => {
       const helper = await me.post('/api/workers', { name: 'Sipho Helper (made up)', kind: 'casual', dayRateCents: 30_000 });
       for (const m of ['2025-04', '2025-05']) await me.post('/api/labour', { date: `${m}-10`, entries: [{ workerId: helper.id, days: 2, wageCents: 60_000 }] });
       const s = await buildStatements(env.sql, '2026-02-28');
-      const item = s.checks.find((c) => c.label.startsWith('PAYE, UIF and the Compensation Fund on day wages'))!;
+      const item = s.checks.find((c) => c.label.startsWith('PAYE and the Compensation Fund on day wages'))!;
       expect(item.detail).toMatch(/^R\s?1 200\.00 of day wages in the year: PAYE and the Compensation Fund may apply to them\. Shap/);
       expect(s.checks.find((c) => c.label.startsWith('Leave pay and bonuses owed'))).toBeUndefined();
       expect(s.policyDefaults.employee_benefits).toMatch(/short-term employee benefits/);
@@ -183,7 +187,7 @@ describe('the statements: day labour that’s employment in the law, and subcont
       expect(look('Leave pay and bonuses owed to employees')!.detail).toMatch(/Workers doesn’t for day labour/);
       const uif = look('PAYE, UIF and the Compensation Fund on day wages')!;
       expect(uif.ok).toBe(false);
-      expect(uif.detail).toMatch(/and UIF in the 3 times day labour reached about 24 hours in a month \(R\s?2 700\.00 of it\)/);
+      expect(uif.detail).toMatch(/and UIF to the R\s?2 700\.00 earned in the 3 months a worker reached about 24 hours/);
       expect(s.policyDefaults.employee_benefits).toMatch(/short-term employee benefits/);
       const stated = s.notes.find((n) => n.key === 'operating_profit')!.tables[0]!.rows;
       expect(stated.find((r) => r.label === 'Employee costs')!.current).toBe(270_000);

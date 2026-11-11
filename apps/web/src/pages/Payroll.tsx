@@ -466,7 +466,7 @@ function Sars() {
           <div className={`xs ${owing > 0 && dueOn < today ? 'warn-text' : 'muted'}`}>
             {owing > 0 ? `${formatZar(owing)} due by ${formatDate(dueOn)}${dueOn < today ? ' (late)' : ''}` : `Paid ${formatZar(paid)}`}
           </div>
-          {dayWages > 0 && <div className="xs muted">Payroll only: day wages logged under Workers this month ({formatZar(dayWages)}) aren’t in it. PAYE and UIF may be due on them too: a reminder, not advice, so check with your accountant.</div>}
+          {dayWages > 0 && <div className="xs muted">Payroll only: day wages logged under Workers this month ({formatZar(dayWages)}) aren’t in it. PAYE and UIF (and SDL, if you pay it) may be due on them too: a reminder, not advice, so check with your accountant.</div>}
         </span>
         {owing > 0 && (
           <button className="btn small" onClick={() => setPay({ kind, period, owing })}>

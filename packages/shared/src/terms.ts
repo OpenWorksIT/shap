@@ -78,7 +78,7 @@ export function setupCautions(a: {
   }
   if (a.casual) {
     out.push('You use casual labour: Shap records their days and pay, but doesn’t work out, deduct or pay PAYE, UIF or the Compensation Fund on day wages, or register you with anyone. Someone you pay by the day is usually your employee in the law, so these may apply: the national minimum wage to every worker, PAYE and the Compensation Fund to employees’ pay, and UIF and the Basic Conditions of Employment Act’s rules on hours and leave from 24 hours a month. Keeping to them is up to you: check with your accountant or a labour practitioner.');
-    if (!a.employees) out.push('SDL: once everything you pay employees (day wages included) is expected to pass R500 000 over the next 12 months, you must register with SARS and pay 1% of it. Shap doesn’t work out SDL on day wages.');
+    if (!a.employees) out.push('SDL: once everything you pay employees (day wages included) is expected to pass R500 000 over the next 12 months, SDL (1% of it) is usually due, registered with SARS (some employers, such as qualifying public benefit organisations, are exempt). Shap doesn’t work out SDL on day wages: check with your accountant.');
   }
   if (a.turnoverTax) out.push('You’re on turnover tax: Shap estimates it from your turnover, but the TT01 registration and the TT03 return are yours to file.');
   if (a.paysDividends) out.push('Dividends: each dividend paid is declared to SARS on the DTR01 and DTR02 by the last day of the next month (an exemption is claimed on the DTR01, so exempt dividends are declared too: confirm with your accountant). Shap records them and reminds you; declaring and paying is up to you.');
