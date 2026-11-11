@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { formatDate, formatZar, monthLabel, todayIso, WORKER_KIND_LABELS } from '@shap/shared';
+import { casualLabourNote, formatDate, formatZar, HOURS_A_DAY, labourLooks, LAW_HOURS_A_MONTH, monthLabel, SUBCONTRACTOR_NOTE, todayIso, WORKER_KIND_LABELS } from '@shap/shared';
 import { LabourEntryForm } from '../components/LabourForm';
 import { ProjectSelect } from '../components/Pickers';
 import { PayForm } from '../components/PayForm';
@@ -125,6 +125,7 @@ export default function WorkerPage() {
           ...(data.savings.length ? [{ value: 'savings' as Tab, label: 'Savings', count: data.savings.length }] : []),
         ]}
       />
+      <LawNote worker={data.worker} months={data.months} />
       {tab === 'months' && (
         <section className="panel table-wrap">
           <table className="table money-table">
@@ -155,7 +156,10 @@ export default function WorkerPage() {
                   {y.months.map((m) => (
                     <tr key={m.month}>
                       <td>{monthLabel(m.month)}</td>
-                      <td className="num">{m.days || '–'}</td>
+                      <td className="num" title={labourLooks({ kind: data.worker.kind, dayRateCents: 0, daysInMonth: m.days, on: `${m.month}-01` }).lawApplies ? `About ${m.days * HOURS_A_DAY} hours: UIF and the BCEA apply` : undefined}>
+                        {m.days || '–'}
+                        {labourLooks({ kind: data.worker.kind, dayRateCents: 0, daysInMonth: m.days, on: `${m.month}-01` }).lawApplies && <span className="xs warn-text"> ●</span>}
+                      </td>
                       <td className="num hide-sm">{formatZar(m.wageCents, { cents: false })}</td>
                       <td className="num hide-sm">{formatZar(m.allowanceCents, { cents: false })}</td>
                       <td className="num">{formatZar(m.earnedCents, { cents: false })}</td>
@@ -429,5 +433,32 @@ function SettleAdvance({ workerId, name, advanceCents, onClose, onDone }: { work
         <button className="btn primary big block">Book it</button>
       </form>
     </Drawer>
+  );
+}
+
+/**
+ * What the law asks of the business for this worker, from the days logged (docs/CASUAL_LABOUR.md):
+ * the months they worked 24 hours or more (UIF and the BCEA), and the day rate against the national
+ * minimum wage. Reminders, not advice.
+ */
+function LawNote({ worker, months }: { worker: WorkerRow; months: { month: string; days: number }[] }) {
+  const on = todayIso();
+  if (worker.kind === 'subcontractor') return <p className="xs muted">{SUBCONTRACTOR_NOTE}</p>;
+  const covered = months.filter((m) => labourLooks({ kind: worker.kind, dayRateCents: 0, daysInMonth: m.days, on: `${m.month}-01` }).lawApplies);
+  const rate = labourLooks({ kind: worker.kind, dayRateCents: worker.dayRateCents, daysInMonth: 0, on });
+  return (
+    <section className="panel panel-pad stack-sm">
+      {(covered.length > 0 || rate.belowMinimumWage) && (
+        <div className="banner signal small stack-sm">
+          {covered.length > 0 && (
+            <span>
+              <strong>{worker.name} is your employee in the law</strong> in the {covered.length} month{covered.length === 1 ? '' : 's'} marked ● (about {LAW_HOURS_A_MONTH} hours or more): UIF, the Basic Conditions of Employment Act and the Compensation Fund apply, and employees' tax on what they earn.
+            </span>
+          )}
+          {rate.belowMinimumWage && <span>Their day rate is under the national minimum wage for a full day ({formatZar(rate.minimumDayCents)}).</span>}
+        </div>
+      )}
+      <p className="xs muted">{casualLabourNote(on)}</p>
+    </section>
   );
 }

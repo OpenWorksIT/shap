@@ -129,7 +129,7 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
       // This version's SARS tables were checked up to SARS_CHECKED_TO: a later tax year needs an update.
       sarsCheckedTo: taxYearEnd(now) > SARS_CHECKED_TO ? SARS_CHECKED_TO : null,
       // Month end due (last month still open) or the books reopened: for whoever may lock them.
-      periods: await (async () => { const p = await lockState(sql); return { monthDue: p.monthDue, reopened: p.reopened, lockDate: p.lockDate }; })(),
+      periods: await (async () => { const p = await lockState(sql); return { monthDue: p.monthDue, closes: p.closes, reopened: p.reopened, lockDate: p.lockDate }; })(),
       bankCents: bal('bank'),
       ownerLoanCents: -bal('owner_loan'),
       projects: projects.map((p) => ({ ...p, ...totals(p as unknown as ProjectSummary) })),

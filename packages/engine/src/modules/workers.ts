@@ -1,11 +1,11 @@
 import type { App as FastifyInstance } from '../http.js';
-import { allocateInput, labourBatchInput, labourEntryInput, savingsInput, wagePaymentInput, workerInput } from '@shap/shared';
+import { allocateInput, labourBatchInput, labourEntryInput, labourLooks, savingsInput, wagePaymentInput, workerInput, type WorkerKind } from '@shap/shared';
 import { z } from 'zod';
 import { requireRole, seesMoney, userOrThrow, type AuthUser } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { pgCode, PG, type Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
-import { assertOpen, isIsoDate, q } from '../lib/books.js';
+import { assertOpen, isIsoDate, q, today } from '../lib/books.js';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 
@@ -28,21 +28,27 @@ export function registerWorkerRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/workers', { preHandler: requireRole() }, async (req) => {
     const user = userOrThrow(req);
     if (!seesMoney(user)) return sql`select id, name, kind, active from workers order by active desc, name`;
-    return sql`
+    const rows = await sql<{ kind: string; dayRateCents: number; daysThisMonth: number; daysLastMonth: number }[]>`
       select w.*,
         coalesce(e.earned, 0)::bigint as earned_cents,
         coalesce(p.paid, 0)::bigint as paid_cents,
         (coalesce(e.earned, 0) - coalesce(p.paid, 0))::bigint as balance_cents,
         coalesce(sv.held, 0)::bigint as savings_cents,
         coalesce(m.days, 0)::float as days_this_month,
+        coalesce(lm.days, 0)::float as days_last_month,
         e.last_date as last_worked
       from workers w
       left join lateral (select sum(wage_cents + allowance_cents) as earned, max(date) as last_date from labour_entries where worker_id = w.id) e on true
       left join lateral (select sum(amount_cents) as paid from wage_payments where worker_id = w.id) p on true
       left join lateral (select sum(amount_cents) as held from worker_savings where worker_id = w.id) sv on true
       left join lateral (select sum(days) as days from labour_entries where worker_id = w.id and date >= date_trunc('month', current_date)) m on true
+      left join lateral (select sum(days) as days from labour_entries where worker_id = w.id
+        and date >= date_trunc('month', current_date) - interval '1 month' and date < date_trunc('month', current_date)) lm on true
       order by w.active desc, e.last_date desc nulls last, w.name
     `;
+    // Where the law starts to apply (docs/CASUAL_LABOUR.md): from the busier of this month and last.
+    const on = today();
+    return rows.map((w) => ({ ...w, law: labourLooks({ kind: w.kind as WorkerKind, dayRateCents: Number(w.dayRateCents), daysInMonth: Math.max(Number(w.daysThisMonth), Number(w.daysLastMonth)), on }) }));
   });
 
   /** The tracker's Wages Breakdown for one worker: per month days, wages, allowances, paid, saved/(advance). */

@@ -1,17 +1,17 @@
 /**
  * Locked periods (Shap's docs/LOCKS.md). Everything dated on or before the lock date is closed.
  * The owner locks a month or a year, and reopens the books with a reason (in the audit log) to put
- * something right, then locks them again. A business that sells closes each month (month end): by hand, or
- * the month locks itself on a day of the next month (lib/books.ts applyMonthLock). One that doesn't
- * closes its years.
+ * something right, then locks them again. A business that sells closes each month (month end), a
+ * VAT vendor that doesn't sell each VAT period: by hand, or the period locks itself on a day of the
+ * month after it (lib/books.ts applyMonthLock). Any other business closes its years.
  */
 import type { App as FastifyInstance } from '../http.js';
-import { addMonths, featureOn, financialYear, lockInput, monthEnd, monthEndInput, monthLockDue, nextMonthLock, reopenInput, vatPeriod, type VatCategory } from '@shap/shared';
+import { addDays, addMonths, featureOn, financialYear, lockInput, lockPeriod, monthEnd, monthEndInput, nextPeriodLock, periodLockDue, reopenInput, vatPeriod, type VatCategory } from '@shap/shared';
 import { requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
-import { applyMonthLock, effectiveLock, getSettings, today } from '../lib/books.js';
+import { applyMonthLock, closesOf, effectiveLock, getSettings, today } from '../lib/books.js';
 import { badRequest } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 
@@ -38,14 +38,18 @@ export async function lockState(db: Db, who = true) {
         where a.entity = 'period' and a.action = 'reopen' order by a.at desc limit 1`
     : [];
   const t = today();
-  const lastMonthEnd = monthEnd(addMonths(`${t.slice(0, 8)}01`, -1));
+  // Months (it sells), VAT periods (a VAT vendor that doesn't), or years.
+  const closes = closesOf(s);
+  // The last period that has ended, once the month after it has reached the month end day.
+  const lastDue = closes === 'year' ? null : periodLockDue(t, s.monthEndDay, closes, s.vatCategory, s.fyEndMonth);
   return {
     lockDate,
     reopened: relock ? { relockDate: relock, at: reopened?.at ?? null, byName: who ? (reopened?.byName ?? null) : null, reason: who ? (reopened?.reason ?? '') : '' } : null,
     sells,
-    monthEnd: { mode: s.monthEndMode, day: s.monthEndDay, next: s.monthEndMode === 'auto' && sells ? nextMonthLock(t, s.monthEndDay) : null },
-    // Month end due: a business that sells, last month still open, from the month end day.
-    monthDue: sells && (!lockDate || lockDate < lastMonthEnd) && Number(t.slice(8, 10)) >= s.monthEndDay ? lastMonthEnd : null,
+    closes,
+    monthEnd: { mode: s.monthEndMode, day: s.monthEndDay, next: s.monthEndMode === 'auto' && closes !== 'year' ? nextPeriodLock(t, s.monthEndDay, closes, s.vatCategory, s.fyEndMonth) : null },
+    // Month end (or VAT period end) due: the last period that has ended still open, from the day.
+    monthDue: lastDue && (!lockDate || lockDate < lastDue) ? lastDue : null,
     fyEndMonth: s.fyEndMonth,
     // A VAT vendor's VAT periods that have ended and are closed: reopening one may mean a VAT201
     // already filed (docs/LOCKS.md).
@@ -73,14 +77,15 @@ export function registerPeriodRoutes(app: FastifyInstance, ctx: Ctx): void {
     userOrThrow(req);
     const state = await lockState(sql);
     const t = today();
-    // The last twelve month ends (a business that sells) or financial years, newest first, with
-    // what each holds: a month end looks over these before locking.
-    const ends = state.sells
-      ? Array.from({ length: 12 }, (_, i) => monthEnd(addMonths(`${t.slice(0, 8)}01`, -i)))
-      : Array.from({ length: 6 }, (_, i) => financialYear(addMonths(t, -12 * i), state.fyEndMonth).end);
+    // The last twelve months (a business that sells), eight VAT periods (a VAT vendor that doesn't)
+    // or six financial years, newest first, with what each holds: a period end looks over these
+    // before locking.
+    const s = await getSettings(sql);
+    const spans: { start: string; end: string }[] = [];
+    if (state.closes === 'year') for (let i = 0; i < 6; i++) spans.push(financialYear(addMonths(t, -12 * i), state.fyEndMonth));
+    else for (let p = lockPeriod(t, state.closes, s.vatCategory, s.fyEndMonth); spans.length < (state.closes === 'month' ? 12 : 8); p = lockPeriod(addDays(p.start, -1), state.closes, s.vatCategory, s.fyEndMonth)) spans.push(p);
     const periods = [];
-    for (const end of ends) {
-      const start = state.sells ? `${end.slice(0, 8)}01` : financialYear(end, state.fyEndMonth).start;
+    for (const { start, end } of spans) {
       const [f] = await sql<{ salesCount: number; salesCents: string; refundsCents: string; invoicedCents: string; costsCents: string; bankOpen: number }[]>`
         select
           (select count(*)::int from documents where counter and status = 'issued' and issue_date between ${start}::date and ${end}::date) as sales_count,
@@ -146,15 +151,16 @@ export function registerPeriodRoutes(app: FastifyInstance, ctx: Ctx): void {
     });
   });
 
-  /** Month end: closed by hand, or each month locks itself on a day of the next. */
+  /** Month end (VAT period end): closed by hand, or each period locks itself on a day of the month after it. */
   app.put('/api/periods/month-end', { preHandler: requireRole('owner') }, async (req) => {
     const user = userOrThrow(req);
     const { mode, day } = parse(monthEndInput, req.body);
     const before = await getSettings(sql);
-    if (!featureOn(before.features, 'sales')) throw badRequest('Month end is for a business that sells: switch Sales on first (Settings → What you use)');
-    // Switched to locking by itself: the months due lock now, unless the books are reopened (then
-    // from the next month's day, so what's being put right isn't closed under someone).
-    const due = monthLockDue(today(), day);
+    const closes = closesOf(before);
+    if (closes === 'year') throw badRequest('Month end is for a business that sells, or one registered for VAT (each VAT period): otherwise the books close by the year');
+    // Switched to locking by itself: the periods due lock now, unless the books are reopened (then
+    // from the next period's day, so what's being put right isn't closed under someone).
+    const due = periodLockDue(today(), day, closes, before.vatCategory, before.fyEndMonth);
     await sql`update settings set month_end_mode = ${mode}, month_end_day = ${day}, updated_at = now(),
       month_locked_through = case when ${mode} = 'auto' and relock_date is not null and (lock_date is null or relock_date > lock_date)
         then greatest(coalesce(month_locked_through, ${due}::date), ${due}::date) else month_locked_through end

@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { formatDate, formatZar, WORKER_KIND_LABELS, WORKER_KINDS, type WorkerKind } from '@shap/shared';
+import { casualLabourNote, formatDate, formatZar, HOURS_A_DAY, labourLooks, SUBCONTRACTOR_NOTE, todayIso, WORKER_KIND_LABELS, WORKER_KINDS, type WorkerKind } from '@shap/shared';
 import { ProjectSelect } from '../components/Pickers';
 import { PageHead } from '../components/Shell';
 import { Avatar, Drawer, Empty, ErrorBox, Field, Icon, Loading, Money, MoneyInput, Tabs, useToast } from '../components/ui';
@@ -78,6 +78,8 @@ export default function WorkersPage() {
                               {WORKER_KIND_LABELS[w.kind]}
                               {w.active ? '' : ' · not active'}
                             </div>
+                            {w.law?.lawApplies && <div className="xs warn-text">About {w.law.hours} hours a month: UIF and the BCEA apply</div>}
+                            {w.law?.belowMinimumWage && <div className="xs warn-text">Day rate under the minimum wage for a full day ({formatZar(w.law.minimumDayCents)})</div>}
                           </span>
                         </Link>
                       </td>
@@ -96,6 +98,7 @@ export default function WorkersPage() {
                 </tbody>
               </table>
               <p className="xs muted panel-pad">Owed is what they’ve earned and not been paid yet. Brackets mean you’ve paid ahead (an advance).</p>
+              <p className="xs muted panel-pad">{casualLabourNote(todayIso())} Hours are worked out from the days logged, at {HOURS_A_DAY} hours a day.</p>
             </div>
           )}
         </>
@@ -239,8 +242,18 @@ export function WorkerDrawer({ worker, onClose, onSaved }: { worker?: WorkerRow;
             </select>
           )}
         </Field>
+        <p className="xs muted">{f.kind === 'subcontractor' ? SUBCONTRACTOR_NOTE : casualLabourNote(todayIso())}</p>
         <div className="form-grid">
-          <Field label="Day rate" hint="Used for new days. Past days keep what they were.">{(p) => <MoneyInput {...p} value={f.dayRateCents} onChange={(c) => setF({ ...f, dayRateCents: c ?? 0 })} />}</Field>
+          <Field
+            label="Day rate"
+            hint={
+              f.kind !== 'subcontractor' && labourLooks({ kind: f.kind, dayRateCents: f.dayRateCents, daysInMonth: 0, on: todayIso() }).belowMinimumWage
+                ? `Under the national minimum wage for a full day (${formatZar(labourLooks({ kind: f.kind, dayRateCents: 0, daysInMonth: 0, on: todayIso() }).minimumDayCents)} for ${HOURS_A_DAY} hours). Used for new days.`
+                : 'Used for new days. Past days keep what they were.'
+            }
+          >
+            {(p) => <MoneyInput {...p} value={f.dayRateCents} onChange={(c) => setF({ ...f, dayRateCents: c ?? 0 })} />}
+          </Field>
           <Field label="Daily allowance" hint="Transport or lunch">{(p) => <MoneyInput {...p} value={f.allowanceCents} onChange={(c) => setF({ ...f, allowanceCents: c ?? 0 })} />}</Field>
         </div>
         <Field label="Phone">{(p) => <input {...p} className="input" type="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} />}</Field>

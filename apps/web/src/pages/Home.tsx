@@ -45,7 +45,7 @@ interface Dashboard {
   /** This version's SARS tables were checked up to this year end, before the tax year we're in. */
   sarsCheckedTo?: string | null;
   /** For whoever may lock the books: month end due (last month still open), or the books reopened. */
-  periods?: { monthDue: string | null; reopened: { relockDate: string; reason: string } | null; lockDate: string | null } | null;
+  periods?: { monthDue: string | null; closes?: 'month' | 'vat' | 'year'; reopened: { relockDate: string; reason: string } | null; lockDate: string | null } | null;
   bankCents: number;
   ownerLoanCents: number;
   projects: ProjectRow[];
@@ -119,9 +119,17 @@ function OwnerHome() {
       <Link key="month-end" to="/accounts?tab=locks" className="attention">
         <Icon name="calendar" size={18} />
         <span className="grow">
-          <strong>Month end</strong>: {monthLabel(data.periods.monthDue.slice(0, 7))} is still open. Check it over and close it.
+          {data.periods.closes === 'vat' ? (
+            <>
+              <strong>VAT period end</strong>: the VAT period to {formatDate(data.periods.monthDue)} is still open. Check it over and close it before the VAT201.
+            </>
+          ) : (
+            <>
+              <strong>Month end</strong>: {monthLabel(data.periods.monthDue.slice(0, 7))} is still open. Check it over and close it.
+            </>
+          )}
         </span>
-        Month end
+        {data.periods.closes === 'vat' ? 'Locks' : 'Month end'}
         <Icon name="chevronRight" size={16} />
       </Link>
     ),

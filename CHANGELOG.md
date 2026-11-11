@@ -2,6 +2,22 @@
 
 What changed in each version of Shap Pocket, newest first.
 
+## 1.10.0 (11 November 2026)
+
+A VAT vendor closes each VAT period, and Workers says where the law starts for day labour (from
+Shap 1.26).
+
+- **VAT period end** (a VAT vendor that doesn't sell): the books close VAT period by VAT period, as
+  a business that sells closes each month: by hand (Home reminds you from the day you choose of
+  the month after the period, while it's still open), or by itself on that day. Choose a day
+  before the VAT201 is due. Setup asks; it was the year's lock before.
+- **Day labour and the law**: someone who works for you 24 hours or more a month is your employee
+  in the law (UIF, the Basic Conditions of Employment Act, the national minimum wage, employees'
+  tax). Workers says so on the list, on each worker and when adding one, with a day rate under the
+  minimum wage for a full day. Pocket records the days and pay only: it doesn't work out or pay
+  UIF or tax on day wages. Reminders, not advice: Shap Pocket is free software from OpenWorks IT,
+  who are not accountants or labour lawyers.
+
 ## 1.9.0 (11 November 2026)
 
 The financial statements look for three more things (from Shap 1.25).

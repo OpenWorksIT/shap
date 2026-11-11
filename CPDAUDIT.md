@@ -7,9 +7,9 @@ way the profession would check it before any phone takes it. Pocket shares Shap'
 audit ([OpenWorksIT/shap: CPDAUDIT.md](https://github.com/OpenWorksIT/shap/blob/main/CPDAUDIT.md)),
 with what's Pocket's own below.
 
-## 1. Every update: the four reviews
+## 1. Every update: the five reviews
 
-Before the version goes up and the update is pushed, the four reviews of Shap's CPD audit, each
+Before the version goes up and the update is pushed, the five reviews of Shap's CPD audit, each
 by someone (or a separate AI session) that didn't write the change, each finding fixed with a test
 that fails without it, here and in Shap where the code is shared:
 
@@ -24,6 +24,11 @@ that fails without it, here and in Shap where the code is shared:
 4. **Accounting and arithmetic**: every figure the same wherever it goes, and data safety on
    upgrade: books from the version before open (the migrations, `packages/engine/migrations`) and
    give the same figures, and what was signed stays signed.
+5. **Words on screen and liability** (from 1.10): everything the app, its PDFs, its store
+   listings (docs/app-stores.md) and its docs say to the owner, read as the owner would read it
+   and as someone holding OpenWorks IT to it would, as in Shap's: a free app from people who
+   aren't accountants, tax practitioners, auditors or labour lawyers, so nothing reads as advice,
+   a promise or a figure to rely on; estimates, checks and reminders say so.
 
 Then CI is green on the commit (`apps.yml`: the typecheck, every test, known vulnerabilities and
 the privacy list, and the Android and iPhone builds; `web.yml`; CodeQL), and the changelog says

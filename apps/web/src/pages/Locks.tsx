@@ -5,7 +5,7 @@
  * on a day of the next.
  */
 import { useState, type FormEvent } from 'react';
-import { formatDate, monthLabel } from '@shap/shared';
+import { addDays, formatDate, monthLabel } from '@shap/shared';
 import { Empty, ErrorBox, Field, Loading, Money, Segmented, useToast } from '../components/ui';
 import { api, ApiError } from '../lib/api';
 import { useApi } from '../lib/hooks';
@@ -27,6 +27,8 @@ export interface LockState {
   lockDate: string | null;
   reopened: { relockDate: string; at: string | null; byName: string | null; reason: string } | null;
   sells: boolean;
+  /** Closed as it goes: each month (it sells), each VAT period (a VAT vendor that doesn't), or each year. */
+  closes: 'month' | 'vat' | 'year';
   monthEnd: { mode: 'manual' | 'auto'; day: number; next: { on: string; through: string } | null };
   monthDue: string | null;
   periods: Period[];
@@ -40,11 +42,11 @@ export function Locks() {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState('');
-  const [reopening, setReopening] = useState<string | null>(null);
+  const [reopening, setReopening] = useState<{ start: string; end: string } | null>(null);
   const mayLock = isOwner;
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   if (!data) return <Loading />;
-  const name = (end: string) => (data.sells ? monthLabel(end.slice(0, 7)) : `the year to ${formatDate(end)}`);
+  const name = (p: { start: string; end: string }) => (data.closes === 'year' ? `the year to ${formatDate(p.end)}` : data.closes === 'vat' ? `the VAT period ${spanLabel(p)}` : spanLabel(p));
   const run = async (what: () => Promise<unknown>, done: string) => {
     setBusy(true);
     setProblem('');
@@ -66,12 +68,14 @@ export function Locks() {
   return (
     <div className="stack">
       <section className="panel panel-pad stack-sm">
-        <h3>{data.sells ? 'Month end and locks' : 'Locks'}</h3>
+        <h3>{data.closes === 'month' ? 'Month end and locks' : data.closes === 'vat' ? 'VAT period end and locks' : 'Locks'}</h3>
         <p className="small muted">
           {data.lockDate ? `The books are closed up to ${formatDate(data.lockDate)}: nothing dated on or before it can change.` : 'Nothing is locked yet.'}{' '}
-          {data.sells
+          {data.closes === 'month'
             ? 'A business that sells closes each month, so the takings, the VAT and the bank stay as they were checked.'
-            : 'Close a year once your accountant has signed it off.'}{' '}
+            : data.closes === 'vat'
+              ? 'A VAT vendor closes each VAT period, so what the VAT201 was worked out from stays as it was checked.'
+              : 'Close a year once your accountant has signed it off.'}{' '}
           To put something right in a closed period, reopen it with the reason (it’s kept with the books), then lock it again.
         </p>
         {data.reopened && (
@@ -95,19 +99,19 @@ export function Locks() {
         {mayLock && nextToClose && (
           <div className="row wrap">
             <button type="button" className="btn primary" disabled={busy} onClick={() => void lock(nextToClose.end)}>
-              Close {name(nextToClose.end)}
+              Close {name(nextToClose)}
             </button>
           </div>
         )}
       </section>
 
-      {data.sells && has('sales') && <MonthEndMode state={data} mayLock={mayLock} onSaved={() => void reload()} />}
+      {(data.closes === 'vat' || (data.closes === 'month' && has('sales'))) && <MonthEndMode state={data} mayLock={mayLock} onSaved={() => void reload()} />}
 
       <div className="panel table-wrap">
         <table className="table">
           <thead>
             <tr>
-              <th>{data.sells ? 'Month' : 'Year'}</th>
+              <th>{data.closes === 'month' ? 'Month' : data.closes === 'vat' ? 'VAT period' : 'Year'}</th>
               <th>State</th>
               {data.sells && <th className="num">Sales</th>}
               {data.sells && <th className="num">Refunds</th>}
@@ -120,7 +124,7 @@ export function Locks() {
           <tbody>
             {data.periods.map((p) => (
               <tr key={p.end}>
-                <td className="nowrap">{data.sells ? monthLabel(p.end.slice(0, 7)) : `To ${formatDate(p.end)}`}</td>
+                <td className="nowrap">{data.closes === 'year' ? `To ${formatDate(p.end)}` : spanLabel(p)}</td>
                 <td className="small">{p.locked ? 'Closed' : p.ended ? <strong>Open</strong> : 'Under way'}</td>
                 {data.sells && (
                   <td className="num">
@@ -144,7 +148,7 @@ export function Locks() {
                       </button>
                     )}
                     {p.locked && (
-                      <button type="button" className="btn small quiet" disabled={busy} onClick={() => setReopening(p.end)}>
+                      <button type="button" className="btn small quiet" disabled={busy} onClick={() => setReopening(p)}>
                         Reopen
                       </button>
                     )}
@@ -161,7 +165,6 @@ export function Locks() {
         <Reopen
           period={reopening}
           label={name(reopening)}
-          sells={data.sells}
           vatPeriods={data.vatPeriods}
           onCancel={() => setReopening(null)}
           onDone={async () => {
@@ -175,14 +178,14 @@ export function Locks() {
   );
 }
 
-/** The month (or year) ending `period` and everything after it opened again, with the reason. */
-function Reopen({ period, label, sells, vatPeriods, onCancel, onDone }: { period: string; label: string; sells: boolean; vatPeriods: { start: string; end: string }[]; onCancel: () => void; onDone: () => Promise<void> }) {
+/** The month (VAT period, year) `period` and everything after it opened again, with the reason. */
+function Reopen({ period, label, vatPeriods, onCancel, onDone }: { period: { start: string; end: string }; label: string; vatPeriods: { start: string; end: string }[]; onCancel: () => void; onDone: () => Promise<void> }) {
   const toast = useToast();
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  // Closed up to the month (or year) before it.
-  const to = sells ? previousMonthEnd(period) : previousYearEnd(period);
+  // Closed up to the period before it.
+  const to = addDays(period.start, -1);
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -230,18 +233,20 @@ function Reopen({ period, label, sells, vatPeriods, onCancel, onDone }: { period
   );
 }
 
-/** Month end: closed by hand, or each month locks itself on a day of the next. */
+/** Month end (VAT period end): closed by hand, or each locks itself on a day of the month after it. */
 function MonthEndMode({ state, mayLock, onSaved }: { state: LockState; mayLock: boolean; onSaved: () => void }) {
   const toast = useToast();
   const [mode, setMode] = useState(state.monthEnd.mode);
   const [day, setDay] = useState(state.monthEnd.day);
   const [error, setError] = useState('');
   const dirty = mode !== state.monthEnd.mode || day !== state.monthEnd.day;
+  const vat = state.closes === 'vat';
+  const each = vat ? 'Each VAT period' : 'Each month';
   const save = async () => {
     setError('');
     try {
       await api('/api/periods/month-end', { method: 'PUT', body: { mode, day } });
-      toast(mode === 'auto' ? `Each month locks itself on day ${day} of the next` : 'Each month is closed by hand');
+      toast(mode === 'auto' ? `${each} locks itself on day ${day} of the month after it` : `${each} is closed by hand`);
       onSaved();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Couldn’t save');
@@ -249,9 +254,9 @@ function MonthEndMode({ state, mayLock, onSaved }: { state: LockState; mayLock: 
   };
   return (
     <section className="panel panel-pad stack-sm">
-      <h3>Month end</h3>
+      <h3>{vat ? 'VAT period end' : 'Month end'}</h3>
       <Segmented
-        label="How each month is closed"
+        label={vat ? 'How each VAT period is closed' : 'How each month is closed'}
         value={mode}
         onChange={setMode}
         disabled={!mayLock}
@@ -260,12 +265,12 @@ function MonthEndMode({ state, mayLock, onSaved }: { state: LockState; mayLock: 
           { value: 'auto', label: 'By itself' },
         ]}
       />
-      <Field label={mode === 'auto' ? 'Day of the next month it locks' : 'Day of the next month Home reminds you'} hint="1 to 28">
+      <Field label={vat ? (mode === 'auto' ? 'Day of the month after the period that it locks' : 'Day of the month after the period that Home reminds you') : mode === 'auto' ? 'Day of the next month it locks' : 'Day of the next month Home reminds you'} hint={vat ? '1 to 28: before the VAT201 is due (the last business day of that month on eFiling), so the return is worked out from closed books' : '1 to 28'}>
         {(p) => <input {...p} className="input" type="number" min={1} max={28} value={day} disabled={!mayLock} onChange={(e) => setDay(Math.min(28, Math.max(1, Number(e.target.value) || 1)))} style={{ width: 100 }} />}
       </Field>
       {state.monthEnd.next && !dirty && (
         <p className="small muted">
-          Next: {monthLabel(state.monthEnd.next.through.slice(0, 7))} locks itself on {formatDate(state.monthEnd.next.on)}, whether or not it’s been checked. You can close it earlier.
+          Next: {vat ? `the VAT period to ${formatDate(state.monthEnd.next.through)}` : monthLabel(state.monthEnd.next.through.slice(0, 7))} locks itself on {formatDate(state.monthEnd.next.on)}, whether or not it’s been checked. You can close it earlier.
         </p>
       )}
       {error && <div className="banner alert small">{error}</div>}
@@ -280,14 +285,9 @@ function MonthEndMode({ state, mayLock, onSaved }: { state: LockState; mayLock: 
   );
 }
 
-function previousMonthEnd(end: string): string {
-  const d = new Date(`${end.slice(0, 8)}01T00:00:00Z`);
-  d.setUTCDate(0);
-  return d.toISOString().slice(0, 10);
-}
-
-function previousYearEnd(end: string): string {
-  const d = new Date(`${Number(end.slice(0, 4)) - 1}-${end.slice(5, 7)}-01T00:00:00Z`);
-  d.setUTCMonth(d.getUTCMonth() + 1, 0);
-  return d.toISOString().slice(0, 10);
+/** A month ("Mar 26"), or a VAT period of months ("Jan to Feb 26"). */
+function spanLabel(p: { start: string; end: string }): string {
+  const to = monthLabel(p.end.slice(0, 7));
+  if (p.start.slice(0, 7) === p.end.slice(0, 7)) return to;
+  return `${monthLabel(p.start.slice(0, 7), p.start.slice(0, 4) !== p.end.slice(0, 4))} to ${to}`;
 }
