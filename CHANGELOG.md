@@ -8,16 +8,17 @@ The financial statements look for three more things (from Shap 1.25).
 
 - **Going concern** (IFRS for SMEs 3.8): when liabilities exceed assets or the bank is overdrawn at
   the year end, the statements' checks ask you (and your accountant) to assess whether the business
-  can carry on, and for a company to look at business rescue (Companies Act s128, s129(7)).
+  can carry on, and for a company or close corporation to look at business rescue (Companies Act
+  s128, s129(7); CC Act s66(1A)).
 - **Distributions declared after the year end** (IFRS for SMEs 32.8, 32.10): disclosed in the
-  notes, not as a liability at the year end; the checks list any.
+  notes, not as a liability at the year end; the checks list any declared before the next one.
 - **Stock on hand** (IFRS for SMEs 13.4): selling without keeping stock in Pocket, the checks ask
   you to count what's on hand at the year end and put it in the books.
 - The statement of changes in equity names a CC's capital as members' contributions, a trust's as
   capital contributed and a co-op's as members' shares.
 
-These are checks to help you and your accountant, not an opinion on your books: Pocket is a free
-tool, not an accountant.
+These are checks to help you and your accountant, not an opinion on your books: Shap Pocket is
+free software from OpenWorks IT, who are not accountants.
 
 ## 1.8.0 (10 November 2026)
 

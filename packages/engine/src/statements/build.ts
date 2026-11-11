@@ -15,6 +15,8 @@
  */
 import {
   addDays,
+  addMonths,
+  monthEnd,
   companyRate,
   estimateTax,
   assessedLossSetOff,
@@ -819,20 +821,22 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
   // (A CC's accounting officer also reports a deficit to CIPC: below.)
   const deficit = totalLiabilities.current > totalAssets.current;
   const overdrawn = (lineTotals.get('bank_overdraft')?.current ?? 0) > 0;
-  if (bt !== 'cc' || overdrawn) {
+  {
     const g = governingFor(bt);
-    const company = ['company', 'inc', 'npc', 'coop'].includes(bt);
+    // Business rescue: companies (Companies Act Chapter 6), and close corporations with it (CC Act s66(1A)).
+    const rescue = ['company', 'inc', 'npc', 'cc'].includes(bt);
     look(
       'The business is a going concern (IFRS for SMEs 3.8)',
       !deficit && !overdrawn,
       deficit || overdrawn
-        ? `${deficit ? 'Liabilities exceed assets' : 'The bank is overdrawn'} at the year end${deficit && overdrawn ? ', and the bank is overdrawn' : ''}. The ${g.many} assess whether the business can carry on for at least the next twelve months; if there's real doubt, the statements say so (IFRS for SMEs 3.9), and the going-concern wording in the details changes.${company ? ' A company that may not pay its debts as they fall due in the next six months is financially distressed (Companies Act s128, s129(7)).' : ''}`
+        ? `${deficit ? 'Liabilities exceed assets' : 'The bank is overdrawn'} at the year end${deficit && overdrawn ? ', and the bank is overdrawn' : ''}. The ${g.many} ${g.plural ? 'assess' : 'assesses'} whether the business can carry on for at least the next twelve months; if there's real doubt, the statements say so (IFRS for SMEs 3.9), and the going-concern wording in the details changes.${rescue ? ` A ${bt === 'cc' ? 'close corporation' : 'company'} is financially distressed if it's reasonably unlikely to pay all its debts as they fall due in the next six months, or reasonably likely to become insolvent in that time (Companies Act s128(1)(f)${bt === 'cc' ? ', with CC Act s66(1A)' : ''}); the ${g.many} then consider business rescue, or tell those affected why they aren't starting it (s129(7)).` : ''} This is a check, not an opinion on the business: talk it through with your accountant.`
         : 'assets cover the liabilities and the bank isn’t overdrawn',
     );
   }
-  // Dividends (distributions) declared after the year end aren't a liability at it (32.8), but are disclosed (32.10).
-  const [after] = await db<{ n: number; gross: string }[]>`select count(*)::int as n, coalesce(sum(gross_cents), 0)::bigint as gross from dividends where declared_on > ${fyEnd}::date`;
-  if (after!.n) look('Distributions declared after the year end are disclosed (IFRS for SMEs 32.8, 32.10)', false, `${formatZar(Number(after!.gross))} declared after the year end: not a liability at it. Mention it in the events after the reporting date (the details) if it's material.`);
+  // Dividends (distributions) declared after the year end, up to the next one, aren't a liability at it (32.8), but are disclosed (32.10).
+  const nextFyEnd = monthEnd(addMonths(fyEnd, 12));
+  const [after] = await db<{ n: number; gross: string }[]>`select count(*)::int as n, coalesce(sum(gross_cents), 0)::bigint as gross from dividends where declared_on > ${fyEnd}::date and declared_on <= ${nextFyEnd}::date`;
+  if (after!.n) look('Distributions declared after the year end are disclosed (IFRS for SMEs 32.8, 32.10)', false, `${formatZar(Number(after!.gross))} declared after the year end (before the next): not a liability at it. Mention it in the events after the reporting date (the details) if it's material.`);
   // Sold without keeping stock in Shap: what's on the shelf at the year end isn't in the books (13.4).
   if (featureOn(settings.features, 'sales') && !featureOn(settings.features, 'inventory') && !lineTotals.has('inventories'))
     look('Stock on hand at the year end is in the books (IFRS for SMEs 13.4)', false, 'Shap doesn’t keep this business’s stock, so goods on hand at the year end aren’t in the books: count them, and your accountant journals their cost into inventory.');

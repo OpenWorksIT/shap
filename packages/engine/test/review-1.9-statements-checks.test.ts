@@ -44,6 +44,46 @@ describe('a company in deficit and overdrawn, with a dividend declared after the
     expect(later.ok).toBe(false);
     expect(later.detail).toMatch(/R\s?10 000/);
     expect(look('Stock on hand at the year end is in the books')!.ok).toBe(false);
+    expect(gc.detail).toMatch(/check, not an opinion.*accountant/);
+    // The year before: that dividend is more than a year after its end, so not this year's to mention.
+    const before = await buildStatements(env.sql, '2025-02-28');
+    expect(before.checks.find((c) => c.label.startsWith('Distributions declared after the year end'))).toBeUndefined();
+    await expectCleanAudit(env.sql);
+  });
+});
+
+describe('a sole proprietor overdrawn, and a CC in deficit with money in the bank', () => {
+  let env: TestEnv;
+  beforeAll(async () => {
+    env = await setup();
+  });
+  afterAll(async () => env.close());
+
+  it('the owner assesses it (and a sole proprietor has no business rescue)', async () => {
+    const me = await business(env, 'sole_prop');
+    const r = await ref(env.sql);
+    await me.post('/api/costs', { date: '2025-06-01', description: 'Rent (made up)', amountCents: 2_000_000, vatCents: 0, vatCode: 'exempt', categoryId: await r.cat('Sundry'), sourceId: await r.src('Business bank') });
+    const gc = (await buildStatements(env.sql, FY)).checks.find((c) => c.label.startsWith('The business is a going concern'))!;
+    expect(gc.ok).toBe(false);
+    expect(gc.detail).toMatch(/The owner assesses whether/);
+    expect(gc.detail).not.toMatch(/s128/);
+    await expectCleanAudit(env.sql);
+  });
+
+  it('a CC in deficit, not overdrawn: the going-concern look, with business rescue (CC Act s66(1A))', async () => {
+    await env.sql`delete from costs`;
+    const me = await business(env, 'cc');
+    const r = await ref(env.sql);
+    const bank = await r.src('Business bank');
+    await me.post('/api/journals', { date: '2025-03-01', description: 'Members’ contributions (made up)', lines: [{ accountId: await r.acc('bank'), debitCents: 1_000_000 }, { accountId: await r.acc('share_capital'), creditCents: 1_000_000 }] });
+    await me.post('/api/journals', { date: '2025-03-02', description: 'Loan from a member (made up)', lines: [{ accountId: await r.acc('bank'), debitCents: 5_000_000 }, { accountId: await r.acc('owner_loan'), creditCents: 5_000_000 }] });
+    await me.post('/api/costs', { date: '2025-06-01', description: 'Rent (made up)', amountCents: 5_500_000, vatCents: 0, vatCode: 'exempt', categoryId: await r.cat('Sundry'), sourceId: bank });
+    const s = await buildStatements(env.sql, FY);
+    const gc = s.checks.find((c) => c.label.startsWith('The business is a going concern'))!;
+    expect(gc.ok).toBe(false);
+    expect(gc.detail).toMatch(/^Liabilities exceed assets at the year end\. The members assess/);
+    expect(gc.detail).toMatch(/close corporation is financially distressed.*s128\(1\)\(f\), with CC Act s66\(1A\).*s129\(7\)/);
+    expect(s.checks.find((c) => c.label.startsWith('The members’ interest is not in deficit'))!.ok).toBe(false);
     await expectCleanAudit(env.sql);
   });
 });
@@ -55,7 +95,7 @@ describe('a CC and a trust: their capital by its own name', () => {
   });
   afterAll(async () => env.close());
 
-  it('a CC’s members’ contributions; healthy books pass the going-concern check', async () => {
+  it('a CC’s members’ contributions; healthy books pass the going-concern look', async () => {
     const me = await business(env, 'cc');
     const r = await ref(env.sql);
     await me.post('/api/journals', { date: '2025-03-01', description: 'Members’ contributions (made up)', lines: [{ accountId: await r.acc('bank'), debitCents: 1_000_000 }, { accountId: await r.acc('share_capital'), creditCents: 1_000_000 }] });
@@ -63,8 +103,8 @@ describe('a CC and a trust: their capital by its own name', () => {
     const rows = s.soce.rows.map((x) => x.label);
     expect(rows).toContain('Members’ contributions');
     expect(rows).not.toContain('Issue of shares');
-    // A CC's deficit is the accounting officer's check (s62(3)); the going-concern look only when overdrawn.
-    expect(s.checks.find((c) => c.label.startsWith('The business is a going concern'))).toBeUndefined();
+    // Healthy books pass the going-concern look, and the accounting officer's deficit check (s62(3)).
+    expect(s.checks.find((c) => c.label.startsWith('The business is a going concern'))!.ok).toBe(true);
     expect(s.checks.find((c) => c.label.startsWith('The members’ interest is not in deficit'))!.ok).toBe(true);
     await expectCleanAudit(env.sql);
   });
