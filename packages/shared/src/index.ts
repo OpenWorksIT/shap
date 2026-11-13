@@ -24,3 +24,4 @@ export * from './public-interest.js';
 export * from './sha256.js';
 export * from './locks.js';
 export * from './labour.js';
+export * from './documents.js';

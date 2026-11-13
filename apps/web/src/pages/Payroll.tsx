@@ -11,6 +11,7 @@ import { Drawer, Empty, ErrorBox, Field, Icon, Loading, Money, MoneyInput, Tabs,
 import { api, ApiError } from '../lib/api';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
+import { UNEXPECTED } from '../lib/words';
 import { EstimateNote } from '../components/EstimateNote';
 
 type Tab = 'runs' | 'people' | 'sars' | 'dividends';
@@ -172,7 +173,8 @@ function RunDrawer({ id, onClose }: { id: string; onClose: () => void }) {
       await reload();
       if (done) toast(done);
     } catch (err) {
-      toast(err instanceof ApiError ? err.message : 'Something went wrong', 'error');
+      if (!(err instanceof ApiError)) console.error(err);
+      toast(err instanceof ApiError ? err.message : UNEXPECTED, 'error');
     } finally {
       setBusy(false);
     }

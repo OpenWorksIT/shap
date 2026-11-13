@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { api, ApiError } from '../lib/api';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
+import { UNEXPECTED } from '../lib/words';
 import { AuthenticatorSetup, CodeInput, RecoveryCodes } from './TwoFactor';
 import { Drawer, Field, useToast } from './ui';
 
@@ -32,7 +33,8 @@ export function AccountDrawer({ onClose }: { onClose: () => void }) {
     try {
       await fn();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Something went wrong');
+      if (!(err instanceof ApiError)) console.error(err);
+      setError(err instanceof ApiError ? err.message : UNEXPECTED);
     } finally {
       setBusy(false);
     }

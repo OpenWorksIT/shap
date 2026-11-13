@@ -13,6 +13,9 @@ import {
   PAYMENT_METHODS,
   todayIso,
   documentTotals,
+  documentName,
+  hasGoneOut,
+  notIssuedYet,
   SALE_VAT,
   SALE_VAT_CODES,
   vatRateOn,
@@ -33,6 +36,7 @@ import { reminderToast, sendReminder } from '../lib/reminders';
 import { hoursLabel } from '../lib/time';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
+import { UNEXPECTED } from '../lib/words';
 import type { ClientRow, DocDetail, DocLine, ProjectRow } from '../lib/types';
 
 interface Draft {
@@ -138,6 +142,8 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
   // Goods back on an issued invoice: a credit note for them, back into stock, paid back or off what's owed.
   const [returns, setReturns] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // Share or Email on a draft invoice or credit note: asked first whether to issue it.
+  const [askIssue, setAskIssue] = useState<null | 'share' | 'email'>(null);
   const profile = useMemo(() => industryProfile(settings.industry), [settings.industry]);
   const L = (c: LineCategory) => lineLabel(settings.industry, c);
   // Demolition is a builder's line type: offered to builders (and books that haven't said).
@@ -230,7 +236,9 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
     try {
       await fn();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Something went wrong');
+      // Not one the server explained: into Feedback's trail, for a bug report.
+      if (!(err instanceof ApiError)) console.error(err);
+      setError(err instanceof ApiError ? err.message : UNEXPECTED);
     } finally {
       setBusy(false);
     }
@@ -288,15 +296,51 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
       toast(`Job #${p.number} ${name} created${doc ? ' and linked' : ''}`);
     });
 
-  const pdfName = `${label} ${doc?.number ?? ''}.pdf`;
+  const pdfName = `${doc ? documentName(doc) : label} ${doc?.number ?? ''}.pdf`;
   const loadPdf = useCallback(async () => (await apiBlob(`/api/documents/${doc!.id}/pdf`)).blob, [doc?.id, doc?.updatedAt]);
-  const share = () =>
-    run(async () => {
-      if (dirty) await save();
-      const how = await shareOrDownload(apiUrl(`/api/documents/${doc!.id}/pdf`), pdfName, `${label} ${doc!.number}`);
-      if (how === 'downloaded') toast('PDF downloaded');
-      if (kind === 'quote' && doc!.status === 'draft') await api(`/api/documents/${doc!.id}/status`, { body: { status: 'sent' } }).then(() => reload());
+  /**
+   * Unsaved changes, saved before the PDF is made. Unlike save() (which shows its own error and
+   * carries on), a refusal here stops what comes after: Share, Email, Preview.
+   */
+  const persist = async () => {
+    if (!dirty || !doc) return;
+    await api(`/api/documents/${doc.id}`, { method: 'PUT', body: body() });
+    setDirty(false);
+    await reload();
+  };
+  /** The PDF to the phone's share sheet, or downloaded: named as its PDF is. Shared, a draft quote counts as sent. */
+  const shareNow = async () => {
+    const { doc: now } = await api<DocDetail>(`/api/documents/${doc!.id}`);
+    const name = `${documentName(now)} ${now.number}`;
+    const how = await shareOrDownload(apiUrl(`/api/documents/${now.id}/pdf`), `${name}.pdf`, name);
+    if (how === 'downloaded') toast('PDF downloaded');
+    if (how !== 'cancelled' && isOwner) await api(`/api/documents/${now.id}/shared`, { body: {} });
+    await reload();
+  };
+  /** Share PDF or Email. A draft invoice or credit note isn't in the books yet: it asks first whether to issue it. */
+  const sendBy = (how: 'share' | 'email') => {
+    if (doc && isOwner && notIssuedYet(doc)) return setAskIssue(how);
+    return run(async () => {
+      await persist();
+      if (how === 'share') await shareNow();
+      else setDrawer('email');
     });
+  };
+  const share = () => sendBy('share');
+  const sendAfterAsking = (issue: boolean) => {
+    const how = askIssue;
+    setAskIssue(null);
+    return run(async () => {
+      await persist();
+      if (issue) {
+        await api(`/api/documents/${doc!.id}/issue`, { body: {} });
+        toast(`${label} ${doc!.number} issued`);
+        await reload();
+      }
+      if (how === 'share') await shareNow();
+      else setDrawer('email');
+    });
+  };
 
   return (
     <div className="stack-lg">
@@ -330,7 +374,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
               </button>
               <button className="btn quiet" onClick={() =>
                   void run(async () => {
-                    if (dirty) await save();
+                    await persist();
                     setPreview(true);
                   })
                 } disabled={busy}>
@@ -338,7 +382,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                 Preview
               </button>
               {isOwner && (
-                <button className="btn quiet" onClick={() => setDrawer('email')}>
+                <button className="btn quiet" onClick={() => void sendBy('email')} disabled={busy}>
                   <Icon name="mail" size={18} />
                   Email
                 </button>
@@ -935,7 +979,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                 Share
               </button>
               {isOwner && (
-                <button className="btn small" onClick={() => (setPreview(false), setDrawer('email'))}>
+                <button className="btn small" onClick={() => (setPreview(false), void sendBy('email'))} disabled={busy}>
                   <Icon name="mail" size={16} />
                   Email
                 </button>
@@ -947,10 +991,31 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
           }
         />
       )}
+      {askIssue && doc && (
+        <Drawer title={`Issue ${label.toLowerCase()} ${doc.number} first?`} onClose={() => setAskIssue(null)}>
+          <div className="stack">
+            <p>
+              {credit
+                ? `It’s still a draft: it hasn’t come off ${doc.creditedInvoiceNumber ? `invoice ${doc.creditedInvoiceNumber}` : 'the invoice'} or out of your books yet. Issue it to ${askIssue === 'email' ? 'email' : 'share'} it as your credit note.`
+                : `It’s still a draft: it isn’t in your books yet. Issue it to ${askIssue === 'email' ? 'email' : 'share'} it as your invoice, with your payment details.`}
+            </p>
+            <p className="xs muted">{credit ? 'Sent as a draft, its PDF says “Draft credit note”.' : 'Sent as a draft, its PDF says “Draft invoice” and asks for no payment.'}</p>
+            <button type="button" className="btn primary block" disabled={busy || (credit && total <= 0)} onClick={() => void sendAfterAsking(true)}>
+              {askIssue === 'email' ? 'Issue and email' : 'Issue and share'}
+            </button>
+            <button type="button" className="btn block" disabled={busy} onClick={() => void sendAfterAsking(false)}>
+              {askIssue === 'email' ? 'Email the draft' : 'Share the draft'}
+            </button>
+            <button type="button" className="btn quiet block" onClick={() => setAskIssue(null)}>
+              Cancel
+            </button>
+          </div>
+        </Drawer>
+      )}
       {deleting && doc && (
         <DeleteRecord
           what={`${label.toLowerCase()} ${doc.number}`}
-          sent={doc.status !== 'draft' || Boolean((doc as { sharedAt?: string | null }).sharedAt)}
+          sent={hasGoneOut(doc)}
           creditInstead={doc.kind === 'invoice' && has('creditNotes')}
           onClose={() => setDeleting(false)}
           onDelete={() =>

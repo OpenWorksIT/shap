@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { Mailer } from '../lib/mailer.js';
-import { addDays, documentInput, documentTotals, featureOn, quoteStatusInput, receiptInput, vatRateOn, writeOffInput, type DocKind } from '@shap/shared';
+import { addDays, documentInput, documentName, documentTotals, featureOn, quoteStatusInput, receiptInput, vatRateOn, writeOffInput, type DocKind } from '@shap/shared';
 import { z } from 'zod';
 import { can, requireAccess, type AuthUser, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -216,8 +216,7 @@ export async function documentPdf(db: Db, id: string, opts: { abridged?: boolean
     logo = a?.bytes ?? null;
   }
   const pdf = await renderDocumentPdf({ ...data, settings, brand, logo });
-  const label =
-    data.doc.kind === 'invoice' ? (Number(data.doc.vatRateBp) > 0 ? 'Tax invoice' : data.doc.legacySale ? 'Sale' : 'Invoice') : data.doc.kind === 'credit_note' ? 'Credit note' : data.doc.proforma ? 'Pro-forma invoice' : 'Quote';
+  const label = documentName(data.doc);
   const filename = `${brand ? `${brand.name} ` : ''}${label} ${data.doc.number}${data.doc.clientName ? ` - ${data.doc.clientName}` : ''}.pdf`.replace(/[^\w.\- ]/g, '');
   return { pdf, filename, data, settings, brand };
 }
@@ -228,7 +227,9 @@ export async function documentPdf(db: Db, id: string, opts: { abridged?: boolean
  */
 export async function emailDocument(db: Db, mailer: Mailer, id: string, to: string, message: string): Promise<string> {
   const { pdf, filename, data, settings, brand } = await documentPdf(db, id);
-  const what = data.doc.kind === 'invoice' ? 'Invoice' : data.doc.kind === 'credit_note' ? 'Credit note' : data.doc.proforma ? 'Pro-forma invoice' : 'Quote';
+  // Named as its PDF is (a draft invoice is a "Draft invoice", asking for no payment).
+  const what = documentName(data.doc);
+  const asksPay = (data.doc.kind === 'invoice' && data.doc.status !== 'draft') || Boolean(data.doc.proforma);
   const from = brand?.name || settings.tradingName || settings.companyName;
   await mailer.send({
     to,
@@ -237,8 +238,8 @@ export async function emailDocument(db: Db, mailer: Mailer, id: string, to: stri
     subject: `${what} ${data.doc.number} from ${from}`,
     text:
       (message || `Good day,\n\nPlease find ${what.toLowerCase()} ${data.doc.number} attached.\n\nKind regards,\n${from}`) +
-      ((data.doc.kind === 'invoice' || data.doc.proforma) && featureOn(settings.features, 'payshap') && settings.payshapId ? `\n\nPay instantly with PayShap to ${settings.payshapId} (reference ${data.doc.number}).` : '') +
-      ((data.doc.kind === 'invoice' || data.doc.proforma) && (data.doc.payLink || settings.payLink) ? `\n\nPay by card: ${data.doc.payLink || settings.payLink}` : ''),
+      (asksPay && featureOn(settings.features, 'payshap') && settings.payshapId ? `\n\nPay instantly with PayShap to ${settings.payshapId} (reference ${data.doc.number}).` : '') +
+      (asksPay && (data.doc.payLink || settings.payLink) ? `\n\nPay by card: ${data.doc.payLink || settings.payLink}` : ''),
     attachments: [{ filename, content: pdf, contentType: 'application/pdf' }],
   });
   if (data.doc.kind === 'quote' && data.doc.status === 'draft') await db`update documents set status = 'sent', sent_at = now() where id = ${id}`;

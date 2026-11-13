@@ -325,6 +325,9 @@ export interface DocDetail {
     creditedInvoiceNumber: string | null;
     creditedInvoiceDate: string | null;
     creditedInvoiceTotalCents: number | null;
+    /** When it was last emailed or shared (a draft invoice can go out before it's issued). */
+    sentAt: string | null;
+    legacySale?: boolean;
   };
   lines: DocLine[];
   receipts: { id: string; date: string; amountCents: number; sourceName: string; method: string; reference: string; note: string }[];

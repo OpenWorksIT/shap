@@ -1,5 +1,5 @@
 import PDFDocument from 'pdfkit';
-import { featureOn, formatDate, formatZar, lineLabel, lineTotal, SALE_VAT, SHAP_LINE, SHAP_URL, type LineCategory, type SaleVatCode, regPrefix } from '@shap/shared';
+import { documentHeading, featureOn, formatDate, notIssuedYet, formatZar, lineLabel, lineTotal, SALE_VAT, SHAP_LINE, SHAP_URL, type LineCategory, type SaleVatCode, regPrefix } from '@shap/shared';
 import type { SettingsRow } from '../lib/books.js';
 import { cleanImageCached } from '../lib/images.js';
 
@@ -192,13 +192,13 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   const isInvoice = doc.kind === 'invoice';
   // A sale at the counter is an invoice paid on the spot (a walk-in's, the abridged tax invoice): it asks for nothing.
   const isSale = isInvoice && Boolean(doc.counter);
-  const asksPayment = (isInvoice && !isSale) || isProforma;
-  // Its own VAT rate says whether the business was a VAT vendor for it (not whether it is today):
-  // a vendor's invoice is a tax invoice even when everything on it is zero-rated (VAT Act s20(4)(a)),
-  // and one from before registering still reprints as a plain invoice.
+  // A draft invoice or credit note isn't issued: not a tax invoice yet, and not to be paid.
+  const draft = notIssuedYet(doc);
+  const asksPayment = (isInvoice && !isSale && !draft) || isProforma;
+  // Its own VAT rate says whether the business was a VAT vendor for it (not whether it is today).
   const vatShown = doc.vatRateBp > 0;
   const legacy = isInvoice && Boolean(doc.legacySale);
-  const heading = isCredit ? 'Credit note' : legacy ? (vatShown ? 'Tax invoice' : 'Sale') : isInvoice ? (vatShown ? 'Tax invoice' : 'Invoice') : isProforma ? 'Pro-forma invoice' : 'Quotation';
+  const heading = documentHeading(doc);
   const balance = doc.totalCents - (isInvoice ? doc.paidCents : 0);
   const label = (text: string, x: number, at: number, opts: PDFKit.Mixins.TextOptions = {}) =>
     pdf.font(bold).fontSize(7.5).fillColor(MUTED).text(text.toUpperCase(), x, at, { characterSpacing: 0.9, ...opts });
@@ -369,7 +369,7 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   // A deposit is a request for part of the total up front. On an invoice it's what's due until it's in.
   const deposit = Math.min(doc.depositDueCents ?? 0, doc.totalCents);
   const depositLabel = `Deposit${doc.depositBp ? ` (${(doc.depositBp / 100).toFixed(doc.depositBp % 100 ? 1 : 0)}%)` : ''}`;
-  const depositDue = isInvoice && deposit > 0 && doc.paidCents < deposit;
+  const depositDue = isInvoice && !draft && deposit > 0 && doc.paidCents < deposit;
   // What credit notes settled isn't money paid: it's shown as credited.
   const credited = ((data as { receipts?: { method: string; amountCents: number }[] }).receipts ?? []).filter((r) => r.method === 'credit').reduce((t, r) => t + Number(r.amountCents), 0);
   const settled = (paidLabel: string) => {
@@ -387,9 +387,13 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
     settled(deposit > 0 ? 'Paid (incl. deposit)' : 'Paid');
   } else if (vatShown) totals.push([totalLabel, doc.totalCents]);
   const bigLabel = isCredit
-    ? 'Credited'
+    ? draft
+      ? 'To credit'
+      : 'Credited'
     : isInvoice
-      ? depositDue
+      ? draft
+        ? 'Total'
+        : depositDue
         ? 'Deposit due'
         : doc.paidCents >= doc.totalCents && doc.totalCents > 0
           ? 'Paid in full'

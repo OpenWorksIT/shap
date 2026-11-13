@@ -560,6 +560,31 @@ same, `packages/engine/test/review-1.10-*`):
   without its exemptions or the accountant; the statements' item named UIF with no month at 24
   hours.
 
+### The reviews of Shap Pocket 1.10.1 (Shap 1.26.1)
+
+Pocket 1.10.1 fixed Send (a stray hook call in Pocket's screen only) and went out before its
+reviews, at OpenWorks' call; Shap got the same check of its screens (`web-hooks.test.ts`), a test
+only. The five reviews of it found these in the code the two share, fixed in both with tests
+(`apps/server/test/review-1.26.1/send-drafts.test.ts`, `web-actions.test.ts`; Pocket's section 7,
+1.10.2):
+
+- IFRS and SARS: Share PDF and Email on a draft invoice or credit note sent a PDF headed "Tax
+  invoice" (or "Credit note") asking to be paid, for a supply not in the books or the VAT201, and
+  issuing's checks (s20(4), s21(3)) never ran. They ask to issue it first, and a draft's PDF and
+  email say "Draft invoice" or "Draft credit note" and ask for no payment.
+- Accounting: Share PDF and Preview carried on when the save before them was refused, with the PDF
+  as last saved; Email didn't save at all. They save first and stop when it's refused;
+  `web-actions.test.ts` finds an action that swallows its own errors awaited inside another.
+- SARS: what a document is called comes from its own VAT rate, in one place
+  (`documentHeading`/`documentName` in `@shap/shared`) for the PDF, its file and its email.
+- IFRS and SARS: the delete warning read `sharedAt`, which the API doesn't have; Share PDF didn't
+  record that it went out (and counted a cancelled share sheet as sent). Now `/shared` after a
+  share that wasn't cancelled, and `sentAt`, typed, through `hasGoneOut`.
+- Words: "Something went wrong" told the owner nothing and lost the cause: one wording
+  (`UNEXPECTED`), the error into Feedback's trail, checked in every screen.
+- Security and privacy: nothing to fix. The hooks check now also finds a hook imported under
+  another name, called on any namespace, or in a handler named like a component.
+
 ### Code scanning (CodeQL), first run
 
 - The Accounts screen's download links carried the period's dates unencoded (flagged as text

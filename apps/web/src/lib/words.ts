@@ -8,6 +8,13 @@ let tone: Tone = 'casual';
 export const setTone = (t: Tone | undefined) => void (tone = t === 'formal' ? 'formal' : 'casual');
 export const getTone = () => tone;
 
+/**
+ * When something fails that the app didn't expect (not a refusal the books explained): no detail,
+ * nothing promised, and not "try again", which could make a second of something. The error itself
+ * goes in Feedback's trail (console.error), so a bug report carries it.
+ */
+export const UNEXPECTED = 'That didn’t work. Please let us know: tap Feedback, then Bug found.';
+
 const CHEERS = ['Lekker', 'Sharp', 'Shap', 'Nice one', 'Sorted'];
 
 /** A confirmation in the app's voice: "Saved" becomes "Lekker! Saved" when casual. */

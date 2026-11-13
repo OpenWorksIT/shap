@@ -91,7 +91,7 @@ export async function shrinkImage(file: File, max = 1600, quality = 0.8): Promis
 }
 
 /** Downloads (or on phones, shares) a file fetched from the API. */
-export async function shareOrDownload(url: string, filename: string, title: string): Promise<'shared' | 'downloaded'> {
+export async function shareOrDownload(url: string, filename: string, title: string): Promise<'shared' | 'cancelled' | 'downloaded'> {
   const res = await fetch(url, { credentials: 'same-origin' });
   if (!res.ok) throw new Error('Couldn’t fetch the file');
   const blob = await res.blob();
@@ -102,7 +102,7 @@ export async function shareOrDownload(url: string, filename: string, title: stri
       await nav.share({ files: [file], title });
       return 'shared';
     } catch (err) {
-      if ((err as Error).name === 'AbortError') return 'shared';
+      if ((err as Error).name === 'AbortError') return 'cancelled';
     }
   }
   const a = document.createElement('a');

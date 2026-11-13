@@ -5,6 +5,7 @@ import { formatDate, formatZar, todayIso } from '@shap/shared';
 import { Drawer, Field, Icon, Segmented, useToast } from './ui';
 import { api, ApiError } from '../lib/api';
 import { useApi } from '../lib/hooks';
+import { UNEXPECTED } from '../lib/words';
 
 export interface MonthlySchedule {
   id: string;
@@ -73,7 +74,8 @@ export function MonthlyPanel({ doc, data, reload, onChange }: { doc: { id: strin
       await fn();
       await reload();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Something went wrong');
+      if (!(err instanceof ApiError)) console.error(err);
+      setError(err instanceof ApiError ? err.message : UNEXPECTED);
     } finally {
       setBusy(false);
     }

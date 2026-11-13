@@ -3,6 +3,24 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.26.1 (13 November 2026)
+
+From the reviews of Shap Pocket 1.10.1, which shares this code.
+
+- **Share PDF and Email on a draft invoice or credit note ask first.** A draft isn't issued, so it
+  isn't in the books (or the VAT) yet, but its PDF said "Tax invoice" and asked to be paid. Now
+  they ask: issue it, then share or email it, or send the draft. A draft's PDF and its email say
+  "Draft invoice" (or "Draft credit note") and ask for no payment: no bank details, card link or
+  PayShap.
+- **Share PDF, Email and Preview save your changes first, and stop if they can't.** Share and
+  Preview carried on with the PDF as last saved; Email didn't save them at all.
+- **An invoice's email is named as its PDF is:** "Tax invoice INV-… from …" for a VAT vendor's.
+- **Sharing records that it went out,** as emailing does (a quote shared counts as sent, as
+  before; cancelling the share sheet doesn't count), so deleting a draft that was shared or
+  emailed warns that it has gone out. It didn't know.
+- **An error the app didn't expect** now says "That didn’t work. Please let us know: tap Feedback,
+  then Bug found." instead of "Something went wrong", and a bug report you send carries the error.
+
 ## 1.26.0 (11 November 2026)
 
 A VAT-registered business without Sales closes each VAT period, and Workers reminds you where the
