@@ -5,6 +5,7 @@ import { Drawer, Empty, ErrorBox, Field, Icon, Loading, Money, Segmented, useToa
 import { api, ApiError } from '../lib/api';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
+import { UNEXPECTED } from '../lib/words';
 
 type State = 'open' | 'suggested' | 'matched' | 'ignored';
 interface Line {
@@ -110,7 +111,8 @@ export function BankRecon() {
       if (msg) toast(msg);
       await reload();
     } catch (err) {
-      toast(err instanceof ApiError ? err.message : 'Something went wrong', 'error');
+      if (!(err instanceof ApiError)) console.error(err);
+      toast(err instanceof ApiError ? err.message : UNEXPECTED, 'error');
     } finally {
       setBusy(false);
     }

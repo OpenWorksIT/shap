@@ -17,6 +17,13 @@ export function flavour(text: string): string {
   return `${pick}! ${text}`;
 }
 
+/**
+ * When something fails that the app didn't expect (not a refusal the books explained): no detail,
+ * nothing promised, and not "try again", which could make a second of something. The error itself
+ * goes in Feedback's trail (console.error), so a bug report carries it.
+ */
+export const UNEXPECTED = 'That didn’t work. Please let us know: tap Feedback, then Bug found.';
+
 /** The greeting at the top of Home. */
 export function greeting(now = new Date()): string {
   if (tone === 'casual') return 'Howzit';

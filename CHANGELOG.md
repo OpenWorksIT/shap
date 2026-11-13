@@ -2,12 +2,34 @@
 
 What changed in each version of Shap Pocket, newest first.
 
+## 1.10.2 (13 November 2026)
+
+From the reviews of 1.10.1.
+
+- **Send on a draft invoice or credit note asks first.** A draft isn't issued, so it isn't in your
+  books (or your VAT) yet, but Send shared it as a "Tax invoice" asking to be paid. Now Send asks:
+  Issue and send, or Send the draft. A draft's PDF says "Draft invoice" (or "Draft credit note")
+  and asks for no payment: no bank details, card link or PayShap.
+- **Send stops if your changes can't be saved.** It shared the PDF as last saved instead, with the
+  reason at the bottom of the screen. Preview and Open in another app stop too.
+- **The message names the document as its PDF does,** from the document itself: it said "tax
+  invoice" from whether you're registered for VAT today, so one from before you registered was
+  called a tax invoice.
+- **Deleting a draft you've sent warns that it has gone out.** It didn't know.
+- **An error the app didn't expect** now says "That didn’t work. Please let us know: tap Feedback,
+  then Bug found." instead of "Something went wrong", and a bug report you send carries the error.
+
 ## 1.10.1 (13 November 2026)
 
-- **Send works again.** Tapping Send on an invoice, quote or credit note showed "Something went
-  wrong" instead of opening the share sheet: a stray line in the Send button's code, there since
-  1.1.0. Preview and the PDF itself were never affected. A new check reads every screen for the
-  same kind of mistake, so it can't come back unnoticed.
+- **Send works again.** Since 1.1.0 (9 November), tapping Send on a quote, pro-forma, invoice or
+  credit note, on its screen or in its preview, showed "Something went wrong" instead of opening
+  the share sheet: a stray line in the Send button's code. If you tapped Send in those days and
+  saw that message, it didn't go (and a quote stayed a draft): please send it again. If you're
+  registered for VAT, check the invoices and credit notes you issued since then: a tax invoice is
+  due to the client within 21 days of the supply (VAT Act s20(1)), and a credit note goes to them
+  too (s21(3)). Nothing in your books changed: Send only shares the PDF. Preview and Open in
+  another app worked throughout, and the PDFs themselves were not affected. The tests now check
+  every screen for this kind of mistake.
 
 ## 1.10.0 (11 November 2026)
 

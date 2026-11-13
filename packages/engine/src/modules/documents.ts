@@ -1,5 +1,5 @@
 import type { App as FastifyInstance } from '../http.js';
-import { addDays, documentInput, documentTotals, featureOn, quoteStatusInput, receiptInput, vatRateOn, writeOffInput, type DocKind } from '@shap/shared';
+import { addDays, documentInput, documentName, documentTotals, featureOn, quoteStatusInput, receiptInput, vatRateOn, writeOffInput, type DocKind } from '@shap/shared';
 import { z } from 'zod';
 import { requireRole, userOrThrow, type AuthUser } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -215,8 +215,7 @@ export async function documentPdf(db: Db, id: string, opts: { abridged?: boolean
     logo = a?.bytes ?? null;
   }
   const pdf = await renderDocumentPdf({ ...data, settings, brand, logo });
-  const label =
-    data.doc.kind === 'invoice' ? (Number(data.doc.vatRateBp) > 0 ? 'Tax invoice' : data.doc.legacySale ? 'Sale' : 'Invoice') : data.doc.kind === 'credit_note' ? 'Credit note' : data.doc.proforma ? 'Pro-forma invoice' : 'Quote';
+  const label = documentName(data.doc);
   const filename = `${brand ? `${brand.name} ` : ''}${label} ${data.doc.number}${data.doc.clientName ? ` - ${data.doc.clientName}` : ''}.pdf`.replace(/[^\w.\- ]/g, '');
   return { pdf, filename, data, settings, brand };
 }

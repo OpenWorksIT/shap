@@ -69,9 +69,33 @@ Shap's CPD audit (section 7) has each review; what was Pocket's own:
   `packages/engine/test/review-1.10-vat-period-locks.test.ts` and
   `review-1.10-casual-labour.test.ts`. The first words on screen and liability review read
   Pocket's screens too.
-- **1.10.1**: Send on an invoice, quote or credit note failed with "Something went wrong" since
-  1.1.0: a `useCallback` pasted inside the Send button's action (React refuses a hook there). The
-  type check and the engine's tests couldn't see it: the screens had no test. Now
+- **1.10.1**: from 1.1.0, Send on a quote, pro-forma, invoice or credit note (on its screen and in
+  its preview) failed with "Something went wrong": a `useCallback` for the new PDF preview was
+  pasted a second time inside the Send button's action (React refuses a hook there, so it threw
+  before the PDF was made, and nothing was shared or marked sent). The type check and the
+  engine's tests couldn't see it: the screens had no test. Now
   `packages/engine/test/web-hooks.test.ts` reads every screen with TypeScript's parser and fails on
-  a hook outside a component or hook (it fails on 1.10.0's `Document.tsx:290`); Shap's screens get
-  the same check. Found by the owner, on a phone.
+  a hook outside a component or hook (it fails on 1.10.0's `Document.tsx:290`); Shap's screens have
+  the same check (Shap's Send never had the line). Found in use, on a phone. Released before its
+  reviews, at OpenWorks' call (Send was broken); the reviews' findings are 1.10.2.
+- **1.10.2**: the five reviews of 1.10.1, each by a separate agent, fixed with tests
+  (`packages/engine/test/review-1.10.1-send.test.ts`, `web-actions.test.ts`, and more cases in
+  `web-hooks.test.ts`); Shap 1.26.1 has the same fixes:
+  - IFRS and SARS: Send on a draft invoice or credit note shared a PDF headed "Tax invoice" (or
+    "Credit note") asking to be paid, for a supply not in the books or the VAT201, and issuing's
+    checks (s20(4), s21(3)) never ran. Send asks to issue it first, and a draft's PDF says "Draft
+    invoice" or "Draft credit note" and asks for no payment.
+  - Accounting: Send (and Preview, Open in another app) carried on when the save before it was
+    refused, sharing the PDF as last saved. They stop now; `web-actions.test.ts` finds an action
+    that swallows its own errors awaited inside another.
+  - SARS: the message called a document a tax invoice from today's VAT registration, not its own
+    VAT rate as its PDF does: both from the shared `documentName`/`documentHeading`.
+  - IFRS and SARS: the delete warning read `sharedAt`, which the API doesn't have, so a draft that
+    was shared never warned it had gone out: `sentAt`, typed, through `hasGoneOut`.
+  - Words: "Something went wrong" told the owner nothing and lost the cause. One wording
+    (`UNEXPECTED`: report it under Feedback, no "try again"), and the error into Feedback's trail;
+    checked in every screen. The 1.10.1 entry promised the fault "can't come back" and didn't say
+    what to do: it says to send again, and, for a VAT vendor, to check what was issued since.
+  - Security and privacy: nothing to fix in 1.10.1 (the share sheet is the owner's yes; the PDF
+    goes through a FileProvider that isn't exported). The hooks check now also finds a hook
+    imported under another name, called on any namespace, or in a handler named like a component.

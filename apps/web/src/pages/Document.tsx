@@ -16,6 +16,9 @@ import {
   PAYMENT_METHODS,
   todayIso,
   documentTotals,
+  documentName,
+  hasGoneOut,
+  notIssuedYet,
   SALE_VAT,
   SALE_VAT_CODES,
   vatRateOn,
@@ -33,6 +36,7 @@ import { sendReminder } from '../lib/reminders';
 import { hoursLabel } from '../lib/time';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
+import { UNEXPECTED } from '../lib/words';
 import type { ClientRow, DocDetail, DocLine, ProjectRow } from '../lib/types';
 
 interface Draft {
@@ -135,6 +139,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
   // Goods back on an issued invoice: a credit note for them, back into stock, paid back or off what's owed.
   const [returns, setReturns] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [askIssue, setAskIssue] = useState(false);
   const profile = useMemo(() => industryProfile(settings.industry), [settings.industry]);
   const L = (c: LineCategory) => lineLabel(settings.industry, c);
   const usual = useApi<UsualLine[]>(isOwner && editable ? '/api/documents/usual-lines' : null);
@@ -224,7 +229,9 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
     try {
       await fn();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Something went wrong');
+      // Not one the server explained: into Feedback's trail, for a bug report.
+      if (!(err instanceof ApiError)) console.error(err);
+      setError(err instanceof ApiError ? err.message : UNEXPECTED);
     } finally {
       setBusy(false);
     }
@@ -284,23 +291,53 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
 
   const from = settings.tradingName || settings.companyName;
   const loadPdf = useCallback(async () => (await apiBlob(`/api/documents/${doc!.id}/pdf`)).blob, [doc?.id, doc?.updatedAt]);
-  /** The PDF to the share sheet (WhatsApp, Gmail, Outlook…), with a short note for the message. */
-  const share = () =>
-    run(async () => {
-      if (dirty) await save();
-      const { blob, filename } = await apiBlob(`/api/documents/${doc!.id}/pdf`);
-      const what = `${kind === 'invoice' ? (settings.vatRegistered ? 'tax invoice' : 'invoice') : credit ? 'credit note' : proforma ? 'pro-forma invoice' : 'quote'} ${doc!.number}`;
-      const link = billLike ? d.payLink || settings.payLink : '';
-      const shap = billLike && has('payshap') && settings.payshapId ? settings.payshapId : '';
-      const extra = credit && doc!.creditedInvoiceNumber ? ` It credits invoice ${doc!.creditedInvoiceNumber}${d.creditReason ? ` (${d.creditReason})` : ''}.` : '';
-      const text = `Good day${doc!.clientName ? ` ${doc!.clientName}` : ''},\n\nPlease find ${what} attached.${extra}${shap ? `\n\nPay instantly with PayShap to ${shap} (reference ${doc!.number}).` : ''}${link ? `\n\nPay by card: ${link}` : ''}\n\nKind regards,\n${from}`;
-      const how = await shareFile(blob, filename, `${label} ${doc!.number}`, text);
-      if (how === 'downloaded') toast('PDF saved');
-      if (how !== 'cancelled') await api(`/api/documents/${doc!.id}/shared`, { body: {} }).then(() => reload());
+  /**
+   * Unsaved changes, saved before the PDF is made. Unlike save() (which shows its own error and
+   * carries on), a refusal here stops what comes after: Send, Preview, Open in another app.
+   */
+  const persist = async () => {
+    if (!dirty || !doc) return;
+    await api(`/api/documents/${doc.id}`, { method: 'PUT', body: body() });
+    setDirty(false);
+    await reload();
+  };
+  /** The PDF to the share sheet (WhatsApp, Gmail, Outlook…), with a short note for the message: named as its PDF is. */
+  const sendNow = async () => {
+    const { doc: now } = await api<DocDetail>(`/api/documents/${doc!.id}`);
+    const { blob, filename } = await apiBlob(`/api/documents/${now.id}/pdf`);
+    const name = documentName(now);
+    const asksPay = billLike && !notIssuedYet(now);
+    const link = asksPay ? now.payLink || settings.payLink : '';
+    const shap = asksPay && has('payshap') && settings.payshapId ? settings.payshapId : '';
+    const extra = credit && now.creditedInvoiceNumber ? ` It credits invoice ${now.creditedInvoiceNumber}${now.creditReason ? ` (${now.creditReason})` : ''}.` : '';
+    const text = `Good day${now.clientName ? ` ${now.clientName}` : ''},\n\nPlease find ${name.toLowerCase()} ${now.number} attached.${extra}${shap ? `\n\nPay instantly with PayShap to ${shap} (reference ${now.number}).` : ''}${link ? `\n\nPay by card: ${link}` : ''}\n\nKind regards,\n${from}`;
+    const how = await shareFile(blob, filename, `${name} ${now.number}`, text);
+    if (how === 'downloaded') toast('PDF saved');
+    if (how !== 'cancelled' && isOwner) await api(`/api/documents/${now.id}/shared`, { body: {} });
+    await reload();
+  };
+  /** Send. A draft invoice or credit note isn't in the books yet: it asks first whether to issue it. */
+  const share = () => {
+    if (doc && isOwner && notIssuedYet(doc)) return setAskIssue(true);
+    return run(async () => {
+      await persist();
+      await sendNow();
     });
+  };
+  const sendAfterAsking = (issue: boolean) => {
+    setAskIssue(false);
+    return run(async () => {
+      await persist();
+      if (issue) {
+        await api(`/api/documents/${doc!.id}/issue`, { body: {} });
+        toast(`${label} ${doc!.number} issued`);
+      }
+      await sendNow();
+    });
+  };
   const view = () =>
     run(async () => {
-      if (dirty) await save();
+      await persist();
       const { blob, filename } = await apiBlob(`/api/documents/${doc!.id}/pdf`);
       await openFile(blob, filename);
     });
@@ -339,7 +376,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                 className="btn quiet"
                 onClick={() =>
                   void run(async () => {
-                    if (dirty) await save();
+                    await persist();
                     setPreview(true);
                   })
                 }
@@ -954,10 +991,31 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
           }
         />
       )}
+      {askIssue && doc && (
+        <Drawer title={`Issue ${label.toLowerCase()} ${doc.number} first?`} onClose={() => setAskIssue(false)}>
+          <div className="stack">
+            <p>
+              {credit
+                ? `It’s still a draft: it hasn’t come off ${doc.creditedInvoiceNumber ? `invoice ${doc.creditedInvoiceNumber}` : 'the invoice'} or out of your books yet. Issue it to send it as your credit note.`
+                : 'It’s still a draft: it isn’t in your books yet. Issue it to send it as your invoice, with your payment details.'}
+            </p>
+            <p className="xs muted">{credit ? 'Sent as a draft, its PDF says “Draft credit note”.' : 'Sent as a draft, its PDF says “Draft invoice” and asks for no payment.'}</p>
+            <button type="button" className="btn primary block" disabled={busy || (credit && total <= 0)} onClick={() => void sendAfterAsking(true)}>
+              Issue and send
+            </button>
+            <button type="button" className="btn block" disabled={busy} onClick={() => void sendAfterAsking(false)}>
+              Send the draft
+            </button>
+            <button type="button" className="btn quiet block" onClick={() => setAskIssue(false)}>
+              Cancel
+            </button>
+          </div>
+        </Drawer>
+      )}
       {deleting && doc && (
         <DeleteRecord
           what={`${label.toLowerCase()} ${doc.number}`}
-          sent={doc.status !== 'draft' || Boolean((doc as { sharedAt?: string | null }).sharedAt)}
+          sent={hasGoneOut(doc)}
           creditInstead={doc.kind === 'invoice' && has('creditNotes')}
           onClose={() => setDeleting(false)}
           onDelete={() =>

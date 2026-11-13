@@ -45,9 +45,11 @@ describe('a new phone', () => {
     await me.post('/api/settings', { ...settings, payLink: 'https://pay.yoco.com/sparky' }, 'PUT');
     const inv = await me.post('/api/documents', { kind: 'invoice', issueDate: '2026-11-01', payLink: 'https://pay.yoco.com/r/abc123', lines: [{ category: 'labour', description: 'Call-out', qty: 1, unitPriceCents: 85000 }] });
     expect((await me.get(`/api/documents/${inv.id}`)).doc.payLink).toBe('https://pay.yoco.com/r/abc123');
-    const pdf = await me.call({ method: 'GET', url: `/api/documents/${inv.id}/pdf` });
-    const text = new TextDecoder('latin1').decode(pdf.rawPayload);
-    expect(text).toContain('https://pay.yoco.com/r/abc123'); // the link annotation
+    const text = async () => new TextDecoder('latin1').decode((await me.call({ method: 'GET', url: `/api/documents/${inv.id}/pdf` })).rawPayload);
+    // A draft isn't issued, so its PDF asks for no payment (1.10.2); issued, it carries the link.
+    expect(await text()).not.toContain('https://pay.yoco.com/r/abc123');
+    await me.post(`/api/documents/${inv.id}/issue`, {});
+    expect(await text()).toContain('https://pay.yoco.com/r/abc123'); // the link annotation
   });
 
   it('has no sign-in, users, demo, email or server routes', () => {
