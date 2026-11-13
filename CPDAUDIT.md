@@ -69,3 +69,9 @@ Shap's CPD audit (section 7) has each review; what was Pocket's own:
   `packages/engine/test/review-1.10-vat-period-locks.test.ts` and
   `review-1.10-casual-labour.test.ts`. The first words on screen and liability review read
   Pocket's screens too.
+- **1.10.1**: Send on an invoice, quote or credit note failed with "Something went wrong" since
+  1.1.0: a `useCallback` pasted inside the Send button's action (React refuses a hook there). The
+  type check and the engine's tests couldn't see it: the screens had no test. Now
+  `packages/engine/test/web-hooks.test.ts` reads every screen with TypeScript's parser and fails on
+  a hook outside a component or hook (it fails on 1.10.0's `Document.tsx:290`); Shap's screens get
+  the same check. Found by the owner, on a phone.

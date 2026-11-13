@@ -287,7 +287,6 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
   /** The PDF to the share sheet (WhatsApp, Gmail, Outlook…), with a short note for the message. */
   const share = () =>
     run(async () => {
-  const loadPdf = useCallback(async () => (await apiBlob(`/api/documents/${doc!.id}/pdf`)).blob, [doc?.id, doc?.updatedAt]);
       if (dirty) await save();
       const { blob, filename } = await apiBlob(`/api/documents/${doc!.id}/pdf`);
       const what = `${kind === 'invoice' ? (settings.vatRegistered ? 'tax invoice' : 'invoice') : credit ? 'credit note' : proforma ? 'pro-forma invoice' : 'quote'} ${doc!.number}`;

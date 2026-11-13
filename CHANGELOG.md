@@ -2,6 +2,13 @@
 
 What changed in each version of Shap Pocket, newest first.
 
+## 1.10.1 (13 November 2026)
+
+- **Send works again.** Tapping Send on an invoice, quote or credit note showed "Something went
+  wrong" instead of opening the share sheet: a stray line in the Send button's code, there since
+  1.1.0. Preview and the PDF itself were never affected. A new check reads every screen for the
+  same kind of mistake, so it can't come back unnoticed.
+
 ## 1.10.0 (11 November 2026)
 
 A VAT-registered business without Sales closes each VAT period, and Workers reminds you where the
