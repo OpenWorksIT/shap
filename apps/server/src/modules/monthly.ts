@@ -9,7 +9,7 @@
  * on the day it catches up, up to three months back.
  */
 import type { FastifyInstance } from 'fastify';
-import { addMonths, monthEnd } from '@shap/shared';
+import { addMonths, monthEnd, UNEXPECTED } from '@shap/shared';
 import { z } from 'zod';
 import { requireAccess, requireRole, userOrThrow } from '../auth.js';
 import { checkInUsage } from './feedback.js';
@@ -145,7 +145,7 @@ export async function runMonthly(db: Sql, mailer: Mailer, opts: { emailOn: boole
           result.emailed++;
         } catch (err) {
           result.failed++;
-          await db`update monthly_invoices set last_error = ${(err as Error).message || 'Something went wrong'}, last_error_at = now() where id = ${s.id}`;
+          await db`update monthly_invoices set last_error = ${(err as Error).message || UNEXPECTED}, last_error_at = now() where id = ${s.id}`;
           stop = true;
           break;
         }
@@ -167,7 +167,7 @@ export async function runMonthly(db: Sql, mailer: Mailer, opts: { emailOn: boole
         await db`update monthly_invoices set last_error = null, last_error_at = null where id = ${s.id}`;
       } catch (err) {
         result.failed++;
-        const why = (err as Error).message || 'Something went wrong';
+        const why = (err as Error).message || UNEXPECTED;
         await db`update monthly_invoices set last_error = ${why}, last_error_at = now() where id = ${s.id}`;
         // An invoice made but not emailed stays (it shows as not sent); a month that couldn't be
         // made is tried again next time.

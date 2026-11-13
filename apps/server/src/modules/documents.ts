@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { Mailer } from '../lib/mailer.js';
-import { addDays, documentInput, documentName, documentTotals, featureOn, quoteStatusInput, receiptInput, vatRateOn, writeOffInput, type DocKind } from '@shap/shared';
+import { addDays, asksForPayment, documentInput, documentName, documentTotals, featureOn, quoteStatusInput, receiptInput, vatRateOn, writeOffInput, type DocKind } from '@shap/shared';
 import { z } from 'zod';
 import { can, requireAccess, type AuthUser, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -227,9 +227,9 @@ export async function documentPdf(db: Db, id: string, opts: { abridged?: boolean
  */
 export async function emailDocument(db: Db, mailer: Mailer, id: string, to: string, message: string): Promise<string> {
   const { pdf, filename, data, settings, brand } = await documentPdf(db, id);
-  // Named as its PDF is (a draft invoice is a "Draft invoice", asking for no payment).
+  // Named as its PDF is, and asking to be paid only where it does (not a draft or voided invoice).
   const what = documentName(data.doc);
-  const asksPay = (data.doc.kind === 'invoice' && data.doc.status !== 'draft') || Boolean(data.doc.proforma);
+  const asksPay = asksForPayment(data.doc);
   const from = brand?.name || settings.tradingName || settings.companyName;
   await mailer.send({
     to,

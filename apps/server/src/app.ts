@@ -59,6 +59,7 @@ import { isInternal, registerTestServerRoutes } from './modules/test-server.js';
 import { dbScope, DemoUnavailable, inDemo, routedDb } from './db/routing.js';
 import { registerStatementRoutes } from './modules/statements.js';
 import { registerCompanyFileRoutes } from './modules/company-file.js';
+import { UNEXPECTED } from '@shap/shared';
 
 const CSP = [
   "default-src 'self'",
@@ -229,7 +230,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
     const msg = err.message ?? '';
     if (/does not balance/.test(msg)) return reply.code(400).send({ error: msg, code: 'unbalanced' });
     req.log.error({ err: safeError(err), route: `${req.method} ${routePath(req)}` }, 'unhandled error');
-    return reply.code(500).send({ error: 'Something went wrong on the server', code: 'internal' });
+    return reply.code(500).send({ error: UNEXPECTED, code: 'internal' });
   });
 
   app.get('/api/health', async () => {

@@ -3,6 +3,8 @@
  * A native (Capacitor) build sets VITE_API_URL to the Shap server and stores the
  * bearer token returned at login, because cross-origin cookies are unreliable in webviews.
  */
+import { scrubPath, UNEXPECTED } from '@shap/shared';
+
 const BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? '';
 const NATIVE = Boolean(import.meta.env.VITE_API_URL);
 const TOKEN_KEY = 'shap.token';
@@ -86,7 +88,9 @@ export async function api<T = unknown>(path: string, opts: { method?: string; bo
   if (!res.ok) {
     if (res.status === 401 && !path.startsWith('/api/auth/login')) onUnauthorized?.();
     const d = (data ?? {}) as { error?: string; code?: string; details?: { fields?: Record<string, string> } };
-    throw new ApiError(res.status, d.error ?? `Request failed (${res.status})`, d.code ?? 'error', d.details?.fields ?? {}, d.details);
+    // One the server didn't expect: where, into Feedback's trail (redacted there).
+    if (res.status >= 500) console.error(`${opts.method ?? (opts.body !== undefined ? 'POST' : 'GET')} ${scrubPath(path)} → ${res.status}`);
+    throw new ApiError(res.status, d.error ?? (res.status >= 500 ? UNEXPECTED : `Request failed (${res.status})`), d.code ?? 'error', d.details?.fields ?? {}, d.details);
   }
   return data as T;
 }

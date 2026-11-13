@@ -3,7 +3,8 @@
  * 1.26.1 and Pocket 1.10.2 (each failed before): a draft invoice or credit note isn't issued, so its
  * PDF and the email it goes with no longer call it a tax invoice or ask to be paid; what it's called
  * comes from the document's own VAT rate, not today's settings; and a draft shared or emailed counts
- * as gone out, for the warning before it's deleted. All data made up.
+ * as gone out, for the warning before it's deleted. From the check of those fixes: a voided invoice
+ * asked to be paid too. All data made up.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { documentHeading, documentName, hasGoneOut, notIssuedYet } from '@shap/shared';
@@ -93,6 +94,18 @@ describe('sending drafts, from the Pocket 1.10.1 reviews', () => {
     expect(documentHeading({ kind: 'quote', status: 'draft', vatRateBp: 1500 })).toBe('Quotation');
     expect(documentName({ kind: 'quote', status: 'draft', vatRateBp: 1500, proforma: true })).toBe('Pro-forma invoice');
     await env.sql`update settings set vat_registered = true`;
+  });
+
+  it('asks no payment on a voided invoice, on its PDF or in its email', async () => {
+    const inv = await me.post('/api/documents', { kind: 'invoice', clientId: client.id, issueDate: D, lines: [line] });
+    await me.post(`/api/documents/${inv.id}/issue`, {});
+    await me.post(`/api/documents/${inv.id}/void`, { reason: 'Made-up mistake' });
+    const voided = await pdf(inv.id);
+    expect(voided.text).toContain('VOID');
+    expect(voided.text).not.toMatch(/AMOUNT DUE|Made-up Bank|pay\.example\.com/);
+    env.mails.length = 0;
+    await me.post(`/api/documents/${inv.id}/email`, { to: 'accounts@pretend.example.com', message: '' });
+    expect(env.mails[0]!.text).not.toMatch(/PayShap|Pay by card/);
   });
 
   it('counts a draft invoice shared from a phone as gone out, still a draft', async () => {

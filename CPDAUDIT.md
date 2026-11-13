@@ -565,13 +565,13 @@ same, `packages/engine/test/review-1.10-*`):
 Pocket 1.10.1 fixed Send (a stray hook call in Pocket's screen only) and went out before its
 reviews, at OpenWorks' call; Shap got the same check of its screens (`web-hooks.test.ts`), a test
 only. The five reviews of it found these in the code the two share, fixed in both with tests
-(`apps/server/test/review-1.26.1/send-drafts.test.ts`, `web-actions.test.ts`; Pocket's section 7,
+(`apps/server/test/review-1.26.1/send-drafts.test.ts`, `web-actions.test.ts`; Pocket's section 3,
 1.10.2):
 
 - IFRS and SARS: Share PDF and Email on a draft invoice or credit note sent a PDF headed "Tax
   invoice" (or "Credit note") asking to be paid, for a supply not in the books or the VAT201, and
   issuing's checks (s20(4), s21(3)) never ran. They ask to issue it first, and a draft's PDF and
-  email say "Draft invoice" or "Draft credit note" and ask for no payment.
+  email say "Draft invoice" or "Draft credit note", without the payment details.
 - Accounting: Share PDF and Preview carried on when the save before them was refused, with the PDF
   as last saved; Email didn't save at all. They save first and stop when it's refused;
   `web-actions.test.ts` finds an action that swallows its own errors awaited inside another.
@@ -584,6 +584,15 @@ only. The five reviews of it found these in the code the two share, fixed in bot
   (`UNEXPECTED`), the error into Feedback's trail, checked in every screen.
 - Security and privacy: nothing to fix. The hooks check now also finds a hook imported under
   another name, called on any namespace, or in a handler named like a component.
+- The fixes, checked by a separate agent: the server's own unexpected error (and the monthly
+  invoices' fallback) still said "Something went wrong": now `UNEXPECTED` from `@shap/shared`, the
+  screen logs the failing route to the trail, and the wording check reads the server too. A
+  voided invoice still asked to be paid on its PDF and in its email: only an issued invoice (and a
+  pro-forma) asks now (`asksForPayment`). The screen fixes had no test that failed without them:
+  `web-actions.test.ts` reads the wiring (Email only through the question, a share recorded and a
+  cancelled one not, `hasGoneOut`), each failing on 1.26.0. The email drawer said "Invoice" for a
+  draft and showed "Couldn’t send" without logging: fixed. "Asks for no payment" overstated it (a
+  draft still shows its due date and terms).
 
 ### Code scanning (CodeQL), first run
 

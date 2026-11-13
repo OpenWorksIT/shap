@@ -1,5 +1,5 @@
 import PDFDocument from 'pdfkit';
-import { documentHeading, featureOn, formatDate, notIssuedYet, formatZar, lineLabel, lineTotal, SALE_VAT, SHAP_LINE, SHAP_URL, type LineCategory, type SaleVatCode, regPrefix } from '@shap/shared';
+import { asksForPayment, documentHeading, featureOn, formatDate, notIssuedYet, formatZar, lineLabel, lineTotal, SALE_VAT, SHAP_LINE, SHAP_URL, type LineCategory, type SaleVatCode, regPrefix } from '@shap/shared';
 import type { SettingsRow } from '../lib/books.js';
 import { cleanImageCached } from '../lib/images.js';
 
@@ -192,9 +192,11 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   const isInvoice = doc.kind === 'invoice';
   // A sale at the counter is an invoice paid on the spot (a walk-in's, the abridged tax invoice): it asks for nothing.
   const isSale = isInvoice && Boolean(doc.counter);
-  // A draft invoice or credit note isn't issued: not a tax invoice yet, and not to be paid.
+  // A draft invoice or credit note isn't issued: not a tax invoice yet. Only an issued invoice (not
+  // a draft or a voided one) and a pro-forma ask to be paid.
   const draft = notIssuedYet(doc);
-  const asksPayment = (isInvoice && !isSale && !draft) || isProforma;
+  const asksPayment = asksForPayment(doc);
+  const unpayable = isInvoice && (draft || doc.status === 'void');
   // Its own VAT rate says whether the business was a VAT vendor for it (not whether it is today).
   const vatShown = doc.vatRateBp > 0;
   const legacy = isInvoice && Boolean(doc.legacySale);
@@ -369,7 +371,7 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
   // A deposit is a request for part of the total up front. On an invoice it's what's due until it's in.
   const deposit = Math.min(doc.depositDueCents ?? 0, doc.totalCents);
   const depositLabel = `Deposit${doc.depositBp ? ` (${(doc.depositBp / 100).toFixed(doc.depositBp % 100 ? 1 : 0)}%)` : ''}`;
-  const depositDue = isInvoice && !draft && deposit > 0 && doc.paidCents < deposit;
+  const depositDue = isInvoice && !unpayable && deposit > 0 && doc.paidCents < deposit;
   // What credit notes settled isn't money paid: it's shown as credited.
   const credited = ((data as { receipts?: { method: string; amountCents: number }[] }).receipts ?? []).filter((r) => r.method === 'credit').reduce((t, r) => t + Number(r.amountCents), 0);
   const settled = (paidLabel: string) => {
@@ -391,7 +393,7 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
       ? 'To credit'
       : 'Credited'
     : isInvoice
-      ? draft
+      ? unpayable
         ? 'Total'
         : depositDue
         ? 'Deposit due'
@@ -403,7 +405,7 @@ export function renderDocumentPdf(data: PdfDocument): Promise<Buffer> {
           ? 'Deposit due'
           : 'Amount due'
         : 'Quote total';
-  const bigAmount = isInvoice ? (depositDue ? deposit - doc.paidCents : Math.max(balance, 0)) : isProforma && deposit > 0 ? deposit : doc.totalCents;
+  const bigAmount = isInvoice ? (unpayable ? doc.totalCents : depositDue ? deposit - doc.paidCents : Math.max(balance, 0)) : isProforma && deposit > 0 ? deposit : doc.totalCents;
   const totalsH = totals.length * 16 + 44;
   const bankText = asksPayment && contact.bank ? `${contact.bank}\nReference: ${doc.number}` : '';
   // A card payment link (Yoco, SnapScan…): this invoice's, or the business's usual one, while it's unpaid.

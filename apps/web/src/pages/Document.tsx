@@ -999,7 +999,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                 ? `It’s still a draft: it hasn’t come off ${doc.creditedInvoiceNumber ? `invoice ${doc.creditedInvoiceNumber}` : 'the invoice'} or out of your books yet. Issue it to ${askIssue === 'email' ? 'email' : 'share'} it as your credit note.`
                 : `It’s still a draft: it isn’t in your books yet. Issue it to ${askIssue === 'email' ? 'email' : 'share'} it as your invoice, with your payment details.`}
             </p>
-            <p className="xs muted">{credit ? 'Sent as a draft, its PDF says “Draft credit note”.' : 'Sent as a draft, its PDF says “Draft invoice” and asks for no payment.'}</p>
+            <p className="xs muted">{credit ? 'Sent as a draft, its PDF says “Draft credit note”.' : 'Sent as a draft, its PDF says “Draft invoice”, without your payment details.'}</p>
             <button type="button" className="btn primary block" disabled={busy || (credit && total <= 0)} onClick={() => void sendAfterAsking(true)}>
               {askIssue === 'email' ? 'Issue and email' : 'Issue and share'}
             </button>
@@ -1027,7 +1027,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
           }
         />
       )}
-      {drawer === 'email' && doc && <EmailDrawer docId={doc.id} defaultTo={doc.clientEmail ?? ''} label={`${label} ${doc.number}`} onClose={() => setDrawer(null)} onSent={reload} />}
+      {drawer === 'email' && doc && <EmailDrawer docId={doc.id} defaultTo={doc.clientEmail ?? ''} label={`${documentName(doc)} ${doc.number}`} onClose={() => setDrawer(null)} onSent={reload} />}
       {drawer === 'charge' && project.data && (
         <ChargeDrawer
           summary={project.data.summary}
@@ -1231,7 +1231,8 @@ function EmailDrawer({ docId, defaultTo, label, onClose, onSent }: { docId: stri
       onSent();
       onClose();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Couldn’t send');
+      if (!(err instanceof ApiError)) console.error(err);
+      setError(err instanceof ApiError ? err.message : UNEXPECTED);
     } finally {
       setBusy(false);
     }
