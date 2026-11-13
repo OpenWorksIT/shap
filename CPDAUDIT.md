@@ -592,7 +592,7 @@ only. The five reviews of it found these in the code the two share, fixed in bot
   `web-actions.test.ts` reads the wiring (Email only through the question, a share recorded and a
   cancelled one not, `hasGoneOut`), each failing on 1.26.0. The email drawer said "Invoice" for a
   draft and showed "Couldn’t send" without logging: fixed. "Asks for no payment" overstated it (a
-  draft still shows its due date and terms).
+  draft still shows its due date and terms): "without your payment details" now.
 
 ### Code scanning (CodeQL), first run
 
