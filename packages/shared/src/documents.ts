@@ -16,6 +16,13 @@ export interface NamedDocument {
   legacySale?: boolean | null;
 }
 
+/**
+ * Whether its PDF and message ask to be paid (bank details, a card link, PayShap): an issued
+ * invoice, not one paid at the counter, and a pro-forma. Not a draft or a voided invoice.
+ */
+export const asksForPayment = (d: { kind: string; status: string; proforma?: boolean | null; counter?: boolean | null }) =>
+  d.kind === 'invoice' ? d.status === 'issued' && !d.counter : d.kind === 'quote' && Boolean(d.proforma);
+
 /** A draft invoice or credit note: not issued, so not in the books. Send offers to issue it first. */
 export const notIssuedYet = (d: Pick<NamedDocument, 'kind' | 'status'>) => (d.kind === 'invoice' || d.kind === 'credit_note') && d.status === 'draft';
 
@@ -38,3 +45,29 @@ export function documentName(d: NamedDocument): string {
 
 /** It has gone out to someone: issued or sent, or shared from the phone while still a draft. */
 export const hasGoneOut = (d: { status: string; sentAt?: string | null }) => d.status !== 'draft' || Boolean(d.sentAt);
+
+export interface MessageDocument extends NamedDocument {
+  number: string;
+  clientName?: string | null;
+  payLink?: string | null;
+  counter?: boolean | null;
+  creditedInvoiceNumber?: string | null;
+  creditReason?: string | null;
+}
+
+/**
+ * The note that goes with a PDF shared from the phone: named as its PDF is, and asking to be paid
+ * (PayShap, a card link) only where its PDF does. `payshapId` only when PayShap is switched on.
+ */
+export function shareMessage(d: MessageDocument, opts: { from: string; payLink?: string | null; payshapId?: string | null }): string {
+  const pays = asksForPayment(d);
+  const link = pays ? d.payLink || opts.payLink || '' : '';
+  const payshap = pays ? opts.payshapId || '' : '';
+  const credits = d.kind === 'credit_note' && d.creditedInvoiceNumber ? ` It credits invoice ${d.creditedInvoiceNumber}${d.creditReason ? ` (${d.creditReason})` : ''}.` : '';
+  return (
+    `Good day${d.clientName ? ` ${d.clientName}` : ''},\n\nPlease find ${documentName(d).toLowerCase()} ${d.number} attached.${credits}` +
+    (payshap ? `\n\nPay instantly with PayShap to ${payshap} (reference ${d.number}).` : '') +
+    (link ? `\n\nPay by card: ${link}` : '') +
+    `\n\nKind regards,\n${opts.from}`
+  );
+}

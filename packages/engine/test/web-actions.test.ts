@@ -5,7 +5,12 @@
  *   awaited inside another action: if it fails, the outer one goes ahead anyway. Send did this
  *   with save(): an edit the books refused, and Send still shared the PDF as last saved.
  * - The words for an error nobody expected: not "Something went wrong" (which told the owner
- *   nothing), and the error itself into Feedback's trail (console.error) so a bug report has it.
+ *   nothing), from the screens or the books, and the error itself into Feedback's trail
+ *   (console.error) so a bug report has it.
+ * - Send on the document screen: it asks before sending a draft invoice or credit note, names it
+ *   and asks for payment as its PDF does, and the delete warning knows when it has gone out. (The
+ *   screens have no test harness: these read the wiring from the source; the rest is tested in
+ *   review-1.10.1-send.test.ts.)
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -13,6 +18,10 @@ import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 const WEB = join(import.meta.dirname, '../../../apps/web/src');
+/** The books' own code: their errors reach the screens word for word. */
+const BOOKS = join(import.meta.dirname, '../src');
+/** What Send is called on the document screen. */
+const SEND = 'share';
 
 function webFiles(dir = WEB): string[] {
   return readdirSync(dir).flatMap((f) => {
@@ -22,7 +31,7 @@ function webFiles(dir = WEB): string[] {
 }
 const parse = (path: string, source: string) => ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, path.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
 const lineOf = (sf: ts.SourceFile, n: ts.Node) => sf.getLineAndCharacterOfPosition(n.getStart()).line + 1;
-const where = (path: string) => path.slice(WEB.length + 1);
+const where = (path: string) => (path.startsWith(WEB) ? path.slice(WEB.length + 1) : `books/${path.slice(BOOKS.length + 1)}`);
 
 function contains(node: ts.Node, test: (n: ts.Node) => boolean): boolean {
   let found = false;
@@ -83,13 +92,15 @@ export function actionsInActions(path: string, source: string): string[] {
   return out;
 }
 
-/** "Something went wrong" said anywhere, and each catch that shows UNEXPECTED without logging the error. */
+/** "Something went wrong" said anywhere (in a string or a template), and each catch that shows UNEXPECTED without logging the error. */
 export function unexpectedWords(path: string, source: string): string[] {
   const sf = parse(path, source);
   const out: string[] = [];
   const visit = (n: ts.Node) => {
-    if ((ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) && n.text.trim() === 'Something went wrong') out.push(`${where(path)}:${lineOf(sf, n)} “Something went wrong”`);
-    if (ts.isCatchClause(n) && contains(n.block, (m) => ts.isIdentifier(m) && m.text === 'UNEXPECTED')) {
+    const text = ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || ts.isTemplateHead(n) || ts.isTemplateMiddle(n) || ts.isTemplateTail(n) ? n.text : null;
+    if (text !== null && /something went wrong/i.test(text)) out.push(`${where(path)}:${lineOf(sf, n)} “Something went wrong”`);
+    // On a screen, the error itself goes to Feedback's trail (the server and the books log their own).
+    if (path.startsWith(WEB) && ts.isCatchClause(n) && contains(n.block, (m) => ts.isIdentifier(m) && m.text === 'UNEXPECTED')) {
       const logs = contains(n.block, (m) => ts.isCallExpression(m) && ts.isPropertyAccessExpression(m.expression) && m.expression.getText(sf) === 'console.error');
       if (!logs) out.push(`${where(path)}:${lineOf(sf, n)} UNEXPECTED without console.error`);
     }
@@ -126,11 +137,56 @@ describe('the screens’ actions', () => {
 
 describe('the words for an error nobody expected', () => {
   it('finds “Something went wrong”, and UNEXPECTED shown without the error going in the trail', () => {
-    const src = `function a() {\n  try { x(); } catch (err) { toast(err instanceof ApiError ? err.message : 'Something went wrong'); }\n  try { x(); } catch (err) { toast(UNEXPECTED); }\n  try { x(); } catch (err) { console.error(err); toast(UNEXPECTED); }\n}\n`;
-    expect(unexpectedWords(join(WEB, 'x.tsx'), src)).toEqual(['x.tsx:2 “Something went wrong”', 'x.tsx:3 UNEXPECTED without console.error']);
+    const src = `function a() {\n  try { x(); } catch (err) { toast(err instanceof ApiError ? err.message : 'Something went wrong'); }\n  try { x(); } catch (err) { toast(UNEXPECTED); }\n  try { x(); } catch (err) { console.error(err); toast(UNEXPECTED); }\n  throw new Error(\`Something went wrong (\${status})\`);\n  reply({ error: 'Something went wrong. Please try again.' });\n}\n`;
+    expect(unexpectedWords(join(WEB, 'x.tsx'), src)).toEqual(['x.tsx:2 “Something went wrong”', 'x.tsx:3 UNEXPECTED without console.error', 'x.tsx:5 “Something went wrong”', 'x.tsx:6 “Something went wrong”']);
   });
 
-  it('none in the app’s screens', () => {
-    expect(webFiles().flatMap((f) => unexpectedWords(f, readFileSync(f, 'utf8')))).toEqual([]);
+  it('none in the app’s screens or the books', () => {
+    expect([...webFiles(), ...webFiles(BOOKS)].flatMap((f) => unexpectedWords(f, readFileSync(f, 'utf8')))).toEqual([]);
+  });
+});
+
+/** The function a `const name = …` holds in a source file. */
+function constFn(sf: ts.SourceFile, name: string): ts.ArrowFunction | ts.FunctionExpression | null {
+  let found: ts.ArrowFunction | ts.FunctionExpression | null = null;
+  const visit = (n: ts.Node) => {
+    if (!found && ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === name) found = initFn(n);
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return found;
+}
+const calls = (node: ts.Node, name: string) => contains(node, (n) => ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === name);
+
+describe('Send on the document screen', () => {
+  const path = join(WEB, 'pages/Document.tsx');
+  const sf = parse(path, readFileSync(path, 'utf8'));
+
+  it('asks before sending a draft invoice or credit note', () => {
+    const send = constFn(sf, SEND)!;
+    expect(send, SEND).toBeTruthy();
+    expect([calls(send, 'notIssuedYet'), calls(send, 'setAskIssue')]).toEqual([true, true]);
+    // "Issue and send": issued, then the screen reloaded before the PDF is made and shared.
+    const after = constFn(sf, 'sendAfterAsking')!;
+    const issuing = (n: ts.Node) => ts.isIfStatement(n) && contains(n.thenStatement, (m) => ts.isNoSubstitutionTemplateLiteral(m) || ts.isTemplateExpression(m) ? m.getText(sf).includes('/issue') : false);
+    expect(contains(after, (n) => issuing(n) && calls((n as ts.IfStatement).thenStatement, 'reload'))).toBe(true);
+  });
+
+  it('names it, and asks for payment, as its PDF does', () => {
+    const sendNow = constFn(sf, 'sendNow')!;
+    expect([calls(sendNow, 'shareMessage'), calls(sendNow, 'documentName')]).toEqual([true, true]);
+    expect(contains(sendNow, (n) => (ts.isNoSubstitutionTemplateLiteral(n) || ts.isTemplateExpression(n)) && n.getText(sf).includes('/shared'))).toBe(true);
+  });
+
+  it('warns before deleting one that has gone out, from what the books record (sentAt)', () => {
+    expect(webFiles().filter((f) => readFileSync(f, 'utf8').includes('sharedAt')).map(where)).toEqual([]);
+    const sent: string[] = [];
+    const visit = (n: ts.Node) => {
+      if ((ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n)) && n.tagName.getText(sf) === 'DeleteRecord')
+        for (const a of n.attributes.properties) if (ts.isJsxAttribute(a) && a.name.getText(sf) === 'sent') sent.push(a.initializer?.getText(sf) ?? '');
+      ts.forEachChild(n, visit);
+    };
+    visit(sf);
+    expect(sent).toEqual(['{hasGoneOut(doc)}']);
   });
 });

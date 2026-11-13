@@ -1,6 +1,6 @@
 /** What's particular to Shap Pocket: a new phone's books, switches, sharing. */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { login, setup, type TestEnv } from './helpers.js';
+import { expectCleanAudit, login, setup, type TestEnv } from './helpers.js';
 
 describe('a new phone', () => {
   let env: TestEnv;
@@ -9,7 +9,11 @@ describe('a new phone', () => {
     env = await setup({ fresh: true });
     me = await login(env.app);
   });
-  afterAll(() => env.close());
+  afterAll(async () => {
+    // An invoice is issued below: the books it makes must audit clean.
+    await expectCleanAudit(env.sql, '2026-11-30');
+    await env.close();
+  });
 
   it('starts as one person trading in their own name, waiting for the first-run questions', async () => {
     const { settings, accounts } = await me.get('/api/reference');

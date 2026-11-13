@@ -3,10 +3,11 @@
  * a draft invoice or credit note isn't issued, so its PDF no longer says "Tax invoice" or asks to be
  * paid; what the message calls a document is what its PDF calls it, from the document's own VAT
  * rate, not today's settings; and a draft shared from the phone counts as gone out, for the warning
- * before it's deleted. All data made up.
+ * before it's deleted. From the check of those fixes: a voided invoice asked to be paid too, and the
+ * message's payment lines are tested where they're made. All data made up.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { documentHeading, documentName, hasGoneOut, notIssuedYet } from '@shap/shared';
+import { documentHeading, documentName, hasGoneOut, notIssuedYet, shareMessage } from '@shap/shared';
 import { expectCleanAudit, login, setup, type TestEnv } from './helpers.js';
 
 const D = '2026-11-10';
@@ -87,6 +88,42 @@ describe('Send, from the 1.10.1 reviews', () => {
     expect(documentHeading({ kind: 'quote', status: 'draft', vatRateBp: 1500 })).toBe('Quotation');
     expect(documentName({ kind: 'quote', status: 'draft', vatRateBp: 1500, proforma: true })).toBe('Pro-forma invoice');
     await env.sql`update settings set vat_registered = true`;
+  });
+
+  it('asks no payment on a voided invoice', async () => {
+    const inv = await me.post('/api/documents', { kind: 'invoice', clientId: client.id, issueDate: D, lines: [line] });
+    await me.post(`/api/documents/${inv.id}/issue`, {});
+    await me.post(`/api/documents/${inv.id}/void`, { reason: 'Made-up mistake' });
+    const voided = await pdf(inv.id);
+    expect(voided.text).toContain('VOID');
+    expect(voided.text).not.toMatch(/AMOUNT DUE|Made-up Bank|pay\.example\.com/);
+    const { doc } = await me.get(`/api/documents/${inv.id}`);
+    expect(shareMessage(doc, { from: 'Fictional Sparks', payLink: 'https://pay.example.com/made-up', payshapId: '0820000000' })).not.toMatch(/PayShap|Pay by card/);
+  });
+
+  it('asks to be paid in the message only where the PDF does, naming it as the PDF does', async () => {
+    const opts = { from: 'Fictional Sparks', payLink: 'https://pay.example.com/made-up', payshapId: '0820000000' };
+    const inv = await me.post('/api/documents', { kind: 'invoice', clientId: client.id, issueDate: D, lines: [line] });
+    const draft = shareMessage((await me.get(`/api/documents/${inv.id}`)).doc, opts);
+    expect(draft).toContain(`Please find draft invoice ${inv.number} attached.`);
+    expect(draft).not.toMatch(/PayShap|Pay by card/);
+    await me.post(`/api/documents/${inv.id}/issue`, {});
+    const issued = shareMessage((await me.get(`/api/documents/${inv.id}`)).doc, opts);
+    expect(issued).toContain(`Please find tax invoice ${inv.number} attached.`);
+    expect(issued).toContain(`Pay instantly with PayShap to 0820000000 (reference ${inv.number}).`);
+    expect(issued).toContain('Pay by card: https://pay.example.com/made-up');
+    expect(issued).toMatch(/Kind regards,\nFictional Sparks$/);
+    // Deregistered since (made up): still a tax invoice, as its PDF says; it used to go by today's settings.
+    await env.sql`update settings set vat_registered = false`;
+    expect(shareMessage((await me.get(`/api/documents/${inv.id}`)).doc, opts)).toContain('Please find tax invoice');
+    await env.sql`update settings set vat_registered = true`;
+    // PayShap only when it's switched on (the screen passes no id otherwise).
+    expect(shareMessage((await me.get(`/api/documents/${inv.id}`)).doc, { ...opts, payshapId: '' })).not.toContain('PayShap');
+    // A pro-forma asks to be paid, a quote doesn't.
+    const pf = await me.post('/api/documents', { kind: 'quote', proforma: true, clientId: client.id, issueDate: D, lines: [line] });
+    expect(shareMessage((await me.get(`/api/documents/${pf.id}`)).doc, opts)).toContain('Pay by card');
+    const q = await me.post('/api/documents', { kind: 'quote', clientId: client.id, issueDate: D, lines: [line] });
+    expect(shareMessage((await me.get(`/api/documents/${q.id}`)).doc, opts)).toMatch(/^Good day Pretend Client \(Pty\) Ltd,\n\nPlease find quote \S+ attached\.\n\nKind regards/);
   });
 
   it('counts a draft invoice shared from the phone as gone out, still a draft', async () => {

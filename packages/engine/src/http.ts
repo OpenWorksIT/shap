@@ -5,6 +5,7 @@
  * server uses, so the method names and shapes follow Fastify's.
  */
 import type { AuthUser } from './auth.js';
+import { UNEXPECTED } from '@shap/shared';
 import { HttpError } from './lib/errors.js';
 
 export interface Req {
@@ -226,5 +227,7 @@ function errorReply(err: unknown, reply: Reply, log: Logger) {
     return;
   }
   log.error('unhandled error', err);
-  reply.code(500).send({ error: 'Something went wrong. Please try again.', code: 'internal' });
+  // The books run on the phone, so the cause can go back with it (nothing leaves): the screen
+  // puts it in Feedback's trail, for a bug report the owner sends.
+  reply.code(500).send({ error: UNEXPECTED, code: 'internal', details: { cause: String(e.message ?? err).slice(0, 200) } });
 }

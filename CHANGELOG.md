@@ -9,15 +9,18 @@ From the reviews of 1.10.1.
 - **Send on a draft invoice or credit note asks first.** A draft isn't issued, so it isn't in your
   books (or your VAT) yet, but Send shared it as a "Tax invoice" asking to be paid. Now Send asks:
   Issue and send, or Send the draft. A draft's PDF says "Draft invoice" (or "Draft credit note")
-  and asks for no payment: no bank details, card link or PayShap.
+  and leaves out your payment details (bank details, card link and PayShap), and so does a voided
+  invoice's.
 - **Send stops if your changes can't be saved.** It shared the PDF as last saved instead, with the
   reason at the bottom of the screen. Preview and Open in another app stop too.
 - **The message names the document as its PDF does,** from the document itself: it said "tax
   invoice" from whether you're registered for VAT today, so one from before you registered was
   called a tax invoice.
 - **Deleting a draft you've sent warns that it has gone out.** It didn't know.
-- **An error the app didn't expect** now says "That didn’t work. Please let us know: tap Feedback,
-  then Bug found." instead of "Something went wrong", and a bug report you send carries the error.
+- **An error the app didn't expect,** on a screen or in the books, now says "That didn’t work.
+  Please let us know: tap Feedback, then Bug found." instead of "Something went wrong" (and no
+  longer "Please try again", which could make a second of something), and a bug report you send
+  carries what failed.
 
 ## 1.10.1 (13 November 2026)
 

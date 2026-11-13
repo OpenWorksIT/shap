@@ -19,6 +19,7 @@ import {
   documentName,
   hasGoneOut,
   notIssuedYet,
+  shareMessage,
   SALE_VAT,
   SALE_VAT_CODES,
   vatRateOn,
@@ -305,13 +306,8 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
   const sendNow = async () => {
     const { doc: now } = await api<DocDetail>(`/api/documents/${doc!.id}`);
     const { blob, filename } = await apiBlob(`/api/documents/${now.id}/pdf`);
-    const name = documentName(now);
-    const asksPay = billLike && !notIssuedYet(now);
-    const link = asksPay ? now.payLink || settings.payLink : '';
-    const shap = asksPay && has('payshap') && settings.payshapId ? settings.payshapId : '';
-    const extra = credit && now.creditedInvoiceNumber ? ` It credits invoice ${now.creditedInvoiceNumber}${now.creditReason ? ` (${now.creditReason})` : ''}.` : '';
-    const text = `Good day${now.clientName ? ` ${now.clientName}` : ''},\n\nPlease find ${name.toLowerCase()} ${now.number} attached.${extra}${shap ? `\n\nPay instantly with PayShap to ${shap} (reference ${now.number}).` : ''}${link ? `\n\nPay by card: ${link}` : ''}\n\nKind regards,\n${from}`;
-    const how = await shareFile(blob, filename, `${name} ${now.number}`, text);
+    const text = shareMessage(now, { from, payLink: settings.payLink, payshapId: has('payshap') ? settings.payshapId : '' });
+    const how = await shareFile(blob, filename, `${documentName(now)} ${now.number}`, text);
     if (how === 'downloaded') toast('PDF saved');
     if (how !== 'cancelled' && isOwner) await api(`/api/documents/${now.id}/shared`, { body: {} });
     await reload();
@@ -331,6 +327,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
       if (issue) {
         await api(`/api/documents/${doc!.id}/issue`, { body: {} });
         toast(`${label} ${doc!.number} issued`);
+        await reload();
       }
       await sendNow();
     });
@@ -999,7 +996,7 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
                 ? `It’s still a draft: it hasn’t come off ${doc.creditedInvoiceNumber ? `invoice ${doc.creditedInvoiceNumber}` : 'the invoice'} or out of your books yet. Issue it to send it as your credit note.`
                 : 'It’s still a draft: it isn’t in your books yet. Issue it to send it as your invoice, with your payment details.'}
             </p>
-            <p className="xs muted">{credit ? 'Sent as a draft, its PDF says “Draft credit note”.' : 'Sent as a draft, its PDF says “Draft invoice” and asks for no payment.'}</p>
+            <p className="xs muted">{credit ? 'Sent as a draft, its PDF says “Draft credit note”.' : 'Sent as a draft, its PDF says “Draft invoice”, without your payment details.'}</p>
             <button type="button" className="btn primary block" disabled={busy || (credit && total <= 0)} onClick={() => void sendAfterAsking(true)}>
               Issue and send
             </button>

@@ -84,7 +84,7 @@ Shap's CPD audit (section 7) has each review; what was Pocket's own:
   - IFRS and SARS: Send on a draft invoice or credit note shared a PDF headed "Tax invoice" (or
     "Credit note") asking to be paid, for a supply not in the books or the VAT201, and issuing's
     checks (s20(4), s21(3)) never ran. Send asks to issue it first, and a draft's PDF says "Draft
-    invoice" or "Draft credit note" and asks for no payment.
+    invoice" or "Draft credit note", without the payment details.
   - Accounting: Send (and Preview, Open in another app) carried on when the save before it was
     refused, sharing the PDF as last saved. They stop now; `web-actions.test.ts` finds an action
     that swallows its own errors awaited inside another.
@@ -99,3 +99,13 @@ Shap's CPD audit (section 7) has each review; what was Pocket's own:
   - Security and privacy: nothing to fix in 1.10.1 (the share sheet is the owner's yes; the PDF
     goes through a FileProvider that isn't exported). The hooks check now also finds a hook
     imported under another name, called on any namespace, or in a handler named like a component.
+  - The fixes, checked by a separate agent: the books' own unexpected error still said "Something
+    went wrong. Please try again." (and the screens' fallback too), and its cause never reached
+    the trail: now `UNEXPECTED` from `@shap/shared` everywhere, the books send the cause back and
+    the screen logs it with the route, and the wording check reads the books too. A voided invoice
+    still asked to be paid on its PDF and in the message: only an issued invoice (and a
+    pro-forma) asks now (`asksForPayment`). The message's payment lines had no test: they're made
+    in the shared `shareMessage` now, tested; Send's wiring (asking first, reloading after "Issue
+    and send", `hasGoneOut`) is read from the source by `web-actions.test.ts`. "Asks for no
+    payment" overstated it (a draft still shows its due date and terms): "without your payment
+    details". `pocket.test.ts` issues an invoice, so it ends with `expectCleanAudit`.

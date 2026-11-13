@@ -71,7 +71,7 @@ function WipeSteps({ onClose }: { onClose: () => void }) {
       window.location.replace('/');
     } catch {
       setBusy(false);
-      setError('Something went wrong while wiping. Close the app and open it again: if your books are still there, nothing was deleted.');
+      setError('Wiping didn’t finish. Close the app and open it again: if your books are still there, nothing was deleted.');
     }
   };
 

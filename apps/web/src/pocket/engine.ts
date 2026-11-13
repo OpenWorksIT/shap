@@ -165,7 +165,11 @@ async function readSafetyCopy(): Promise<Blob | null> {
 /** A file from the engine (PDF, CSV, photo), with the name it should be saved as. */
 export async function fetchBlob(path: string): Promise<{ blob: Blob; filename: string }> {
   const r = await call('GET', path);
-  if (r.status >= 400) throw new Error((r.body as { error?: string } | null)?.error ?? 'Couldn’t make that file');
+  if (r.status >= 400) {
+    const d = r.body as { error?: string; details?: { cause?: string } } | null;
+    // With its status, so the screens can tell the books' refusal (said as it is) from a fault.
+    throw Object.assign(new Error(d?.error ?? 'Couldn’t make that file'), { status: r.status, cause: d?.details?.cause });
+  }
   const type = r.headers['content-type'] ?? 'application/octet-stream';
   const blob = r.bytes ? new Blob([r.body as ArrayBuffer], { type }) : new Blob([typeof r.body === 'string' ? r.body : JSON.stringify(r.body)], { type });
   const named = /filename="([^"]+)"/.exec(r.headers['content-disposition'] ?? '')?.[1];
