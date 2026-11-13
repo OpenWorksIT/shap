@@ -101,8 +101,10 @@ Shap's CPD audit (section 7) has each review; what was Pocket's own:
     imported under another name, called on any namespace, or in a handler named like a component.
   - The fixes, checked by a separate agent: the books' own unexpected error still said "Something
     went wrong. Please try again." (and the screens' fallback too), and its cause never reached
-    the trail: now `UNEXPECTED` from `@shap/shared` everywhere, the books send the cause back and
-    the screen logs it with the route, and the wording check reads the books too. A voided invoice
+    the trail: now `UNEXPECTED` from `@shap/shared` everywhere, the books send back what kind of
+    fault it was (`causeOf`: its kind and code, never its words, which can quote what was typed,
+    and Feedback says nothing typed goes) and the screen logs it with the route, and the wording
+    check reads the books too. A voided invoice
     still asked to be paid on its PDF and in the message: only an issued invoice (and a
     pro-forma) asks now (`asksForPayment`). The message's payment lines had no test: they're made
     in the shared `shareMessage` now, tested; Send's wiring (asking first, reloading after "Issue

@@ -190,6 +190,14 @@ function done(reply: Reply): Response {
   return { status: reply.statusCode, headers: reply.headers, body: p ?? null };
 }
 
+/** An unexpected error, for Feedback's trail: its kind and the database's code, not its words. */
+export function causeOf(err: unknown): string {
+  const e = err as { name?: unknown; code?: unknown } | null;
+  const name = typeof e?.name === 'string' && /^[A-Za-z]{1,40}$/.test(e.name) ? e.name : 'Error';
+  const code = typeof e?.code === 'string' && /^[A-Z0-9_]{1,12}$/i.test(e.code) ? ` ${e.code}` : '';
+  return name + code;
+}
+
 function errorReply(err: unknown, reply: Reply, log: Logger) {
   const e = err as Error & { statusCode?: number; code?: string };
   reply.payload = undefined;
@@ -227,7 +235,7 @@ function errorReply(err: unknown, reply: Reply, log: Logger) {
     return;
   }
   log.error('unhandled error', err);
-  // The books run on the phone, so the cause can go back with it (nothing leaves): the screen
-  // puts it in Feedback's trail, for a bug report the owner sends.
-  reply.code(500).send({ error: UNEXPECTED, code: 'internal', details: { cause: String(e.message ?? err).slice(0, 200) } });
+  // What kind of error, for Feedback's trail (the screen adds the route): never its message,
+  // which can quote what was typed, and Feedback says nothing typed is included.
+  reply.code(500).send({ error: UNEXPECTED, code: 'internal', details: { cause: causeOf(err) } });
 }

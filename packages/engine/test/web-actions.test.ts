@@ -136,6 +136,14 @@ describe('the screens’ actions', () => {
 });
 
 describe('the words for an error nobody expected', () => {
+  it('sends the books’ fault to the trail as its kind and code, never its words (they can quote what was typed)', async () => {
+    const { causeOf } = await import('../src/http.js');
+    expect(causeOf(new Error('Unexpected token in “Made-up Client (Pty) Ltd”'))).toBe('Error');
+    expect(causeOf(Object.assign(new TypeError('x of Made-up Client'), { code: '42P01' }))).toBe('TypeError 42P01');
+    expect(causeOf(Object.assign(new Error('y'), { name: 'Made up Client name with spaces', code: 'Made-up Client' }))).toBe('Error');
+    expect(causeOf('a string')).toBe('Error');
+  });
+
   it('finds “Something went wrong”, and UNEXPECTED shown without the error going in the trail', () => {
     const src = `function a() {\n  try { x(); } catch (err) { toast(err instanceof ApiError ? err.message : 'Something went wrong'); }\n  try { x(); } catch (err) { toast(UNEXPECTED); }\n  try { x(); } catch (err) { console.error(err); toast(UNEXPECTED); }\n  throw new Error(\`Something went wrong (\${status})\`);\n  reply({ error: 'Something went wrong. Please try again.' });\n}\n`;
     expect(unexpectedWords(join(WEB, 'x.tsx'), src)).toEqual(['x.tsx:2 “Something went wrong”', 'x.tsx:3 UNEXPECTED without console.error', 'x.tsx:5 “Something went wrong”', 'x.tsx:6 “Something went wrong”']);
