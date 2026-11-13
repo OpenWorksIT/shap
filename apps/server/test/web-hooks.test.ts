@@ -4,13 +4,14 @@
  * effect. One that isn't throws when it runs ("Invalid hook call"), and the screen showed only
  * "Something went wrong": in Shap Pocket 1.10.1, a stray useCallback inside an invoice's Send had
  * stopped every invoice and quote from being shared since its 1.1.0. Shap's screens are checked the
- * same way. Read straight from the source with TypeScript's own parser: nothing else to install.
+ * same way. Read straight from the source with TypeScript's own parser.
  * From the 1.10.1 review: a hook imported under another name or called on any namespace counts,
  * and a handler named like a component inside one isn't one.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import ts from 'typescript';
+// TypeScript's own parser, from its 6.x package: TypeScript 7 (the compiler here) has no parser API yet.
+import ts from '@typescript/typescript6';
 import { describe, expect, it } from 'vitest';
 
 const WEB = join(import.meta.dirname, '../../web/src');

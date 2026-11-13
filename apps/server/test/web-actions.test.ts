@@ -15,7 +15,8 @@
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import ts from 'typescript';
+// TypeScript's own parser, from its 6.x package: TypeScript 7 (the compiler here) has no parser API yet.
+import ts from '@typescript/typescript6';
 import { describe, expect, it } from 'vitest';
 
 const WEB = join(import.meta.dirname, '../../web/src');
