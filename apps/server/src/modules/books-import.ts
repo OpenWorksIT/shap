@@ -168,6 +168,12 @@ export async function applyImport(tx: Db, files: LedgerFile[], mapping: z.infer<
   const need = accountsIn(files);
   const chosen = new Map(mapping.map((m) => [keyOf(m), m]));
   const existing = new Map((await tx<ShapAccount[]>`select id, code, name, type, system_key from accounts`).map((a) => [a.id, a]));
+  // An account brought in before is used again, not made twice (the same preview applied again).
+  const remembered = new Map(
+    (await tx<{ sourceCode: string; sourceName: string; accountId: string }[]>`select source_code, source_name, account_id from ledger_import_accounts`)
+      .filter((r) => existing.has(r.accountId))
+      .map((r) => [keyOf({ code: r.sourceCode, name: r.sourceName }), r.accountId]),
+  );
   const codes = new Set([...existing.values()].map((a) => a.code.toLowerCase()));
   const accountOf = new Map<string, string>();
   let created = 0;
@@ -176,6 +182,8 @@ export async function applyImport(tx: Db, files: LedgerFile[], mapping: z.infer<
     if (m?.accountId) {
       if (!existing.has(m.accountId)) throw badRequest(`The account chosen for “${a.name}” isn’t in these books`);
       accountOf.set(keyOf(a), m.accountId);
+    } else if (remembered.has(keyOf(a))) {
+      accountOf.set(keyOf(a), remembered.get(keyOf(a))!);
     } else {
       const type = m?.newType ?? a.type;
       if (!type) throw badRequest(`Choose an account in these books for “${a.code ? `${a.code} ` : ''}${a.name}”, or what kind of account a new one is`);
