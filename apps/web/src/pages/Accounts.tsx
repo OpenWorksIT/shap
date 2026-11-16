@@ -15,17 +15,18 @@ import { ExportStudio } from '../components/ExportStudio';
 import { FinancialStatements } from './FinancialStatements';
 import { sharePdf } from '../lib/share-pdf';
 import { TurnoverTax, Vat201 } from '../components/TaxForms';
+import BooksImport from './BooksImport';
 
 /** A typed value in a download's address: encoded, so it can only ever be a value. */
 const enc = (v: string | null | undefined) => encodeURIComponent(String(v ?? ''));
 
-type Tab = 'income' | 'balance' | 'trial' | 'ledger' | 'journals' | 'assets' | 'bank' | 'files' | 'checks' | 'locks' | 'yearend' | 'statements' | 'tax' | 'vat201' | 'export';
+type Tab = 'income' | 'balance' | 'trial' | 'ledger' | 'journals' | 'assets' | 'bank' | 'files' | 'checks' | 'locks' | 'yearend' | 'statements' | 'tax' | 'vat201' | 'export' | 'import';
 
 export default function AccountsPage() {
   const [params, setParams] = useSearchParams();
   const tab = (params.get('tab') as Tab) || 'income';
   const go = (t: Tab, extra: Record<string, string> = {}) => setParams({ tab: t, ...extra }, { replace: false });
-  const { has, settings } = useAuthed();
+  const { has, settings, can } = useAuthed();
   return (
     <div className="stack-lg">
       <PageHead title="Accounts" sub="Built live from your invoices, costs, labour and payments." />
@@ -48,6 +49,7 @@ export default function AccountsPage() {
             { value: 'tax', label: settings.turnoverTax ? 'Turnover tax' : 'Provisional tax' },
             ...(settings.vatRegistered ? [{ value: 'vat201' as Tab, label: 'VAT201' }] : []),
             { value: 'export', label: 'Export' },
+            ...(can('books.adjust') ? [{ value: 'import' as Tab, label: 'From another package' }] : []),
           ]}
         />
       </div>
@@ -66,6 +68,7 @@ export default function AccountsPage() {
       {tab === 'tax' && (settings.turnoverTax ? <TurnoverTax /> : <ProvisionalTax />)}
       {tab === 'vat201' && <Vat201 />}
       {tab === 'export' && <Exports />}
+      {tab === 'import' && can('books.adjust') && <BooksImport />}
     </div>
   );
 }
