@@ -18,6 +18,7 @@
  * /collect/usage: open to anyone (Pocket has no account), so words only up to a size, limited per
  * address and per day.
  */
+import { inClient, inDemo } from '../db/routing.js';
 import { randomBytes } from 'node:crypto';
 import { appendFile, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -426,8 +427,9 @@ export function registerFeedbackRoutes(app: FastifyInstance, ctx: Ctx): void {
 
 /** This Shap's own anonymous note, when its owner agreed (sent to OpenWorks, or kept if it is OpenWorks'). */
 export async function reportUsage(ctx: Ctx, s: { usageConsent: boolean; installId: string; businessType: BusinessType; industry: string; features: string[]; vatRegistered: boolean; tone: 'casual' | 'formal' }, log: { warn: (o: object, m: string) => void }): Promise<boolean> {
-  // A test server's setups are made up: they aren't counted (docs/TEST_SERVER.md).
-  if (!s.usageConsent || ctx.config.TEST_SERVER) return false;
+  // A test server's setups are made up: they aren't counted (docs/TEST_SERVER.md). Nothing goes
+  // from the demo company or a practice's client's books (Shap Accountant): neither is this Shap's own.
+  if (!s.usageConsent || ctx.config.TEST_SERVER || inClient() || inDemo()) return false;
   const note = { app: 'shap' as const, version: appVersion(), installId: s.installId, platform: 'server', businessType: s.businessType, industry: s.industry, features: s.features, vatRegistered: s.vatRegistered, tone: s.tone };
   const { installId, ...kept } = note;
   if (ctx.config.COLLECT) {
@@ -445,6 +447,7 @@ export const USAGE_CHECK_IN_DAYS = 30;
  * since the last one, and only with the owner's agreement. Checked with the other half-hourly jobs.
  */
 export async function checkInUsage(ctx: Ctx, db: Db, log: { warn: (o: object, m: string) => void }) {
+  if (inClient() || inDemo()) return;
   const s = await getSettings(db);
   if (!s.usageConsent || !s.setupDone) return;
   const note = { usageConsent: true, installId: s.installId, businessType: s.businessType, industry: s.industry, features: FEATURE_KEYS.filter((k) => featureOn(s.features, k)), vatRegistered: s.vatRegistered, tone: s.tone };

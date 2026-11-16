@@ -22,7 +22,8 @@ describe('Shap Accountant: a practice and the clients it keeps', () => {
   const made: string[] = [];
 
   const dropClients = async () => {
-    for (const { datname } of await env.sql<{ datname: string }[]>`select datname from pg_database where datname like 'shap\\_test\\_\\_c\\_%'`) {
+    const pattern = `${env.ctx.clients.practiceDb.replace(/_/g, '\\_')}\\_\\_c\\_%`;
+    for (const { datname } of await env.sql<{ datname: string }[]>`select datname from pg_database where datname like ${pattern}`) {
       await env.sql.unsafe(`drop database if exists "${datname}" with (force)`);
     }
   };
@@ -106,8 +107,8 @@ describe('Shap Accountant: a practice and the clients it keeps', () => {
     expect((await site.call({ method: 'POST', url: `/api/practice/clients/${id}/open`, payload: {} })).statusCode).toBe(403);
     await env.sql`update users set access_add = '{practice.clients}' where id = ${siteId}`;
     expect((await site.call({ method: 'POST', url: `/api/practice/clients/${id}/open`, payload: {} })).statusCode).toBe(403);
-    // Given it to review: in the client's books as its accountant (reads, changes nothing).
-    await owner.post(`/api/practice/clients/${id}/access`, { access: [{ userId: siteId, level: 'review' }] }, 'PUT');
+    // Given it to compile: in the client's books as its accountant (reads, changes nothing).
+    await owner.post(`/api/practice/clients/${id}/access`, { access: [{ userId: siteId, level: 'compile' }] }, 'PUT');
     const list = await site.get('/api/practice');
     expect(list.clients.map((x: { name: string }) => x.name)).toEqual(['Fictional Bakery CC']);
     const c = await open(site, id);
@@ -118,8 +119,8 @@ describe('Shap Accountant: a practice and the clients it keeps', () => {
     await owner.post(`/api/practice/clients/${id}/access`, { access: [] }, 'PUT');
     expect((await there.get('/api/practice/here')).json().client).toBeNull();
     const change = await there.send('POST', '/api/clients', { name: 'Made-up' });
-    expect(change.statusCode).toBe(403);
-    expect(change.json().error).toMatch(/no longer open/);
+    expect(change.statusCode).toBe(409);
+    expect(change.json()).toMatchObject({ code: 'client_closed', error: expect.stringMatching(/no longer open/) });
     await env.sql`update users set access_add = '{}' where id = ${siteId}`;
   });
 
@@ -130,7 +131,9 @@ describe('Shap Accountant: a practice and the clients it keeps', () => {
     // Client B's id with client A's session: not a session in B's books, so back to the practice.
     const forged = inside(owner, { ...c, shap_client: b });
     expect((await forged.get('/api/practice/here')).json().client).toBeNull();
-    expect((await forged.send('POST', '/api/clients', { name: 'Made-up Intruder' })).statusCode).toBe(403);
+    expect((await forged.send('POST', '/api/clients', { name: 'Made-up Intruder' })).statusCode).toBe(409);
+    // Reading isn't let through either: nothing from the practice's own books under the client's name.
+    expect((await forged.get('/api/reports/trial-balance')).statusCode).toBe(409);
     expect((await (await clientDb(b))`select 1 from clients where name = 'Made-up Intruder'`).length).toBe(0);
     // Not an id at all.
     expect((await inside(owner, { ...c, shap_client: "x' or '1'='1" }).get('/api/practice/here')).json().client).toBeNull();
@@ -142,7 +145,7 @@ describe('Shap Accountant: a practice and the clients it keeps', () => {
   it('keeps what isn’t for a client’s books out of them', async () => {
     const id = await addClient('Fictional Florist (Pty) Ltd');
     const there = inside(owner, await open(owner, id));
-    for (const url of ['/api/system', '/api/users', '/api/practice', '/api/wipe', '/api/test-server/status']) {
+    for (const url of ['/api/system', '/api/users', '/api/practice', '/api/wipe', '/api/test-server/status', '/api/audit/server', '/api/feedback']) {
       expect((await there.get(url)).statusCode, url).toBe(403);
     }
     expect((await there.get('/api/practice/here')).statusCode).toBe(200);
@@ -163,7 +166,7 @@ describe('Shap Accountant: a practice and the clients it keeps', () => {
     expect((await inside(owner, await open(owner, id)).get('/api/practice/here')).json().client.id).toBe(id);
   });
 
-  it('runs every check on a client’s books for the list: the books audit, the statements’ checks, the returns due', async () => {
+  it('runs three of Shap’s checks on a client’s books for the list: the books audit, the statements’ checks, how far they’re closed; and the returns due', async () => {
     const id = await addClient('Made-up Movers (Pty) Ltd');
     const db = await clientDb(id);
     await db`update settings set setup_done = true, business_type = 'company', vat_registered = true, vat_number = '4740101508', vat_category = 'A', fy_end_month = 2`;
@@ -190,13 +193,13 @@ describe('the returns coming up for a client', () => {
     const due = deadlinesFor({ businessType: 'company', vatRegistered: true, vatCategory: 'A', fyEndMonth: 2, turnoverTax: false, employer: true }, '2026-11-17');
     // Category A ends in odd months: October and November, due the last business day of December;
     // August and September's was due on Friday 30 October (the 31st a Saturday).
-    expect(due).toContainEqual({ key: 'vat201-2026-11-30', label: 'VAT201 for October 2026 to November 2026', due: '2026-12-31', past: false });
-    expect(due).toContainEqual({ key: 'vat201-2026-09-30', label: 'VAT201 for August 2026 to September 2026', due: '2026-10-30', past: true });
+    expect(due).toContainEqual({ key: 'vat201-2026-11-30', label: 'VAT201 for Oct to Nov 26 (on eFiling; by the 25th otherwise)', due: '2026-12-31', past: false });
+    expect(due).toContainEqual({ key: 'vat201-2026-09-30', label: 'VAT201 for Aug to Sep 26 (on eFiling; by the 25th otherwise)', due: '2026-10-30', past: true });
     // October's EMP201: the 7th is a Saturday, so Friday 6 November, already past.
     expect(due).toContainEqual({ key: 'emp201-2026-10', label: 'EMP201 for October 2026', due: '2026-11-06', past: true });
     // A non-employer has no EMP201; a sole proprietor no ITR14.
     const sole = deadlinesFor({ businessType: 'sole_prop', vatRegistered: false, vatCategory: 'A', fyEndMonth: 2, turnoverTax: false, employer: false }, '2027-02-01');
     expect(sole.some((d) => /EMP201|ITR14|VAT201/.test(d.label))).toBe(false);
-    expect(sole.some((d) => d.label === 'Second provisional tax payment (IRP6, 2027)')).toBe(true);
+    expect(sole.some((d) => d.label === 'Second provisional tax payment (IRP6, year to February 2027)')).toBe(true);
   });
 });

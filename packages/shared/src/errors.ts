@@ -5,3 +5,5 @@
  * the screen), so a bug report the owner sends carries it.
  */
 export const UNEXPECTED = 'That didn’t work. Please let us know: tap Feedback, then Bug found.';
+/** The same, in a practice's client's books (Shap Accountant), where Feedback goes from the practice's own. */
+export const UNEXPECTED_IN_A_CLIENT = 'That didn’t work. Please let us know from the practice: tap Back to the practice, then Feedback, then Bug found.';

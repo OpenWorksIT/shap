@@ -5,17 +5,23 @@ entries newer than the version you're running before you update.
 
 ## 1.27.0 (17 November 2026)
 
-- **Shap Accountant, for a practice** (Settings → Features; docs/ACCOUNTANT.md). The practice's own
-  Shap keeps its clients' books too, each client in a database of its own on the practice's
-  server, kept apart from the others by Postgres itself. **Practice** in the menu lists the
-  clients with what Shap's checks found in each (the books audit, the financial statements'
-  checks for the last year, how far the books are closed) and the returns coming up (VAT201,
-  EMP201, provisional tax, ITR14). **Open their books** works in them with all of Shap's screens,
-  the bar across the top saying whose they are. The owner opens every client; anyone else, the
-  clients they're given, to write up or to read and compile. The checks flag and never post, no
-  AI reads anyone's books, and the dates are Shap's own reading of SARS's tables, to check. Off
-  unless switched on. Imports from other packages, Pocket shares and linking a client's own Shap
-  come next.
+- **Shap Accountant, for a practice** (Settings → Features; docs/ACCOUNTANT.md). Off unless switched
+  on. The practice's own Shap keeps its clients' books too, each in a database of its own on the
+  practice's server: a query in one client's books can't reach another's, and Shap checks who may
+  open which on every request. **Practice** lists the clients with what three of Shap's checks
+  found (the books audit, the statements for the last year that has ended, how far the books are
+  closed) and some of the returns coming up (VAT201, EMP201, provisional tax, turnover tax, ITR14
+  and the filing season's dates), from each client's settings and Shap's SARS tables: aids to
+  check, not advice. **Open their books** works in them with Shap's screens (not the server's own:
+  updates and backups, people, feedback), the bar saying whose they are; nothing is emailed from
+  them, and nothing about them goes to OpenWorks. The owner opens every client; anyone else, the
+  clients they're given, to write up (as their owner in Shap) or to read and compile. The practice
+  compiles a client's statements in Shap and records the directors' approval with the page they
+  signed. The checks never post anything. A server whose database login can't create databases
+  needs it allowed first (docs/ACCOUNTANT.md). Imports, Pocket shares and linking a client's own
+  Shap are planned.
+- 4 November 2026 (the local government elections) is a public holiday in Shap's dates.
+- The financial statements aren't compiled until those who approve them are named.
 
 ## 1.26.1 (13 November 2026)
 

@@ -70,6 +70,13 @@ export function formatDate(iso: string | null | undefined, style: 'short' | 'lon
  * Sunday is also kept on the Monday after. One-off days the President declares (an election day,
  * say) aren't known in advance and aren't here.
  */
+/**
+ * Public holidays the President declares for one year only (Public Holidays Act s2A), such as an
+ * election day: checked with each update, the same as SARS's tables (docs/SARS.md).
+ * 4 November 2026, the local government elections: https://www.sanews.gov.za/node/84344
+ */
+export const DECLARED_HOLIDAYS: readonly string[] = ['2026-11-04'];
+
 export function publicHolidays(year: number): Set<string> {
   // Easter Sunday (the anonymous Gregorian computus).
   const a = year % 19;
@@ -90,6 +97,7 @@ export function publicHolidays(year: number): Set<string> {
   const fixed = ['01-01', '03-21', '04-27', '05-01', '06-16', '08-09', '09-24', '12-16', '12-25', '12-26'].map((md) => `${year}-${md}`);
   const out = new Set([...fixed, addDays(easter, -2), addDays(easter, 1)]);
   for (const x of fixed) if (new Date(`${x}T00:00:00Z`).getUTCDay() === 0) out.add(addDays(x, 1));
+  for (const d of DECLARED_HOLIDAYS) if (d.startsWith(`${year}-`)) out.add(d);
   return out;
 }
 

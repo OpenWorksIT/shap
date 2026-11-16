@@ -33,6 +33,7 @@ import type { Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
 import { effectiveLock, freshTotals, getSettings, today } from '../lib/books.js';
 import { badRequest, forbidden, notFound } from '../lib/errors.js';
+import { inClient } from '../db/routing.js';
 import { parse } from '../lib/validate.js';
 import { auditBooks } from '../audit/books.js';
 import { buildStatements, yearStartOf, type Statements } from '../statements/build.js';
@@ -280,6 +281,8 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
   /** The accountant's signed compiler's report (or the whole signed set), uploaded by the owner. */
   app.post('/api/statements/:fyEnd/compiler-report', owner, async (req) => {
     const user = userOrThrow(req);
+    // In a practice's client's books (Shap Accountant) the practice compiles them here, as itself.
+    if (inClient()) throw forbidden('In a client’s books, the practice compiles the statements in Shap: open the client to compile (Practice → Open to compile).');
     const { fyEnd } = parse(fyParam, req.params);
     const input = parse(compilerReportInput, req.body);
     await on();
@@ -326,6 +329,17 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
     await on();
     const r = await row(sql, fyEnd);
     if (!r || r.status !== 'compiled' || !r.snapshot) throw badRequest('The statements are approved once the accountant has compiled them');
+    // In a practice's client's books (Shap Accountant), the approval is the client's directors' own
+    // (Companies Act s30(3)(c)): the practice records it, with the page a director signed, and the
+    // name is one of those named in the statements.
+    const recorded = inClient();
+    if (recorded) {
+      const named = (r.snapshot.details?.directors ?? []).map((d) => d.name.trim().toLowerCase()).filter(Boolean);
+      if (!named.includes(input.name.trim().toLowerCase())) throw badRequest('Record the approval of one of those named in the statements’ details, as they signed it.');
+      if (!input.signedId) throw badRequest('Upload the page they signed: in a client’s books the practice records their approval, it doesn’t give it.');
+      const [file] = await sql<{ mime: string }[]>`select mime from attachments where id = ${input.signedId} and created_by = ${user.id}`;
+      if (!file || !(file.mime === 'application/pdf' || file.mime.startsWith('image/'))) throw badRequest('The signed page as a PDF or a photo');
+    }
     if (input.date < (r.compiledOn ?? fyEnd)) throw badRequest('They’re approved on or after the day they were compiled');
     const now = await buildStatements(sql, fyEnd, r.snapshot.details);
     if (!stillSigned(r as { snapshot: Statements; snapshotHash: string | null }, now)) throw badRequest('The books have changed since the statements were compiled, so they no longer give the signed figures. Send them to your accountant again.');
@@ -346,8 +360,15 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
         values (${`${settings.companyName} financial statements ${fyEnd.slice(0, 4)} (signed).pdf`.replace(/[^\w.\- ]/g, '')}, 'application/pdf', ${pdf.length}, ${pdf}, ${user.id})
         returning id`;
       await tx`update financial_statements set status = 'approved', approved_by = ${user.id}, approved_name = ${input.name}, approved_on = ${input.date}::date, approved_at = now(),
-        final_pdf_id = ${f!.id}, updated_at = now() where fy_end = ${fyEnd}::date`;
-      await audit(tx, { userId: user.id, action: 'approve_statements', entity: 'financial_statements', entityId: fyEnd, ip: req.ip, details: { name: input.name, date: input.date, hash: r.snapshotHash } });
+        final_pdf_id = ${f!.id}, approval_signed_id = ${recorded ? input.signedId : null}, updated_at = now() where fy_end = ${fyEnd}::date`;
+      await audit(tx, {
+        userId: user.id,
+        action: recorded ? 'record_statements_approval' : 'approve_statements',
+        entity: 'financial_statements',
+        entityId: fyEnd,
+        ip: req.ip,
+        details: { name: input.name, date: input.date, hash: r.snapshotHash, ...(recorded ? { recordedBy: user.name, signedId: input.signedId } : {}) },
+      });
     });
     return { ok: true };
   });

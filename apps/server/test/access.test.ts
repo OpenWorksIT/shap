@@ -71,10 +71,12 @@ describe('every door, for every task', () => {
     'GET /api/workers', 'GET /api/costs/suppliers', 'GET /api/costs/:id', 'GET /api/costs/vat-in', 'GET /api/attachments/:id', 'POST /api/feedback',
     // Whether this is a test server (the banner on every screen): no figures.
     'GET /api/test-server',
+    // Whether a practice's client's books are open in this browser (Shap Accountant): their name only.
+    'GET /api/practice/here',
   ]);
 
   it('gives every route a door: some roles, some tasks, or anyone signed in on purpose', () => {
-    const unguarded = Object.entries(env.doors).filter(([r, d]) => !d && !r.startsWith('POST /api/auth/') && !r.startsWith('GET /api/auth/') && !/^(GET \/api\/(health|demo\/status)|POST \/api\/demo\/leave)$/.test(r));
+    const unguarded = Object.entries(env.doors).filter(([r, d]) => !d && !r.startsWith('POST /api/auth/') && !r.startsWith('GET /api/auth/') && !/^(GET \/api\/(health|demo\/status)|POST \/api\/(demo|practice)\/leave)$/.test(r));
     expect(unguarded.map(([r]) => r)).toEqual([]);
     const anyone = Object.entries(env.doors).filter(([, d]) => d?.roles && d.roles.length === 0).map(([r]) => r);
     expect(anyone.sort()).toEqual([...ANYONE].sort());

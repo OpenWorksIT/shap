@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { addDays, addMonths, featureOn, financialYear, lastBusinessDay, monthEnd, monthLabel, monthStart, monthsBetween, vat201Due, vatPeriod, SARS_CHECKED_TO, taxYearEnd, type VatCategory } from '@shap/shared';
+import { addDays, addMonths, featureOn, financialYear, lastBusinessDay, monthEnd, monthLabel, monthStart, monthsBetween, vat201Due, vat201Label, vatPeriod, SARS_CHECKED_TO, taxYearEnd, type VatCategory } from '@shap/shared';
 import { can, requireRole, seesBooks, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { getSettings, today, freshTotals } from '../lib/books.js';
@@ -153,7 +153,7 @@ export function taxDue(settings: { vatRegistered: boolean; vatCategory: VatCateg
     const current = vatPeriod(now, settings.vatCategory, settings.fyEndMonth);
     const last = vatPeriod(addMonths(current.start, -1), settings.vatCategory, settings.fyEndMonth);
     const due = vat201Due(last.end);
-    if (due >= now && due <= soon) out.push({ key: `vat201-${last.end}`, label: `VAT201 for ${last.start.slice(0, 7) === last.end.slice(0, 7) ? monthLabel(last.end.slice(0, 7)) : `${monthLabel(last.start.slice(0, 7), last.start.slice(0, 4) !== last.end.slice(0, 4))} to ${monthLabel(last.end.slice(0, 7))}`}`, due, to: '/accounts?tab=vat201' });
+    if (due >= now && due <= soon) out.push({ key: `vat201-${last.end}`, label: vat201Label(last), due, to: '/accounts?tab=vat201' });
   }
   if (settings.turnoverTax) {
     const fy = financialYear(now, settings.fyEndMonth);

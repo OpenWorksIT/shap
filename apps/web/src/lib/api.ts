@@ -88,6 +88,9 @@ export async function api<T = unknown>(path: string, opts: { method?: string; bo
   if (!res.ok) {
     if (res.status === 401 && !path.startsWith('/api/auth/login')) onUnauthorized?.();
     const d = (data ?? {}) as { error?: string; code?: string; details?: { fields?: Record<string, string> } };
+    // A client's books that were open here aren't any more (archived, or taken off them): back to
+    // the practice's list, rather than showing anything from the wrong books under the client's name.
+    if (res.status === 409 && d.code === 'client_closed' && !NATIVE) window.location.assign('/practice');
     // One the server didn't expect: where, into Feedback's trail (redacted there).
     if (res.status >= 500) console.error(`${opts.method ?? (opts.body !== undefined ? 'POST' : 'GET')} ${scrubPath(path)} → ${res.status}`);
     throw new ApiError(res.status, d.error ?? (res.status >= 500 ? UNEXPECTED : `Request failed (${res.status})`), d.code ?? 'error', d.details?.fields ?? {}, d.details);

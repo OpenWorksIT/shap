@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { api, ApiError, APP_VERSION } from '../lib/api';
 import { getTrail, record, scrubPath, startTrail } from '../lib/trail';
 import { Icon } from './ui';
+import { useClientHere } from './ClientBanner';
 
 type Kind = 'love' | 'dislike' | 'bug' | 'idea';
 const KINDS: { kind: Kind; label: string; emoji: string; prompt: string }[] = [
@@ -69,6 +70,12 @@ async function capture(mask: boolean): Promise<string | null> {
  * pages and server calls, so we can see what led up to it.
  */
 export function FeedbackButton() {
+  // Not in a practice's client's books (Shap Accountant): feedback goes from the practice's own.
+  if (useClientHere()) return null;
+  return <FeedbackButtonHere />;
+}
+
+function FeedbackButtonHere() {
   const location = useLocation();
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<Kind | null>(null);

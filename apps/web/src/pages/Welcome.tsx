@@ -4,8 +4,9 @@
  */
 import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BUSINESS_TYPES, ENTITIES, entity, extrasFor, featuresFor, INDUSTRIES, paysOutProfit, payoutWord, payeRefProblem, regNumberProblem, sdlRefFor, setupCautions, TERMS_VERSION, TURNOVER_TAX_LIMIT_CENTS, formatZar, uifRefProblem, vatNumberProblem, vatThresholds, WORKFLOWS, type EmployerAnswer, type IndustryKey, type SetupExtras, type Workflow, PAYMENT_DAYS, dayLabel, withPaymentTerm } from '@shap/shared';
+import { BUSINESS_TYPES, ENTITIES, entity, extrasFor, featuresFor, INDUSTRIES, paysOutProfit, payoutWord, payeRefProblem, regNumberProblem, sdlRefFor, setupCautions, TERMS_VERSION, PRACTICE_TERMS_TICK, TURNOVER_TAX_LIMIT_CENTS, formatZar, uifRefProblem, vatNumberProblem, vatThresholds, WORKFLOWS, type EmployerAnswer, type IndustryKey, type SetupExtras, type Workflow, PAYMENT_DAYS, dayLabel, withPaymentTerm } from '@shap/shared';
 import { TermsReview } from '../components/Terms';
+import { useClientHere } from '../components/ClientBanner';
 import { LogoField } from '../components/BusinessForm';
 import { Logo } from '../components/Logo';
 import { Field, Icon, MoneyInput } from '../components/ui';
@@ -37,6 +38,9 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
   const [uif, setUif] = useState<EmployerAnswer | null>(null);
   const [sdl, setSdl] = useState<EmployerAnswer | null>(null);
   const [accepted, setAccepted] = useState(false);
+  // A practice's client's books (Shap Accountant): nothing about them goes to OpenWorks, so the two
+  // sharing questions aren't asked, and the terms are accepted for the practice's use of Shap on them.
+  const client = useClientHere();
   const [workflow, setWorkflow] = useState<Workflow>('quote_job_invoice');
   const [extras, setExtras] = useState<SetupExtras>(() => extrasFor(settings.industry || ''));
   const [movingIn, setMovingIn] = useState<boolean | null>(null);
@@ -79,7 +83,7 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
       const employer = employees
         ? { payeRegistered: paye === 'yes', payeRef: paye === 'yes' ? f.payeRef : '', uifRegistered: uif === 'yes', uifRef: uif === 'yes' ? f.uifRef : '', sdl: sdl === 'yes' }
         : { payeRegistered: null, payeRef: '', uifRegistered: null, uifRef: '', sdl: false };
-      const { logoId: _l, termsAcceptedAt: _t, ...rest } = { ...f, ...employer, features, industry, usageConsent: Boolean(consent), marketConsent: market, marketNoticeSeen: true, setupDone: true, termsVersion: TERMS_VERSION, fyEndMonth: kind.febYearEnd ? 2 : f.fyEndMonth, turnoverTax: kind.turnoverTax && f.turnoverTax } as Settings & { logoId: string | null };
+      const { logoId: _l, termsAcceptedAt: _t, ...rest } = { ...f, ...employer, features, industry, usageConsent: !client && Boolean(consent), marketConsent: !client && market, marketNoticeSeen: true, setupDone: true, termsVersion: TERMS_VERSION, fyEndMonth: kind.febYearEnd ? 2 : f.fyEndMonth, turnoverTax: kind.turnoverTax && f.turnoverTax } as Settings & { logoId: string | null };
       await api('/api/settings', { method: 'PUT', body: rest });
       if ((sales || f.vatRegistered) && monthEnd) {
         try {
@@ -224,6 +228,7 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
                 </button>
               ))}
             </div>
+            {!client && (
             <div className="panel panel-pad stack" style={{ gap: 8 }}>
               <strong className="small">Can Shap let OpenWorks know, anonymously, what kind of business uses it?</strong>
               <span className="xs muted">Only the kind of business and which parts of Shap you switch on, sent after an update and about once a month, so it can be made better for people like you. Never your name, clients or figures.</span>
@@ -236,6 +241,8 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
                 </button>
               </div>
             </div>
+            )}
+            {!client && (
             <label className="check panel panel-pad">
               <input type="checkbox" checked={market} onChange={(e) => setMarket(e.target.checked)} />
               <span>
@@ -245,7 +252,8 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
                 </div>
               </span>
             </label>
-            {nav(Boolean(industry) && consent !== null)}
+            )}
+            {nav(Boolean(industry) && (consent !== null || Boolean(client)))}
           </Q>
         )}
 
@@ -440,6 +448,7 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
               cautions={setupCautions({ vatRegistered: f.vatRegistered, employees: Boolean(employees), casual: Boolean(casual), payeRegistered: paye, uifRegistered: uif, sdl, turnoverTax: kind.turnoverTax && f.turnoverTax, paysDividends: dividendsAlways || Boolean(dividends) })}
               accepted={accepted}
               onAccepted={setAccepted}
+              tick={client ? PRACTICE_TERMS_TICK : undefined}
             />
             {nav(accepted, busy ? 'Setting up…' : 'Accept and open my books', () => void finish())}
           </Q>

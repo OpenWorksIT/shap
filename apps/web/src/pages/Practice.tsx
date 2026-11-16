@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { formatDate, todayIso } from '@shap/shared';
+import { formatDate, LEVEL_WORDS, PRACTICE_NOTE, STATEMENT_STATUS_LABELS, todayIso, type Level, type StatementStatus } from '@shap/shared';
 import { PageHead } from '../components/Shell';
 import { Drawer, Empty, ErrorBox, Field, Loading, useToast } from '../components/ui';
 import { api, ApiError } from '../lib/api';
@@ -7,13 +7,16 @@ import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
 import { UNEXPECTED } from '../lib/words';
 
-type Level = 'books' | 'review';
+type Statements =
+  | { yearEnd: string; status: StatementStatus; changedSince: boolean; failing: string[]; look: string[]; assurance: string | null; unapprovedEarlier: string | null; error?: undefined; firstYearEnds?: undefined }
+  | { yearEnd: string | null; error: true; firstYearEnds?: undefined }
+  | { yearEnd: null; firstYearEnds: string; error?: undefined };
 interface Health {
   at: string;
   company: string;
   setupDone: boolean;
   audit: { fail: number; warn: number; items: { level: 'fail' | 'warn'; section: string; text: string }[] };
-  statements: { yearEnd: string; failing: string[]; look: string[] } | null;
+  statements: Statements | null;
   lockedThrough: string | null;
   deadlines: { key: string; label: string; due: string; past: boolean }[];
 }
@@ -22,6 +25,7 @@ interface PracticeClient {
   name: string;
   kind: string;
   archived: boolean;
+  notUpToDate: boolean;
   level: Level | null;
   health: Health | null;
   healthAt: string | null;
@@ -32,22 +36,26 @@ interface Practice {
   people: { id: string; name: string; email: string; role: string }[];
 }
 
-const LEVEL_WORDS: Record<Level, string> = { books: 'Writes up the books', review: 'Reads them and compiles the statements' };
+const SHORT: Record<Level, string> = { books: 'writes up', compile: 'reads and compiles' };
+const counted = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
 /**
  * Shap Accountant: the practice's clients, each in a database of its own on this server, with what
- * Shap's checks found in each and the returns coming up. Open one to work in its books with all of
- * Shap's screens; Back to the practice (the bar at the top) comes back here.
+ * three of Shap's checks found in each and some of the returns coming up. Open one to work in its
+ * books with Shap's screens; Back to the practice (the bar at the top) comes back here. Clients'
+ * and people's names are marked private, so a feedback screenshot never shows them.
  */
 export default function PracticePage() {
-  const { can } = useAuthed();
+  const { can, user } = useAuthed();
   const manage = can('practice.manage');
+  const isOwner = user.role === 'owner';
   const toast = useToast();
   const { data, error, reload } = useApi<Practice>('/api/practice');
   const [name, setName] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [accessFor, setAccessFor] = useState<PracticeClient | null>(null);
+  const [backupsFor, setBackupsFor] = useState<PracticeClient | null>(null);
   const [openFindings, setOpenFindings] = useState<string | null>(null);
 
   const act = async (key: string, fn: () => Promise<void>) => {
@@ -70,9 +78,9 @@ export default function PracticePage() {
       await reload();
     });
   };
-  const open = (c: PracticeClient) =>
+  const open = (c: PracticeClient, as?: Level) =>
     act(`open-${c.id}`, async () => {
-      await api(`/api/practice/clients/${c.id}/open`, { body: {} });
+      await api(`/api/practice/clients/${c.id}/open`, { body: as ? { as } : {} });
       window.location.assign('/');
     });
   const check = (c: PracticeClient) =>
@@ -82,7 +90,7 @@ export default function PracticePage() {
     });
   const archive = (c: PracticeClient, archived: boolean) =>
     act(`archive-${c.id}`, async () => {
-      if (archived && !confirm(`Archive ${c.name}? Nobody opens it until it's brought back. Its books and backups stay.`)) return;
+      if (archived && !confirm(`Archive ${c.name}? Anyone in its books now is taken out, and nobody opens it until it’s brought back. Its books stay on this server, and in its backups.`)) return;
       await api(`/api/practice/clients/${c.id}/archive`, { body: { archived } });
       await reload();
     });
@@ -92,9 +100,11 @@ export default function PracticePage() {
   const shown = data.clients.filter((c) => showArchived || !c.archived);
   const archivedCount = data.clients.filter((c) => c.archived).length;
   const now = todayIso();
+  const who = (id: string) => data.people.find((p) => p.id === id)?.name ?? 'someone';
   return (
     <div className="stack-lg">
-      <PageHead title="Practice" sub="Shap Accountant: your clients’ books, each kept apart on this server" />
+      <PageHead title="Practice" sub="Shap Accountant: your clients’ books, each in a database of its own on this server" />
+      <p className="xs muted">{PRACTICE_NOTE}</p>
       {manage && (
         <form className="panel panel-pad row wrap" style={{ gap: 8, alignItems: 'flex-end' }} onSubmit={add}>
           <Field label="A client whose books you keep" className="grow">
@@ -111,34 +121,46 @@ export default function PracticePage() {
         <section className="stack">
           {shown.map((c) => {
             const h = c.health;
-            const next = h?.deadlines.filter((d) => !d.past).slice(0, 3) ?? [];
+            const next = h?.deadlines.filter((d) => !d.past).slice(0, 4) ?? [];
             const past = h?.deadlines.filter((d) => d.past) ?? [];
+            const st = h?.statements ?? null;
+            const level = isOwner ? 'books' : c.level;
             return (
               <article key={c.id} className="panel panel-pad stack">
                 <div className="row wrap" style={{ gap: 8, alignItems: 'center' }}>
-                  <h3 className="grow" style={{ margin: 0 }}>
+                  <h3 className="grow" style={{ margin: 0 }} data-private>
                     {c.name}
                     {c.archived && <span className="chip"> Archived</span>}
+                    {c.notUpToDate && <span className="chip warn"> Not up to date</span>}
                   </h3>
-                  {!c.archived && (
+                  {!c.archived && level && (
                     <>
-                      <button className="btn small" disabled={busy !== null} onClick={() => void check(c)}>
+                      <button className="btn small" disabled={busy !== null || c.notUpToDate} onClick={() => void check(c)}>
                         {busy === `check-${c.id}` ? 'Checking…' : 'Run the checks'}
                       </button>
-                      <button className="btn small primary" disabled={busy !== null} onClick={() => void open(c)}>
-                        {busy === `open-${c.id}` ? 'Opening…' : 'Open their books'}
+                      {level === 'books' && (
+                        <button className="btn small" disabled={busy !== null || c.notUpToDate} onClick={() => void open(c, 'compile')}>
+                          Open to compile
+                        </button>
+                      )}
+                      <button className="btn small primary" disabled={busy !== null || c.notUpToDate} onClick={() => void open(c)}>
+                        {busy === `open-${c.id}` ? 'Opening…' : level === 'books' ? 'Open their books' : 'Open to compile'}
                       </button>
                     </>
                   )}
                 </div>
-                {!h ? (
-                  <p className="small muted">Not checked yet. Open their books, or run the checks.</p>
+                {c.notUpToDate ? (
+                  <p className="small warn-text">Shap couldn’t bring these books up to date when it last started, so they aren’t opened until it can. Whoever runs the server can see why in its log.</p>
+                ) : !h ? (
+                  <p className="small muted">Shap’s checks haven’t run on these books yet: open them, or run the checks.</p>
                 ) : !h.setupDone ? (
-                  <p className="small muted">Not set up yet: open their books to answer Shap’s first questions about the business.</p>
+                  <p className="small muted">
+                    {level === 'books' ? 'Not set up yet: open their books to answer Shap’s first questions about the business.' : 'Not set up yet: whoever writes up their books answers Shap’s first questions when they first open them.'}
+                  </p>
                 ) : (
                   <div className="stack-sm">
                     <p className="small">
-                      <strong>Books audit:</strong> {h.audit.fail === 0 && h.audit.warn === 0 ? 'nothing found' : [h.audit.fail ? `${h.audit.fail} to put right` : '', h.audit.warn ? `${h.audit.warn} to look at` : ''].filter(Boolean).join(', ')}
+                      <strong>Books check:</strong> {h.audit.fail === 0 && h.audit.warn === 0 ? 'nothing to fix' : [h.audit.fail ? `${h.audit.fail} to fix` : '', h.audit.warn ? `${h.audit.warn} to look at` : ''].filter(Boolean).join(', ')}
                       {h.audit.items.length > 0 && (
                         <button className="link-btn small" onClick={() => setOpenFindings(openFindings === c.id ? null : c.id)}>
                           {openFindings === c.id ? ' Hide' : ' Show'}
@@ -146,49 +168,85 @@ export default function PracticePage() {
                       )}
                     </p>
                     {openFindings === c.id && (
-                      <ul className="small">
+                      <ul className="small" data-private>
                         {h.audit.items.map((i, n) => (
                           <li key={n} className={i.level === 'fail' ? 'warn-text' : undefined}>
                             {i.section}: {i.text}
                           </li>
                         ))}
+                        {h.audit.fail + h.audit.warn > h.audit.items.length && <li className="muted">(the first {h.audit.items.length}: open their books for the rest)</li>}
                       </ul>
                     )}
-                    {h.statements && (
-                      <p className="small">
-                        <strong>Statements for the year to {formatDate(h.statements.yearEnd)}:</strong>{' '}
-                        {h.statements.failing.length === 0 && h.statements.look.length === 0
-                          ? 'every check passes'
-                          : [h.statements.failing.length ? `${h.statements.failing.length} check${h.statements.failing.length === 1 ? '' : 's'} not passing` : '', h.statements.look.length ? `${h.statements.look.length} to look at` : ''].filter(Boolean).join(', ')}
+                    {st?.error ? (
+                      <p className="small warn-text">
+                        <strong>Statements{st.yearEnd ? ` for the year to ${formatDate(st.yearEnd)}` : ''}:</strong> Shap’s checks couldn’t run on them. Open their books and look.
                       </p>
+                    ) : st?.firstYearEnds ? (
+                      <p className="small">
+                        <strong>Statements:</strong> their first year in these books ends {formatDate(st.firstYearEnds)}.
+                      </p>
+                    ) : (
+                      st &&
+                      'status' in st && (
+                        <>
+                          <p className="small">
+                            <strong>Statements for the year to {formatDate(st.yearEnd)}</strong> ({STATEMENT_STATUS_LABELS[st.status].toLowerCase()}):{' '}
+                            {st.changedSince
+                              ? 'the books have changed since they were signed, so they no longer give the signed figures'
+                              : st.status === 'approved'
+                                ? 'signed'
+                                : st.failing.length === 0 && st.look.length === 0
+                                  ? 'Shap’s checks pass'
+                                  : [st.failing.length ? `${counted(st.failing.length, 'check')} not passing` : '', st.look.length ? `${st.look.length} to look at` : ''].filter(Boolean).join(', ')}
+                          </p>
+                          {st.assurance && st.status !== 'approved' && (
+                            <p className="small">
+                              <strong>Assurance:</strong> {st.assurance} The independent reviewer can’t be anyone in your practice who prepared or compiled them (Companies Regulation 29(5)).
+                            </p>
+                          )}
+                          {st.unapprovedEarlier && (
+                            <p className="small">
+                              <strong>Earlier:</strong> the statements for the year to {formatDate(st.unapprovedEarlier)} aren’t approved in Shap.
+                            </p>
+                          )}
+                        </>
+                      )
                     )}
                     <p className="small">
                       <strong>Books closed:</strong> {h.lockedThrough ? `up to ${formatDate(h.lockedThrough)}` : 'not yet'}
                     </p>
                     {(next.length > 0 || past.length > 0) && (
                       <p className="small">
-                        <strong>Returns:</strong>{' '}
-                        {[...past.map((d) => `${d.label}, was due ${formatDate(d.due)}`), ...next.map((d) => `${d.label}, due ${formatDate(d.due)}${d.due === now ? ' (today)' : ''}`)].join(' · ')}
+                        <strong>Some returns coming up:</strong>{' '}
+                        {[
+                          ...past.map((d) => `${d.label}, was due ${formatDate(d.due)} (Shap can’t tell whether it was filed)`),
+                          ...next.map((d) => `${d.label}, due ${formatDate(d.due)}${d.due === now ? ' (today)' : ''}`),
+                        ].join(' · ')}
                       </p>
                     )}
-                    <p className="xs muted">Checked {new Date(h.at).toLocaleString('en-ZA', { dateStyle: 'medium', timeStyle: 'short' })}.</p>
+                    <p className="xs muted">Shap’s checks ran {formatDate(h.at.slice(0, 10))}.</p>
                   </div>
                 )}
-                {manage && (
+                {(manage || isOwner) && (
                   <div className="row wrap" style={{ gap: 8 }}>
-                    <span className="xs muted grow">
-                      {c.access.length === 0
-                        ? 'Only you (the owner) open these books.'
-                        : `Also opened by ${c.access.map((a) => data.people.find((p) => p.id === a.userId)?.name ?? 'someone').join(', ')}.`}
+                    <span className="xs muted grow" data-private>
+                      {c.access.length === 0 ? 'Only the practice’s owner opens these books.' : `Also opened by ${c.access.map((a) => `${who(a.userId)} (${SHORT[a.level]})`).join(', ')}.`}
                     </span>
-                    {!c.archived && (
+                    {manage && !c.archived && (
                       <button className="btn small quiet" onClick={() => setAccessFor(c)}>
                         Who opens it
                       </button>
                     )}
-                    <button className="btn small quiet" disabled={busy !== null} onClick={() => void archive(c, !c.archived)}>
-                      {c.archived ? 'Bring back' : 'Archive'}
-                    </button>
+                    {isOwner && (
+                      <button className="btn small quiet" onClick={() => setBackupsFor(c)}>
+                        Their backups
+                      </button>
+                    )}
+                    {manage && (
+                      <button className="btn small quiet" disabled={busy !== null} onClick={() => void archive(c, !c.archived)}>
+                        {c.archived ? 'Bring back' : 'Archive'}
+                      </button>
+                    )}
                   </div>
                 )}
               </article>
@@ -201,11 +259,8 @@ export default function PracticePage() {
           {showArchived ? 'Hide archived clients' : `Show archived clients (${archivedCount})`}
         </button>
       )}
-      <p className="xs muted">
-        What’s found and the dates are Shap’s own reading of each client’s books and of SARS’s tables, which may be out of date: estimates for you to check, not advice. Shap files nothing with SARS or CIPC. Shap is free software from
-        OpenWorks IT, who are not accountants.
-      </p>
       {accessFor && <AccessDrawer client={accessFor} people={data.people} onClose={() => setAccessFor(null)} onSaved={() => (setAccessFor(null), void reload())} />}
+      {backupsFor && <BackupsDrawer client={backupsFor} onClose={() => setBackupsFor(null)} />}
     </div>
   );
 }
@@ -218,7 +273,7 @@ function AccessDrawer({ client, people, onClose, onSaved }: { client: PracticeCl
     setBusy(true);
     try {
       const access = Object.entries(levels)
-        .filter((e): e is [string, Level] => e[1] === 'books' || e[1] === 'review')
+        .filter((e): e is [string, Level] => e[1] === 'books' || e[1] === 'compile')
         .map(([userId, level]) => ({ userId, level }));
       await api(`/api/practice/clients/${client.id}/access`, { method: 'PUT', body: { access } });
       toast('Saved');
@@ -231,8 +286,8 @@ function AccessDrawer({ client, people, onClose, onSaved }: { client: PracticeCl
   };
   return (
     <Drawer
-      title={`Who opens ${client.name}`}
-      sub="You, the owner, open every client. Someone given a client also needs “Open the clients they’re given” ticked under Settings → People."
+      title={<span data-private>Who opens {client.name}</span>}
+      sub="The practice’s owner opens every client. Someone given a client also needs “Open the clients they’re given” ticked under Settings → People who sign in."
       onClose={onClose}
       footer={
         <button className="btn primary" disabled={busy} onClick={() => void save()}>
@@ -241,20 +296,72 @@ function AccessDrawer({ client, people, onClose, onSaved }: { client: PracticeCl
       }
     >
       {people.length === 0 ? (
-        <p className="small muted">There’s nobody else in the practice yet: add them under Settings → People.</p>
+        <p className="small muted">There are no staff in the practice yet: add them under Settings → People who sign in. (A read-only accountant can’t be given a client.)</p>
       ) : (
         <div className="stack">
           {people.map((p) => (
-            <Field key={p.id} label={p.name}>
-              {(f) => (
-                <select {...f} className="select" value={levels[p.id] ?? ''} onChange={(e) => setLevels({ ...levels, [p.id]: e.target.value as Level | '' })}>
-                  <option value="">Doesn’t open it</option>
-                  <option value="books">{LEVEL_WORDS.books}</option>
-                  <option value="review">{LEVEL_WORDS.review}</option>
-                </select>
-              )}
-            </Field>
+            <div key={p.id} data-private>
+              <Field label={p.name}>
+                {(f) => (
+                  <select {...f} className="select" value={levels[p.id] ?? ''} onChange={(e) => setLevels({ ...levels, [p.id]: e.target.value as Level | '' })}>
+                    <option value="">Doesn’t open it</option>
+                    <option value="books">{LEVEL_WORDS.books}</option>
+                    <option value="compile">{LEVEL_WORDS.compile}</option>
+                  </select>
+                )}
+              </Field>
+            </div>
           ))}
+          <p className="xs muted">
+            As their owner in Shap, someone who writes up the books can do everything the client’s owner could, reopening closed periods included, and records the client’s approval of the financial statements (with the page they signed). Approving the statements is the client’s own decision.
+          </p>
+        </div>
+      )}
+    </Drawer>
+  );
+}
+
+/** A client's own backups, for the practice's owner: each download takes the owner's password. */
+function BackupsDrawer({ client, onClose }: { client: PracticeClient; onClose: () => void }) {
+  const toast = useToast();
+  const { data, error } = useApi<{ backups: { name: string; sizeBytes: number; at: string }[] }>(`/api/practice/clients/${client.id}/backups`);
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const download = async (name: string) => {
+    setBusy(name);
+    try {
+      const { url } = await api<{ url: string }>(`/api/practice/clients/${client.id}/backups/${encodeURIComponent(name)}/link`, { body: { password } });
+      window.location.assign(url);
+    } catch (err) {
+      if (!(err instanceof ApiError)) console.error(err);
+      toast(err instanceof ApiError ? err.message : UNEXPECTED, 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <Drawer title={<span data-private>{client.name}: their backups</span>} sub="The server’s own copies of these books, to hand to the client or to keep as the law asks (Companies Act s24)" onClose={onClose}>
+      {error ? (
+        <ErrorBox error={error} />
+      ) : !data ? (
+        <Loading />
+      ) : data.backups.length === 0 ? (
+        <p className="small muted">No backups of these books on the server yet: the server makes them each night, where it’s set up to.</p>
+      ) : (
+        <div className="stack">
+          <Field label="Your password, to download one">{(p) => <input {...p} className="input" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />}</Field>
+          <ul className="list">
+            {data.backups.map((b) => (
+              <li key={b.name} className="list-row">
+                <span className="grow small">
+                  {formatDate(b.at.slice(0, 10))} · {(b.sizeBytes / 1_048_576).toFixed(1)} MB
+                </span>
+                <button className="btn small" disabled={!password || busy !== null} onClick={() => void download(b.name)}>
+                  {busy === b.name ? '…' : 'Download'}
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
     </Drawer>

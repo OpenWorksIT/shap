@@ -49,7 +49,8 @@ import { ClipsSetting } from '../components/HowItWorks';
 import { TermPicks } from '../components/TermPicks';
 import { LogoPlacer } from '../components/LogoPlacer';
 import { LogoField } from '../components/BusinessForm';
-import { FEATURES, FEATURE_GROUPS, FEATURE_KEYS, featureOn, INDUSTRIES, TURNOVER_TAX_LIMIT_CENTS } from '@shap/shared';
+import { FEATURES, FEATURE_GROUPS, FEATURE_KEYS, featureOn, INDUSTRIES, PRACTICE_CAUTION, TURNOVER_TAX_LIMIT_CENTS } from '@shap/shared';
+import { useClientHere } from '../components/ClientBanner';
 import { WipeData } from '../components/WipeData';
 import { setTone, type Tone } from '../lib/words';
 import { SupportShap } from '../components/Support';
@@ -1238,6 +1239,8 @@ function Sections() {
   const { settings, refreshReference } = useAuthed();
   const toast = useToast();
   const [on, setOn] = useState<Record<string, boolean>>(() => Object.fromEntries(FEATURE_KEYS.map((k) => [k, featureOn(settings.features, k)])));
+  // In a practice's client's books (Shap Accountant): no practice of its own, and nothing shared.
+  const client = useClientHere();
   const [prefs, setPrefs] = useState({ tone: settings.tone, industry: settings.industry, usageConsent: settings.usageConsent, marketConsent: settings.marketConsent, sdl: settings.sdl, watermark: settings.watermark });
   const save = async (changes: Partial<Settings>, done: string) => {
     try {
@@ -1251,6 +1254,8 @@ function Sections() {
     }
   };
   const toggle = async (k: (typeof FEATURE_KEYS)[number], value: boolean) => {
+    // What the practice answers for, said back before Shap Accountant goes on.
+    if (k === 'practice' && value && !confirm(PRACTICE_CAUTION)) return;
     const next = { ...on, [k]: value };
     setOn(next);
     if (!(await save({ features: next }, `${FEATURES[k].label} ${value ? 'on' : 'off'}`))) setOn(on);
@@ -1273,7 +1278,7 @@ function Sections() {
           <strong>What you use</strong>
           <div className="xs muted">Switch off what a business like yours doesn’t need. Nothing is deleted: switch it on again and it’s all still there.</div>
         </div>
-        {FEATURE_GROUPS.map((g) => (
+        {FEATURE_GROUPS.filter((g) => !client || !g.keys.includes('practice')).map((g) => (
           <div key={g.label}>
             <div className="list-group-head xs muted">{g.label}</div>
             <ul className="list">
@@ -1342,6 +1347,10 @@ function Sections() {
             </select>
           )}
         </Field>
+        {client ? (
+          <p className="xs muted">Nothing about a client’s books goes to OpenWorks: no usage note and no prices.</p>
+        ) : (
+        <>
         <label className="check">
           <input type="checkbox" checked={prefs.usageConsent} onChange={(e) => void pref('usageConsent', e.target.checked)} />
           <span>
@@ -1358,6 +1367,8 @@ function Sections() {
             </div>
           </span>
         </label>
+        </>
+        )}
       </section>
       <ClipsSetting />
       <SupportShap />

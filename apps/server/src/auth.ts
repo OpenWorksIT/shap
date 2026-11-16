@@ -27,6 +27,8 @@ export const SESSION_COOKIE = 'shap_session';
 export const DEMO_SESSION_COOKIE = 'shap_demo_session';
 /** A session in a practice client's own books (Shap Accountant, modules/practice.ts). */
 export const CLIENT_SESSION_COOKIE = 'shap_client_session';
+/** Which practice client's books this browser has open (Shap Accountant, modules/practice.ts). */
+export const CLIENT_COOKIE = 'shap_client';
 const sessionCookie = () => (inClient() ? CLIENT_SESSION_COOKIE : inDemo() ? DEMO_SESSION_COOKIE : SESSION_COOKIE);
 
 export interface AuthUser {
@@ -416,6 +418,15 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
     const token = tokenFrom(req);
     if (token) await sql`delete from sessions where token_hash = ${sha256(token)}`;
     reply.clearCookie(sessionCookie(), { path: '/' });
+    // Signing out in a client's books (Shap Accountant) signs out of the practice too: on a shared
+    // computer, the next person mustn't find the practice still signed in behind the client.
+    if (inClient() || req.cookies?.[CLIENT_COOKIE]) {
+      const practice = req.cookies?.[SESSION_COOKIE];
+      const client = req.cookies?.[CLIENT_SESSION_COOKIE];
+      if (practice) await ctx.dbs.real`delete from sessions where token_hash = ${sha256(practice)}`;
+      if (client && inClient()) await sql`delete from sessions where token_hash = ${sha256(client)}`;
+      for (const c of [SESSION_COOKIE, CLIENT_SESSION_COOKIE, CLIENT_COOKIE]) reply.clearCookie(c, { path: '/' });
+    }
     return { ok: true };
   });
 

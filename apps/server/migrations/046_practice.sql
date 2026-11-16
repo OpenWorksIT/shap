@@ -12,17 +12,23 @@ create table if not exists practice_clients (
   created_by uuid references users(id),
   created_at timestamptz not null default now(),
   archived_at timestamptz,
-  -- What the checks found when they last ran (practice.ts healthOf), and when.
+  -- What the checks found when they last ran (practice.ts healthOf), and when they started.
   health jsonb,
-  health_at timestamptz
+  health_at timestamptz,
+  -- Its migrations didn't all run at the last start (main.ts): it isn't opened until they do.
+  migrate_error text
 );
 
 -- Who in the practice may open a client, and how: 'books' writes them up (the client's owner, in
--- its own database), 'review' reads them and compiles the statements (its accountant). The
--- practice's owner opens every client.
+-- its own database), 'compile' reads them and compiles the statements (its accountant). The
+-- practice's owner opens every client, either way.
 create table if not exists practice_access (
   client_id uuid not null references practice_clients(id) on delete cascade,
   user_id uuid not null references users(id) on delete cascade,
-  level text not null check (level in ('books', 'review')),
+  level text not null check (level in ('books', 'compile')),
   primary key (client_id, user_id)
 );
+
+-- In a client's books the practice records the directors' approval of the statements rather than
+-- giving it (Companies Act s30(3)(c)): the page a director signed, kept with the approved set.
+alter table financial_statements add column if not exists approval_signed_id uuid references attachments(id);

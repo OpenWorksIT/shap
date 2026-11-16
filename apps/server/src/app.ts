@@ -61,7 +61,7 @@ import { ClientDbs } from './lib/practice.js';
 import { CLIENT_COOKIE, registerPracticeRoutes, registerPracticeScope } from './modules/practice.js';
 import { registerStatementRoutes } from './modules/statements.js';
 import { registerCompanyFileRoutes } from './modules/company-file.js';
-import { UNEXPECTED } from '@shap/shared';
+import { UNEXPECTED, UNEXPECTED_IN_A_CLIENT } from '@shap/shared';
 
 const CSP = [
   "default-src 'self'",
@@ -198,6 +198,9 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
     if (!routePath(req).startsWith('/api/') || req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return;
     // Filling or wiping a test server's books sets month end aside itself (test-server.ts).
     if (routePath(req).startsWith('/api/test-server/')) return;
+    // Leaving a client's books or signing out changes nothing in them (someone reading them only
+    // mustn't close a month on the way out).
+    if (['/api/practice/leave', '/api/auth/logout'].includes(routePath(req))) return;
     await applyMonthLock(sql);
   });
 
@@ -241,7 +244,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
     const msg = err.message ?? '';
     if (/does not balance/.test(msg)) return reply.code(400).send({ error: msg, code: 'unbalanced' });
     req.log.error({ err: safeError(err), route: `${req.method} ${routePath(req)}` }, 'unhandled error');
-    return reply.code(500).send({ error: UNEXPECTED, code: 'internal' });
+    return reply.code(500).send({ error: inClient() ? UNEXPECTED_IN_A_CLIENT : UNEXPECTED, code: 'internal' });
   });
 
   app.get('/api/health', async () => {

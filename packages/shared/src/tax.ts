@@ -1,4 +1,4 @@
-import { businessDayOnOrBefore } from './dates.js';
+import { businessDayOnOrBefore, monthLabel } from './dates.js';
 import { splitByShares } from './entities.js';
 /**
  * South African company income tax, for provisional tax estimates.
@@ -378,6 +378,29 @@ export function vat201Due(periodEnd: string): string {
 }
 
 /** The last business day of a month, public holidays included (turnover tax and provisional tax payments). */
+/** A VAT period's name, as Home and the practice's list both say it: "VAT201 for Sep to Oct 26". */
+export function vat201Label(p: { start: string; end: string }): string {
+  const s = p.start.slice(0, 7);
+  const e = p.end.slice(0, 7);
+  return `VAT201 for ${s === e ? monthLabel(e) : `${monthLabel(s, p.start.slice(0, 4) !== p.end.slice(0, 4))} to ${monthLabel(e)}`}`;
+}
+
+/**
+ * The filing season's closing dates SARS sets each year (they change every year): what the practice's
+ * list shows beside the dates the law fixes (lib deadlinesFor). Checked with each standard SARS update
+ * (docs/SARS.md); a season not yet announced isn't here.
+ * - Individuals and trusts, 2026: https://www.sars.gov.za/types-of-tax/personal-income-tax/tax-season/
+ * - IT3(t) and the trusts' season: https://www.sars.gov.za/media-release/trust-filing-season-set-to-open/
+ * - The employers' interim season (EMP501, March to August 2026), 21 September to 31 October 2026: the same page.
+ */
+export const FILING_SEASON_DATES: readonly { key: string; label: string; due: string; who: 'individual' | 'partners' | 'trust' | 'employer' }[] = [
+  { key: 'itr12-2026', label: 'ITR12 for the year to February 2026 (a provisional taxpayer’s)', due: '2027-01-22', who: 'individual' },
+  { key: 'itr12-2026', label: 'Each partner’s ITR12 for the year to February 2026 (a provisional taxpayer’s)', due: '2027-01-22', who: 'partners' },
+  { key: 'itr12t-2026', label: 'ITR12T for the year to February 2026', due: '2027-01-22', who: 'trust' },
+  { key: 'it3t-2026', label: 'IT3(t) for the year to February 2026', due: '2026-09-30', who: 'trust' },
+  { key: 'emp501-2027-interim', label: 'EMP501 interim reconciliation (March to August 2026)', due: '2026-10-30', who: 'employer' },
+];
+
 export function lastBusinessDay(year: number, month: number): string {
   return businessDayOnOrBefore(new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10));
 }

@@ -9,7 +9,7 @@
  * on the day it catches up, up to three months back.
  */
 import type { FastifyInstance } from 'fastify';
-import { addMonths, monthEnd, UNEXPECTED } from '@shap/shared';
+import { addMonths, featureOn, monthEnd, UNEXPECTED } from '@shap/shared';
 import { z } from 'zod';
 import { requireAccess, requireRole, userOrThrow } from '../auth.js';
 import { checkInUsage } from './feedback.js';
@@ -21,6 +21,7 @@ import { assertOpen, today } from '../lib/books.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import type { Mailer } from '../lib/mailer.js';
 import { parse } from '../lib/validate.js';
+import { dbScope } from '../db/routing.js';
 import { assertTaxDocument, createDocument, emailDocument, loadDocument, syncProjectStatus } from './documents.js';
 
 const ym = (iso: string) => iso.slice(0, 7);
@@ -308,6 +309,8 @@ export function startMonthlyTimer(ctx: Ctx, log: { info: (o: object, m: string) 
     void runMonthly(ctx.dbs.real, ctx.mailer, { emailOn: Boolean(ctx.config.SMTP_URL) })
       .then((r) => r.created + r.failed > 0 && log.info(r, 'monthly invoices'))
       .catch((err) => log.error({ err }, 'monthly invoices failed'));
+    // A practice's clients' monthly invoices too (Shap Accountant): made, never emailed from them.
+    void runClientsMonthly(ctx).catch((err) => log.error({ err }, 'clients’ monthly invoices failed'));
     // The real books only (never the demo company's).
     void shareMarketRates(ctx, ctx.dbs.real, { warn: (o, m) => log.info(o, m) }).catch((err) => log.error({ err }, 'market rates failed'));
     // This Shap's anonymous usage note, when it changed or monthly (only if the owner agreed).
@@ -318,4 +321,29 @@ export function startMonthlyTimer(ctx: Ctx, log: { info: (o: object, m: string) 
   first.unref();
   every.unref();
   return () => (clearTimeout(first), clearInterval(every));
+}
+
+/**
+ * Each of a practice's clients whose books have monthly invoices set up (Shap Accountant): made in
+ * the client's own books, in its scope (so nothing is emailed from them: app.ts's mailer refuses).
+ * Exported for the tests.
+ */
+export async function runClientsMonthly(ctx: Ctx, on?: string): Promise<number> {
+  const real = ctx.dbs.real;
+  const [s] = await real<{ features: Record<string, boolean> | null }[]>`select features from settings where id`;
+  if (!featureOn(s?.features, 'practice')) return 0;
+  let made = 0;
+  for (const c of await real<{ id: string; name: string; dbName: string }[]>`
+    select id, name, db_name from practice_clients where db_name is not null and archived_at is null and migrate_error is null order by created_at`) {
+    const sql = ctx.clients.get(c.dbName);
+    try {
+      const [any] = await sql`select 1 from monthly_invoices where active limit 1`;
+      if (!any) continue;
+      const r = await dbScope.run({ demo: false, client: { id: c.id, name: c.name, sql } }, () => runMonthly(sql, ctx.mailer, { emailOn: false, on }));
+      made += r.created;
+    } catch {
+      /* this client's books: tried again on the next check (the schedule keeps its error) */
+    }
+  }
+  return made;
 }

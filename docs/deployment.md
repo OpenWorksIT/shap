@@ -219,9 +219,9 @@ setup.
   grant connect on database shap to shap_app;
   ```
 
-  Pre-create the demo database (`createdb -O shap_app shap_demo`) so the app never needs
-  `CREATEDB`. (Shap Accountant does need it, to make each client's database: docs/ACCOUNTANT.md.) (Tenant companies added with `add-company.sh` already use their own non-superuser
-  roles.)
+  Pre-create the demo database (`createdb -O shap_app shap_demo`) so the app doesn't need
+  `CREATEDB`, unless Shap Accountant is on: it makes each client's database (docs/ACCOUNTANT.md).
+  (Tenant companies added with `add-company.sh` already use their own non-superuser roles.)
 - **Update from signed releases, not branch tips.** "Update" pulls `main` from GitHub and rebuilds
   on the server, so whoever controls that branch or the GitHub account controls the server. For a
   stricter chain, track signed, annotated release tags and verify them (`git verify-tag`) before

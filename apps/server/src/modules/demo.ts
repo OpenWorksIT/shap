@@ -3,6 +3,7 @@
  * a made-up company (its own database) so you can show Shap to someone without your figures on
  * screen. "Back to my books" asks for your password, in case the phone was handed over.
  */
+import { SERVER_ONLY, under } from '../lib/server-only.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { browserName, confirmPassword, DEMO_SESSION_COOKIE, requireRole, SESSION_COOKIE, userOrThrow } from '../auth.js';
@@ -28,11 +29,14 @@ export function registerDemoRoutes(app: FastifyInstance, ctx: Ctx): void {
   // and the wipe screen all read the REAL company/server regardless of the routed sql, so they
   // must never run while showing the demo. Match on the resolved route, not req.url: the latter
   // keeps percent-encoding, so `/api/%73ystem` would slip past a raw `startsWith('/api/system')`.
-  const REAL_ONLY = ['/api/system', '/api/feedback', '/api/wipe'];
+  // The server's own, and the practice's clients (Shap Accountant): the demo is for handing a phone
+  // over, so whoever holds it never reaches the practice's list, its people or its clients.
+  const REAL_ONLY = [...SERVER_ONLY, '/api/practice'];
+  const DEMO_TOO = ['/api/practice/here', '/api/practice/leave'];
   app.addHook('onRequest', async (req) => {
     if (!inDemo()) return;
     const p = routePath(req);
-    if (REAL_ONLY.some((base) => p === base || p.startsWith(`${base}/`))) throw forbidden('Not available in the demo company');
+    if (under(p, REAL_ONLY) && !DEMO_TOO.includes(p)) throw forbidden('Not available in the demo company');
   });
 
   // Fill the demo company the first time it's shown (a few seconds), one at a time.

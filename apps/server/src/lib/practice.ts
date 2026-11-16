@@ -1,26 +1,29 @@
 /**
  * Shap Accountant (docs/ACCOUNTANT.md): a practice keeps its clients' books on its own server,
  * each client in a database of its own next to the practice's, named <practice db>__c_<12 hex>.
- * No query can join two databases, so one client's books can't reach another's: the walls are
- * Postgres's own. A request reaches a client's database only through the scope practice.ts sets
- * after its checks (db/routing.ts), the way the demo company works.
+ * No query can join two databases, so a query in one client's books can't reach another's. Which
+ * database a request goes to is Shap's own doing: only through the scope practice.ts sets after its
+ * checks, every request (db/routing.ts), the way the demo company works. Nobody but the database's
+ * own login may connect to a client's database (revokePublic).
  *
- * Here: the pools (small, one per client, closed when idle), making a client's database, putting
- * the practice's people into it, and the checks the client list shows.
+ * Here: the pools (small, one per client, closed when idle, and only so many at once), making a
+ * client's database, migrating them all at start, putting the practice's people into them, and the
+ * checks the client list shows.
  */
-import { addDays, deadlinesFor, featureOn, financialYear, type Deadline } from '@shap/shared';
+import { addDays, featureOn, financialYear, LEVELS, type DeadlineInputs, type Level } from '@shap/shared';
 import { auditBooks } from '../audit/books.js';
 import { createDb, type Sql } from '../db/index.js';
 import { migrate } from '../db/migrate.js';
-import { ensureDatabase } from '../db/routing.js';
 import { buildStatements } from '../statements/build.js';
-import { effectiveLock, getSettings, today } from './books.js';
+import { currentStatements, stillSigned } from '../modules/financial-statements.js';
+import type { Statements } from '../statements/build.js';
+import { effectiveLock, freshTotals, getSettings, today } from './books.js';
 
-/** The practice's people's two ways into a client: writing the books up, or reading and compiling. */
-export const LEVELS = ['books', 'review'] as const;
-export type Level = (typeof LEVELS)[number];
-/** Who they are in the client's own database. */
+export { LEVELS, type Level };
+/** Who they are in the client's own database: its owner, or its accountant (read only, compiles). */
 export const roleFor = (level: Level) => (level === 'books' ? 'owner' : 'accountant');
+/** The roles a level may be in a client's books: writing up takes in compiling (open to compile). */
+export const rolesFor = (level: Level): string[] => (level === 'books' ? ['owner', 'accountant'] : ['accountant']);
 
 /** A client database's name, from the practice's and the client's id. */
 export function clientDbName(practiceDb: string, clientId: string): string {
@@ -30,6 +33,9 @@ export function clientDbName(practiceDb: string, clientId: string): string {
 }
 
 export const dbNameOf = (url: string) => new URL(url).pathname.replace(/^\//, '') || 'shap';
+
+/** How many clients' pools stay open at once (each up to 3 connections): the least used close first. */
+export const MAX_CLIENT_POOLS = 12;
 
 /** The clients' pools, made when first needed. */
 export class ClientDbs {
@@ -47,24 +53,63 @@ export class ClientDbs {
     return u.toString();
   }
 
+  /** How many pools are open now (the tests). */
+  get open(): number {
+    return this.pools.size;
+  }
+
   get(dbName: string): Sql {
     // Only this practice's clients: a name from the table, checked against the pattern.
     if (!dbName.startsWith(`${this.practiceDb}__c_`) || !/^[a-z0-9_]{1,63}$/.test(dbName)) throw new Error(`Not one of this practice's client databases: ${dbName}`);
     let sql = this.pools.get(dbName);
-    if (!sql) {
-      sql = createDb(this.urlFor(dbName), { max: 3, idleSeconds: 60 });
+    if (sql) {
+      // The most recently used last, so the least used goes first.
+      this.pools.delete(dbName);
       this.pools.set(dbName, sql);
+      return sql;
     }
+    while (this.pools.size >= MAX_CLIENT_POOLS) {
+      const [oldest, pool] = this.pools.entries().next().value as [string, Sql];
+      this.pools.delete(oldest);
+      // A query still running on it finishes first (postgres.js ends gracefully).
+      void pool.end({ timeout: 30 }).catch(() => undefined);
+    }
+    sql = createDb(this.urlFor(dbName), { max: 3, idleSeconds: 60 });
+    this.pools.set(dbName, sql);
     return sql;
   }
 
-  /** A new client's database, with every migration. */
+  /** Only the database's own login connects to a client's database (Postgres lets everyone by default). */
+  async revokePublic(practice: Sql, dbName: string): Promise<void> {
+    if (!/^[a-z0-9_]{1,63}$/.test(dbName)) throw new Error(`Unusable client database name: ${dbName}`);
+    await practice.unsafe(`revoke all on database "${dbName}" from public`);
+  }
+
+  /** A new client's database, with every migration; a database already there is never taken over. */
   async create(practice: Sql, dbName: string, companyName: string): Promise<Sql> {
-    await ensureDatabase(practice, this.urlFor(dbName));
-    const sql = this.get(dbName);
-    await migrate(sql);
-    await sql`update settings set company_name = ${companyName} where id`;
-    return sql;
+    if (!/^[a-z0-9_]{1,63}$/.test(dbName)) throw new Error(`Unusable client database name: ${dbName}`);
+    const [has] = await practice`select 1 from pg_database where datname = ${dbName}`;
+    if (has) throw Object.assign(new Error(`A database called ${dbName} is there already`), { code: 'exists' });
+    await practice.unsafe(`create database "${dbName}"`);
+    try {
+      await this.revokePublic(practice, dbName);
+      const sql = this.get(dbName);
+      await migrate(sql);
+      // Nothing about a client goes to OpenWorks: no usage note, no prices (feedback.ts, market.ts).
+      await sql`update settings set company_name = ${companyName}, usage_consent = false, market_consent = false where id`;
+      return sql;
+    } catch (err) {
+      // Half made: gone again, so nothing is left behind (and backed up) that nobody can open.
+      await this.drop(practice, dbName).catch(() => undefined);
+      throw err;
+    }
+  }
+
+  /** A client database that was never finished. */
+  async drop(practice: Sql, dbName: string): Promise<void> {
+    if (!dbName.startsWith(`${this.practiceDb}__c_`) || !/^[a-z0-9_]{1,63}$/.test(dbName)) throw new Error(`Not one of this practice's client databases: ${dbName}`);
+    await this.forget(dbName);
+    await practice.unsafe(`drop database if exists "${dbName}" with (force)`);
   }
 
   async forget(dbName: string): Promise<void> {
@@ -81,9 +126,58 @@ export class ClientDbs {
 }
 
 /**
+ * Every client's database gets the same migrations, at start (main.ts), one at a time with its pool
+ * closed after, so a practice with many clients doesn't hold a connection for each. A client whose
+ * migrations failed is marked, and isn't opened until they run (an older database under newer code
+ * could give wrong figures without an error). Also: only the database's own login may connect.
+ */
+export async function migrateClients(practice: Sql, clients: ClientDbs, log: { info: (m: string) => void; warn: (o: object, m: string) => void }): Promise<{ ok: string[]; failed: string[] }> {
+  const ok: string[] = [];
+  const failed: string[] = [];
+  // A client whose database was never finished (the server stopped while it was made): gone.
+  await practice`delete from practice_clients where db_name is null and created_at < now() - interval '1 hour'`;
+  for (const c of await practice<{ id: string; dbName: string }[]>`select id, db_name from practice_clients where db_name is not null order by created_at`) {
+    try {
+      await clients.revokePublic(practice, c.dbName);
+      await migrate(clients.get(c.dbName), (m) => log.info(`a client's books: ${m}`));
+      await practice`update practice_clients set migrate_error = null where id = ${c.id} and migrate_error is not null`;
+      ok.push(c.id);
+    } catch (err) {
+      log.warn({ err }, 'a client’s books: migrations failed');
+      await practice`update practice_clients set migrate_error = ${String((err as Error).message).slice(0, 500)} where id = ${c.id}`;
+      failed.push(c.id);
+    } finally {
+      await clients.forget(c.dbName);
+    }
+  }
+  return { ok, failed };
+}
+
+/** Saves a client's checks, unless a run that started later saved first. */
+export async function saveHealth(practice: Sql, id: string, health: ClientHealth, started: Date): Promise<void> {
+  await practice`update practice_clients set health = ${practice.json(health as never)}, health_at = ${started}
+    where id = ${id} and (health_at is null or health_at < ${started})`;
+}
+
+/** After an update (main.ts): every client's checks again, one at a time, in the background. */
+export async function refreshAllHealth(practice: Sql, clients: ClientDbs, ids: string[], log: { warn: (o: object, m: string) => void }): Promise<void> {
+  for (const c of await practice<{ id: string; dbName: string }[]>`select id, db_name from practice_clients where id = any(${ids}::uuid[]) and archived_at is null`) {
+    const started = new Date();
+    try {
+      await saveHealth(practice, c.id, await healthOf(clients.get(c.dbName), today(), log), started);
+    } catch (err) {
+      log.warn({ err }, 'practice: a client’s checks failed');
+    } finally {
+      await clients.forget(c.dbName);
+    }
+  }
+}
+
+/**
  * Puts someone from the practice into a client's database, as who they are there (role from
  * their level), so what they do is in the client's own audit trail by name. They never sign in to
- * it: they open it from the practice, which makes them a session (practice.ts).
+ * it: they open it from the practice, which makes them a session (practice.ts). Marked as the
+ * practice's ('!practice', no password), so they're never taken for the client's own directors.
  */
 export async function mirrorUser(client: Sql, u: { id: string; name: string; email: string }, level: Level): Promise<void> {
   const role = roleFor(level);
@@ -99,7 +193,7 @@ export async function mirrorUser(client: Sql, u: { id: string; name: string; ema
   });
 }
 
-/** Takes someone from the practice out of a client's books (their access went, or the client was archived). */
+/** Takes someone from the practice out of a client's books (their access went or changed, or the client was archived). */
 export async function unmirrorUser(client: Sql, userId: string): Promise<void> {
   await client`delete from sessions where user_id = ${userId}`;
   await client`update users set active = false where id = ${userId}`;
@@ -110,49 +204,109 @@ export interface ClientHealth {
   company: string;
   setupDone: boolean;
   vatRegistered: boolean;
-  /** The books audit (audit/books.ts): what fails and what to look at. */
+  /** The books audit (audit/books.ts) on the day they ran: what to fix (first) and what to look at. */
   audit: { fail: number; warn: number; items: { level: 'fail' | 'warn'; section: string; text: string }[] };
-  /** The financial statements' checks (IFRS for SMEs, company law) for the last year that has ended. */
-  statements: { yearEnd: string; failing: string[]; look: string[] } | null;
+  /**
+   * The financial statements for the newest year that has ended (none before the books' first year
+   * ends): where they stand, their checks (IFRS for SMEs, company law) and the books audit at that
+   * year end (what compiling refuses), whether a signed set still matches the books, and an earlier
+   * ended year not yet approved. `error`: the checks couldn't run.
+   */
+  statements:
+    | { yearEnd: string; status: string; changedSince: boolean; failing: string[]; look: string[]; assurance: string | null; unapprovedEarlier: string | null; error?: undefined }
+    | { yearEnd: string | null; error: true }
+    | { yearEnd: null; firstYearEnds: string; error?: undefined }
+    | null;
   /** The books are closed up to this day (month end, a VAT period or a year). */
   lockedThrough: string | null;
-  deadlines: (Deadline & { past: boolean })[];
+  /** What the returns are worked out from (deadlinesFor, again each time the list is shown). */
+  deadlineInputs: DeadlineInputs | null;
 }
 
-/** Every check Shap has, run on one client's books: what the practice's list shows. */
-export async function healthOf(db: Sql, now = today()): Promise<ClientHealth> {
-  const s = await getSettings(db);
-  const audit = await auditBooks(db, now);
-  const bad = audit.filter((a): a is typeof a & { level: 'fail' | 'warn' } => a.level !== 'ok');
-  let statements: ClientHealth['statements'] = null;
-  if (s.setupDone) {
-    const current = financialYear(now, s.fyEndMonth);
-    const last = financialYear(addDays(current.start, -1), s.fyEndMonth);
-    try {
-      const st = await buildStatements(db, last.end);
-      statements = {
-        yearEnd: last.end,
-        failing: st.checks.filter((c) => !c.ok && c.level !== 'look').map((c) => c.label),
-        look: st.checks.filter((c) => !c.ok && c.level === 'look').map((c) => c.label),
-      };
-    } catch {
-      statements = null; // no year to build yet
-    }
+const ASSURANCE = 'The assurance fits the public interest score';
+
+/** Three of Shap's checks, run on one client's books: what the practice's list shows. */
+/** What the checks call (the tests give their own books audit). */
+export interface HealthDeps {
+  auditBooks: typeof auditBooks;
+}
+
+export async function healthOf(db: Sql, now = today(), log?: { warn: (o: object, m: string) => void }, deps: HealthDeps = { auditBooks }): Promise<ClientHealth> {
+  await freshTotals(db);
+  try {
+    return await healthNow(db, now, log, deps);
+  } catch (err) {
+    // Someone saved while they ran: once more, on the books as they are then.
+    if ((err as { code?: string }).code === '40001') return healthNow(db, now, log, deps);
+    throw err;
   }
-  const [emp] = await db<{ n: number }[]>`select count(*)::int as n from employees where active`;
-  const employees = emp?.n ?? 0;
-  const employer = featureOn(s.features, 'payroll') && employees > 0;
-  const deadlines = s.setupDone
-    ? deadlinesFor({ businessType: s.businessType, vatRegistered: s.vatRegistered, vatCategory: s.vatCategory, fyEndMonth: s.fyEndMonth, turnoverTax: s.turnoverTax, employer }, now)
-    : [];
-  return {
-    at: new Date().toISOString(),
-    company: s.companyName,
-    setupDone: s.setupDone,
-    vatRegistered: s.vatRegistered,
-    audit: { fail: bad.filter((a) => a.level === 'fail').length, warn: bad.filter((a) => a.level === 'warn').length, items: bad.slice(0, 12).map((a) => ({ level: a.level, section: a.section, text: a.text })) },
-    statements,
-    lockedThrough: await effectiveLock(db),
-    deadlines,
-  };
+}
+
+/** The books audit's findings for the list: what to fix first, then what to look at, the first 12. */
+export function findingsForList(items: { level: string; section: string; text: string }[]): { fail: number; warn: number; items: { level: 'fail' | 'warn'; section: string; text: string }[] } {
+  const bad = items.filter((a): a is typeof a & { level: 'fail' | 'warn' } => a.level === 'fail' || a.level === 'warn');
+  const ordered = [...bad.filter((a) => a.level === 'fail'), ...bad.filter((a) => a.level === 'warn')];
+  return { fail: ordered.filter((a) => a.level === 'fail').length, warn: ordered.filter((a) => a.level === 'warn').length, items: ordered.slice(0, 12).map((a) => ({ level: a.level, section: a.section, text: a.text })) };
+}
+
+async function healthNow(db: Sql, now: string, log: { warn: (o: object, m: string) => void } | undefined, deps: HealthDeps): Promise<ClientHealth> {
+  // One view of the books for all of it, as they stand now.
+  return db.begin('isolation level repeatable read', async (t) => {
+    // The checks take the pool's type; inside the transaction they only query.
+    const tx = t as unknown as Sql;
+    const s = await getSettings(tx);
+    // Employees are counted, never named: the list is kept in the practice's own database.
+    const audit = findingsForList(await deps.auditBooks(tx, now, { people: false }));
+    let statements: ClientHealth['statements'] = null;
+    if (s.setupDone) {
+      const ended = financialYear(addDays(financialYear(now, s.fyEndMonth).start, -1), s.fyEndMonth).end;
+      try {
+        const [first] = await tx<{ d: string | null }[]>`select min(date)::text as d from ledger_totals where amount_cents <> 0`;
+        const firstEnd = first?.d ? financialYear(first.d, s.fyEndMonth).end : null;
+        if (!firstEnd) statements = null;
+        else if (firstEnd > ended) statements = { yearEnd: null, firstYearEnds: firstEnd };
+        else {
+          const { statements: st, row } = await currentStatements(tx, ended);
+          const status = row?.status ?? 'draft';
+          const signed = row?.snapshot && (status === 'compiled' || status === 'approved');
+          const changedSince = signed ? !stillSigned(row as { snapshot: Statements; snapshotHash: string }, await buildStatements(tx, ended, st.details)) : false;
+          // What compiling refuses: the statements' own checks, and the books audit at the year end.
+          const atYearEnd = signed ? [] : (await deps.auditBooks(tx, ended, { people: false })).filter((i) => i.level === 'fail').map((i) => `Books check at the year end: ${i.text}`);
+          const assurance = st.checks.find((c) => c.label === ASSURANCE && !c.ok)?.detail ?? null;
+          const approved = new Set((await tx<{ fyEnd: string }[]>`select fy_end::text as fy_end from financial_statements where status = 'approved'`).map((r) => r.fyEnd));
+          let earlier: string | null = null;
+          for (let end = firstEnd; end < ended && !earlier; end = financialYear(addDays(end, 1), s.fyEndMonth).end) if (!approved.has(end)) earlier = end;
+          statements = {
+            yearEnd: ended,
+            status,
+            changedSince,
+            failing: [...st.checks.filter((c) => !c.ok && c.level !== 'look').map((c) => c.label), ...atYearEnd],
+            look: st.checks.filter((c) => !c.ok && c.level === 'look' && c.label !== ASSURANCE).map((c) => c.label),
+            assurance,
+            unapprovedEarlier: earlier,
+          };
+        }
+      } catch (err) {
+        log?.warn({ err }, 'practice: a client’s statements checks failed');
+        statements = { yearEnd: ended, error: true };
+      }
+    }
+    // An employer: registered for PAYE, paying people on Shap's payroll, or paid someone lately.
+    const [emp] = await tx<{ n: number }[]>`select count(*)::int as n from employees where active`;
+    const [runs] = await tx<{ n: number }[]>`select count(*)::int as n from pay_runs where pay_date >= ${addDays(now, -100)}::date`;
+    const employer = Boolean(s.payeRef?.trim()) || (featureOn(s.features, 'payroll') && (emp?.n ?? 0) > 0) || (runs?.n ?? 0) > 0;
+    const paid = await tx<{ d: string }[]>`select distinct paid_on::text as d from dividends where paid_on >= ${addDays(now, -100)}::date order by 1`;
+    return {
+      at: new Date().toISOString(),
+      company: s.companyName,
+      setupDone: s.setupDone,
+      vatRegistered: s.vatRegistered,
+      audit,
+      statements,
+      lockedThrough: await effectiveLock(tx),
+      deadlineInputs: s.setupDone
+        ? { businessType: s.businessType, vatRegistered: s.vatRegistered, vatCategory: s.vatCategory, fyEndMonth: s.fyEndMonth, turnoverTax: s.turnoverTax, employer, approvedPbo: Boolean(s.approvedPbo), dividendsPaid: paid.map((p) => p.d) }
+        : null,
+    };
+  }) as Promise<ClientHealth>;
 }

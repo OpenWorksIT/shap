@@ -594,6 +594,74 @@ only. The five reviews of it found these in the code the two share, fixed in bot
   draft and showed "Couldn’t send" without logging: fixed. "Asks for no payment" overstated it (a
   draft still shows its due date and terms): "without your payment details" now.
 
+### The five reviews of 1.27 (Shap Accountant, phase 1; before release)
+
+A practice's clients' books, each in a database of its own on the practice's server. All fixed with
+tests (`apps/server/test/review-1.27/`, and `test/accountant/practice.test.ts`):
+
+- Security and privacy: signing out in a client's books left the practice signed in behind it (on
+  a shared computer, a reload signed the last person back in): it signs out of both now. The demo
+  company reached the real practice's list, its staff and its clients, and could change who opens
+  which: the practice is behind the demo's wall, with the server's own routes in one shared list
+  (`lib/server-only.ts`), its security audit (`/api/audit/server`) now among them, for clients
+  too. Lowering someone from writing up to compiling left them the client's owner until they
+  reopened it: a change of level takes them out at once, and every request checks they're in as
+  they were let in. A client's Welcome sent its usage note to OpenWorks: nothing about a client's
+  books is sent (no usage note, no prices, both questions not asked there, both off in a new
+  client's books). Client databases let every other database login connect: `revoke all on
+  database … from public`, at creation and every start. Start-up held a connection per client:
+  one at a time, each pool closed, at most 12 client pools open at once, and adding, opening and
+  the checks rate-limited. The checks kept employees' names in the practice's database: counted,
+  not named. The penetration test's section 6 now tries someone given one client reaching
+  another, a level lowered or taken away, an archived client, the demo, reads through a forged
+  cookie, and signing out, and uses its two clients again rather than adding two each run.
+- IFRS for SMEs and company law: the practice approved and signed a client's statements as its
+  board, and the signed set named the practice's people as its directors (and took it as
+  owner-managed). In a client's books the practice compiles in Shap and records the directors'
+  approval, with the page one of those named signed (Companies Act s30(3)(c)); the practice's
+  people are never taken for directors; nothing is owner-managed until said; and nothing is
+  compiled until those who approve are named (a check that stops compiling, everywhere). The list
+  checked a year before the books began, and hid real errors: the newest year the books reach, or
+  "couldn't run". It said "every check passes" where compiling would refuse: the books audit at the
+  year end too. It now says where the statements stand (draft to approved), when a signed set no
+  longer matches the books, the assurance the score calls for (with Regulation 29(5)), and an
+  earlier year not approved. Wiping the practice's own books lost its clients: the list and who
+  opens each are kept. The practice's owner can download each client's backups (s24), and
+  docs/ACCOUNTANT.md says what the client's records duties are (s24, s25, s28). The level is
+  "compile", not "review", which read as an independent review.
+- SARS and tax: an NPC had no returns (now a company's, or an approved PBO's IT12EI), a company on
+  turnover tax was shown an ITR14 (its TT03), the window behind missed an ITR14 a year back, monthly
+  VAT and the EMP201 after next, there was no third (top-up) IRP6, an employer registered for PAYE
+  with nobody on payroll had no EMP201, a partnership's labels said the partnership pays, the
+  VAT201 date didn't say it's eFiling's, and a trust's Category E period used the books' year end.
+  All fixed; the filing season's dates (ITR12, ITR12T, IT3(t), the EMP501 interim) in a table
+  (`FILING_SEASON_DATES`), dividends tax, and the declared 4 November 2026 holiday
+  (`DECLARED_HOLIDAYS`); all in docs/SARS.md. The list went stale: the returns are worked out again
+  for the day they're shown.
+- Accounting and arithmetic: a client whose migrations failed at start opened on the newer code
+  (marked, and not opened until they run). A client's monthly invoices were never made (now on
+  their day, never emailed). Coming back from a client showed the checks from before (now waited
+  for), an earlier run could overwrite a later one (never now), and leaving closed a month in the
+  client's books (it changes nothing now). The findings could leave a fail off the list (fails
+  first). A half-made client database was left behind (dropped), and a database already there is
+  never taken over. The test drops the client databases of whatever test database it runs on, and
+  a test writes real books in a client and counts the checks exactly.
+- Words on screen and liability: "every check", "kept apart by Postgres itself", "all of Shap's
+  screens", "Returns:", "Books audit:", "was due" alone, "Writes up the books" (it makes them the
+  client's owner) and the note at the foot of the list. Now: three of Shap's checks, a database of
+  its own with Shap checking who opens which, Shap's screens, "Some returns coming up", "Books
+  check", "was due (Shap can't tell whether it was filed)", the levels' own words (shared:
+  `LEVEL_WORDS`), and `PRACTICE_NOTE` under the heading naming accountants, tax practitioners and
+  auditors and saying it's not every check or return. Names on the page are marked private for the
+  feedback screenshot. The bar could show the practice's own books under a client's name when the
+  client closed: refused, and back to the list. The terms are accepted "for my practice's use of
+  Shap on these books"; switching the feature on says back what the practice answers for; the
+  website's disclaimer has a section on practices (within terms 2 and 3: no re-acceptance). The
+  errors, the drawer (staff only, every client for whoever manages), the archive question, the
+  deadline labels, the feature's hint (hidden in a client), the changelog and the docs. For
+  OpenWorks to decide: an indemnity from a practice against its clients' claims would be a terms
+  change (everyone accepts again).
+
 ### Code scanning (CodeQL), first run
 
 - The Accounts screen's download links carried the period's dates unencoded (flagged as text

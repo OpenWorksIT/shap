@@ -751,6 +751,11 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
   checks.push({ label: 'The statement of changes in equity ends at the equity shown', ok: soceClose.total === equity.current, detail: `${money(soceClose.total)} and ${money(equity.current)}` });
   const suspense = accounts.filter((a) => a.systemKey === 'suspense').reduce((t, a) => t + val(a, 'atEnd'), 0);
   checks.push({ label: 'Nothing is left in suspense', ok: suspense === 0, detail: suspense ? `${money(suspense)} in suspense: sort it out before the statements are signed` : 'none' });
+  // Who approves and signs them (Companies Act s30(3)(c) for a company): named, so the statements
+  // never go out with nobody, or the wrong people, on the signature lines.
+  const approvers = details.directors.filter((d) => d.name.trim()).length;
+  const gov = governingFor(bt);
+  checks.push({ label: `The ${gov.many} who approve the statements are named`, ok: approvers > 0, detail: approvers ? `${approvers} named` : `none named: name the ${gov.many} in the details on this screen` });
 
   // ---------------------------------------------------------------- for the accountant to look at
   // What the standard asks that Shap can't settle from the books alone: shown with the checks, never

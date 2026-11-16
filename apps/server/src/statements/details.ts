@@ -98,14 +98,18 @@ export function defaultDetails(bt: BusinessType, owners: string[] = []): Stateme
     loanTerms: `The loans from the ${kind.owner.many} are unsecured, bear no interest and have no fixed terms of repayment.`,
     eventsAfter: `The ${g.many} ${g.plural ? 'are' : 'is'} not aware of any material event after the reporting date that requires the financial statements to be adjusted or disclosed.`,
     goingConcern: `The financial statements have been prepared on the going concern basis. The ${g.many} ${g.plural ? 'have' : 'has'} no reason to believe that the business will not be a going concern in the year ahead.`,
-    ownerManaged: true,
+    // Every shareholder a director: said only where the business's own people are named. In a
+    // practice's client's books (Shap Accountant) nobody is yet, so it isn't taken for granted.
+    ownerManaged: owners.length > 0,
   });
 }
 
 export async function loadDetails(db: Db): Promise<StatementDetails> {
   const [s] = await db<{ businessType: BusinessType }[]>`select business_type from settings where id`;
   const [row] = await db<{ details: Record<string, unknown> }[]>`select details from statement_details where id`;
-  const owners = (await db<{ name: string }[]>`select name from users where role = 'owner' and active order by created_at limit 4`).map((u) => u.name);
+  // The business's own owners: never the practice's people, who are owners in a client's books only
+  // to write them up (Shap Accountant, lib/practice.ts mirrorUser).
+  const owners = (await db<{ name: string }[]>`select name from users where role = 'owner' and active and password_hash <> '!practice' order by created_at limit 4`).map((u) => u.name);
   const base = defaultDetails(s!.businessType, owners);
   if (!row) return base;
   const saved = statementDetailsInput.safeParse(row.details);

@@ -13,6 +13,7 @@
  * shared), and those hashes differ from item to item, so they can't be joined into one
  * business's price list. Nothing here publishes anything.
  */
+import { inClient, inDemo } from '../db/routing.js';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -68,8 +69,9 @@ async function send(url: string, body: unknown): Promise<boolean> {
  * standard items is marked done with nothing sent.
  */
 export async function shareMarketRates(ctx: Ctx, db: Db, log: { warn: (o: object, m: string) => void }): Promise<'off' | 'done' | 'sent' | 'nothing' | 'failed'> {
-  // A test server's books are made up: their prices never go anywhere (docs/TEST_SERVER.md).
-  if (ctx.config.TEST_SERVER) return 'off';
+  // A test server's books are made up: their prices never go anywhere (docs/TEST_SERVER.md). Nor do
+  // the demo company's, or a practice's clients' (Shap Accountant): only this Shap's own books share.
+  if (ctx.config.TEST_SERVER || inClient() || inDemo()) return 'off';
   const s = await getSettings(db);
   // On unless switched off, but nothing goes until the owner has been told (setup, or Home's note).
   if (!s.marketConsent || !s.marketNoticeSeen || !s.setupDone) return 'off';

@@ -28,6 +28,7 @@ import { sharePdf } from '../lib/share-pdf';
 import { compressSlip } from '../lib/files';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
+import { useClientHere } from '../components/ClientBanner';
 
 interface Year {
   fyEnd: string;
@@ -101,6 +102,9 @@ export function FinancialStatements() {
     await Promise.all([years.reload(), view.reload()]);
   };
   const accountant = user.role === 'accountant';
+  // A practice's client's books (Shap Accountant): the practice compiles here, and records the
+  // directors' approval with the page they signed; it never approves for them.
+  const client = useClientHere();
   const toast = useToast();
   const share = async (path: string, title: string, text?: string) => {
     try {
@@ -342,7 +346,7 @@ export function FinancialStatements() {
 
           {/* What can be done next, by who's signed in and where the statements are. */}
           <div className="row wrap">
-            {isOwner && (status === 'draft' || status === 'sent') && (
+            {isOwner && !client && (status === 'draft' || status === 'sent') && (
               <>
                 <button className="btn primary" onClick={shareWithAccountant}>
                   <Icon name="share" size={18} />
@@ -369,7 +373,7 @@ export function FinancialStatements() {
             {isOwner && status === 'compiled' && !v.changedSince && (
               <button className="btn primary" onClick={() => setForm('approve')}>
                 <Icon name="check" size={18} />
-                Approve and sign: finish the year
+                {client ? `Record the ${possessive(s?.governing.many ?? 'directors')} approval: finish the year` : 'Approve and sign: finish the year'}
               </button>
             )}
             {isOwner && (status === 'compiled' || status === 'approved' || status === 'sent') && (
@@ -408,7 +412,8 @@ export function FinancialStatements() {
       {form === 'send' && s && <SendForm fyEnd={s.fyEnd} to={v?.row?.sentTo || s.details.accountantEmail} onClose={() => setForm(null)} onDone={reload} />}
       {form === 'upload' && s && <UploadForm fyEnd={s.fyEnd} compiler={s.details.compiler.name} cc={cc} onClose={() => setForm(null)} onDone={reload} />}
       {form === 'compile' && s && <CompileForm fyEnd={s.fyEnd} compiler={s.details.compiler} cc={cc} onClose={() => setForm(null)} onDone={reload} />}
-      {form === 'approve' && s && <ApproveForm fyEnd={s.fyEnd} governing={s.governing} onClose={() => setForm(null)} onDone={reload} />}
+      {form === 'approve' && s && client && <RecordApprovalForm fyEnd={s.fyEnd} governing={s.governing} named={s.details.directors.map((d) => d.name).filter((n) => n.trim())} onClose={() => setForm(null)} onDone={reload} />}
+      {form === 'approve' && s && !client && <ApproveForm fyEnd={s.fyEnd} governing={s.governing} onClose={() => setForm(null)} onDone={reload} />}
       {form === 'reopen' && s && <ReopenForm fyEnd={s.fyEnd} approved={status === 'approved'} onClose={() => setForm(null)} onDone={reload} />}
     </div>
   );
@@ -704,6 +709,83 @@ function ApproveForm({ fyEnd, governing, onClose, onDone }: { fyEnd: string; gov
         {error && <div className="banner alert small">{error}</div>}
         <button className="btn primary big block" disabled={busy || !sure}>
           Approve and close the year
+        </button>
+      </form>
+    </Drawer>
+  );
+}
+
+/** "directors’", "owner’s". */
+const possessive = (many: string) => (many.endsWith('s') ? `${many}’` : `${many}’s`);
+
+/**
+ * In a practice's client's books: the approval is the client's directors' own (Companies Act
+ * s30(3)(c)). The practice records it, with the page one of those named signed, uploaded.
+ */
+function RecordApprovalForm({ fyEnd, governing, named, onClose, onDone }: { fyEnd: string; governing: { one: string; many: string; signs: string }; named: string[]; onClose: () => void; onDone: () => Promise<void> }) {
+  const [name, setName] = useState(named[0] ?? '');
+  const [date, setDate] = useState(todayIso());
+  const [file, setFile] = useState<{ id: string; name: string } | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [upError, setUpError] = useState('');
+  const [sure, setSure] = useState(false);
+  const { submit, error, busy } = useSubmit(() => api(`/api/statements/${fyEnd}/approve`, { body: { name, date, signedId: file?.id ?? null } }), onDone, 'Recorded: the year is finished');
+  const pick = async (f: File | undefined) => {
+    if (!f) return;
+    setUploading(true);
+    setUpError('');
+    try {
+      const r = await api<{ id: string }>('/api/attachments', { body: await compressSlip(f) });
+      setFile({ id: r.id, name: f.name });
+    } catch (err) {
+      setUpError(err instanceof ApiError ? err.message : 'Couldn’t upload it');
+    } finally {
+      setUploading(false);
+    }
+  };
+  return (
+    <Drawer title={`Record the ${possessive(governing.many)} approval`} sub="The last step of the year, for the client" onClose={onClose}>
+      <form className="stack" onSubmit={submit}>
+        <p className="small">
+          Approving the statements is the client’s own: one of their {governing.many} signs. Upload the page they signed, and Shap records it under your name, checks the books still give exactly the figures compiled, agrees the year at them and closes it.
+        </p>
+        {named.length === 0 ? (
+          <div className="banner alert small">Name the {governing.many} in the details first.</div>
+        ) : (
+          <div className="form-grid">
+            <Field label={`Signed by (as named in the details)`}>
+              {(p) => (
+                <select {...p} className="select" value={name} onChange={(e) => setName(e.target.value)}>
+                  {named.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </Field>
+            <Field label="Signed on">{(p) => <input {...p} className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} required />}</Field>
+          </div>
+        )}
+        <div className="row wrap">
+          <label className="btn">
+            <Icon name="upload" size={18} />
+            {file ? 'Choose another' : 'The signed page: a PDF or a photo'}
+            <input type="file" accept="application/pdf,image/*" hidden onChange={(e) => void pick(e.target.files?.[0])} />
+          </label>
+          {uploading && <span className="small muted">Uploading…</span>}
+          {file && <span className="small">{file.name}</span>}
+        </div>
+        {upError && <div className="banner alert small">{upError}</div>}
+        <label className="check">
+          <input type="checkbox" checked={sure} onChange={(e) => setSure(e.target.checked)} />
+          <span>
+            {name || `The ${governing.one}`} signed the approval of these statements, as compiled
+          </span>
+        </label>
+        {error && <div className="banner alert small">{error}</div>}
+        <button className="btn primary big block" disabled={busy || !sure || !file || !name}>
+          Record it and close the year
         </button>
       </form>
     </Drawer>

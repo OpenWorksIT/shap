@@ -1,43 +1,53 @@
 /**
  * Shap Accountant (docs/ACCOUNTANT.md): with the feature on, this server is a practice's. It keeps
  * clients' books, each in a database of its own (lib/practice.ts), and shows the practice one list
- * of its clients with what each one's checks found and the returns coming up.
+ * of its clients with what three of Shap's checks found in each and some of the returns coming up.
  *
  * Opening a client works like showing the demo company: the browser gets a session in the
  * client's own database (as the practice person they are, mirrored there) and a cookie saying
  * which client. Every request with that cookie is checked here first: the practice's own session
- * must still be good, the feature on, the client not archived, and the person still allowed in.
- * Only then is the request routed to the client's database (db/routing.ts); otherwise the cookies
- * go and it carries on in the practice's own books. A session made in one client's database means
- * nothing in another's, so a cookie changed by hand opens nothing.
+ * must still be good, the feature on, the client not archived, its migrations all run, the person
+ * still allowed in, and as who they were let in. Only then is the request routed to the client's
+ * database (db/routing.ts). If any check fails, the cookies go and the request is refused (409,
+ * client_closed): the page goes back to the practice's list rather than show the practice's own
+ * books under the client's name. A session made in one client's database means nothing in
+ * another's, so a cookie changed by hand opens nothing.
  */
+import { createReadStream, existsSync } from 'node:fs';
+import { readdir, stat } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { featureOn } from '@shap/shared';
+import { deadlinesFor, featureOn, LEVELS, type Level } from '@shap/shared';
 import { z } from 'zod';
-import { browserName, can, CLIENT_SESSION_COOKIE, loadUser, requireAccess, requireRole, SESSION_COOKIE, userOrThrow, type AuthUser } from '../auth.js';
+import { browserName, can, CLIENT_COOKIE, confirmPassword, CLIENT_SESSION_COOKIE, loadUser, requireAccess, requireRole, SESSION_COOKIE, userOrThrow, type AuthUser } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Sql } from '../db/index.js';
 import { dbScope, inClient } from '../db/routing.js';
 import { audit } from '../lib/audit.js';
-import { badRequest, forbidden, notFound } from '../lib/errors.js';
+import { today } from '../lib/books.js';
+import { badRequest, forbidden, HttpError, notFound } from '../lib/errors.js';
 import { routePath } from '../lib/http.js';
-import { clientDbName, healthOf, LEVELS, mirrorUser, unmirrorUser, type Level } from '../lib/practice.js';
+import { clientDbName, healthOf, mirrorUser, roleFor, rolesFor, saveHealth, unmirrorUser, type ClientHealth } from '../lib/practice.js';
+import { SERVER_ONLY, under } from '../lib/server-only.js';
+import { BACKUP_NAME } from './system.js';
 import { newToken, sha256 } from '../lib/tokens.js';
 import { parse } from '../lib/validate.js';
 
-/** Which client's books this browser has open. */
-export const CLIENT_COOKIE = 'shap_client';
+export { CLIENT_COOKIE };
 
 const isUuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 
 /**
- * What isn't for a client's books, while they're open: the server's own updates and backups, the
- * practice's feedback inbox, wiping, the demo, the test server, the practice's own people (the
- * people in a client's books are the practice's, put there from the practice), and the practice
- * layer itself (but its "where am I" and "back to the practice").
+ * What isn't for a client's books, while they're open: the server's own (lib/server-only.ts), the
+ * demo, the test server, the practice's own people (the people in a client's books are the
+ * practice's, put there from the practice), signing in and the password, and the practice layer
+ * itself (but its "where am I" and "back to the practice").
  */
-const NOT_IN_A_CLIENT = ['/api/system', '/api/feedback', '/api/wipe', '/api/demo', '/api/test-server', '/api/users', '/api/profiles', '/api/practice', '/api/auth/login', '/api/auth/password', '/api/auth/mfa', '/api/auth/email'];
-const IN_A_CLIENT_TOO = ['/api/practice/here', '/api/practice/leave'];
+export const NOT_IN_A_CLIENT = [...SERVER_ONLY, '/api/demo', '/api/test-server', '/api/users', '/api/profiles', '/api/practice', '/api/auth/login', '/api/auth/password', '/api/auth/mfa'];
+export const IN_A_CLIENT_TOO = ['/api/practice/here', '/api/practice/leave'];
+
+const CLOSED = 'Those books are no longer open here: go back to the practice (Practice, in the menu) and open them again.';
+const NOT_GIVEN = 'You haven’t been given this client: ask whoever runs the practice’s Shap.';
 
 interface ClientRow {
   id: string;
@@ -45,8 +55,9 @@ interface ClientRow {
   kind: string;
   dbName: string | null;
   archivedAt: Date | null;
-  health: unknown;
+  health: ClientHealth | null;
   healthAt: Date | null;
+  migrateError: string | null;
 }
 
 const practiceOn = async (real: Sql) => {
@@ -63,7 +74,7 @@ async function practiceUser(real: Sql, req: FastifyRequest): Promise<AuthUser | 
   return s ? loadUser(real, s.userId) : null;
 }
 
-/** May they open this client, and how? The practice's owner opens all of them. */
+/** May they open this client, and how? The practice's owner opens all of them, either way. */
 async function levelFor(real: Sql, user: AuthUser, clientId: string): Promise<Level | null> {
   if (user.role === 'owner') return 'books';
   if (!can(user, 'practice.clients')) return null;
@@ -82,25 +93,33 @@ export function registerPracticeScope(app: FastifyInstance, ctx: Ctx): void {
     const id = req.cookies?.[CLIENT_COOKIE];
     const scope = dbScope.getStore();
     if (!id || !scope || scope.demo || !routePath(req).startsWith('/api/')) return;
+    const p = routePath(req);
     const fail = () => {
       clear(reply);
-      // A page that thought it was in a client's books mustn't change the practice's own instead.
-      if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && !IN_A_CLIENT_TOO.includes(routePath(req)))
-        throw forbidden('That client’s books are no longer open here. Go back to Clients and open them again.');
+      // A page that thought it was in a client's books mustn't read or change the practice's own
+      // instead: refused, and the page goes back to the practice (lib/api.ts). Where am I, back to
+      // the practice, and who am I carry on in the practice's own books.
+      if (!IN_A_CLIENT_TOO.includes(p) && !(req.method === 'GET' && p === '/api/auth/me') && !p.startsWith('/api/auth/logout')) throw new HttpError(409, CLOSED, 'client_closed');
     };
     if (!isUuid(id)) return fail();
     const user = await practiceUser(dbs.real, req);
-    if (!user || !(await practiceOn(dbs.real))) return fail();
-    const [c] = await dbs.real<ClientRow[]>`select * from practice_clients where id = ${id} and archived_at is null and db_name is not null`;
-    if (!c || !(await levelFor(dbs.real, user, c.id))) return fail();
+    // Not signed in to the practice at all: the cookies go, and it's an ordinary signed-out request.
+    if (!user) return clear(reply);
+    if (!(await practiceOn(dbs.real))) return fail();
+    const [c] = await dbs.real<ClientRow[]>`select * from practice_clients where id = ${id} and archived_at is null and db_name is not null and migrate_error is null`;
+    const level = c ? await levelFor(dbs.real, user, c.id) : null;
+    if (!c || !level) return fail();
     const sql = clients.get(c.dbName!);
-    // Their session in the client's books, as that same person: gone or ended, they're back in the practice.
+    // Their session in the client's books, as that same person and as who they were let in as: gone,
+    // ended, or their level lowered since, and they're back in the practice.
     const token = req.cookies?.[CLIENT_SESSION_COOKIE];
-    const [s] = token ? await sql<{ userId: string }[]>`select user_id from sessions where token_hash = ${sha256(token)} and expires_at > now()` : [];
-    if (!s || s.userId !== user.id) return fail();
+    const [s] = token
+      ? await sql<{ userId: string; role: string }[]>`
+          select s.user_id, u.role from sessions s join users u on u.id = s.user_id where s.token_hash = ${sha256(token)} and s.expires_at > now() and u.active`
+      : [];
+    if (!s || s.userId !== user.id || !rolesFor(level).includes(s.role)) return fail();
     scope.client = { id: c.id, name: c.name, sql };
-    const p = routePath(req);
-    if (NOT_IN_A_CLIENT.some((b) => p === b || p.startsWith(`${b}/`)) && !IN_A_CLIENT_TOO.includes(p)) throw forbidden(`Not in a client’s books. Go back to your practice first.`);
+    if (under(p, NOT_IN_A_CLIENT) && !IN_A_CLIENT_TOO.includes(p)) throw forbidden('That’s the practice’s own, so it isn’t done in a client’s books: tap Back to the practice, at the top, first.');
   });
 }
 
@@ -108,6 +127,7 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { dbs, clients, config } = ctx;
   const real = dbs.real;
   const cookie = { httpOnly: true, sameSite: 'lax' as const, secure: config.COOKIE_SECURE, path: '/', maxAge: config.SESSION_TTL_HOURS * 3600 };
+  const limit = (max: number) => ({ rateLimit: { max, timeWindow: '1 minute' } });
   const view = { preHandler: requireAccess('practice.clients') };
   const manage = { preHandler: requireAccess('practice.manage') };
 
@@ -120,6 +140,12 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!c) throw notFound('Client');
     return c;
   };
+  const usable = (c: ClientRow) => {
+    if (!c.dbName) throw badRequest('This client’s books were never finished on the server: archive it and add it again.');
+    if (c.archivedAt) throw badRequest('That client is archived');
+    if (c.migrateError) throw new HttpError(409, 'Shap couldn’t bring this client’s books up to date when it last started, so they aren’t opened until it can. Whoever runs the server can see why in its log; they open again after the next start that brings them up to date.', 'not_migrated');
+    return c.dbName;
+  };
 
   /** Where this browser is: the practice's own books, or a client's. Works in both. */
   app.get('/api/practice/here', { preHandler: requireRole() }, async () => ({ client: inClient() }));
@@ -129,20 +155,24 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     await assertOn();
     const rows = await real<(ClientRow & { level: Level | null })[]>`
       select c.*, a.level from practice_clients c left join practice_access a on a.client_id = c.id and a.user_id = ${user.id}
-      order by c.archived_at nulls first, lower(c.name)`;
-    const mine = user.role === 'owner' ? rows : rows.filter((r) => r.level);
-    const people = can(user, 'practice.manage')
-      ? await real<{ id: string; name: string; email: string; role: string }[]>`select id, name, email, role from users where active and role <> 'owner' order by lower(name)`
-      : [];
-    const access = can(user, 'practice.manage') ? await real<{ clientId: string; userId: string; level: Level }[]>`select client_id, user_id, level from practice_access` : [];
+      where c.db_name is not null order by c.archived_at nulls first, lower(c.name)`;
+    const manages = can(user, 'practice.manage');
+    // Who manages sees every client (they can give themselves any of them); others, theirs.
+    const mine = user.role === 'owner' || manages ? rows : rows.filter((r) => r.level);
+    // Only staff can be given a client: read-only accountants can't have "Open the clients they're given".
+    const people = manages ? await real<{ id: string; name: string; email: string; role: string }[]>`select id, name, email, role from users where active and role = 'staff' order by lower(name)` : [];
+    const access = manages ? await real<{ clientId: string; userId: string; level: Level }[]>`select client_id, user_id, level from practice_access` : [];
+    const now = today();
     return {
       clients: mine.map((r) => ({
         id: r.id,
         name: r.name,
         kind: r.kind,
         archived: r.archivedAt != null,
+        notUpToDate: r.migrateError != null,
         level: user.role === 'owner' ? 'books' : r.level,
-        health: r.health,
+        // The returns are worked out again for today, so a date moves to past by itself.
+        health: r.health ? { ...r.health, deadlines: r.health.deadlineInputs ? deadlinesFor(r.health.deadlineInputs, now) : [] } : null,
         healthAt: r.healthAt,
         access: access.filter((a) => a.clientId === r.id).map((a) => ({ userId: a.userId, level: a.level })),
       })),
@@ -151,7 +181,7 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** A new client whose books the practice keeps: a database of its own, set up through its Welcome when first opened. */
-  app.post('/api/practice/clients', manage, async (req) => {
+  app.post('/api/practice/clients', { ...manage, config: limit(10) }, async (req) => {
     const user = userOrThrow(req);
     await assertOn();
     const { name } = parse(z.object({ name: z.string().trim().min(1).max(200) }), req.body);
@@ -161,33 +191,65 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
       await clients.create(real, dbName, name);
     } catch (err) {
       await real`delete from practice_clients where id = ${c!.id}`;
-      throw badRequest(`Couldn’t make the client’s database (${(err as Error).message}). Shap Accountant needs its database login to be allowed to create databases (docs/ACCOUNTANT.md).`);
+      req.log.error({ err }, 'practice: a client’s database couldn’t be made');
+      if ((err as { code?: string }).code === '42501')
+        throw badRequest('Couldn’t make this client’s books on the server. Shap Accountant needs the database login to be allowed to create databases: whoever runs the server can allow it (docs/ACCOUNTANT.md, on Shap’s GitHub).');
+      throw err;
     }
-    await real`update practice_clients set db_name = ${dbName} where id = ${c!.id}`;
-    await audit(real, { userId: user.id, action: 'practice_client_add', entity: 'practice_client', entityId: c!.id, ip: req.ip, details: { name } });
+    await real.begin(async (tx) => {
+      await tx`update practice_clients set db_name = ${dbName} where id = ${c!.id}`;
+      await audit(tx, { userId: user.id, action: 'practice_client_add', entity: 'practice_client', entityId: c!.id, ip: req.ip, details: { name } });
+    });
     return { id: c!.id };
   });
 
-  /** Open a client's books in this browser. */
-  app.post('/api/practice/clients/:id/open', view, async (req, reply) => {
+  /** Open a client's books in this browser: as given, or, for someone who writes them up, to compile (read only). */
+  app.post('/api/practice/clients/:id/open', { ...view, config: limit(30) }, async (req, reply) => {
     const user = userOrThrow(req);
     await assertOn();
     const c = await clientOr404((req.params as { id: string }).id);
-    if (c.archivedAt || !c.dbName) throw badRequest('That client is archived');
-    const level = await levelFor(real, user, c.id);
-    if (!level) throw forbidden('You haven’t been given this client');
-    const sql = clients.get(c.dbName);
+    const dbName = usable(c);
+    const given = await levelFor(real, user, c.id);
+    if (!given) throw forbidden(NOT_GIVEN);
+    const { as } = parse(z.object({ as: z.enum(LEVELS).optional() }), req.body ?? {});
+    // Never more than given: writing up takes in compiling, not the other way round.
+    if (as === 'books' && given !== 'books') throw forbidden('You’ve been given these books to read and compile, not to write up.');
+    const level = as ?? given;
+    const sql = clients.get(dbName);
     await mirrorUser(sql, user, level);
     const token = newToken();
     await sql`insert into sessions (token_hash, user_id, expires_at, user_agent, ip)
       values (${sha256(token)}, ${user.id}, now() + make_interval(hours => ${config.SESSION_TTL_HOURS}), ${browserName(req)}, ${req.ip})`;
     reply.setCookie(CLIENT_COOKIE, c.id, cookie);
     reply.setCookie(CLIENT_SESSION_COOKIE, token, cookie);
-    await audit(real, { userId: user.id, action: 'practice_client_open', entity: 'practice_client', entityId: c.id, ip: req.ip, details: { level } });
+    await audit(real, { userId: user.id, action: 'practice_client_open', entity: 'practice_client', entityId: c.id, ip: req.ip, details: { level, role: roleFor(level) } });
     return { ok: true, name: c.name, level };
   });
 
-  /** Back to the practice: the client's session ends, and its checks run again for the list. */
+  // The checks of one client at a time, and not again within the minute (a quick look in and out).
+  const running = new Map<string, Promise<ClientHealth | null>>();
+  const refreshHealth = (id: string, sql: Sql): Promise<ClientHealth | null> => {
+    const already = running.get(id);
+    if (already) return already;
+    const started = new Date();
+    const job = (async () => {
+      try {
+        const health = await healthOf(sql, today(), { warn: (o, m) => app.log.warn(o, m) });
+        // A slower run that started earlier never overwrites a newer one.
+        await saveHealth(real, id, health, started);
+        return health;
+      } catch (err) {
+        app.log.warn({ err }, 'practice: a client’s checks failed');
+        return null;
+      } finally {
+        running.delete(id);
+      }
+    })();
+    running.set(id, job);
+    return job;
+  };
+
+  /** Back to the practice: the client's session ends, and its checks run again for the list (waited for, up to a few seconds). */
   app.post('/api/practice/leave', async (req, reply) => {
     const here = dbScope.getStore()?.client ?? null;
     const token = req.cookies?.[CLIENT_SESSION_COOKIE];
@@ -195,32 +257,24 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     reply.clearCookie(CLIENT_SESSION_COOKIE, { path: '/' });
     if (here && token) {
       await here.sql`delete from sessions where token_hash = ${sha256(token)}`.catch(() => undefined);
-      void refreshHealth(here.id, here.sql);
+      const [c] = await real<{ healthAt: Date | null }[]>`select health_at from practice_clients where id = ${here.id}`;
+      if (!c?.healthAt || Date.now() - c.healthAt.getTime() > 60_000) {
+        await Promise.race([refreshHealth(here.id, here.sql), new Promise((r) => setTimeout(r, 8000).unref())]);
+      }
     }
     return { ok: true };
   });
 
-  const refreshHealth = async (id: string, sql: Sql) => {
-    try {
-      const health = await healthOf(sql);
-      await real`update practice_clients set health = ${real.json(health as never)}, health_at = now() where id = ${id}`;
-      return health;
-    } catch (err) {
-      app.log.warn({ err }, 'practice: a client’s checks failed');
-      return null;
-    }
-  };
-
-  /** Run every check on a client's books now. */
-  app.post('/api/practice/clients/:id/checks', view, async (req) => {
+  /** Run the checks on a client's books now. */
+  app.post('/api/practice/clients/:id/checks', { ...view, config: limit(10) }, async (req) => {
     const user = userOrThrow(req);
     await assertOn();
     const c = await clientOr404((req.params as { id: string }).id);
-    if (c.archivedAt || !c.dbName) throw badRequest('That client is archived');
-    if (!(await levelFor(real, user, c.id))) throw forbidden('You haven’t been given this client');
-    const health = await refreshHealth(c.id, clients.get(c.dbName));
-    if (!health) throw badRequest('The checks couldn’t run on this client’s books. Open them and look, or tell us under Feedback.');
-    return { health };
+    const dbName = usable(c);
+    if (!(await levelFor(real, user, c.id))) throw forbidden(NOT_GIVEN);
+    const health = await refreshHealth(c.id, clients.get(dbName));
+    if (!health) throw badRequest('Shap’s checks couldn’t run on this client’s books. Open them and look, or let us know: tap Feedback, then Bug found.');
+    return { health: { ...health, deadlines: health.deadlineInputs ? deadlinesFor(health.deadlineInputs, today()) : [] } };
   });
 
   /** Who in the practice opens this client, and how. */
@@ -229,30 +283,78 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     await assertOn();
     const c = await clientOr404((req.params as { id: string }).id);
     const { access } = parse(z.object({ access: z.array(z.object({ userId: z.string().uuid(), level: z.enum(LEVELS) })).max(200) }), req.body);
-    const people = new Set((await real<{ id: string }[]>`select id from users where active and role <> 'owner'`).map((p) => p.id));
-    for (const a of access) if (!people.has(a.userId)) throw badRequest('Only the practice’s own people can be given a client');
-    const before = await real<{ userId: string }[]>`select user_id from practice_access where client_id = ${c.id}`;
+    const people = new Set((await real<{ id: string }[]>`select id from users where active and role = 'staff'`).map((p) => p.id));
+    for (const a of access) if (!people.has(a.userId)) throw badRequest('Only the practice’s own staff can be given a client');
+    const before = await real<{ userId: string; level: Level }[]>`select user_id, level from practice_access where client_id = ${c.id}`;
     await real.begin(async (tx) => {
       await tx`delete from practice_access where client_id = ${c.id}`;
       for (const a of access) await tx`insert into practice_access (client_id, user_id, level) values (${c.id}, ${a.userId}, ${a.level})`;
+      await audit(tx, { userId: user.id, action: 'practice_client_access', entity: 'practice_client', entityId: c.id, ip: req.ip, details: { access } });
     });
-    // Whoever lost the client is out of its books at once.
-    const kept = new Set(access.map((a) => a.userId));
-    if (c.dbName) for (const b of before) if (!kept.has(b.userId)) await unmirrorUser(clients.get(c.dbName), b.userId);
-    await audit(real, { userId: user.id, action: 'practice_client_access', entity: 'practice_client', entityId: c.id, ip: req.ip, details: { access } });
+    // Whoever lost the client, or whose level changed, is out of its books at once (open it again, as given now).
+    const now = new Map(access.map((a) => [a.userId, a.level]));
+    if (c.dbName) for (const b of before) if (now.get(b.userId) !== b.level) await unmirrorUser(clients.get(c.dbName), b.userId);
     return { ok: true };
   });
 
-  /** Archive a client: nobody opens it until it's brought back; its database (and backups) stay. */
+  /** Archive a client: whoever is in its books is taken out, and nobody opens it until it's brought back; its database (and backups) stay. */
   app.post('/api/practice/clients/:id/archive', manage, async (req) => {
     const user = userOrThrow(req);
     await assertOn();
     const c = await clientOr404((req.params as { id: string }).id);
     const { archived } = parse(z.object({ archived: z.boolean() }), req.body);
-    await real`update practice_clients set archived_at = ${archived ? new Date() : null} where id = ${c.id}`;
+    await real.begin(async (tx) => {
+      await tx`update practice_clients set archived_at = ${archived ? new Date() : null} where id = ${c.id}`;
+      await audit(tx, { userId: user.id, action: archived ? 'practice_client_archive' : 'practice_client_unarchive', entity: 'practice_client', entityId: c.id, ip: req.ip });
+    });
     if (archived && c.dbName) await clients.get(c.dbName)`delete from sessions`;
-    await audit(real, { userId: user.id, action: archived ? 'practice_client_archive' : 'practice_client_unarchive', entity: 'practice_client', entityId: c.id, ip: req.ip });
     return { ok: true };
+  });
+
+  /**
+   * A client's own backups (shap-ctl backs up each client's database, named after it), for the
+   * practice's owner only: to hand a client its books, or keep them as the Companies Act asks
+   * (s24). Downloading one takes the owner's password and gives a link for two minutes, as the
+   * practice's own backups do (system.ts).
+   */
+  const owner = { preHandler: requireRole('owner') };
+  const backupsOf = async (dbName: string) => {
+    const dir = config.BACKUP_DIR;
+    if (!existsSync(dir)) return [];
+    const names = (await readdir(dir).catch(() => [] as string[])).filter((n) => BACKUP_NAME.test(n) && n.startsWith(`${dbName}-`));
+    return (await Promise.all(names.map(async (name) => ({ name, s: await stat(join(dir, name)) }))))
+      .map(({ name, s }) => ({ name, sizeBytes: s.size, at: s.mtime.toISOString() }))
+      .sort((a, b) => b.at.localeCompare(a.at));
+  };
+  app.get('/api/practice/clients/:id/backups', owner, async (req) => {
+    await assertOn();
+    const c = await clientOr404((req.params as { id: string }).id);
+    return { backups: c.dbName ? await backupsOf(c.dbName) : [] };
+  });
+  app.post('/api/practice/clients/:id/backups/:name/link', { ...owner, config: limit(10) }, async (req) => {
+    const user = userOrThrow(req);
+    await assertOn();
+    const { id, name } = parse(z.object({ id: z.string(), name: z.string().max(200) }), req.params);
+    const c = await clientOr404(id);
+    if (!c.dbName || !BACKUP_NAME.test(name) || !name.startsWith(`${c.dbName}-`)) throw notFound('Backup');
+    await confirmPassword(real, user.id, parse(z.object({ password: z.string().max(200).optional() }), req.body ?? {}).password, req.ip);
+    const t = ctx.secrets.signToken('client-backup', { id: c.id, name, uid: user.id }, 120);
+    return { url: `/api/practice/clients/${c.id}/backups/${encodeURIComponent(name)}?t=${encodeURIComponent(t)}` };
+  });
+  app.get('/api/practice/clients/:id/backups/:name', owner, async (req, reply) => {
+    const user = userOrThrow(req);
+    const { id, name } = parse(z.object({ id: z.string(), name: z.string().max(200) }), req.params);
+    const c = await clientOr404(id);
+    if (!c.dbName || !BACKUP_NAME.test(name) || !name.startsWith(`${c.dbName}-`)) throw notFound('Backup');
+    const { t } = parse(z.object({ t: z.string().max(2000).default('') }), req.query);
+    const link = ctx.secrets.verifyToken<{ id: string; name: string; uid: string }>('client-backup', t);
+    if (!link || link.id !== c.id || link.name !== name || link.uid !== user.id) throw badRequest('That download link has expired. Choose the backup again.');
+    const path = join(config.BACKUP_DIR, name);
+    if (!existsSync(path)) throw notFound('Backup');
+    await audit(real, { userId: user.id, action: 'download_client_backup', entity: 'practice_client', entityId: c.id, ip: req.ip, details: { name } });
+    reply.header('content-type', 'application/octet-stream');
+    reply.header('content-disposition', `attachment; filename="${name}"`);
+    return reply.send(createReadStream(path));
   });
 
   /** Rename a client (on the practice's list; its own books keep their own name). */
@@ -261,8 +363,10 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     await assertOn();
     const c = await clientOr404((req.params as { id: string }).id);
     const { name } = parse(z.object({ name: z.string().trim().min(1).max(200) }), req.body);
-    await real`update practice_clients set name = ${name} where id = ${c.id}`;
-    await audit(real, { userId: user.id, action: 'practice_client_rename', entity: 'practice_client', entityId: c.id, ip: req.ip, details: { name } });
+    await real.begin(async (tx) => {
+      await tx`update practice_clients set name = ${name} where id = ${c.id}`;
+      await audit(tx, { userId: user.id, action: 'practice_client_rename', entity: 'practice_client', entityId: c.id, ip: req.ip, details: { name } });
+    });
     return { ok: true };
   });
 }

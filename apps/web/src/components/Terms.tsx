@@ -4,7 +4,8 @@
  * accepted (at the end of setup, and again when the published terms change).
  */
 import { useState } from 'react';
-import { TERMS_URL, TERMS_VERSION, termsPoints } from '@shap/shared';
+import { PRACTICE_TERMS_TICK, TERMS_URL, TERMS_VERSION, termsPoints } from '@shap/shared';
+import { useClientHere } from './ClientBanner';
 import { api, ApiError } from '../lib/api';
 import { useAuthed } from '../lib/session';
 import type { Settings } from '../lib/types';
@@ -12,7 +13,8 @@ import { Logo } from './Logo';
 
 export const APP: 'shap' | 'pocket' = 'shap';
 
-export function TermsReview({ cautions, accepted, onAccepted }: { cautions: string[]; accepted: boolean; onAccepted: (v: boolean) => void }) {
+/** `tick`: what the box says, where it isn't the business's own (a practice's client's books: PRACTICE_TERMS_TICK). */
+export function TermsReview({ cautions, accepted, onAccepted, tick }: { cautions: string[]; accepted: boolean; onAccepted: (v: boolean) => void; tick?: string }) {
   return (
     <div className="stack terms">
       {cautions.length > 0 && (
@@ -46,7 +48,7 @@ export function TermsReview({ cautions, accepted, onAccepted }: { cautions: stri
       <label className="check panel panel-pad terms-accept">
         <input type="checkbox" checked={accepted} onChange={(e) => onAccepted(e.target.checked)} />
         <span>
-          <strong className="small">I have read and accept the terms of use</strong>
+          <strong className="small">{tick ?? 'I have read and accept the terms of use'}</strong>
           <div className="xs muted">Including that OpenWorks isn’t an accountant, doesn’t keep or back up my data, and isn’t liable for what I file or pay. I’m responsible for backups, updates and checking the figures.</div>
         </span>
       </label>
@@ -58,6 +60,7 @@ export function TermsReview({ cautions, accepted, onAccepted }: { cautions: stri
 export function TermsGate() {
   const { settings, refreshReference } = useAuthed();
   const [accepted, setAccepted] = useState(false);
+  const client = useClientHere();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const agree = async () => {
@@ -80,7 +83,7 @@ export function TermsGate() {
           <h2>{settings.termsVersion ? 'The terms of use have changed' : 'Before you carry on: the terms of use'}</h2>
           <p className="small muted">Shap now asks everyone to accept its terms of use. Your books are untouched: read them, accept, and carry on where you were.</p>
         </div>
-        <TermsReview cautions={[]} accepted={accepted} onAccepted={setAccepted} />
+        <TermsReview cautions={[]} accepted={accepted} onAccepted={setAccepted} tick={client ? PRACTICE_TERMS_TICK : undefined} />
         {error && <div className="banner alert small">{error}</div>}
         <button type="button" className="btn primary big block" disabled={!accepted || busy} onClick={() => void agree()}>
           {busy ? 'Saving…' : 'Accept and open my books'}

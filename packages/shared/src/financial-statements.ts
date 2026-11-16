@@ -79,7 +79,12 @@ export const compileInput = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2
 /** The signed compiler's report (or the whole signed set) from the accountant, uploaded. */
 export const compilerReportInput = z.object({ attachmentId: z.string().uuid(), compilerName: t(120).min(2, 'Who signed it?'), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) });
 /** The directors (members, trustees…) approve the statements and sign: the year is then finished. */
-export const approveStatementsInput = z.object({ name: t(120).min(2, 'Your name, as it’s signed'), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) });
+export const approveStatementsInput = z.object({
+  name: t(120).min(2, 'Your name, as it’s signed'),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  /** In a client's books (Shap Accountant): the page the director signed, uploaded, since the practice records their approval rather than giving it. */
+  signedId: z.string().uuid().nullable().default(null),
+});
 export const sendStatementsInput = z.object({ to: z.string().trim().email('That email address doesn’t look right').max(200), message: t(4000).default('') });
 export const reopenStatementsInput = z.object({ reason: t(300).min(2, 'Say why they’re reopened') });
 

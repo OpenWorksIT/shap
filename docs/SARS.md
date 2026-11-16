@@ -43,10 +43,32 @@ promulgated, check the figures against them (the standard update). The 2025/26 t
 | Individuals: tables, rebates and thresholds | `tax.ts` `INDIVIDUAL_TABLES` | 2023 to 2027 (earlier years use 2023's) | [SARS: rates for individuals](https://www.sars.gov.za/tax-rates/income-tax/rates-of-tax-for-individuals/) |
 | Retirement contributions: 27.5%, capped at R350 000 (R430 000 from 2027) | `tax.ts` `retirementDeduction` | 2023 to 2027 | SARS Budget 2026 FAQ (above) |
 | Assessed loss: carried forward year by year, a company's set-off limited to the greater of R1 million and 80% of taxable income (years ending on or after 31 March 2023) | `tax.ts` `assessedLossSetOff`, `assessedLossCarried` | all | [SARS BGR 73](https://www.sars.gov.za/legal-intr-r-bgr-73-meaning-of-taxable-income-for-purposes-of-setting-off-the-balance-of-an-assessed-loss-by-a-company) |
-| Provisional tax (IRP6): first period half the year's tax, second the rest, less what's been paid (the payments recorded for the year). The screen works out the amount; SARS's due dates (the end of the sixth month and the year end) are in the guide, not on the screen | `tax.ts` `provisionalPayable`, the IRP6 screen | all | [SARS guide to provisional tax](https://www.sars.gov.za/guide-to-provisional-tax/) |
+| Provisional tax (IRP6): first period half the year's tax, second the rest, less what's been paid (the payments recorded for the year). The screen works out the amount; SARS's due dates are in the guide and on a practice's list (below), not on this screen | `tax.ts` `provisionalPayable`, the IRP6 screen | all | [SARS guide to provisional tax](https://www.sars.gov.za/guide-to-provisional-tax/) |
 | Turnover tax: tables and the micro business limit (R1 million, R2.3 million from the year ending February 2027); TT02 payments end August and end February; TT03 1 July to 31 January | `tax.ts` `TURNOVER_TABLES`, `turnoverTaxLimit` | 2022 to 2027 | [SARS: turnover tax rates](https://www.sars.gov.za/tax-rates/turnover-tax/), [turnover tax](https://www.sars.gov.za/types-of-tax/turnover-tax/) |
 | A company on turnover tax needs a February year end | `settings.ts` | until the Budget 2026 proposal is law | [TT01 FAQ](https://www.sars.gov.za/legal-pub-faqs-tt01-faqs-on-turnover-tax); watch: the [Budget 2026 FAQ](https://www.sars.gov.za/about/sars-tax-and-customs-system/budget/budget-2026-frequently-asked-questions/) proposes dropping it |
 | Filing seasons (ITR12, ITR14, ITR12T) shown in the guides | `Guides.tsx` | 2026 season | [SARS filing season 2026](https://www.sars.gov.za/filing-season-2026-leaflet/) |
+
+## The returns on a practice's list (Shap Accountant)
+
+The practice's list of clients (docs/ACCOUNTANT.md) shows some of the returns coming up for each,
+worked out again each time it's shown: `practice.ts` `deadlinesFor`, from the client's settings.
+The dates the law fixes are in code there; the filing season's, which SARS sets each year, are in
+`tax.ts` `FILING_SEASON_DATES`; a public holiday the President declares for one year is in
+`dates.ts` `DECLARED_HOLIDAYS`. Each standard update checks all three.
+
+| Return | Rule | Where | Source |
+| --- | --- | --- | --- |
+| VAT201 | Last business day of the month after the period on eFiling (the 25th otherwise, said in the label); Category E on the year of assessment (a trust's and an individual's: February) | `deadlinesFor`, `vat201Due`, `vat201Label` | [SARS: obligations of a vendor](https://www.sars.gov.za/types-of-tax/value-added-tax/obligations-of-a-vat-vendor/), [VAT Act s27](https://www.acts.co.za/value-added-tax-act-1991/27__tax_period) |
+| EMP201 | By the 7th of the month after (the business day before), nil ones included, for an employer registered for PAYE | `emp201Due` | [SARS: EMP201](https://www.sars.gov.za/types-of-tax/pay-as-you-earn/emp-201-completion/) |
+| IRP6 | First at the end of the sixth month of the year of assessment, second on its last business day, the voluntary third seven months after a February year end (six after any other); each partner's own; none for an approved PBO | `deadlinesFor` | [SARS FAQ: when is provisional tax paid](https://www.sars.gov.za/faq/faq-when-must-provisional-tax-be-paid/), [provisional tax](https://www.sars.gov.za/businesses-and-employers/provisional-tax/) |
+| Turnover tax | TT02 at the end of August and February (each partner's own); a company's TT03 12 months after its year end. An individual's TT03 isn't shown (SARS's pages give 1 July to 31 January, and the notice 23 October and 22 January) | `deadlinesFor` | [SARS: TT03](https://www.sars.gov.za/types-of-tax/turnover-tax/annual-return/), [TT01 guide 3.5](https://www.sars.gov.za/legal-pub-guide-tt01-tax-guide-for-micro-businesses) |
+| ITR14, IT12EI | 12 months after a company's (an NPC's) year end; an approved PBO files the IT12EI instead | `deadlinesFor` | [GN 7422 (2026) para 4(a)](https://www.gov.za/sites/default/files/gcis_document/202604/54598gon7422.pdf) |
+| DTR01 | The end of the month after a dividend is paid | `dwtDue` | [SARS: dividends tax](https://www.sars.gov.za/types-of-tax/dividends-tax/) |
+| ITR12 (provisional taxpayers, each partner's), ITR12T, IT3(t), EMP501 interim | 22 January 2027, 22 January 2027, 30 September 2026, 30 October 2026 (31 October a Saturday) | `FILING_SEASON_DATES` | [SARS: tax season 2026](https://www.sars.gov.za/types-of-tax/personal-income-tax/tax-season/), [trust filing season](https://www.sars.gov.za/media-release/trust-filing-season-set-to-open/) |
+| A declared public holiday | 4 November 2026 (the local government elections) | `DECLARED_HOLIDAYS` | [SAnews](https://www.sanews.gov.za/node/84344) |
+
+Not shown: the CIPC annual return (Shap doesn't keep the date of incorporation), the Compensation
+Fund's return of earnings, and a filing season SARS hasn't announced yet.
 
 ## VAT
 

@@ -24,7 +24,7 @@ export function appVersion(): string {
   return (rootPackage as { version?: string }).version ?? '0.0.0';
 }
 
-const BACKUP_NAME = /^[a-z0-9_]+-(daily|manual|pre-update)-\d{4}-\d{2}-\d{2}_\d{4}\.dump$/;
+export const BACKUP_NAME = /^[a-z0-9_]+-(daily|manual|pre-update)-\d{4}-\d{2}-\d{2}_\d{4}\.dump$/;
 
 export function registerSystemRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { CTL_DIR, REQUEST_DIR, BACKUP_DIR, GIT_SHA } = ctx.config;

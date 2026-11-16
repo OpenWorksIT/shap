@@ -27,7 +27,10 @@ export async function wipeNames(db: Sql): Promise<string[]> {
 }
 
 /** Kept, in this order: the profiles before the people on them. */
-const KEEP = ['profiles', 'users', 'sessions', 'recovery_codes', 'audit_log'] as const;
+// The people and who did what, and a practice's list of its clients and who opens each (Shap
+// Accountant): the clients' books are databases of their own, which a wipe of these never touches,
+// so the practice must still find them after it.
+const KEEP = ['profiles', 'users', 'sessions', 'recovery_codes', 'audit_log', 'practice_clients', 'practice_access'] as const;
 
 export async function wipeBooks(db: Sql): Promise<void> {
   const migrations = await migrationFiles();

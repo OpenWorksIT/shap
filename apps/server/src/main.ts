@@ -5,6 +5,7 @@ import { serverLogger } from './lib/logging.js';
 import { migrate } from './db/migrate.js';
 import { demoUrl, ensureDatabase } from './db/routing.js';
 import { startMonthlyTimer } from './modules/monthly.js';
+import { migrateClients, refreshAllHealth } from './lib/practice.js';
 
 const config = loadConfig();
 const sql = createDb(config.DATABASE_URL);
@@ -33,10 +34,9 @@ const { app, ctx } = await buildApp({ config, sql, demoSql, logger });
 // Apply pending migrations on start so an update is just "pull and restart".
 await migrate(sql, (m) => app.log.info(m));
 if (demoSql) await migrate(demoSql, (m) => app.log.info(`demo company: ${m}`)).catch((err) => app.log.warn({ err }, 'demo company: migrations failed'));
-// Shap Accountant: every client's own database gets the same migrations (lib/practice.ts).
-for (const c of await sql<{ name: string; dbName: string }[]>`select name, db_name from practice_clients where db_name is not null`) {
-  await migrate(ctx.clients.get(c.dbName), (m) => app.log.info(`a client's books: ${m}`)).catch((err) => app.log.warn({ err }, 'a client’s books: migrations failed'));
-}
+// Shap Accountant: every client's own database gets the same migrations (lib/practice.ts), one at
+// a time; one that fails isn't opened until they run. Their checks then run again in the background.
+const clientsMigrated = await migrateClients(sql, ctx.clients, { info: (m) => app.log.info(m), warn: (o, m) => app.log.warn(o, m) });
 
 let stopMonthly: (() => void) | undefined;
 const shutdown = async () => {
@@ -57,6 +57,8 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (err) => app.log.error({ err }, 'A background task failed'));
 
 await app.listen({ host: config.HOST, port: config.PORT });
+// The practice's list shows each client as the updated Shap sees it.
+if (clientsMigrated.ok.length) void refreshAllHealth(sql, ctx.clients, clientsMigrated.ok, { warn: (o, m) => app.log.warn(o, m) }).catch((err) => app.log.warn({ err }, 'practice: the checks after the update failed'));
 // Monthly invoices go out on their day without anyone opening Shap.
 stopMonthly = startMonthlyTimer(ctx, app.log);
 app.log.info(`Two-factor sign-in: ${config.mfaRequired ? 'required' : 'optional'} · Email: ${config.SMTP_URL ? 'on' : 'off (logged only)'}`);
