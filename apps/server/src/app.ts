@@ -49,6 +49,7 @@ import { registerLogbookRoutes } from './modules/logbook.js';
 import { registerTimeRoutes } from './modules/timetrack.js';
 import { registerAccountantExportRoutes } from './modules/accountantExport.js';
 import { registerMoveInRoutes } from './modules/movein.js';
+import { registerBooksImportRoutes } from './modules/books-import.js';
 import { registerWipeRoutes } from './modules/wipe.js';
 import { registerLiveRoutes } from './modules/live.js';
 import { LiveBus } from './lib/live.js';
@@ -287,6 +288,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   registerTimeRoutes(app, ctx);
   registerAccountantExportRoutes(app, ctx);
   registerMoveInRoutes(app, ctx);
+  registerBooksImportRoutes(app, ctx);
   registerWipeRoutes(app, ctx);
   registerLiveRoutes(app, ctx, bus);
   registerBankRoutes(app, ctx);

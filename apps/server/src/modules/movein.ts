@@ -195,6 +195,13 @@ function mapColumns(headers: string[]): Partial<Record<Field, number>> {
       }
     }
   }
+  // A trial balance with the month's and the year's columns (Xero's: Debit, Credit, YTD Debit,
+  // YTD Credit): the year's are the balances.
+  const ytd = (word: string) => n.findIndex((h) => h.includes(word) && !h.startsWith('creditnote') && (h.includes('ytd') || h.includes('yeartodate')));
+  if (ytd('debit') >= 0 && ytd('credit') >= 0) {
+    out.debit = ytd('debit');
+    out.credit = ytd('credit');
+  }
   // Prefix matches for trial balances ("Debit - Year to date", "Credit YTD").
   if (out.debit == null) {
     const i = n.findIndex((h) => h.startsWith('debit'));
