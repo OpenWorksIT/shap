@@ -5,7 +5,8 @@
 create table if not exists practice_clients (
   id uuid primary key default gen_random_uuid(),
   name text not null check (length(name) between 1 and 200),
-  -- kept: the practice writes the books up here. (Imported, Pocket and linked clients come later.)
+  -- kept: the practice writes the books up here; imported: brought in from the package the client
+  -- keeps them in (Accounts → From another package). (Pocket and linked clients are planned.)
   kind text not null default 'kept' check (kind in ('kept', 'imported', 'pocket', 'linked')),
   -- The client's own database, on this server: <this database>__c_<12 hex>.
   db_name text unique check (db_name ~ '^[a-z0-9_]{1,63}$'),

@@ -22,7 +22,7 @@ opens them, their personal information (POPIA), and checking what Shap shows.
 | Kind | Where the books are | In Shap |
 |---|---|---|
 | Kept by the practice | A database of its own on the practice's server | Now (1.27) |
-| Imported from another package | The same, from Xero's, QuickBooks' or Sage's trial balance and general ledger exports | Planned |
+| Brought in from another package | The same, from Xero's, QuickBooks' or Sage's trial balance and general ledger exports | Now (1.28) |
 | A Shap Pocket share | A read-only copy of the owner's phone books, stamped, the next share marking what changed | Planned |
 | Linked from the client's own Shap | On the client's own server; Open signs the practice in to it | Planned |
 
@@ -42,6 +42,43 @@ practice's list.
 
 **Archive** closes a client for everyone (anyone who had it open is taken out); its books stay on
 the server, and in its backups. **Bring back** opens it again.
+
+## Books from another package
+
+A client who keeps their books in Xero, QuickBooks or Sage (Accounting or Pastel) carries on there;
+the practice brings them into the client's books here, period by period, to check and compile
+them with Shap's checks (**Add client** → their books are written up in another package; then, in
+their books, **Accounts → From another package**). It's what the working-paper packages do with
+the same exports.
+
+- **What to export:** a trial balance at a date, and the general ledger for a period. Xero: the
+  Trial Balance and the General Ledger Detail (or Account Transactions). QuickBooks Online: the
+  Trial Balance and the Journal report. Sage Accounting: the Trial Balance and the Detailed General
+  Ledger. Pastel: the Trial Balance and Ledger Transactions. Excel (.xlsx) or CSV.
+- **How Shap reads them:** by what's in them, not a fixed layout: the heading row among the first
+  rows, each column by the names the packages give it, a trial balance (no dates) or ledger lines
+  (dates) by its columns, flat or grouped under each account, totals and opening rows skipped, and
+  the date or period from the title. Xero's trial balance is read from its year-to-date columns.
+  Each transaction's lines must balance (else the export is missing accounts, and Shap says so).
+- **Their accounts:** each goes to one of these books' accounts (as last time, the same code, or
+  the same name) or a new one of the kind their file gives; the choice is remembered, so the next
+  period's files map by themselves.
+- **A ledger** comes in as its transactions, as the client's package has them (dates, references
+  and descriptions kept). The same period brought in again replaces it; a period that overlaps an
+  earlier one without covering it is refused.
+- **A trial balance** brings every account to its figures on its date: the income and expense
+  accounts for the year (the year end in these books' settings), the rest to date, and retained
+  earnings to what the earlier years left. After the year's ledger it comes to nothing, which
+  checks the ledger is all there; on its own, it gives the year's statements their figures. A
+  trial balance brought in earlier is never left wrong: a ledger or an earlier trial balance under
+  it comes in together with it again, or is refused.
+- Nothing goes into a closed period or a year whose statements were approved; it all goes in at
+  once or not at all; **Take out** removes an import and its journals, while the period is open.
+  Where these books already have entries of their own in a ledger's period, Shap says so first
+  (they'd be counted twice).
+
+The figures are the client's package's: Shap checks what it can from them (the books audit, the
+statements' checks), but a VAT201 or payroll worked out in the other package isn't Shap's to check.
 
 ## Who opens which
 

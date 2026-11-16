@@ -236,3 +236,43 @@ describe('bringing another package’s books in', () => {
     expect((await site.call({ method: 'POST', url: '/api/books-import/read', payload: { files: [file('TB.csv', XERO_TB)] } })).statusCode).toBe(403);
   });
 });
+
+describe('another package’s books in a practice’s client', () => {
+  let env: TestEnv;
+  const drop = async () => {
+    const pattern = `${env.ctx.clients.practiceDb.replace(/_/g, '\\_')}\\_\\_c\\_%`;
+    for (const { datname } of await env.sql<{ datname: string }[]>`select datname from pg_database where datname like ${pattern}`) await env.sql.unsafe(`drop database if exists "${datname}" with (force)`);
+  };
+  beforeAll(async () => {
+    env = await setup();
+    await drop();
+  });
+  afterAll(async () => {
+    await env.ctx.clients.end();
+    await drop();
+    await env.close();
+  });
+
+  it('adds a client whose books are in another package, and brings them into its own books only', async () => {
+    const owner = await login(env.app, 'owner@example.co.za');
+    const { settings } = await owner.get('/api/reference');
+    await owner.post('/api/settings', { ...settings, features: { ...settings.features, practice: true } }, 'PUT');
+    const { id } = await owner.post('/api/practice/clients', { name: 'Made-up Imported Electrical (Pty) Ltd', kind: 'imported' });
+    const list = await owner.get('/api/practice');
+    expect(list.clients.find((c: { id: string }) => c.id === id).kind).toBe('imported');
+    const opened = await owner.call({ method: 'POST', url: `/api/practice/clients/${id}/open`, payload: {} });
+    const cookies = Object.fromEntries(opened.cookies.filter((c) => c.value).map((c) => [c.name, c.value]));
+    const [row] = await env.sql<{ dbName: string }[]>`select db_name from practice_clients where id = ${id}`;
+    const db = env.ctx.clients.get(row!.dbName);
+    await db`update settings set setup_done = true, business_type = 'company', fy_end_month = 2`;
+    const bank = (await db<{ id: string }[]>`select id from accounts where system_key = 'bank'`)[0]!.id;
+    const read = await owner.call({ method: 'POST', url: '/api/books-import/read', payload: { files: [file('TB.csv', XERO_TB)] }, cookies });
+    const { accounts } = read.json();
+    const mapping = accounts.map((a: { code: string; name: string; type: string }) => ({ code: a.code, name: a.name, accountId: a.name === 'Business Bank Account' ? bank : null, newType: a.name === 'Business Bank Account' ? null : a.type }));
+    const applied = await owner.call({ method: 'POST', url: '/api/books-import/apply', payload: { files: [file('TB.csv', XERO_TB)], mapping }, cookies });
+    expect(applied.statusCode, applied.body).toBe(200);
+    expect(await balance(db, 'bank', '2026-10-31')).toBe(1_840_000);
+    expect(await env.sql`select 1 from ledger_imports`).toHaveLength(0);
+    await expectCleanAudit(db);
+  });
+});

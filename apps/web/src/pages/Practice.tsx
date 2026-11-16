@@ -52,6 +52,7 @@ export default function PracticePage() {
   const toast = useToast();
   const { data, error, reload } = useApi<Practice>('/api/practice');
   const [name, setName] = useState('');
+  const [kind, setKind] = useState<'kept' | 'imported'>('kept');
   const [busy, setBusy] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [accessFor, setAccessFor] = useState<PracticeClient | null>(null);
@@ -72,7 +73,7 @@ export default function PracticePage() {
   const add = (e: FormEvent) => {
     e.preventDefault();
     void act('add', async () => {
-      await api('/api/practice/clients', { body: { name } });
+      await api('/api/practice/clients', { body: { name, kind } });
       toast(`${name} added`);
       setName('');
       await reload();
@@ -81,7 +82,8 @@ export default function PracticePage() {
   const open = (c: PracticeClient, as?: Level) =>
     act(`open-${c.id}`, async () => {
       await api(`/api/practice/clients/${c.id}/open`, { body: as ? { as } : {} });
-      window.location.assign('/');
+      // Books brought in from another package open where they're brought in (once set up).
+      window.location.assign(c.kind === 'imported' && c.health?.setupDone && (as ?? c.level ?? 'books') === 'books' ? '/accounts?tab=import' : '/');
     });
   const check = (c: PracticeClient) =>
     act(`check-${c.id}`, async () => {
@@ -110,6 +112,14 @@ export default function PracticePage() {
           <Field label="A client whose books you keep" className="grow">
             {(p) => <input {...p} className="input" value={name} maxLength={200} placeholder="Their business’s name" onChange={(e) => setName(e.target.value)} />}
           </Field>
+          <Field label="Their books are written up">
+            {(p) => (
+              <select {...p} className="select" value={kind} onChange={(e) => setKind(e.target.value as 'kept' | 'imported')}>
+                <option value="kept">Here, in Shap</option>
+                <option value="imported">In another package (brought in from Xero, QuickBooks or Sage)</option>
+              </select>
+            )}
+          </Field>
           <button className="btn primary" disabled={!name.trim() || busy === 'add'}>
             {busy === 'add' ? 'Adding…' : 'Add client'}
           </button>
@@ -132,6 +142,7 @@ export default function PracticePage() {
                     {c.name}
                     {c.archived && <span className="chip"> Archived</span>}
                     {c.notUpToDate && <span className="chip warn"> Not up to date</span>}
+                    {c.kind === 'imported' && <span className="chip"> From another package</span>}
                   </h3>
                   {!c.archived && level && (
                     <>
