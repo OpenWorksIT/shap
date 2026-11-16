@@ -224,6 +224,39 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
     e.bySource.set(r.source, v);
     byAcc.set(r.accountId, e);
   }
+  // A journal that moves a fixed asset against income and expenses only (depreciation, amortisation
+  // or an impairment, posted by hand or brought in from another package) moves no cash: in the cash
+  // flows it's with the register's depreciation (IFRS for SMEs 7.8), not an asset bought or sold.
+  {
+    const fixedIds = accounts.filter((a) => ['ppe', 'intangibles'].includes(STATEMENT_LINES[a.statementLine].cash)).map((a) => a.id);
+    const plIds = new Set(accounts.filter((a) => ['income', 'cost_of_sales', 'expense'].includes(a.type)).map((a) => a.id));
+    const fixed = new Set(fixedIds);
+    type JL = { journalId: string; accountId: string; date: string; cents: string };
+    const jl: JL[] = fixedIds.length
+      ? await db<JL[]>`
+          select j.id as journal_id, jl.account_id, j.date::text as date, (jl.debit_cents - jl.credit_cents)::bigint as cents
+          from journals j join journal_lines jl on jl.journal_id = j.id
+          where j.date between ${priorStart}::date and ${fyEnd}::date
+            and exists (select 1 from journal_lines x where x.journal_id = j.id and x.account_id = any(${fixedIds}::uuid[]))`
+      : [];
+    const byJournal = new Map<string, JL[]>();
+    for (const r of jl) byJournal.set(r.journalId, [...(byJournal.get(r.journalId) ?? []), r]);
+    for (const lines of byJournal.values()) {
+      if (!lines.every((l) => fixed.has(l.accountId) || plIds.has(l.accountId)) || !lines.some((l) => plIds.has(l.accountId))) continue;
+      for (const l of lines.filter((x) => fixed.has(x.accountId))) {
+        const e = byAcc.get(l.accountId);
+        if (!e) continue;
+        const cols: Col[] = ['atEnd', ...(l.date <= priorEnd ? (['atPrior', 'mvPrior'] as Col[]) : (['mvCur'] as Col[]))];
+        const from = e.bySource.get('journal');
+        const to = e.bySource.get('depreciation') ?? { atBefore: 0, atPrior: 0, atEnd: 0, mvPrior: 0, mvCur: 0 };
+        for (const c of cols) {
+          if (from) from[c] -= Number(l.cents);
+          to[c] += Number(l.cents);
+        }
+        e.bySource.set('depreciation', to);
+      }
+    }
+  }
   const val = (a: Acc, c: Col) => byAcc.get(a.id)?.[c] ?? 0;
   const books = sha256Hex(
     JSON.stringify([bt, accounts.filter((a) => (['atBefore', 'atPrior', 'atEnd', 'mvPrior', 'mvCur'] as Col[]).some((c) => val(a, c) !== 0)).map((a) => [a.code, a.type, a.statementLine, val(a, 'atBefore'), val(a, 'atPrior'), val(a, 'atEnd'), val(a, 'mvPrior'), val(a, 'mvCur')])]),
@@ -766,6 +799,16 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
   // stopping anything (the accountant decides, and adjusts with a journal if it's material).
   const kind = entity(bt);
   const look = (label: string, ok: boolean, detail: string) => checks.push({ label, ok, detail, level: 'look' });
+  // Books that begin with a trial balance brought in from another package (books-import.ts): what
+  // came before it is one journal on its date, so the years shown start from nil before it.
+  const [startTb] = await db<{ d: string | null }[]>`
+    select min(j.date)::text as d from journals j join ledger_imports i on i.id = j.ledger_import_id where i.kind = 'trialBalance'`;
+  if (startTb?.d && first?.d && startTb.d <= first.d && startTb.d >= priorStart && startTb.d <= fyEnd)
+    look(
+      'The opening position is in the books',
+      false,
+      `These books begin with the trial balance brought in at ${formatDate(startTb.d)}: before it, the comparatives, the opening equity and cash, the changes in equity and the cash flows start from nil (IFRS for SMEs 3.14, 6, 7). Bring in the trial balance at the year end before it, and the one before that for comparatives, first.`,
+    );
   // Income tax (section 29): a business taxed on its own profit has the year's tax in the books.
   let taxEstimate: Statements['taxEstimate'] = null;
   if (taxNow) {

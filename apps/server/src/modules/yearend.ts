@@ -40,7 +40,8 @@ export async function agreeYear(
   await tx`delete from year_end_figures where fy_end = ${input.fyEnd}`;
   // The tracker's own trial-balance journal is superseded by the accountant's figures (not when
   // the year is agreed at the books as they are: approved statements, which include it).
-  if (!input.keepImport) await tx`delete from journals where kind = 'import' and date <= ${input.fyEnd}::date`;
+  // Only the tracker's: books brought in from another package (books-import.ts) are the books.
+  if (!input.keepImport) await tx`delete from journals where kind = 'import' and ledger_import_id is null and date <= ${input.fyEnd}::date`;
   for (const f of input.figures) {
     await tx`insert into year_end_figures (fy_end, account_id, amount_cents) values (${input.fyEnd}, ${f.accountId}, ${f.amountCents})`;
   }

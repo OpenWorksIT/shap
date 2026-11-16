@@ -16,7 +16,7 @@
  * YTD columns are the balances (CData: https://cdn.cdata.com/help/DXM/py/pg_accountingtable-trialbalance.htm).
  */
 import ExcelJS from 'exceljs';
-import type { AccountType } from '@shap/shared';
+import type { AccountType, StatementLineKey } from '@shap/shared';
 import { badRequest } from '../../lib/errors.js';
 import { parseCsv } from '../clients.js';
 import { guessDayOrder, parseDate, parseMoney, type DayOrder } from '../movein.js';
@@ -27,6 +27,8 @@ export interface LedgerAccount {
   name: string;
   /** From a chart-of-accounts export, or the type its package gave it, when the file says. */
   type: AccountType | null;
+  /** The package's own words for its type ("Fixed Asset", "Non-current Liability"), when the file says. */
+  typeWords?: string;
 }
 /** A trial balance line: debit positive. */
 export interface TbLine extends LedgerAccount {
@@ -211,6 +213,54 @@ export function typeFromWords(words: string): AccountType | null {
   return null;
 }
 
+/**
+ * Where a new account sits on the statements, from the package's type words and its name: Xero's,
+ * QuickBooks' and Sage's types say more than Shap's six (a fixed asset, a non-current liability,
+ * the bank), and the statements need it (IFRS for SMEs 4.4: current and non-current). Null: the
+ * books' own default for the type.
+ */
+export function lineFromWords(typeWords: string, name: string, type: AccountType | null): StatementLineKey | null {
+  const t = typeWords.toLowerCase();
+  const n = name.toLowerCase();
+  const both = `${t} ${n}`;
+  switch (type) {
+    case 'asset':
+      if (/intangible|goodwill|software|patent|trade ?mark|amortis|amortiz/.test(both)) return 'intangibles';
+      if (/fixed asset|non-?current asset|property|plant|equipment|vehicle|furniture|computer|machinery|building|land\b|accumulated depreciation/.test(both)) return 'ppe';
+      if (/^bank|\bbank\b|cash|petty|savings|cheque|current account/.test(t) || /^(bank|cash|petty cash)\b|savings|cheque account|business (bank|account)/.test(n)) return 'cash';
+      if (/inventor|stock/.test(both)) return 'inventories';
+      if (/receivable|debtor|\ba\/r\b/.test(both)) return 'trade_receivables';
+      if (/investment/.test(both)) return 'investments';
+      return 'other_current_assets';
+    case 'liability':
+      if (/overdraft/.test(both)) return 'bank_overdraft';
+      if (/non-?current|long[- ]term/.test(t)) return /shareholder|director|member|owner/.test(n) ? 'shareholder_loans' : 'borrowings_non_current';
+      if (/income tax|provisional tax|company tax|tax payable/.test(n)) return 'current_tax_liability';
+      if (/credit card|loan|borrowing/.test(both)) return /shareholder|director|member|owner/.test(n) ? 'shareholder_loans_current' : 'borrowings_current';
+      if (/payable|creditor|\ba\/p\b|vat|gst|paye|uif|sdl|accrual|wages/.test(both)) return 'trade_payables';
+      return 'other_current_liabilities';
+    case 'equity':
+      if (/retained|current year earnings|accumulated (profit|loss)/.test(n)) return 'retained_earnings';
+      if (/dividend|drawing|distribution/.test(n)) return /drawing/.test(n) ? 'owners_contributions' : 'distributions';
+      if (/share capital|ordinary share|issued capital|stated capital/.test(n)) return 'share_capital';
+      if (/capital|contribution|owner|partner|member|current account/.test(n)) return 'owners_contributions';
+      return 'reserves';
+    case 'income':
+      if (/interest/.test(n)) return 'finance_income';
+      if (/other income|gain|sundry income|rental income|insurance claim/.test(both)) return 'other_income';
+      return 'revenue';
+    case 'cost_of_sales':
+      return 'cost_of_sales';
+    case 'expense':
+      if (/income tax|tax expense|company tax|taxation/.test(n)) return 'income_tax';
+      if (/^interest|interest (paid|expense)|finance (cost|charge)/.test(n)) return 'finance_costs';
+      if (/cost of (goods|sales)|direct cost|cogs|purchases/.test(both)) return 'cost_of_sales';
+      return 'operating_expenses';
+    default:
+      return null;
+  }
+}
+
 const SKIP_ROW = /^(total|opening balance|beginning balance|closing balance|balance b\/?f|balance brought forward|brought forward|carried forward|net movement|grand total)/i;
 
 function datesInTitle(rows: string[][], upTo: number, order: DayOrder): { asAt: string | null; from: string | null; to: string | null } {
@@ -280,7 +330,7 @@ export function readLedger(name: string, rows: string[][]): LedgerFile {
       const key = `${a.code.toLowerCase()}|${a.name.toLowerCase()}`;
       const prev = byKey.get(key);
       if (prev) prev.cents += cents;
-      else byKey.set(key, { ...a, type: typeFromWords(get(r, 'type')), cents });
+      else byKey.set(key, { ...a, type: typeFromWords(get(r, 'type')), typeWords: get(r, 'type'), cents });
       if (i > MAX_ROWS) break;
     }
     return { ...empty, kind: 'trialBalance', source, asAt, tb: [...byKey.values()].filter((l) => l.cents !== 0), skipped };
@@ -319,6 +369,7 @@ export function readLedger(name: string, rows: string[][]): LedgerFile {
     lines.push({
       ...a,
       type: typeFromWords(get(r, 'type')),
+      typeWords: get(r, 'type'),
       date,
       description: (get(r, 'description') || source || reference).slice(0, 300),
       reference: reference.slice(0, 120),

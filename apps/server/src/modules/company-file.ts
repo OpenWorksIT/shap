@@ -238,7 +238,8 @@ export async function restoreCompanyFile(tx: Tx, raw: unknown) {
     await tx`insert into year_ends (fy_end, note) values (${y.fyEnd}, ${y.note}) on conflict (fy_end) do update set note = excluded.note`;
     await tx`delete from year_end_figures where fy_end = ${y.fyEnd}`;
     // The tracker's own trial-balance journal is superseded by the accountant's figures.
-    await tx`delete from journals where kind = 'import' and date <= ${y.fyEnd}::date`;
+    // (Only the tracker's: books brought in from another package are the books, books-import.ts.)
+    await tx`delete from journals where kind = 'import' and ledger_import_id is null and date <= ${y.fyEnd}::date`;
     for (const [code, cents] of Object.entries(y.figures)) {
       await tx`insert into year_end_figures (fy_end, account_id, amount_cents) values (${y.fyEnd}, ${await acc(code)}, ${cents})`;
     }
