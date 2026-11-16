@@ -74,9 +74,34 @@ function cellText(v: ExcelJS.CellValue): string {
   return '';
 }
 
+/** How much an Excel file (a zip) unpacks to, from its own directory, before anything is unpacked. */
+export function unpackedSize(bytes: Buffer): number | null {
+  // The end of the central directory: its signature, within the last 64 KB (a comment may follow it).
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65_557); i--) {
+    if (bytes.readUInt32LE(i) !== 0x06054b50) continue;
+    const entries = bytes.readUInt16LE(i + 10);
+    let at = bytes.readUInt32LE(i + 16);
+    let total = 0;
+    for (let n = 0; n < entries; n++) {
+      if (at + 46 > bytes.length || bytes.readUInt32LE(at) !== 0x02014b50) return null;
+      const size = bytes.readUInt32LE(at + 24);
+      // A ZIP64 entry (0xFFFFFFFF) is bigger than any export Shap reads.
+      if (size === 0xffffffff) return Number.MAX_SAFE_INTEGER;
+      total += size;
+      at += 46 + bytes.readUInt16LE(at + 28) + bytes.readUInt16LE(at + 30) + bytes.readUInt16LE(at + 32);
+    }
+    return total;
+  }
+  return null;
+}
+const MAX_UNPACKED = 200 * 1024 * 1024;
+
 /** A CSV or Excel file (its first sheet) as rows of cell text. */
 export async function sheetRows(name: string, bytes: Buffer): Promise<string[][]> {
   if (/\.xlsx$/i.test(name) || (bytes[0] === 0x50 && bytes[1] === 0x4b)) {
+    // A small file that unpacks to something huge isn't an export: refused before it's opened.
+    const size = unpackedSize(bytes);
+    if (size == null || size > MAX_UNPACKED) throw badRequest(`“${name}” isn’t a spreadsheet Shap can read: export it again as Excel (.xlsx) or CSV.`);
     const wb = new ExcelJS.Workbook();
     try {
       await wb.xlsx.load(bytes as unknown as ArrayBuffer);

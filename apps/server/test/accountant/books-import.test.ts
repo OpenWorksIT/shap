@@ -4,7 +4,8 @@
  * the way each package exports them; every figure made up.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { readLedger, splitAccount, transactionsOf } from '../../src/modules/import/ledger.js';
+import ExcelJS from 'exceljs';
+import { readLedger, sheetRows, splitAccount, transactionsOf, unpackedSize } from '../../src/modules/import/ledger.js';
 import { parseCsv } from '../../src/modules/clients.js';
 import { balance, expectCleanAudit, login, type TestEnv, setup } from '../helpers.js';
 
@@ -99,6 +100,24 @@ describe('reading the packages’ exports', () => {
     ]);
     expect(splitAccount('4000 · Sales')).toEqual({ code: '4000', name: 'Sales' });
     expect(splitAccount('1000/000')).toEqual({ code: '1000/000', name: '1000/000' });
+  });
+
+  it('reads an Excel export’s first sheet, and refuses a file that unpacks to far more than it is', async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Trial Balance');
+    for (const row of parseCsv(XERO_TB)) ws.addRow(row);
+    const bytes = Buffer.from(await wb.xlsx.writeBuffer());
+    expect(unpackedSize(bytes)).toBeGreaterThan(0);
+    const f = readLedger('TB.xlsx', await sheetRows('TB.xlsx', bytes));
+    expect([f.kind, f.asAt, f.tb.length]).toEqual(['trialBalance', '2026-10-31', 3]);
+    // A made-up zip whose directory says one entry unpacks to 4 GB.
+    const bomb = Buffer.alloc(46 + 22);
+    bomb.writeUInt32LE(0x02014b50, 0);
+    bomb.writeUInt32LE(0xfffffffe, 24);
+    bomb.writeUInt32LE(0x06054b50, 46);
+    bomb.writeUInt16LE(1, 46 + 10);
+    bomb.writeUInt32LE(0, 46 + 16);
+    await expect(sheetRows('big.xlsx', Buffer.concat([Buffer.from('PK'), bomb.subarray(2)]))).rejects.toThrow(/isn’t a spreadsheet Shap can read/);
   });
 
   it('says when a day’s lines don’t balance: the export is missing accounts', () => {
