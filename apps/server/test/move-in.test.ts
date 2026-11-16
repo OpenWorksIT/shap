@@ -99,6 +99,26 @@ describe('reading other packages’ exports', () => {
     expect(f('a', XERO_BILLS).kind).toBe('costs');
   });
 
+  it('reads a Xero trial balance from its year-to-date columns, not the month’s', () => {
+    // Xero's Trial Balance export: the month's Debit and Credit, then the year's (the balances).
+    const xero = `Trial Balance
+Fictional Electrical (Pty) Ltd
+As at 31 October 2026
+Account,Account Code,Account Type,Debit,Credit,YTD Debit,YTD Credit
+Business Bank Account,090,Bank,"1,200.00",,"18,400.00",
+Sales,200,Revenue,,"3,000.00",,"41,000.00"
+Wages,477,Expense,"1,800.00",,"22,600.00",
+Total,,,"3,000.00","3,000.00","41,000.00","41,000.00"
+`;
+    const x = readExportFile('Trial_Balance.csv', xero);
+    expect(x.kind).toBe('trialBalance');
+    expect(x.tb!.map((l) => [l.code, l.cents])).toEqual([
+      ['090', 1840000],
+      ['200', -4100000],
+      ['477', 2260000],
+    ]);
+  });
+
   it('turns rows into invoices with lines, VAT and what was paid', () => {
     const x = readExportFile('x', XERO_INVOICES);
     expect(x.docs).toHaveLength(2); // the void one left out
