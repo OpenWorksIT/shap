@@ -187,7 +187,7 @@ describe('bringing another package’s books in', () => {
     // Sales maps by its name to the Sales the trial balance made.
     expect(accounts.find((a: { name: string }) => a.name === 'Sales').how).toBe('same name or code');
     const r = await post('/api/books-import/apply', { files: [file('Journal.csv', QBO_JOURNAL)], mapping: map(accounts, chosen) });
-    expect(r.results).toEqual([{ name: 'Journal.csv', kind: 'ledger', journals: 2 }]);
+    expect(r.results).toMatchObject([{ name: 'Journal.csv', kind: 'ledger', journals: 2 }]);
     expect(await balance(env.sql, 'bank', '2026-11-30')).toBe(1_840_000 + 575_000);
     expect(await balance(env.sql, 'vat', '2026-11-30')).toBe(-75_000);
     await post('/api/books-import/apply', { files: [file('Journal.csv', QBO_JOURNAL)], mapping: map(accounts, chosen) });

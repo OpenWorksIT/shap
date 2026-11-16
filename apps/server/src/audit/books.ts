@@ -103,12 +103,17 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
   // which have no document behind them. What's left has to agree with the documents to the cent.
   const posted = async (keys: string[]) => {
     const [r] = await db<{ t: number }[]>`select coalesce(sum(l.amount_cents), 0)::bigint as t from ledger_totals l join accounts a on a.id = l.account_id where a.system_key = any(${keys}) and l.source <> 'year_end'`;
-    const [j] = await db<{ t: number }[]>`
-      select coalesce(sum(jl.debit_cents - jl.credit_cents), 0)::bigint as t from journal_lines jl join journals j on j.id = jl.journal_id join accounts a on a.id = jl.account_id
+    // Journals by hand, and those brought in from another package (books-import.ts), apart.
+    const [j] = await db<{ t: number; brought: number }[]>`
+      select coalesce(sum(jl.debit_cents - jl.credit_cents) filter (where j.ledger_import_id is null), 0)::bigint as t,
+             coalesce(sum(jl.debit_cents - jl.credit_cents) filter (where j.ledger_import_id is not null), 0)::bigint as brought
+      from journal_lines jl join journals j on j.id = jl.journal_id join accounts a on a.id = jl.account_id
       where a.system_key = any(${keys}) and j.kind = any(${BY_HAND})`;
-    return { app: n(r!.t) - n(j!.t), byHand: n(j!.t) };
+    return { app: n(r!.t) - n(j!.t) - n(j!.brought), byHand: n(j!.t), brought: n(j!.brought) };
   };
-  const besides = (byHand: number) => (byHand ? `; journals by hand add ${byHand < 0 ? '−' : ''}${rand(byHand)} to the account` : '');
+  const signed = (c: number) => `${c < 0 ? '−' : ''}${rand(c)}`;
+  const besides = (byHand: number, brought = 0) =>
+    `${byHand ? `; journals by hand add ${signed(byHand)} to the account` : ''}${brought ? `; what was brought in from another package adds ${signed(brought)}, which is the package’s, not Shap’s to check` : ''}`;
   const suspense = await balance('suspense');
   if (suspense === 0) ok('nothing is waiting in suspense');
   else warn(`${rand(suspense)} is in suspense: money not yet put where it belongs (or a change to an agreed year)`);
@@ -120,7 +125,7 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
             - coalesce((select sum(r.amount_cents) from receipts r join documents i on i.id = r.invoice_id where i.kind = 'invoice' and i.status = 'issued'), 0))::bigint as expected
     from documents d where d.kind = 'invoice' and d.status = 'issued'`;
   const debtors = await posted(['receivables']);
-  if (debtors.app === n(deb!.expected)) ok(`the debtors account agrees with the open invoices (${rand(debtors.app)}${besides(debtors.byHand)})`);
+  if (debtors.app === n(deb!.expected)) ok(`the debtors account agrees with the open invoices (${rand(debtors.app)}${besides(debtors.byHand, debtors.brought)})`);
   else fail(`the debtors account (${rand(debtors.app)}, not counting journals by hand or year-end adjustments) and the open invoices (${rand(n(deb!.expected))}) differ by ${rand(debtors.app - n(deb!.expected))}`);
 
   const [cred] = await db<{ owing: number }[]>`
@@ -129,7 +134,7 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
     from costs c join payment_sources s on s.id = c.source_id and s.role = 'bills'`;
   const payables = await posted(['payables']);
   const creditors = -payables.app;
-  if (creditors === n(cred!.owing)) ok(`the creditors account agrees with the unpaid bills (${rand(creditors)}${besides(-payables.byHand)})`);
+  if (creditors === n(cred!.owing)) ok(`the creditors account agrees with the unpaid bills (${rand(creditors)}${besides(-payables.byHand, -payables.brought)})`);
   else fail(`the creditors account (${rand(creditors)}, not counting journals by hand or year-end adjustments) and the unpaid bills (${rand(n(cred!.owing))}) differ by ${rand(creditors - n(cred!.owing))}`);
 
   // Each VAT period of the last year: the VAT account's movement from documents, costs and assets
@@ -146,7 +151,16 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
       periods.set(p.start, p);
     }
     const off: string[] = [];
+    // A period whose VAT came in from another package: its return is the package's, not Shap's to check.
+    let brought = 0;
     for (const p of periods.values()) {
+      const [imp] = await db<{ t: number }[]>`
+        select coalesce(sum(jl.debit_cents - jl.credit_cents), 0)::bigint as t from journal_lines jl join journals j on j.id = jl.journal_id join accounts a on a.id = jl.account_id
+        where a.system_key = 'vat' and j.ledger_import_id is not null and j.date between ${p.start}::date and ${p.end}::date`;
+      if (n(imp!.t) !== 0) {
+        brought++;
+        continue;
+      }
       const f = await vat201(db, p.start, p.end);
       const [mv] = await db<{ t: number }[]>`
         select coalesce(sum(l.amount_cents), 0)::bigint as t from ledger_totals l join accounts a on a.id = l.account_id
@@ -155,7 +169,8 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
       // The VAT account is a liability (credit negative): output VAT less input VAT is its movement, negated.
       if (-n(mv!.t) !== f.field20) off.push(`${p.start} to ${p.end} (VAT201 ${rand(f.field20)}, books ${rand(-n(mv!.t))})`);
     }
-    if (!off.length) ok(`the VAT account moved by what Shap's VAT201 shows for each period of the last year (${periods.size} periods)`);
+    const notOurs = brought ? `; in ${brought} the VAT came in from another package, so that return is the package’s, not Shap’s to work out or check` : '';
+    if (!off.length) ok(`the VAT account moved by what Shap's VAT201 shows for each period of the last year (${periods.size - brought} of ${periods.size} periods${notOurs})`);
     else fail(`the VAT201 and the VAT account disagree for ${few(off, 3)}`);
   } else ok('not registered for VAT: no VAT201s to check');
 
@@ -166,7 +181,7 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
   // Pay runs and EMP201 payments post as the app's own journals (payroll, sars): counted.
   const payroll = await posted(['paye_payable', 'uif_payable', 'sdl_payable']);
   const owedSars = -payroll.app;
-  if (owedSars === n(sars[0]!.owed)) ok(`PAYE, UIF and SDL owed agree with the pay runs less the EMP201 payments (${rand(owedSars)}${besides(-payroll.byHand)})`);
+  if (owedSars === n(sars[0]!.owed)) ok(`PAYE, UIF and SDL owed agree with the pay runs less the EMP201 payments (${rand(owedSars)}${besides(-payroll.byHand, -payroll.brought)})`);
   else fail(`PAYE, UIF and SDL owed in the books (${rand(owedSars)}, not counting journals by hand or year-end adjustments) and by the pay runs less the EMP201 payments (${rand(n(sars[0]!.owed))}) differ by ${rand(owedSars - n(sars[0]!.owed))}`);
 
   // ---------------------------------------------------------------- agreed years

@@ -348,6 +348,8 @@ interface TaxData {
   fy: { start: string; end: string; label: string };
   prev: { start: string; end: string; label: string };
   asAt: string;
+  /** How far books brought in from another package reach: projected from there. */
+  broughtInThrough: string | null;
   months: number;
   lines: TaxLine[];
   assessedLossCents: number;
@@ -361,6 +363,8 @@ interface TaxData {
   payments?: { id: string; date: string; amountCents: number; sourceName: string; reference: string }[];
   partners?: { name: string; shareBp: number }[];
   distributedCents?: number;
+  /** A trust's distributions in books brought in from another package: shown, not taken off. */
+  distributedBroughtInCents?: number;
   saved: { id: string; period: number; asAt: string; taxableIncomeCents: number; taxCents: number; payableCents: number; note: string; createdAt: string }[];
 }
 
@@ -556,6 +560,7 @@ export function ProvisionalTax() {
           <div className="xs muted">
             {settings.companyName}
             {settings.regNumber ? ` · ${settings.regNumber}` : ''} · actual to {formatDate(data.asAt)} ({data.months} month{data.months === 1 ? '' : 's'})
+            {data.broughtInThrough && data.broughtInThrough === data.asAt ? ` · the books brought in from another package reach ${formatDate(data.broughtInThrough)}` : ''}
           </div>
         </div>
         <table className="table statement tax-sheet">
@@ -619,6 +624,11 @@ export function ProvisionalTax() {
                 <td>
                   Less: this year’s income given to South African beneficiaries
                   <div className="xs muted">Distributions this year marked as this year’s income to a beneficiary living in South Africa: they’re taxed on it, not the trust. Given to someone abroad, or out of capital, it stays the trust’s.</div>
+                  {data.distributedBroughtInCents ? (
+                    <div className="xs warn-text">
+                      The books brought in from another package show {formatZar(data.distributedBroughtInCents)} distributed this year. Shap can’t tell which part is this year’s income to beneficiaries in South Africa, so none of it is taken off here: your accountant works that out (section 25B), and this estimate is only right once they have.
+                    </div>
+                  ) : null}
                 </td>
                 <td className="num">{formatZar(data.distributedCents ?? 0)}</td>
               </tr>

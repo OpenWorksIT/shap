@@ -6,7 +6,7 @@
  * them in at once. The accounts chosen are remembered, so next period's files map by themselves.
  */
 import { useState } from 'react';
-import { ACCOUNT_TYPES, formatDate, type AccountType } from '@shap/shared';
+import { ACCOUNT_TYPES, formatDate, STATEMENT_LINES, type AccountType } from '@shap/shared';
 import { ErrorBox, Field, Icon, Loading, Money, useToast } from '../components/ui';
 import { api, ApiError } from '../lib/api';
 import { useApi } from '../lib/hooks';
@@ -23,14 +23,34 @@ interface ReadFile {
   debits: number;
   credits: number;
   already: number;
+  outside: number;
+  columns: string;
   skipped: string[];
+}
+interface CheckResult {
+  created: number;
+  results: {
+    name: string;
+    kind: 'ledger' | 'trialBalance';
+    from: string;
+    to: string;
+    journals: number;
+    yearFrom?: string;
+    adjustments?: { code: string; name: string; cents: number }[];
+    earlierYearsCents?: number;
+    ownEntries?: number;
+    opening?: boolean;
+  }[];
 }
 interface Theirs {
   code: string;
   name: string;
   type: AccountType | null;
   accountId: string | null;
-  how: 'as last time' | 'same name or code' | 'new';
+  how: 'as last time' | 'same name or code' | 'Shap’s own account for it' | 'new';
+  /** Where a new one sits on the statements, from their file's words for its kind. */
+  line: string | null;
+  typeWords?: string;
 }
 interface Read {
   files: ReadFile[];
@@ -56,7 +76,7 @@ const KIND_WORDS = { trialBalance: 'Trial balance', ledger: 'General ledger', un
 const HOW: { name: string; steps: string }[] = [
   { name: 'Xero', steps: 'Reports → Trial Balance (at the date) and General Ledger Detail or Account Transactions (for the period) → Export → Excel or CSV.' },
   { name: 'QuickBooks Online', steps: 'Reports → Trial Balance (at the date) and Journal (for the period) → Export to Excel.' },
-  { name: 'Sage Accounting', steps: 'Reports → Trial Balance and Detailed General Ledger (or Account Transactions) → Export to Excel.' },
+  { name: 'Sage Accounting', steps: 'Reports → Trial Balance “As of” the date, with “Summarise profit and loss values” ticked (so income and expenses are for the year), and Detailed General Ledger (or Account Transactions) → Export to Excel.' },
   { name: 'Sage Pastel', steps: 'Reports → Ledger → Trial Balance and Ledger Transactions → print to a file (Excel or CSV).' },
 ];
 
@@ -76,6 +96,7 @@ export default function BooksImport() {
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [check, setCheck] = useState<CheckResult | null>(null);
   const key = (a: { code: string; name: string }) => `${a.code}|${a.name}`;
 
   const look = async (next: typeof files) => {
@@ -105,23 +126,39 @@ export default function BooksImport() {
   const dateFor = (name: string, asAt: string) => {
     const next = files.map((f) => (f.name === name ? { ...f, asAt: asAt || null } : f));
     setFiles(next);
+    setCheck(null);
+  };
+  const body = () => ({
+    files,
+    mapping: (read?.accounts ?? []).map((a) => {
+      const m = mapping[key(a)] ?? '';
+      return { code: a.code, name: a.name, accountId: m && !m.startsWith('new:') ? m : null, newType: m.startsWith('new:') ? m.slice(4) : null };
+    }),
+  });
+  // Run it all, undone, to see what it would do: each trial balance's adjustments before they're made.
+  const checkFirst = async () => {
+    setBusy(true);
+    setError('');
+    setCheck(null);
+    try {
+      setCheck(await api<CheckResult>('/api/books-import/check', { body: body() }));
+    } catch (err) {
+      if (!(err instanceof ApiError)) console.error(err);
+      setError(err instanceof ApiError ? err.message : UNEXPECTED);
+    } finally {
+      setBusy(false);
+    }
   };
   const bringIn = async () => {
     if (!read) return;
     setBusy(true);
     setError('');
     try {
-      const body = {
-        files,
-        mapping: read.accounts.map((a) => {
-          const m = mapping[key(a)] ?? '';
-          return { code: a.code, name: a.name, accountId: m && !m.startsWith('new:') ? m : null, newType: m.startsWith('new:') ? m.slice(4) : null };
-        }),
-      };
-      const r = await api<{ created: number; results: { name: string; kind: string; journals: number }[] }>('/api/books-import/apply', { body });
+      const r = await api<CheckResult>('/api/books-import/apply', { body: body() });
       toast(`Brought in: ${r.results.map((x) => `${x.name} (${x.journals} ${x.journals === 1 ? 'journal' : 'journals'})`).join(', ')}${r.created ? `, with ${r.created} new ${r.created === 1 ? 'account' : 'accounts'}` : ''}`);
       setFiles([]);
       setRead(null);
+      setCheck(null);
       await list.reload();
     } catch (err) {
       if (!(err instanceof ApiError)) console.error(err);
@@ -142,7 +179,7 @@ export default function BooksImport() {
 
   const needsDate = read?.files.some((f, i) => f.kind === 'trialBalance' && !f.asAt && !files[i]?.asAt);
   const unmapped = read?.accounts.some((a) => !mapping[key(a)]);
-  const unread = read?.files.some((f) => f.kind === 'unknown');
+  const unread = read?.files.some((f) => f.kind === 'unknown' || f.outside > 0);
   return (
     <div className="stack-lg">
       <section className="panel panel-pad stack">
@@ -196,6 +233,8 @@ export default function BooksImport() {
                   {f.already > 0 && (
                     <span className="small warn-text">These books already have {f.already} entries in this period that weren’t brought in from a package: they’d be counted twice. Bring in a period these books don’t keep, or check before you go on.</span>
                   )}
+                  {f.kind !== 'unknown' && f.columns && <span className="xs muted">Read from {f.columns}.</span>}
+                  {f.outside > 0 && <span className="small warn-text">{f.outside} {f.outside === 1 ? 'line falls' : 'lines fall'} outside its period: check its dates (day or month first?) and export it again.</span>}
                   {f.skipped.length > 0 && f.kind !== 'unknown' && <span className="xs muted">Not read: {f.skipped.join('; ')}</span>}
                 </li>
               ))}
@@ -211,9 +250,11 @@ export default function BooksImport() {
                   <span className="grow small">
                     {a.code && <span className="muted">{a.code} </span>}
                     {a.name}
+                    {a.typeWords && <span className="xs muted"> · {a.typeWords} in their file</span>}
                     {a.how !== 'new' && <span className="xs muted"> ({a.how})</span>}
+                    {a.how === 'new' && a.line && <span className="xs muted"> · a new one goes on the statements as {STATEMENT_LINES[a.line as keyof typeof STATEMENT_LINES]?.label.toLowerCase() ?? a.line}</span>}
                   </span>
-                  <select className="select" aria-label={`Where ${a.name} goes`} value={mapping[key(a)] ?? ''} onChange={(e) => setMapping({ ...mapping, [key(a)]: e.target.value })} style={{ maxWidth: 320 }}>
+                  <select className="select" aria-label={`Where ${a.name} goes`} value={mapping[key(a)] ?? ''} onChange={(e) => (setMapping({ ...mapping, [key(a)]: e.target.value }), setCheck(null))} style={{ maxWidth: 320 }}>
                     <option value="">Choose…</option>
                     <optgroup label="A new account">
                       {ACCOUNT_TYPES.map((t) => (
@@ -237,9 +278,67 @@ export default function BooksImport() {
                 </li>
               ))}
             </ul>
-            <button className="btn primary big" disabled={busy || Boolean(needsDate) || Boolean(unmapped) || Boolean(unread)} onClick={() => void bringIn()}>
-              {busy ? 'Bringing them in…' : 'Bring them in'}
-            </button>
+            {!check ? (
+              <button className="btn primary big" disabled={busy || Boolean(needsDate) || Boolean(unmapped) || Boolean(unread)} onClick={() => void checkFirst()}>
+                {busy ? 'Checking…' : 'Check what it would do'}
+              </button>
+            ) : (
+              <div className="stack">
+                <h3>What bringing them in would do</h3>
+                {check.created > 0 && <p className="small">{check.created} new {check.created === 1 ? 'account' : 'accounts'} in these books.</p>}
+                {check.results.map((r) => (
+                  <div key={r.name} className="stack-sm">
+                    <strong className="small" data-private>
+                      {r.name}
+                    </strong>
+                    {r.kind === 'ledger' ? (
+                      <p className="small">
+                        {r.journals} {r.journals === 1 ? 'journal' : 'journals'}, {formatDate(r.from)} to {formatDate(r.to)}, as their package has them.
+                      </p>
+                    ) : (
+                      <>
+                        <p className="small">
+                          Brings what was brought in from the package to their trial balance at {formatDate(r.to)}: the income and expenses for {formatDate(r.yearFrom)} to {formatDate(r.to)} (these books’ year), the rest to date.
+                          {r.ownEntries ? ` Your own ${r.ownEntries} ${r.ownEntries === 1 ? 'entry' : 'entries'} in these books up to then stay on top of it.` : ''}
+                        </p>
+                        {r.opening && (
+                          <p className="small warn-text">
+                            These books begin with it: before it, the comparatives, the opening equity and cash, the changes in equity and the cash flows start from nil. For statements, bring in the trial balance at the year end before it first (and the one before that, for comparatives).
+                          </p>
+                        )}
+                        {r.earlierYearsCents ? (
+                          <p className="small warn-text">
+                            It gives the years before {formatDate(r.yearFrom)} <Money cents={Math.abs(r.earlierYearsCents)} /> {r.earlierYearsCents < 0 ? 'more' : 'less'} profit than what was brought in before: that goes to retained earnings on {formatDate(r.to)}. That’s a matter for the accountant (an earlier period’s figures changed in the package).
+                          </p>
+                        ) : null}
+                        {r.adjustments && r.adjustments.length > 0 ? (
+                          <ul className="list small" data-private>
+                            {r.adjustments.map((a) => (
+                              <li key={a.code + a.name} className="list-row">
+                                <span className="grow">
+                                  {a.code} {a.name}
+                                </span>
+                                <Money cents={a.cents} />
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="small">Nothing to move: what was brought in already gives these figures.</p>
+                        )}
+                      </>
+                    )}
+                  </div>
+                ))}
+                <div className="row wrap" style={{ gap: 8 }}>
+                  <button className="btn primary big" disabled={busy} onClick={() => void bringIn()}>
+                    {busy ? 'Bringing them in…' : 'Bring them in'}
+                  </button>
+                  <button className="btn quiet" disabled={busy} onClick={() => setCheck(null)}>
+                    Change something first
+                  </button>
+                </div>
+              </div>
+            )}
             {(needsDate || unmapped || unread) && <span className="xs muted">{unread ? 'Take out the file Shap couldn’t read first. ' : ''}{needsDate ? 'Give each trial balance its date. ' : ''}{unmapped ? 'Choose where each account goes.' : ''}</span>}
           </section>
         </>

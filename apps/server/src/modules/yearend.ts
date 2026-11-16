@@ -5,7 +5,7 @@ import { requireAccess, requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
-import { assertOpen, assessedLossBefore, sbcAnswer, getSettings, isIsoDate, q, today, freshTotals, noteShapFigures } from '../lib/books.js';
+import { assertOpen, assessedLossBefore, broughtInThrough, sbcAnswer, getSettings, isIsoDate, q, today, freshTotals, noteShapFigures } from '../lib/books.js';
 import { badRequest, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 
@@ -25,7 +25,16 @@ export async function taxFigures(db: Db, businessType: string, fy: { start: stri
   const kind = entity(businessType).taxedAs;
   const partners = kind === 'partners' ? await db<{ name: string; shareBp: number }[]>`select name, share_bp from partners where active order by created_at` : [];
   const [d] = kind === 'trust' ? await db<{ t: number }[]>`select coalesce(sum(gross_cents), 0)::bigint as t from dividends where conduit and declared_on between ${fy.start}::date and ${fy.end}::date` : [{ t: 0 }];
-  return { partners: partners.map((p) => ({ name: p.name, shareBp: p.shareBp })), distributedCents: Number(d!.t) };
+  // What books brought in from another package show distributed (the dividends account, debit): not
+  // taken off, since Shap can't tell which part is this year's income to beneficiaries in South
+  // Africa; shown, so it's never missed (SARS review of 1.28).
+  const [b] =
+    kind === 'trust'
+      ? await db<{ t: number }[]>`
+          select coalesce(sum(jl.debit_cents - jl.credit_cents), 0)::bigint as t from journal_lines jl join journals j on j.id = jl.journal_id join accounts a on a.id = jl.account_id
+          where a.system_key = 'dividends' and j.ledger_import_id is not null and j.date between ${fy.start}::date and ${fy.end}::date`
+      : [{ t: 0 }];
+  return { partners: partners.map((p) => ({ name: p.name, shareBp: p.shareBp })), distributedCents: Number(d!.t), distributedBroughtInCents: Number(b!.t) };
 }
 
 /**
@@ -160,6 +169,9 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
     // Complete months only, unless told otherwise: the month in progress would drag the average down.
     const lastFull = monthEnd(addMonths(today(), -1));
     let asAt = isIsoDate(asAtParam) ? asAtParam : lastFull < fy.start ? today() : lastFull > fy.end ? fy.end : lastFull;
+    // Books brought in from another package reach only so far: projected from there.
+    const brought = await broughtInThrough(sql);
+    if (!isIsoDate(asAtParam) && brought && brought >= fy.start && brought < asAt) asAt = brought;
     if (asAt > fy.end) asAt = fy.end;
     if (asAt < fy.start) throw badRequest('That date is before the financial year starts');
     const months = monthsBetween(fy.start, asAt).filter((m) => monthEnd(`${m}-01`) <= asAt).length || 1;
@@ -194,6 +206,7 @@ export function registerYearEndRoutes(app: FastifyInstance, ctx: Ctx): void {
     return {
       fy,
       asAt,
+      broughtInThrough: brought,
       months,
       prev,
       lines,

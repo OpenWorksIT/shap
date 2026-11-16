@@ -128,6 +128,15 @@ export async function sbcAnswer(db: Db, fyEnd: string, businessType: string): Pr
   return r ? { sbc: r.sbc, said: r.fyEnd === fyEnd, from: r.fyEnd } : { sbc: null, said: false, from: null };
 }
 
+/**
+ * How far books brought in from another package reach (books-import.ts), or null: a projection to a
+ * full year counts from there, not from today (the months after it aren't in the books yet).
+ */
+export async function broughtInThrough(db: Db): Promise<string | null> {
+  const [r] = await db<{ d: string | null }[]>`select max(date_to)::text as d from ledger_imports`;
+  return r?.d ?? null;
+}
+
 export async function getSettings(db: Db): Promise<SettingsRow> {
   const [s] = await db<SettingsRow[]>`select * from settings where id`;
   return s!;

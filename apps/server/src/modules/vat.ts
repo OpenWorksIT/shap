@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { requireAccess } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db } from '../db/index.js';
-import { getSettings, today, freshTotals } from '../lib/books.js';
+import { broughtInThrough, getSettings, today, freshTotals } from '../lib/books.js';
 
 /**
  * Taxable supplies, roughly: income in the books (VAT excluded), leaving out profit on selling
@@ -15,8 +15,11 @@ import { getSettings, today, freshTotals } from '../lib/books.js';
  * calendar year (VAT Act s23). So besides the 12 months to today, every 12-month run ending on
  * a month end in the last two years is checked.
  */
-export async function vatStatus(db: Db, on = today()) {
+export async function vatStatus(db: Db, asked = today()) {
   const settings = await getSettings(db);
+  // Books brought in from another package reach only so far: the 12 months to there, not to today.
+  const brought = await broughtInThrough(db);
+  const on = asked === today() && brought && brought < asked ? brought : asked;
   const from = addMonths(on, -12);
   const lastFull = monthEnd(addMonths(on, -1));
   const paceFrom = monthStart(addMonths(lastFull, -2));
@@ -56,7 +59,7 @@ export async function vatStatus(db: Db, on = today()) {
   const peakTo = peak.to;
   const pace12Cents = Number(r!.last3) * 4;
   const w = vatWatch(peak12Cents, pace12Cents, on, crossed ? crossed.to : on);
-  return { registered: settings.vatRegistered, last12Cents, peak12Cents, peakTo, pace12Cents, ...w, state: settings.vatRegistered ? null : w.state };
+  return { registered: settings.vatRegistered, broughtInThrough: on === brought ? brought : null, last12Cents, peak12Cents, peakTo, pace12Cents, ...w, state: settings.vatRegistered ? null : w.state };
 }
 
 export function registerVatRoutes(app: FastifyInstance, ctx: Ctx): void {

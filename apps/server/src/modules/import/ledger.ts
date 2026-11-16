@@ -55,6 +55,10 @@ export interface LedgerFile {
   lines: GlLine[];
   /** Rows not read, and why (shown in the preview). */
   skipped: string[];
+  /** Ledger lines dated outside the file's own period (from its title): refused. */
+  outside: number;
+  /** Which of its columns the figures were read from (shown in the preview). */
+  columns: string;
 }
 
 const MAX_ROWS = 200_000;
@@ -65,7 +69,8 @@ const MAX_COLUMNS = 200;
 function cellText(v: ExcelJS.CellValue): string {
   if (v == null) return '';
   if (v instanceof Date) return v.toISOString().slice(0, 10);
-  if (typeof v === 'number') return String(v);
+  // A whole number as it is (an account code); any other to its cents, so "1234.567" isn't read as thousands.
+  if (typeof v === 'number') return Number.isInteger(v) ? String(v) : v.toFixed(2);
   if (typeof v === 'string') return v.trim();
   if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
   if (typeof v === 'object') {
@@ -143,7 +148,10 @@ const COLUMNS = {
   ytdDebit: ['ytddebit', 'debitytd', 'debityeartodate', 'yeartodatedebit'],
   ytdCredit: ['ytdcredit', 'credityeartodate', 'creditytd', 'yeartodatecredit'],
   amount: ['amount', 'netamount', 'value'],
-  balance: ['balance', 'closingbalance', 'netbalance', 'ytdbalance'],
+  balance: ['balance', 'closingbalance', 'netbalance', 'ytdbalance', 'endingbalance', 'balanceatend'],
+  opening: ['openingbalance', 'opening', 'balancebf', 'broughtforward', 'beginningbalance', 'balanceatstart'],
+  closingDebit: ['closingdebit', 'debitclosing', 'closingbalancedebit', 'endingdebit'],
+  closingCredit: ['closingcredit', 'creditclosing', 'closingbalancecredit', 'endingcredit'],
 } as const;
 type Col = keyof typeof COLUMNS;
 
@@ -261,7 +269,18 @@ export function lineFromWords(typeWords: string, name: string, type: AccountType
   }
 }
 
-const SKIP_ROW = /^(total|opening balance|beginning balance|closing balance|balance b\/?f|balance brought forward|brought forward|carried forward|net movement|grand total)/i;
+/** A row of totals in a trial balance: the whole cell is the word (an account can be called "Total…"). */
+const TB_TOTAL = /^(grand )?totals?:?$|^total (for|of) /i;
+/** An opening or closing row in a ledger: the whole text is the phrase ("Opening Balance Equity" is an account). */
+const LEDGER_BALANCE = /^(opening|beginning|closing|ending) balance$|^balance (b\/?f|c\/?f|brought forward|carried forward)$|^(brought|carried) forward$|^net movement$/i;
+/** A row of totals under an account in a grouped ledger: "Total" and the account, or "Total for …". */
+const isGroupTotal = (text: string, heading: { code: string; name: string } | null) => {
+  const t = text.trim().toLowerCase();
+  if (/^(grand )?totals?:?$/.test(t) || /^total (for|of) /.test(t)) return true;
+  if (!heading || !t.startsWith('total ')) return false;
+  const rest = t.slice(6).trim();
+  return rest === heading.name.toLowerCase() || rest.includes(heading.name.toLowerCase()) || (Boolean(heading.code) && rest.includes(heading.code.toLowerCase()));
+};
 
 function datesInTitle(rows: string[][], upTo: number, order: DayOrder): { asAt: string | null; from: string | null; to: string | null } {
   const text = rows.slice(0, Math.max(upTo, 0)).map((r) => r.filter(Boolean).join(' ')).join('\n');
@@ -294,16 +313,36 @@ function guessSource(headers: string[], title: string): LedgerSource {
 /* ---------------------------------------------------------------- what's in a file */
 
 export function readLedger(name: string, rows: string[][]): LedgerFile {
-  const empty: LedgerFile = { name, kind: 'unknown', source: 'a spreadsheet', asAt: null, from: null, to: null, tb: [], lines: [], skipped: [] };
+  const empty: LedgerFile = { name, kind: 'unknown', source: 'a spreadsheet', asAt: null, from: null, to: null, tb: [], lines: [], skipped: [], outside: 0, columns: '' };
   const at = findHeader(rows);
   if (at < 0) return { ...empty, skipped: ['No row of headings with an account and a debit, credit or amount column in the first 25 rows'] };
   const headers = rows[at]!;
   const m = mapColumns(headers);
   const body = rows.slice(at + 1);
   const get = (r: string[], c: Col) => (m[c] == null ? '' : (r[m[c]!] ?? '').trim());
-  const order = guessDayOrder(body.map((r) => get(r, 'date')).filter(Boolean));
   const title = rows.slice(0, at).map((r) => r.filter(Boolean).join(' ')).join(' ');
-  const { asAt, from, to } = datesInTitle(rows, at, order);
+  const rawDates = body.map((r) => get(r, 'date')).filter(Boolean);
+  // Which way round the dates are: the way that puts every line inside the title's period, if it
+  // gives one (QuickBooks set to month first, with every day 12 or less, reads either way).
+  let order = guessDayOrder(rawDates);
+  let period = datesInTitle(rows, at, order);
+  if (period.from && period.to) {
+    const fits = (o: DayOrder) => {
+      const p = datesInTitle(rows, at, o);
+      return p.from && p.to ? rawDates.every((d) => {
+        const x = parseDate(d, o);
+        return !x || (x >= p.from! && x <= p.to!);
+      }) : false;
+    };
+    if (!fits(order)) {
+      const other: DayOrder = order === 'dmy' ? 'mdy' : 'dmy';
+      if (fits(other)) {
+        order = other;
+        period = datesInTitle(rows, at, order);
+      }
+    }
+  }
+  const { asAt, from, to } = period;
   const source = guessSource(headers, title);
   const money = (r: string[], dr: Col, cr: Col) => (parseMoney(get(r, dr)) ?? 0) - (parseMoney(get(r, cr)) ?? 0);
   const skipped: string[] = [];
@@ -311,21 +350,38 @@ export function readLedger(name: string, rows: string[][]): LedgerFile {
   // A trial balance: no dates on its lines.
   const isTb = m.date == null || body.every((r) => !parseDate(get(r, 'date'), order));
   if (isTb) {
+    // The balances: the year to date's (Xero), the closing ones (Sage with opening and closing
+    // balances shown), or a debit and credit that are the balances. With an opening column, plain
+    // Debit and Credit are the period's movements, not balances.
+    const how =
+      m.ytdDebit != null || m.ytdCredit != null
+        ? 'ytd'
+        : m.closingDebit != null || m.closingCredit != null
+          ? 'closing'
+          : m.opening != null && m.balance != null
+            ? 'balance'
+            : m.debit != null || m.credit != null
+              ? 'dc'
+              : 'balance';
+    const used = { ytd: 'its year-to-date debit and credit columns', closing: 'its closing debit and credit columns', balance: 'its closing balance column', dc: 'its debit and credit columns' }[how];
+    if (how === 'dc' && m.opening != null)
+      return { ...empty, source, skipped: ['Its Debit and Credit columns are the period’s movements (it has an opening balance column): export it with the closing balances'], columns: used };
     const byKey = new Map<string, TbLine>();
     for (const [i, r] of body.entries()) {
       let label = get(r, 'account') || get(r, 'description');
       let codeCell = get(r, 'code');
       if (!codeCell && CODE_ONLY.test(label) && get(r, 'description')) [codeCell, label] = [label, get(r, 'description')];
       if (!label && !codeCell) continue;
-      if (SKIP_ROW.test(label) || SKIP_ROW.test(get(r, 'code'))) continue;
-      const cents =
-        m.ytdDebit != null || m.ytdCredit != null
-          ? money(r, 'ytdDebit', 'ytdCredit')
-          : m.debit != null || m.credit != null
-            ? money(r, 'debit', 'credit')
-            : (parseMoney(get(r, 'balance')) ?? parseMoney(get(r, 'amount')) ?? 0);
-      const blank = !get(r, m.ytdDebit != null ? 'ytdDebit' : 'debit') && !get(r, m.ytdCredit != null ? 'ytdCredit' : 'credit') && !get(r, 'balance') && !get(r, 'amount');
+      if (TB_TOTAL.test(label) || TB_TOTAL.test(codeCell)) continue;
+      const cell = (c: Col) => get(r, c);
+      const cents = how === 'ytd' ? money(r, 'ytdDebit', 'ytdCredit') : how === 'closing' ? money(r, 'closingDebit', 'closingCredit') : how === 'dc' ? money(r, 'debit', 'credit') : (parseMoney(get(r, 'balance')) ?? parseMoney(get(r, 'amount')) ?? 0);
+      const blank = how === 'ytd' ? !cell('ytdDebit') && !cell('ytdCredit') : how === 'closing' ? !cell('closingDebit') && !cell('closingCredit') : how === 'dc' ? !cell('debit') && !cell('credit') : !cell('balance') && !cell('amount');
       if (blank) continue; // a heading such as "Assets"
+      // Opening, the period's debits and credits, and closing: they must agree.
+      if (how === 'balance' && m.opening != null && (m.debit != null || m.credit != null)) {
+        const opening = parseMoney(get(r, 'opening')) ?? 0;
+        if (opening + money(r, 'debit', 'credit') !== cents) return { ...empty, source, skipped: [`Row ${at + i + 2}: its opening balance, debit and credit don’t add up to its closing balance`], columns: used };
+      }
       const a = splitAccount(label, codeCell);
       const key = `${a.code.toLowerCase()}|${a.name.toLowerCase()}`;
       const prev = byKey.get(key);
@@ -333,32 +389,39 @@ export function readLedger(name: string, rows: string[][]): LedgerFile {
       else byKey.set(key, { ...a, type: typeFromWords(get(r, 'type')), typeWords: get(r, 'type'), cents });
       if (i > MAX_ROWS) break;
     }
-    return { ...empty, kind: 'trialBalance', source, asAt, tb: [...byKey.values()].filter((l) => l.cents !== 0), skipped };
+    // A title "for the period 1 March 2026 to 30 June 2026" gives the year to date's start too.
+    return { ...empty, kind: 'trialBalance', source, asAt, from, tb: [...byKey.values()].filter((l) => l.cents !== 0), skipped, columns: used };
   }
 
   // Ledger lines, flat or grouped under each account.
   const flat = (m.account != null && m.account !== 0) || m.code != null;
+  // An account's type is only read from a column that says so ("Account Type"): a ledger's own
+  // "Type" column is the transaction's (Sage's "Tax Invoice"), never the account's.
+  const typeCol = m.type != null && /account/.test(norm(headers[m.type] ?? ''));
   let current: { code: string; name: string } | null = null;
   // Flat reports write a transaction's date, type and number on its first line only (QuickBooks'
   // Journal report): the lines after it, with an account and an amount but no date, are its too.
   let last: { date: string; source: string; reference: string; n: number } | null = null;
   let n = 0;
   const lines: GlLine[] = [];
+  const hasMoney = (r: string[]) => Boolean(get(r, 'debit') || get(r, 'credit') || get(r, 'amount') || get(r, 'balance'));
   for (const [i, r] of body.entries()) {
     const first = (r[0] ?? '').trim();
     let date = parseDate(get(r, 'date'), order);
-    let source = get(r, 'source');
+    let rowSource = get(r, 'source');
     let reference = get(r, 'reference');
     const hasAccount = !!(get(r, 'account') || get(r, 'code'));
-    if (!date && flat && last && hasAccount && !get(r, 'date') && !SKIP_ROW.test(first)) ({ date, source, reference } = last);
-    else if (date) last = { date, source, reference, n: ++n };
+    if (!date && flat && last && hasAccount && !get(r, 'date') && !TB_TOTAL.test(first)) ({ date, source: rowSource, reference } = last);
+    else if (date) last = { date, source: rowSource, reference, n: ++n };
     if (!date) {
-      // A row naming the account the lines below are in (grouped layouts), or totals to skip.
-      if (!flat && first && !SKIP_ROW.test(first) && !SKIP_ROW.test(get(r, 'date'))) current = splitAccount(first);
+      // A row naming the account the lines below are in (grouped layouts: no amounts on it), or an
+      // opening, closing or total row (amounts, or the phrase itself) to skip.
+      if (!flat && first && !hasMoney(r) && !LEDGER_BALANCE.test(first) && !isGroupTotal(first, current)) current = splitAccount(first);
       else if (flat && !hasAccount) last = null; // a transaction's total, or the gap after it
       continue;
     }
-    if (SKIP_ROW.test(get(r, 'description')) || SKIP_ROW.test(source) || SKIP_ROW.test(first)) continue;
+    // A dated opening or closing row: only the phrase, with nothing to say it's a transaction.
+    if (LEDGER_BALANCE.test(get(r, 'description')) && !rowSource && !reference) continue;
     const a = flat ? splitAccount(get(r, 'account'), get(r, 'code')) : current;
     if (!a || (!a.code && !a.name)) {
       skipped.push(`Row ${at + i + 2}: no account`);
@@ -368,18 +431,20 @@ export function readLedger(name: string, rows: string[][]): LedgerFile {
     if (!cents) continue;
     lines.push({
       ...a,
-      type: typeFromWords(get(r, 'type')),
-      typeWords: get(r, 'type'),
+      type: typeCol ? typeFromWords(get(r, 'type')) : null,
+      typeWords: typeCol ? get(r, 'type') : '',
       date,
-      description: (get(r, 'description') || source || reference).slice(0, 300),
+      description: (get(r, 'description') || rowSource || reference).slice(0, 300),
       reference: reference.slice(0, 120),
       cents,
       // Lines filled down from one first line are one transaction even when it has no number.
-      group: `${date}|${source.toLowerCase()}|${reference.toLowerCase()}${flat && !reference && last ? `|#${last.n}` : ''}`,
+      group: `${date}|${rowSource.toLowerCase()}|${reference.toLowerCase()}${flat && !reference && last ? `|#${last.n}` : ''}`,
     });
   }
   const dates = lines.map((l) => l.date).sort();
-  return { ...empty, kind: 'ledger', source, from: from ?? dates[0] ?? null, to: to ?? dates.at(-1) ?? null, lines, skipped };
+  const p = { from: from ?? dates[0] ?? null, to: to ?? dates.at(-1) ?? null };
+  const outside = p.from && p.to ? lines.filter((l) => l.date < p.from! || l.date > p.to!).length : 0;
+  return { ...empty, kind: 'ledger', source, from: p.from, to: p.to, lines, skipped, outside, columns: m.debit != null || m.credit != null ? 'its debit and credit columns' : 'its amount column' };
 }
 
 /**

@@ -19,6 +19,8 @@ create table if not exists ledger_imports (
   date_from date not null,
   date_to date not null,
   lines int not null default 0,
+  -- SHA-256 of the file as brought in: which export the figures came from.
+  file_hash text not null default '',
   created_by uuid references users(id),
   created_at timestamptz not null default now()
 );

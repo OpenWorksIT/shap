@@ -309,7 +309,15 @@ async function healthNow(db: Sql, now: string, log: { warn: (o: object, m: strin
     const [emp] = await tx<{ n: number }[]>`select count(*)::int as n from employees where active`;
     const [runs] = await tx<{ n: number }[]>`select count(*)::int as n from pay_runs where pay_date >= ${addDays(now, -100)}::date`;
     const employer = Boolean(s.payeRef?.trim()) || (featureOn(s.features, 'payroll') && (emp?.n ?? 0) > 0) || (runs?.n ?? 0) > 0;
-    const paid = await tx<{ d: string }[]>`select distinct paid_on::text as d from dividends where paid_on >= ${addDays(now, -100)}::date order by 1`;
+    // Dividends paid: Shap's own records, and dividends in ledgers brought in from another package
+    // (the day each was declared there: a trial balance's own journal has no such day).
+    const paid = await tx<{ d: string }[]>`
+      select distinct paid_on::text as d from dividends where paid_on >= ${addDays(now, -100)}::date
+      union
+      select distinct j.date::text from journals j join ledger_imports i on i.id = j.ledger_import_id and i.kind = 'ledger'
+        join journal_lines jl on jl.journal_id = j.id join accounts a on a.id = jl.account_id
+        where a.system_key = 'dividends' and jl.debit_cents > 0 and j.date >= ${addDays(now, -100)}::date
+      order by 1`;
     return {
       at: new Date().toISOString(),
       company: s.companyName,

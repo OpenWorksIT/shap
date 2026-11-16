@@ -18,6 +18,8 @@ interface Vat201Data {
   due: string;
   periods: { start: string; end: string }[];
   fields: Record<string, number>;
+  /** VAT brought in from another package in the period: not in the boxes, not Shap’s to check. */
+  importedVatCents: number;
 }
 
 const periodLabel = (p: { start: string; end: string }) =>
@@ -61,6 +63,11 @@ export function Vat201() {
       </div>
       <EstimateNote />
       {pending && <div className="banner signal small">This period hasn’t ended yet: the figures will still change.</div>}
+      {data.importedVatCents ? (
+        <div className="banner alert small">
+          The VAT account moved by <Money cents={data.importedVatCents} /> in this period through books brought in from another package (Accounts → From another package). Shap can’t split that into the VAT201’s boxes, so the boxes below leave it out: this period’s return is the one worked out in that package. Shap doesn’t work it out or check it.
+        </div>
+      ) : null}
       <section className="panel">
         <div className="panel-head spread">
           <strong>VAT201 for {periodLabel(data.period)}</strong>
@@ -96,6 +103,8 @@ interface TurnoverData {
   on: boolean;
   fy: { start: string; end: string; label: string };
   asAt: string;
+  /** How far books brought in from another package reach: projected from there. */
+  broughtInThrough: string | null;
   months: number;
   turnoverCents: number;
   projectedCents: number;
@@ -127,7 +136,10 @@ export function TurnoverTax() {
         <h3>Turnover tax, {data.fy.label}</h3>
         <div className="kpis compact">
           <div className="kpi">
-            <div className="xs muted">Turnover so far ({data.months} month{data.months === 1 ? '' : 's'})</div>
+            <div className="xs muted">
+              Turnover so far ({data.months} month{data.months === 1 ? '' : 's'}
+              {data.broughtInThrough && data.broughtInThrough === data.asAt ? `: the books brought in from another package reach ${formatDate(data.broughtInThrough)}` : ''})
+            </div>
             <strong>
               <Money cents={data.turnoverCents} whole />
             </strong>

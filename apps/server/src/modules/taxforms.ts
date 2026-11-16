@@ -8,7 +8,7 @@ import { addMonths, financialYear, lastBusinessDay, monthEnd, monthsBetween, tur
 import { z } from 'zod';
 import { requireAccess } from '../auth.js';
 import type { Ctx } from '../context.js';
-import { freshTotals, getSettings, today } from '../lib/books.js';
+import { broughtInThrough, freshTotals, getSettings, today } from '../lib/books.js';
 import { badRequest } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 
@@ -90,17 +90,26 @@ export function registerTaxFormRoutes(app: FastifyInstance, ctx: Ctx): void {
       periods.push(p);
       p = vatPeriod(addMonths(p.start, -1), cat, settings.fyEndMonth);
     }
-    return { category: cat, registered: settings.vatRegistered, vatNumber: settings.vatNumber, period, due: vat201Due(period.end), periods, fields: await vat201(sql, period.start, period.end) };
+    // VAT that came in from another package (books-import.ts): Shap can't split it into the boxes,
+    // so that period's return is the package's, not Shap's to work out or check.
+    const [imp] = await sql<{ t: string }[]>`
+      select coalesce(sum(jl.debit_cents - jl.credit_cents), 0)::bigint as t from journal_lines jl join journals j on j.id = jl.journal_id join accounts a on a.id = jl.account_id
+      where a.system_key = 'vat' and j.ledger_import_id is not null and j.date between ${period.start}::date and ${period.end}::date`;
+    return { category: cat, registered: settings.vatRegistered, vatNumber: settings.vatNumber, period, due: vat201Due(period.end), periods, fields: await vat201(sql, period.start, period.end), importedVatCents: -Number(imp?.t ?? 0) };
   });
 
   /** Turnover tax for a year of assessment: turnover so far, the year projected, the two interim payments. */
   app.get('/api/reports/turnover-tax', { preHandler: requireAccess('reports.view') }, async (req) => {
     const settings = await getSettings(sql);
-    const { fyEnd } = parse(z.object({ fyEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }), req.query);
+    const { fyEnd, asAt: asAtParam } = parse(z.object({ fyEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), asAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }), req.query);
     const fy = financialYear(fyEnd ?? today(), settings.fyEndMonth);
     const t = today();
     const lastFull = monthEnd(addMonths(t, -1));
-    const asAt = lastFull < fy.start ? t : lastFull > fy.end ? fy.end : lastFull;
+    let asAt = asAtParam ?? (lastFull < fy.start ? t : lastFull > fy.end ? fy.end : lastFull);
+    if (asAt > fy.end) asAt = fy.end;
+    // Books brought in from another package reach only so far: projected from there.
+    const brought = await broughtInThrough(sql);
+    if (!asAtParam && brought && brought >= fy.start && brought < asAt) asAt = brought;
     if (asAt < fy.start) throw badRequest('That year hasn’t started');
     const months = monthsBetween(fy.start, asAt).filter((m) => monthEnd(`${m}-01`) <= asAt).length || 1;
     await freshTotals(sql);
@@ -128,6 +137,7 @@ export function registerTaxFormRoutes(app: FastifyInstance, ctx: Ctx): void {
       on: settings.turnoverTax,
       fy,
       asAt,
+      broughtInThrough: brought,
       months,
       turnoverCents: actual,
       projectedCents: projected,

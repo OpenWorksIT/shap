@@ -65,6 +65,8 @@ export async function applyTracker(sql: Sql, plan: TrackerPlan, opts: ImportOpti
         select (select lock_date::text from settings where id) as lock_date, (select max(fy_end)::text from financial_statements where status = 'approved') as signed`;
       if (closed?.lockDate || closed?.signed) throw badRequest(`These books are closed up to ${closed.lockDate ?? closed.signed}, so they can’t be replaced by an import: reopen them first (Accounts → Locks), or import into new books.`);
       for (const t of OPERATIONAL_TABLES) await tx`delete from ${tx(t)}`;
+      // Books brought in from another package go too: the books are replaced (books-import.ts).
+      await tx`delete from ledger_imports`;
       await tx`delete from journals where kind = 'import'`;
     }
 
