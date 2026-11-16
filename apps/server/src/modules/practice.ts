@@ -195,8 +195,9 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/practice/clients', { ...manage, config: limit(10) }, async (req) => {
     const user = userOrThrow(req);
     await assertOn();
-    const { name } = parse(z.object({ name: z.string().trim().min(1).max(200) }), req.body);
-    const [c] = await real<{ id: string }[]>`insert into practice_clients (name, kind, created_by) values (${name}, 'kept', ${user.id}) returning id`;
+    // kept: written up here; imported: brought in from the package the client keeps them in (books-import.ts).
+    const { name, kind } = parse(z.object({ name: z.string().trim().min(1).max(200), kind: z.enum(['kept', 'imported']).default('kept') }), req.body);
+    const [c] = await real<{ id: string }[]>`insert into practice_clients (name, kind, created_by) values (${name}, ${kind}, ${user.id}) returning id`;
     const dbName = clientDbName(clients.practiceDb, c!.id);
     try {
       await clients.create(real, dbName, name);
@@ -209,7 +210,7 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     }
     await real.begin(async (tx) => {
       await tx`update practice_clients set db_name = ${dbName} where id = ${c!.id}`;
-      await audit(tx, { userId: user.id, action: 'practice_client_add', entity: 'practice_client', entityId: c!.id, ip: req.ip, details: { name } });
+      await audit(tx, { userId: user.id, action: 'practice_client_add', entity: 'practice_client', entityId: c!.id, ip: req.ip, details: { name, kind } });
     });
     return { id: c!.id };
   });
