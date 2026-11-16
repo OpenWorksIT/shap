@@ -5,9 +5,11 @@ export type Tx = postgres.TransactionSql<{}>;
 /** Either the pool or an open transaction. */
 export type Db = Sql | Tx;
 
-export function createDb(url: string, opts: { max?: number } = {}): Sql {
+export function createDb(url: string, opts: { max?: number; idleSeconds?: number } = {}): Sql {
   return postgres(url, {
     max: opts.max ?? 10,
+    // A practice's clients (Shap Accountant) each have a small pool that lets go when idle.
+    ...(opts.idleSeconds ? { idle_timeout: opts.idleSeconds } : {}),
     // The ledger is one large view over small tables. Postgres's JIT judges it by the plan's
     // estimated cost and spends seconds compiling a query that runs in milliseconds.
     connection: { jit: 'off' },

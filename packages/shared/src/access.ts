@@ -122,6 +122,15 @@ export const ACCESS_GROUPS = [
       },
     ],
   },
+  {
+    key: 'practice',
+    label: 'Shap Accountant',
+    feature: 'practice',
+    tasks: [
+      { key: 'practice.clients', label: 'Open the clients they’re given', hint: 'Each client’s books, as they’re given them: to write up, or to read and compile the statements' },
+      { key: 'practice.manage', label: 'Add clients and choose who opens each', needs: ['practice.clients'] },
+    ],
+  },
 ] as const satisfies readonly AccessGroup[];
 
 export type Task = (typeof ACCESS_GROUPS)[number]['tasks'][number]['key'];

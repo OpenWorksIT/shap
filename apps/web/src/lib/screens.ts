@@ -25,6 +25,8 @@ export function screensFor(u: { role: Role }, can: (t: Task) => boolean, has: (f
     '/guides': has('guides') && can('reports.view'),
     '/settings': owner,
     '/move-in': owner,
+    // Shap Accountant: the practice's clients (never inside a client's own books, where it's off).
+    '/practice': has('practice') && can('practice.clients'),
   } satisfies Record<string, boolean>;
 }
 export type Screens = ReturnType<typeof screensFor>;

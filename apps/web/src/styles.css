@@ -1865,6 +1865,11 @@ button.list-row {
   border-left: 4px solid #6b3fa0;
 }
 
+/* A practice client's books are open (Shap Accountant): the slate of the brand, not the demo's blue. */
+.demo-banner.client-banner {
+  background: var(--brand-slate);
+}
+
 /* The demo company is showing: made-up figures. */
 .demo-banner {
   position: sticky;

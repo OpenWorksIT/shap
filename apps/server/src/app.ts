@@ -10,7 +10,7 @@ import type { Ctx } from './context.js';
 import { pgCode, PG, type Sql } from './db/index.js';
 import { Secrets } from './lib/crypto.js';
 import { applyMonthLock } from './lib/books.js';
-import { HttpError } from './lib/errors.js';
+import { badRequest, HttpError } from './lib/errors.js';
 import { routePath } from './lib/http.js';
 import { safeError } from './lib/logging.js';
 import { createMailer, type Mailer } from './lib/mailer.js';
@@ -56,7 +56,9 @@ import { registerBankRoutes } from './modules/bank/routes.js';
 import { appVersion, registerSystemRoutes } from './modules/system.js';
 import { DEMO_COOKIE, registerDemoRoutes } from './modules/demo.js';
 import { isInternal, registerTestServerRoutes } from './modules/test-server.js';
-import { dbScope, DemoUnavailable, inDemo, routedDb } from './db/routing.js';
+import { dbScope, DemoUnavailable, inClient, inDemo, routedDb } from './db/routing.js';
+import { ClientDbs } from './lib/practice.js';
+import { CLIENT_COOKIE, registerPracticeRoutes, registerPracticeScope } from './modules/practice.js';
 import { registerStatementRoutes } from './modules/statements.js';
 import { registerCompanyFileRoutes } from './modules/company-file.js';
 import { UNEXPECTED } from '@shap/shared';
@@ -121,13 +123,20 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
     config,
     sql,
     dbs: { real: opts.sql, demo: opts.demoSql ?? null },
-    // The demo company's clients are made up: nothing is ever emailed from it.
+    // The demo company's clients are made up: nothing is ever emailed from it. Nor, yet, from a
+    // practice client's books (Shap Accountant): the practice's mailbox isn't the client's.
     mailer: {
-      send: async (m) => (inDemo() ? void app.log.info('demo company: email not sent') : realMailer.send(m)),
+      send: async (m) => {
+        if (inDemo()) return void app.log.info('demo company: email not sent');
+        if (inClient()) throw badRequest('Email isn’t sent from a client’s books in Shap Accountant. Download the PDF and send it yourself.');
+        return realMailer.send(m);
+      },
       check: async () => (realMailer.check ? realMailer.check() : null),
     },
     secrets: new Secrets(config.secretsKey),
+    clients: new ClientDbs(config.DATABASE_URL),
   };
+  app.addHook('onClose', async () => ctx.clients.end());
 
   // Tells other open screens that something changed, after every successful save.
   const bus = new LiveBus();
@@ -136,7 +145,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
     const p = routePath(req);
     // The test server's filling makes thousands of saves: one "changed" when it's done (test-server.ts) is enough.
     if (!p.startsWith('/api/') || p.startsWith('/api/auth') || p.startsWith('/api/feedback') || p.startsWith('/api/demo') || isInternal(req)) return;
-    bus.publish({ type: 'changed', by: req.user?.id ?? null, demo: req.cookies?.shap_demo === '1', at: Date.now() });
+    bus.publish({ type: 'changed', by: req.user?.id ?? null, demo: req.cookies?.shap_demo === '1', client: dbScope.getStore()?.client?.id ?? req.cookies?.[CLIENT_COOKIE] ?? null, at: Date.now() });
   });
 
   await app.register(cookie);
@@ -147,8 +156,10 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   // Which company this request is for: the demo company while its cookie is set. Everything the
   // request does (every query) runs inside this scope.
   app.addHook('onRequest', (req, _reply, done) => {
-    dbScope.run({ demo: req.cookies?.[DEMO_COOKIE] === '1' }, done);
+    dbScope.run({ demo: req.cookies?.[DEMO_COOKIE] === '1', client: null }, done);
   });
+  // A practice client's books (Shap Accountant), once the request has been checked for them.
+  registerPracticeScope(app, ctx);
 
   // CORS only for explicitly configured origins (e.g. a future Capacitor app).
   app.addHook('onRequest', async (req, reply) => {
@@ -240,6 +251,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
 
   registerAuth(app, ctx);
   registerDemoRoutes(app, ctx);
+  registerPracticeRoutes(app, ctx);
   registerTestServerRoutes(app, ctx, bus);
   registerSettingsRoutes(app, ctx);
   registerDashboardRoutes(app, ctx);

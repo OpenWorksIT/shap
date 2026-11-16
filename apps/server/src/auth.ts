@@ -1,5 +1,5 @@
 import { hash, verify } from '@node-rs/argon2';
-import { inDemo } from './db/routing.js';
+import { inClient, inDemo } from './db/routing.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { ACCOUNTANT_TASKS, loginInput, passwordProblem, personAccess, TASK_KEYS, type Role, type Task } from '@shap/shared';
 import { z } from 'zod';
@@ -25,7 +25,9 @@ export const browserName = (req: FastifyRequest) => {
 export const SESSION_COOKIE = 'shap_session';
 /** While showing the demo company, its own sign-in rides in a separate cookie; yours stays as it was. */
 export const DEMO_SESSION_COOKIE = 'shap_demo_session';
-const sessionCookie = () => (inDemo() ? DEMO_SESSION_COOKIE : SESSION_COOKIE);
+/** A session in a practice client's own books (Shap Accountant, modules/practice.ts). */
+export const CLIENT_SESSION_COOKIE = 'shap_client_session';
+const sessionCookie = () => (inClient() ? CLIENT_SESSION_COOKIE : inDemo() ? DEMO_SESSION_COOKIE : SESSION_COOKIE);
 
 export interface AuthUser {
   id: string;
@@ -141,7 +143,7 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
     // UPLOAD_MB of it): only signing in itself, leaving the demo and the collector take one.
     if (!req.user && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
       const path = req.url.split('?')[0]!;
-      if (path.startsWith('/api/') && !path.startsWith('/api/auth/') && path !== '/api/demo/leave') throw unauthorized();
+      if (path.startsWith('/api/') && !path.startsWith('/api/auth/') && path !== '/api/demo/leave' && path !== '/api/practice/leave') throw unauthorized();
     }
   });
 

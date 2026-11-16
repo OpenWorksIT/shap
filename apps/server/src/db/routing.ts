@@ -2,7 +2,8 @@
  * The demo company: a second, made-up company in its own database, shown instead of the real
  * one when you want to show Shap to someone without your figures on screen.
  *
- * Every request runs inside a scope that says which company it's for (from the demo cookie).
+ * Every request runs inside a scope that says which company it's for (from the demo cookie, or a
+ * practice client's: Shap Accountant).
  * The `sql` handed to the route modules is a stand-in that sends each query to that company's
  * database, so no route needs to know. Outside a request (start-up, migrations) it is always
  * the real one; a request in demo mode with no demo database fails rather than falling back.
@@ -10,15 +11,32 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { Sql } from './index.js';
 
-export const dbScope = new AsyncLocalStorage<{ demo: boolean }>();
+/**
+ * Which company a request is for. `client` is set, after its checks (practice.ts), while someone in
+ * a practice has a client's books open (Shap Accountant): every query then goes to that client's
+ * own database, never this one.
+ */
+export interface DbScope {
+  demo: boolean;
+  client?: { id: string; name: string; sql: Sql } | null;
+}
+export const dbScope = new AsyncLocalStorage<DbScope>();
 
 /** Is this request showing the demo company? */
 export const inDemo = (): boolean => dbScope.getStore()?.demo === true;
+
+/** The client whose books this request is in (Shap Accountant), if any. */
+export const inClient = (): { id: string; name: string } | null => {
+  const c = dbScope.getStore()?.client;
+  return c ? { id: c.id, name: c.name } : null;
+};
 
 export class DemoUnavailable extends Error {}
 
 export function routedDb(real: Sql, demo: Sql | null): Sql {
   const pick = (): Sql => {
+    const client = dbScope.getStore()?.client;
+    if (client) return client.sql;
     if (!inDemo()) return real;
     if (!demo) throw new DemoUnavailable('The demo company isn’t set up on this server');
     return demo;

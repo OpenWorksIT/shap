@@ -27,6 +27,7 @@ export function Shell({ children }: { children: ReactNode }) {
 
   const all: (Item & { show: boolean })[] = [
     { to: '/', label: 'Home', icon: 'home', end: true, show: true },
+    { to: '/practice', label: 'Practice', icon: 'clients', show: may['/practice'] },
     { to: '/log', label: 'Log', icon: 'log', show: may['/log'] },
     { to: '/jobs', label: 'Jobs', icon: 'jobs', show: may['/jobs'] },
     { to: '/workers', label: 'Workers', icon: 'workers', show: may['/workers'] },

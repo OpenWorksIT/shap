@@ -5,6 +5,8 @@ export interface LiveEvent {
   type: 'changed';
   by: string | null;
   demo: boolean;
+  /** The practice client whose books it's in (Shap Accountant), or null for the company's own. */
+  client: string | null;
   at: number;
 }
 

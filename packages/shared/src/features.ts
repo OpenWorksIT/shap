@@ -23,6 +23,7 @@ export const FEATURES = {
   sales: { label: 'Sales', hint: 'Sell from a quick list at the counter, paid on the spot: a slip, a refund, or an invoice afterwards', default: false },
   inventory: { label: 'Inventory', hint: 'Stock on hand at average cost: purchases, returns, stock takes, every item’s history', default: false },
   statements: { label: 'Financial statements', hint: 'Shap prepares the annual financial statements (IFRS for SMEs) for your accountant to compile and sign', default: false },
+  practice: { label: 'Shap Accountant', hint: 'For a practice: keep and check clients’ books on this server, each in a database of its own, with Shap’s checks and their deadlines', default: false },
 } as const;
 
 /** How the switches are grouped in Settings. */
@@ -31,6 +32,7 @@ export const FEATURE_GROUPS: { label: string; keys: Feature[] }[] = [
   { label: 'Invoicing', keys: ['proformas', 'creditNotes', 'reminders', 'payshap', 'brands'] },
   { label: 'Selling', keys: ['sales', 'inventory'] },
   { label: 'Money and tax', keys: ['bills', 'bank', 'assets', 'dividends', 'logbook', 'statements', 'guides'] },
+  { label: 'For a practice', keys: ['practice'] },
 ];
 
 export type Feature = keyof typeof FEATURES;

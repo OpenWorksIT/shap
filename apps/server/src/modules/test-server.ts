@@ -179,7 +179,7 @@ export function registerTestServerRoutes(app: FastifyInstance, ctx: Ctx, bus: Li
           busy = null;
           // Done only once month end is back and the sign-in gone; then every screen open on the books refreshes.
           state = done;
-          bus.publish({ type: 'changed', by: null, demo: false, at: Date.now() });
+          bus.publish({ type: 'changed', by: null, demo: false, client: null, at: Date.now() });
         }
       })();
       return { started: true, fill: state };

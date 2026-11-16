@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { requireRole } from '../auth.js';
 import type { Ctx } from '../context.js';
+import { inClient } from '../db/routing.js';
 import { DEMO_COOKIE } from './demo.js';
 import type { LiveBus } from '../lib/live.js';
 
@@ -12,6 +13,7 @@ import type { LiveBus } from '../lib/live.js';
 export function registerLiveRoutes(app: FastifyInstance, ctx: Ctx, bus: LiveBus): void {
   app.get('/api/live', { preHandler: requireRole() }, (req, reply) => {
     const demo = req.cookies?.[DEMO_COOKIE] === '1';
+    const client = inClient()?.id ?? null;
     const me = req.user?.id ?? null;
     reply.hijack();
     const res = reply.raw;
@@ -28,7 +30,7 @@ export function registerLiveRoutes(app: FastifyInstance, ctx: Ctx, bus: LiveBus)
     res.write('retry: 3000\n\n');
     res.write('event: hello\ndata: {}\n\n');
     const unsubscribe = bus.subscribe((e) => {
-      if (e.demo !== demo || e.by === me) return;
+      if (e.demo !== demo || e.client !== client || e.by === me) return;
       res.write(`event: changed\ndata: ${JSON.stringify({ type: 'changed', at: e.at })}\n\n`);
     });
     const heartbeat = setInterval(() => res.write(': ping\n\n'), 25_000);

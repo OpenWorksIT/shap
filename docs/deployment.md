@@ -220,7 +220,7 @@ setup.
   ```
 
   Pre-create the demo database (`createdb -O shap_app shap_demo`) so the app never needs
-  `CREATEDB`. (Tenant companies added with `add-company.sh` already use their own non-superuser
+  `CREATEDB`. (Shap Accountant does need it, to make each client's database: docs/ACCOUNTANT.md.) (Tenant companies added with `add-company.sh` already use their own non-superuser
   roles.)
 - **Update from signed releases, not branch tips.** "Update" pulls `main` from GitHub and rebuilds
   on the server, so whoever controls that branch or the GitHub account controls the server. For a

@@ -3,6 +3,20 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.27.0 (17 November 2026)
+
+- **Shap Accountant, for a practice** (Settings → Features; docs/ACCOUNTANT.md). The practice's own
+  Shap keeps its clients' books too, each client in a database of its own on the practice's
+  server, kept apart from the others by Postgres itself. **Practice** in the menu lists the
+  clients with what Shap's checks found in each (the books audit, the financial statements'
+  checks for the last year, how far the books are closed) and the returns coming up (VAT201,
+  EMP201, provisional tax, ITR14). **Open their books** works in them with all of Shap's screens,
+  the bar across the top saying whose they are. The owner opens every client; anyone else, the
+  clients they're given, to write up or to read and compile. The checks flag and never post, no
+  AI reads anyone's books, and the dates are Shap's own reading of SARS's tables, to check. Off
+  unless switched on. Imports from other packages, Pocket shares and linking a client's own Shap
+  come next.
+
 ## 1.26.1 (13 November 2026)
 
 From the reviews of Shap Pocket 1.10.1, which shares this code.

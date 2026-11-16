@@ -1,6 +1,7 @@
 import type { Config } from './config.js';
 import type { Sql } from './db/index.js';
 import type { Secrets } from './lib/crypto.js';
+import type { ClientDbs } from './lib/practice.js';
 import type { Mailer } from './lib/mailer.js';
 
 /** Everything route modules need, passed explicitly (no globals). */
@@ -12,4 +13,6 @@ export interface Ctx {
   dbs: { real: Sql; demo: Sql | null };
   mailer: Mailer;
   secrets: Secrets;
+  /** Shap Accountant: the practice's clients' databases (lib/practice.ts). */
+  clients: ClientDbs;
 }
