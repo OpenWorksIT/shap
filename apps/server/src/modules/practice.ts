@@ -29,6 +29,7 @@ import { badRequest, forbidden, HttpError, notFound } from '../lib/errors.js';
 import { routePath } from '../lib/http.js';
 import { clientDbName, healthOf, mirrorUser, roleFor, rolesFor, saveHealth, unmirrorUser, type ClientHealth } from '../lib/practice.js';
 import { SERVER_ONLY, under } from '../lib/server-only.js';
+import { applyPocketShare, readPocketShare } from './import/pocket-share.js';
 import { BACKUP_NAME } from './system.js';
 import { newToken, sha256 } from '../lib/tokens.js';
 import { parse } from '../lib/validate.js';
@@ -195,8 +196,9 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/practice/clients', { ...manage, config: limit(10) }, async (req) => {
     const user = userOrThrow(req);
     await assertOn();
-    // kept: written up here; imported: brought in from the package the client keeps them in (books-import.ts).
-    const { name, kind } = parse(z.object({ name: z.string().trim().min(1).max(200), kind: z.enum(['kept', 'imported']).default('kept') }), req.body);
+    // kept: written up here; imported: brought in from the package the client keeps them in
+    // (books-import.ts); pocket: a read-only copy of their Shap Pocket books, from their shares.
+    const { name, kind } = parse(z.object({ name: z.string().trim().min(1).max(200), kind: z.enum(['kept', 'imported', 'pocket']).default('kept') }), req.body);
     const [c] = await real<{ id: string }[]>`insert into practice_clients (name, kind, created_by) values (${name}, ${kind}, ${user.id}) returning id`;
     const dbName = clientDbName(clients.practiceDb, c!.id);
     try {
@@ -226,7 +228,8 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { as } = parse(z.object({ as: z.enum(LEVELS).optional() }), req.body ?? {});
     // Never more than given: writing up takes in compiling, not the other way round.
     if (as === 'books' && given !== 'books') throw forbidden('You’ve been given these books to read and compile, not to write up.');
-    const level = as ?? given;
+    // A Shap Pocket client's books are the owner's, on their phone: here they're a copy to read and compile.
+    const level = c.kind === 'pocket' ? 'compile' : (as ?? given);
     const sql = clients.get(dbName);
     await mirrorUser(sql, user, level);
     const token = newToken();
@@ -321,6 +324,33 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     });
     if (archived && c.dbName) await clients.get(c.dbName)`delete from sessions`;
     return { ok: true };
+  });
+
+  /**
+   * A Shap Pocket share into a Pocket client's books (lib: import/pocket-share.ts), for whoever writes
+   * up the client's books here (the owner, or someone given them to write up): the whole of the books,
+   * entry by entry, with what changed since the last share. Its checks run again for the list.
+   */
+  app.post('/api/practice/clients/:id/pocket-share', { ...view, bodyLimit: 60 * 1024 * 1024, config: limit(10) }, async (req) => {
+    const user = userOrThrow(req);
+    await assertOn();
+    const c = await clientOr404((req.params as { id: string }).id);
+    const dbName = usable(c);
+    if (c.kind !== 'pocket') throw badRequest('This client’s books aren’t kept on Shap Pocket.');
+    if ((await levelFor(real, user, c.id)) !== 'books') throw forbidden('Bringing in their share is for whoever writes up their books.');
+    const { name, dataBase64 } = parse(z.object({ name: z.string().max(200), dataBase64: z.string().max(80_000_000) }), req.body);
+    const share = readPocketShare(name, Buffer.from(dataBase64, 'base64'));
+    const sql = clients.get(dbName);
+    // The practice person is there by name, as the copy's reader.
+    await mirrorUser(sql, user, 'compile');
+    const result = await sql.begin(async (tx) => {
+      const r = await applyPocketShare(tx, share, name, user.id);
+      await audit(tx, { userId: user.id, action: 'pocket_share_in', entity: 'pocket_share', entityId: String(r.number), ip: req.ip, details: { added: r.changes.added.length, changed: r.changes.changed.length, removed: r.changes.removed.length } });
+      return r;
+    });
+    await audit(real, { userId: user.id, action: 'practice_pocket_share', entity: 'practice_client', entityId: c.id, ip: req.ip, details: { number: result.number } });
+    await refreshHealth(c.id, sql);
+    return result;
   });
 
   /**

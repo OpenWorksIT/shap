@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { formatDate, LEVEL_WORDS, PRACTICE_NOTE, STATEMENT_STATUS_LABELS, todayIso, type Level, type StatementStatus } from '@shap/shared';
 import { PageHead } from '../components/Shell';
-import { Drawer, Empty, ErrorBox, Field, Loading, useToast } from '../components/ui';
+import { Drawer, Empty, ErrorBox, Field, Loading, Money, useToast } from '../components/ui';
 import { api, ApiError } from '../lib/api';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
@@ -18,6 +18,7 @@ interface Health {
   audit: { fail: number; warn: number; items: { level: 'fail' | 'warn'; section: string; text: string }[] };
   statements: Statements | null;
   lockedThrough: string | null;
+  pocket?: { number: number; through: string; importedAt: string; added: number; changed: number; removed: number } | null;
   deadlines: { key: string; label: string; due: string; past: boolean }[];
 }
 interface PracticeClient {
@@ -30,6 +31,17 @@ interface PracticeClient {
   health: Health | null;
   healthAt: string | null;
   access: { userId: string; level: Level }[];
+}
+interface ShareChange {
+  key: string;
+  date: string;
+  description: string;
+  cents: number;
+}
+interface ShareResult {
+  number: number;
+  first: boolean;
+  changes: { added: ShareChange[]; changed: ShareChange[]; removed: ShareChange[] };
 }
 interface Practice {
   clients: PracticeClient[];
@@ -52,7 +64,8 @@ export default function PracticePage() {
   const toast = useToast();
   const { data, error, reload } = useApi<Practice>('/api/practice');
   const [name, setName] = useState('');
-  const [kind, setKind] = useState<'kept' | 'imported'>('kept');
+  const [kind, setKind] = useState<'kept' | 'imported' | 'pocket'>('kept');
+  const [shareResult, setShareResult] = useState<{ client: string; result: ShareResult } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [accessFor, setAccessFor] = useState<PracticeClient | null>(null);
@@ -85,6 +98,19 @@ export default function PracticePage() {
       // Books brought in from another package open where they're brought in (once set up).
       window.location.assign(c.kind === 'imported' && c.health?.setupDone && (as ?? c.level ?? 'books') === 'books' ? '/accounts?tab=import' : '/');
     });
+  const bringInShare = (c: PracticeClient, file: File | undefined) =>
+    file &&
+    act(`share-${c.id}`, async () => {
+      const dataBase64 = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).split(',')[1] ?? '');
+        r.onerror = () => reject(r.error);
+        r.readAsDataURL(file);
+      });
+      const result = await api<ShareResult>(`/api/practice/clients/${c.id}/pocket-share`, { body: { name: file.name, dataBase64 } });
+      setShareResult({ client: c.name, result });
+      await reload();
+    });
   const check = (c: PracticeClient) =>
     act(`check-${c.id}`, async () => {
       await api(`/api/practice/clients/${c.id}/checks`, { body: {} });
@@ -114,9 +140,10 @@ export default function PracticePage() {
           </Field>
           <Field label="Their books are written up">
             {(p) => (
-              <select {...p} className="select" value={kind} onChange={(e) => setKind(e.target.value as 'kept' | 'imported')}>
+              <select {...p} className="select" value={kind} onChange={(e) => setKind(e.target.value as 'kept' | 'imported' | 'pocket')}>
                 <option value="kept">Here, in Shap</option>
                 <option value="imported">In another package (brought in from Xero, QuickBooks or Sage)</option>
+                <option value="pocket">On Shap Pocket, on their phone (they send you shares)</option>
               </select>
             )}
           </Field>
@@ -134,7 +161,9 @@ export default function PracticePage() {
             const next = h?.deadlines.filter((d) => !d.past).slice(0, 4) ?? [];
             const past = h?.deadlines.filter((d) => d.past) ?? [];
             const st = h?.statements ?? null;
-            const level = isOwner ? 'books' : c.level;
+            const given = isOwner ? 'books' : c.level;
+            // A Shap Pocket client's books are opened to read and compile only.
+            const level = c.kind === 'pocket' && given ? 'compile' : given;
             return (
               <article key={c.id} className="panel panel-pad stack">
                 <div className="row wrap" style={{ gap: 8, alignItems: 'center' }}>
@@ -143,6 +172,7 @@ export default function PracticePage() {
                     {c.archived && <span className="chip"> Archived</span>}
                     {c.notUpToDate && <span className="chip warn"> Not up to date</span>}
                     {c.kind === 'imported' && <span className="chip"> From another package</span>}
+                    {c.kind === 'pocket' && <span className="chip"> Shap Pocket</span>}
                   </h3>
                   {!c.archived && level && (
                     <>
@@ -153,6 +183,12 @@ export default function PracticePage() {
                         <button className="btn small" disabled={busy !== null || c.notUpToDate} onClick={() => void open(c, 'compile')}>
                           Open to compile
                         </button>
+                      )}
+                      {c.kind === 'pocket' && given === 'books' && (
+                        <label className={`btn small${busy !== null || c.notUpToDate ? ' disabled' : ''}`}>
+                          {busy === `share-${c.id}` ? 'Bringing it in…' : 'Bring in a share'}
+                          <input type="file" accept=".json,application/json" hidden disabled={busy !== null || c.notUpToDate} onChange={(e) => void bringInShare(c, e.target.files?.[0])} />
+                        </label>
                       )}
                       <button className="btn small primary" disabled={busy !== null || c.notUpToDate} onClick={() => void open(c)}>
                         {busy === `open-${c.id}` ? 'Opening…' : level === 'books' ? 'Open their books' : 'Open to compile'}
@@ -224,6 +260,12 @@ export default function PracticePage() {
                         </>
                       )
                     )}
+                    {h.pocket && (
+                      <p className="small">
+                        <strong>Their last share:</strong> share {h.pocket.number}, their books to {formatDate(h.pocket.through)}, brought in {formatDate(h.pocket.importedAt.slice(0, 10))}
+                        {h.pocket.number > 1 ? `: ${h.pocket.added} new, ${h.pocket.changed} changed and ${h.pocket.removed} gone since the share before` : ''}.
+                      </p>
+                    )}
                     <p className="small">
                       <strong>Books closed:</strong> {h.lockedThrough ? `up to ${formatDate(h.lockedThrough)}` : 'not yet'}
                     </p>
@@ -273,6 +315,7 @@ export default function PracticePage() {
       )}
       {accessFor && <AccessDrawer client={accessFor} people={data.people} onClose={() => setAccessFor(null)} onSaved={() => (setAccessFor(null), void reload())} />}
       {backupsFor && <BackupsDrawer client={backupsFor} onClose={() => setBackupsFor(null)} />}
+      {shareResult && <ShareDrawer client={shareResult.client} result={shareResult.result} onClose={() => setShareResult(null)} />}
     </div>
   );
 }
@@ -376,6 +419,47 @@ function BackupsDrawer({ client, onClose }: { client: PracticeClient; onClose: (
           </ul>
         </div>
       )}
+    </Drawer>
+  );
+}
+
+/** What a Pocket share brought in: the whole of their books the first time; then what's new, changed and gone. */
+function ShareDrawer({ client, result, onClose }: { client: string; result: ShareResult; onClose: () => void }) {
+  const list = (title: string, items: ShareChange[]) =>
+    items.length > 0 && (
+      <section className="stack-sm">
+        <strong className="small">
+          {title} ({items.length})
+        </strong>
+        <ul className="list small" data-private>
+          {items.slice(0, 200).map((x) => (
+            <li key={x.key} className="list-row">
+              <span className="grow">
+                {formatDate(x.date)} · {x.description || 'No description'}
+              </span>
+              <Money cents={x.cents} />
+            </li>
+          ))}
+          {items.length > 200 && <li className="list-row muted">and {items.length - 200} more</li>}
+        </ul>
+      </section>
+    );
+  const { added, changed, removed } = result.changes;
+  return (
+    <Drawer title={<span data-private>{client}: share {result.number}</span>} sub={result.first ? 'The first share: the whole of their books, brought in' : 'Brought in: what changed since the share before'} onClose={onClose}>
+      <div className="stack">
+        {result.first ? (
+          <p className="small">Their books are here as they had them on their phone. Each share after this one says what’s new, what changed and what’s gone.</p>
+        ) : added.length + changed.length + removed.length === 0 ? (
+          <p className="small">Nothing changed since the share before.</p>
+        ) : (
+          <>
+            {list('New', added)}
+            {list('Changed', changed)}
+            {list('Gone', removed)}
+          </>
+        )}
+      </div>
     </Drawer>
   );
 }

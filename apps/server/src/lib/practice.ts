@@ -169,6 +169,13 @@ export async function migrateClients(practice: Sql, clients: ClientDbs, log: { i
   return { ok, failed };
 }
 
+/** The last Pocket share brought in, if any. */
+async function lastShare(db: Sql): Promise<ClientHealth['pocket']> {
+  const [p] = await db<{ number: number; through: string; importedAt: Date; changes: { added?: unknown[]; changed?: unknown[]; removed?: unknown[] } }[]>`
+    select number, through::text as through, imported_at, changes from pocket_shares order by imported_at desc limit 1`;
+  return p ? { number: p.number, through: p.through, importedAt: new Date(p.importedAt).toISOString(), added: p.changes.added?.length ?? 0, changed: p.changes.changed?.length ?? 0, removed: p.changes.removed?.length ?? 0 } : null;
+}
+
 /** Saves a client's checks, unless a run that started later saved first. */
 export async function saveHealth(practice: Sql, id: string, health: ClientHealth, started: Date): Promise<void> {
   await practice`update practice_clients set health = ${practice.json(health as never)}, health_at = ${started}
@@ -233,6 +240,8 @@ export interface ClientHealth {
     | null;
   /** The books are closed up to this day (month end, a VAT period or a year). */
   lockedThrough: string | null;
+  /** A Shap Pocket client's last share brought in, and what changed since the one before. */
+  pocket?: { number: number; through: string; importedAt: string; added: number; changed: number; removed: number } | null;
   /** What the returns are worked out from (deadlinesFor, again each time the list is shown). */
   deadlineInputs: DeadlineInputs | null;
 }
@@ -326,6 +335,7 @@ async function healthNow(db: Sql, now: string, log: { warn: (o: object, m: strin
       audit,
       statements,
       lockedThrough: await effectiveLock(tx),
+      pocket: await lastShare(tx),
       deadlineInputs: s.setupDone
         ? { businessType: s.businessType, vatRegistered: s.vatRegistered, vatCategory: s.vatCategory, fyEndMonth: s.fyEndMonth, turnoverTax: s.turnoverTax, employer, approvedPbo: Boolean(s.approvedPbo), dividendsPaid: paid.map((p) => p.d) }
         : null,

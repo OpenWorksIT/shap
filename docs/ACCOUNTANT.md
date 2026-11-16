@@ -23,7 +23,7 @@ opens them, their personal information (POPIA), and checking what Shap shows.
 |---|---|---|
 | Kept by the practice | A database of its own on the practice's server | Now (1.27) |
 | Brought in from another package | The same, from Xero's, QuickBooks' or Sage's trial balance and general ledger exports | Now (1.28) |
-| A Shap Pocket share | A read-only copy of the owner's phone books, stamped, the next share marking what changed | Planned |
+| A Shap Pocket share | A read-only copy of the owner's phone books, stamped, the next share marking what changed | Now (1.29) |
 | Linked from the client's own Shap | On the client's own server; Open signs the practice in to it | Planned |
 
 **Add client** (for whoever may add clients) makes a new set of books named for the business.
@@ -127,6 +127,26 @@ the tax pack, and the books audit leaves it out of its VAT check and says why. T
 turnover tax estimates project from the last day brought in, and a trust's distributions in the
 books brought in are shown, not taken off (Shap can't tell which part is this year's income to
 residents: section 25B is the accountant's to work out). Shap's figures are estimates only.
+
+## A Shap Pocket share
+
+A one-person business on Shap Pocket keeps its books on the owner's phone. **Accounts → Export →
+Share your books with your accountant**, in Pocket, makes one file of the whole of the books: every
+entry with its date, reference and description (which can name their customers and suppliers),
+their accounts, and the business's details Shap needs to read them. It goes only where the owner
+sends it, from the phone's share sheet. Each share is numbered and stamped, and Pocket counts it as
+sent only when the share sheet says it went.
+
+In the practice, a client added as **On Shap Pocket** gets **Bring in a share**: the first share
+brings in the whole of the books; each one after it replaces the last entry by entry (what's the
+same is left as it is), and Shap shows what's new, what changed and what's gone since the share
+before, worked out from what Shap holds, whatever the phone says. An older share than the last one
+brought in is refused, and so is one that would change anything in a closed period or a year whose
+statements were approved (ask the client what changed there). The list shows the last share
+brought in.
+
+Their books here are a copy to read and compile: everyone opens them that way, the practice's
+owner too. Adjustments the practice finds go to the owner, to make in Pocket and share again.
 
 ## Who opens which
 
