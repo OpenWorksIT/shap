@@ -26,7 +26,7 @@ import { addDays, attachmentInput, dayOf, financialYear, formatDate, LETTER_MAX_
 import { z } from 'zod';
 import { requireAccess, userOrThrow, type AuthUser } from '../auth.js';
 import type { Ctx } from '../context.js';
-import type { Sql } from '../db/index.js';
+import type { Db, Sql } from '../db/index.js';
 import { audit } from '../lib/audit.js';
 import { freshTotals, getSettings, today } from '../lib/books.js';
 import { letterSections, servicesFor, type LetterInput, type LetterSection } from '../lib/engagement.js';
@@ -510,25 +510,34 @@ export function registerWorkingPaperRoutes(app: FastifyInstance, ctx: Ctx): void
     notArchived(c);
     const input = parse(z.object({ fyEnd: yearEnd, account: z.object({ code: z.string().trim().min(1).max(40), name: z.string().trim().min(1).max(200) }).nullable().default(null), text: z.string().trim().min(1).max(4000) }), req.body);
     await yearOf(c, input.fyEnd);
-    const [{ n } = { n: 0 }] = await real<{ n: number }[]>`select count(*)::int as n from practice_notes where client_id = ${c.id} and fy_end = ${input.fyEnd}`;
-    if (n >= NOTES_PER_YEAR) throw badRequest(`A year takes ${NOTES_PER_YEAR} review notes at most (cleared ones count): add to one of those there.`);
-    await roomFor(c.id, input.fyEnd, input.text.length);
-    const [note] = await real<{ id: string }[]>`
-      insert into practice_notes (client_id, fy_end, account_code, account_name, text, raised_by)
-      values (${c.id}, ${input.fyEnd}, ${input.account?.code ?? null}, ${input.account?.name ?? null}, ${input.text}, ${user.id}) returning id`;
+    // Counted and added as one, the year's papers locked meanwhile: notes sent at once don't pass the caps.
+    const note = await real.begin(async (tx) => {
+      await lockYear(tx, c.id, input.fyEnd);
+      const [{ n } = { n: 0 }] = await tx<{ n: number }[]>`select count(*)::int as n from practice_notes where client_id = ${c.id} and fy_end = ${input.fyEnd}`;
+      if (n >= NOTES_PER_YEAR) throw badRequest(`A year takes ${NOTES_PER_YEAR} review notes at most (cleared ones count): add to one of those there.`);
+      await roomFor(tx, c.id, input.fyEnd, input.text.length);
+      const [made] = await tx<{ id: string }[]>`
+        insert into practice_notes (client_id, fy_end, account_code, account_name, text, raised_by)
+        values (${c.id}, ${input.fyEnd}, ${input.account?.code ?? null}, ${input.account?.name ?? null}, ${input.text}, ${user.id}) returning id`;
+      return made;
+    });
     await audit(real, { userId: user.id, action: 'file_note', entity: 'practice_client', entityId: c.id, ip: req.ip, details: { fyEnd: input.fyEnd, note: note!.id } });
     const removed = await takeBack(c.id, input.fyEnd, user.id, req.ip, note!.id);
     return { id: note!.id, removed };
   });
 
   /** A year's notes and replies, all together, run to YEAR_NOTES_MAX_CHARS at most: its file is a PDF made on the server. */
-  const roomFor = async (clientId: string, fyEnd: string, adding: number) => {
-    const [{ used } = { used: 0 }] = await real<{ used: number }[]>`
+  const roomFor = async (tx: Db, clientId: string, fyEnd: string, adding: number) => {
+    const [{ used } = { used: 0 }] = await tx<{ used: number }[]>`
       select (coalesce((select sum(length(text)) from practice_notes where client_id = ${clientId} and fy_end = ${fyEnd}), 0)
         + coalesce((select sum(length(r.text)) from practice_note_replies r join practice_notes n on n.id = r.note_id where n.client_id = ${clientId} and n.fy_end = ${fyEnd}), 0))::int as used`;
     if (used + adding > YEAR_NOTES_MAX_CHARS)
-      throw badRequest(`A year’s review notes and replies run to ${YEAR_NOTES_MAX_CHARS.toLocaleString('en-ZA')} characters at most, all together: this year has ${(YEAR_NOTES_MAX_CHARS - used).toLocaleString('en-ZA')} left.`);
+      throw badRequest(
+        `A year’s review notes and replies run to ${YEAR_NOTES_MAX_CHARS.toLocaleString('en-ZA')} characters at most, all together: this year has ${used >= YEAR_NOTES_MAX_CHARS ? 'none' : (YEAR_NOTES_MAX_CHARS - used).toLocaleString('en-ZA')} left.`,
+      );
   };
+  /** One client's year's papers, locked until the transaction ends (its notes and replies counted and added as one). */
+  const lockYear = (tx: Db, clientId: string, fyEnd: string) => tx`select pg_advisory_xact_lock(hashtext(${`practice-papers:${clientId}:${fyEnd}`}))`;
 
   const noteOr404 = async (clientId: string, nid: string) => {
     if (!uuid.safeParse(nid).success) throw notFound('Review note');
@@ -544,10 +553,13 @@ export function registerWorkingPaperRoutes(app: FastifyInstance, ctx: Ctx): void
     const n = await noteOr404(c.id, (req.params as { nid: string }).nid);
     if (n.clearedBy) throw badRequest('That note is cleared: open it again first (whoever raised it, or an owner).');
     const { text } = parse(z.object({ text: z.string().trim().min(1).max(4000) }), req.body);
-    const [{ k } = { k: 0 }] = await real<{ k: number }[]>`select count(*)::int as k from practice_note_replies where note_id = ${n.id}`;
-    if (k >= REPLIES_PER_NOTE) throw badRequest(`A review note takes ${REPLIES_PER_NOTE} replies at most: clear it, and raise a new one if there’s more to say.`);
-    await roomFor(c.id, n.fyEnd, text.length);
-    await real`insert into practice_note_replies (note_id, text, by_user) values (${n.id}, ${text}, ${user.id})`;
+    await real.begin(async (tx) => {
+      await lockYear(tx, c.id, n.fyEnd);
+      const [{ k } = { k: 0 }] = await tx<{ k: number }[]>`select count(*)::int as k from practice_note_replies where note_id = ${n.id}`;
+      if (k >= REPLIES_PER_NOTE) throw badRequest(`A review note takes ${REPLIES_PER_NOTE} replies at most: clear it, and raise a new one if there’s more to say.`);
+      await roomFor(tx, c.id, n.fyEnd, text.length);
+      await tx`insert into practice_note_replies (note_id, text, by_user) values (${n.id}, ${text}, ${user.id})`;
+    });
     await audit(real, { userId: user.id, action: 'file_note_reply', entity: 'practice_client', entityId: c.id, ip: req.ip, details: { note: n.id } });
     return { ok: true };
   });

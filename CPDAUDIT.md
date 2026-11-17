@@ -1195,6 +1195,17 @@ and words not yet, for what the fixes brought:
 Tests: in `test/review-1.31/` (`letter`, `papers`, `words`, `report`) and Pocket's
 `shap-1.31-report.test.ts`, each failing on `9a2bb60` (Pocket's on `bf45da7`).
 
+Checked again by the same five (`9a2bb60..1eb2b1b`, Pocket's `bf45da7..6722b74`, the website's
+`c1eaf45..49b5303`): all five ready. Two low points, done before release: notes and replies sent at
+once could pass the year's cap together (8 to 24 of 80 got through, and the refusal said "-28 000
+left"): each note and reply is counted and added in one transaction, the client's year locked
+meanwhile (`pg_advisory_xact_lock`), and a full year says "none left"; and the DTR01 sentence for a
+company on turnover tax now says turnover tax exempts the first R200 000 of dividends a year (s64F),
+so it isn't read as no return being due for those. The year's file at the cap in unbroken words
+rendered in 1.7 to 4.2 seconds on a machine loaded at 5.7 on two cores, the server answering again
+as soon as it was done; the penetration test gave 0 to fix, 52 OK. Tests: `papers` (notes and
+replies sent at once), `letter` (the DTR01 sentence), each failing on `1eb2b1b`.
+
 ### Code scanning (CodeQL), first run
 
 - The Accounts screen's download links carried the period's dates unencoded (flagged as text

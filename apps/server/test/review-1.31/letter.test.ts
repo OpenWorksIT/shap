@@ -131,7 +131,7 @@ describe('the letter’s tax follows how the client is taxed', () => {
     expect(pt).not.toMatch(/• Prepare the turnover tax returns/);
     expect(pt).toMatch(/• Give each partner the partnership’s figures for their own turnover tax returns \(TT02 and TT03\)\./);
     // A company, CC or co-op on turnover tax still pays dividends tax beyond what turnover tax exempts.
-    for (const bt of ['company', 'cc', 'coop'] as const) expect(text({ bt, services: ['income_tax'], turnoverTax: true })).toMatch(/Dividends tax returns \(DTR01\), for dividends beyond what turnover tax exempts, aren’t included unless they’re listed above/);
+    for (const bt of ['company', 'cc', 'coop'] as const) expect(text({ bt, services: ['income_tax'], turnoverTax: true })).toMatch(/Dividends tax returns \(DTR01\) for dividends it pays \(turnover tax exempts the first R200 000 a year\) aren’t included unless they’re listed above/);
     // The statements serve turnover tax, not income tax.
     const compiled = part({ bt: 'sole_prop', services: ['compile'], turnoverTax: true }, 'Compiling the annual financial statements')!;
     expect(compiled).toMatch(/\(for the owner’s turnover tax\)/);

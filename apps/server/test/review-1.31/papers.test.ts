@@ -334,6 +334,25 @@ describe('engagement letters and working papers, as the 1.31 reviews found them'
       await p.practice.sql`update practice_notes set cleared_by = ${owner!.id}, cleared_at = now() where client_id = ${c.id}`;
     });
 
+    it('notes and replies sent at once don’t pass the year’s cap together, and the refusal never says a negative number', async () => {
+      const c = await client('Made-up Client F (Pty) Ltd');
+      await journal(c.books, '2025-06-01', 'bank', 'owner_loan', 100_000);
+      const [owner] = await p.practice.sql<{ id: string }[]>`select id from users where email = 'owner@example.co.za'`;
+      // 196,000 characters: room for one more of 4,000.
+      await p.practice.sql`insert into practice_notes (client_id, fy_end, text, raised_by) select ${c.id}, ${FY}, repeat('x', 4000), ${owner!.id} from generate_series(1, 49)`;
+      const [n] = await p.practice.sql<{ id: string }[]>`select id from practice_notes where client_id = ${c.id} limit 1`;
+      const sent = await Promise.all([
+        ...Array.from({ length: 12 }, () => p.owner.call({ method: 'POST', url: `/api/practice/clients/${c.id}/file/notes`, payload: { fyEnd: FY, text: 'n'.repeat(4000) } })),
+        ...Array.from({ length: 12 }, () => p.owner.call({ method: 'POST', url: `/api/practice/clients/${c.id}/file/notes/${n!.id}/replies`, payload: { text: 'r'.repeat(4000) } })),
+      ]);
+      expect(sent.filter((r) => r.statusCode === 200)).toHaveLength(1);
+      for (const r of sent.filter((x) => x.statusCode !== 200)) expect(r.json().error).toMatch(/this year has none left\.$/);
+      const [{ used }] = await p.practice.sql<{ used: number }[]>`
+        select (select sum(length(text)) from practice_notes where client_id = ${c.id})::int + coalesce((select sum(length(r.text)) from practice_note_replies r join practice_notes x on x.id = r.note_id where x.client_id = ${c.id}), 0)::int as used`;
+      expect(used).toBe(YEAR_NOTES_MAX_CHARS);
+      await p.practice.sql`update practice_notes set cleared_by = ${owner!.id}, cleared_at = now() where client_id = ${c.id}`;
+    });
+
     it('a letter isn’t sent with no practice named', async () => {
       const [s] = await p.practice.sql<{ companyName: string; tradingName: string }[]>`select company_name, trading_name from settings`;
       await p.practice.sql`update settings set company_name = '', trading_name = ''`;

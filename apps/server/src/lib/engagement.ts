@@ -113,7 +113,7 @@ function incomeTaxParagraphs(bt: BusinessType, tax: TaxSituation): string[] {
           'Each partner’s returns are their own: they give us everything they need, check them before they’re filed, and pay what’s due by its date.',
         ];
       return [
-        `We’ll prepare ${bt === 'sole_prop' ? 'your' : 'the business’s'} turnover tax returns from the books and what you tell us: the TT02 interim payments and the TT03 annual return. Turnover tax takes the place of ${bt === 'sole_prop' ? 'income tax and provisional tax on the business’s income' : 'the business’s income tax and provisional tax'}.${bt === 'sole_prop' ? ' Your own income tax return (the ITR12), for any income outside the business such as a salary or interest, is prepared only if it’s listed above.' : ''}${entity(bt).taxedAs === 'company' ? ' Dividends tax returns (DTR01), for dividends beyond what turnover tax exempts, aren’t included unless they’re listed above.' : ''}`,
+        `We’ll prepare ${bt === 'sole_prop' ? 'your' : 'the business’s'} turnover tax returns from the books and what you tell us: the TT02 interim payments and the TT03 annual return. Turnover tax takes the place of ${bt === 'sole_prop' ? 'income tax and provisional tax on the business’s income' : 'the business’s income tax and provisional tax'}.${bt === 'sole_prop' ? ' Your own income tax return (the ITR12), for any income outside the business such as a salary or interest, is prepared only if it’s listed above.' : ''}${entity(bt).taxedAs === 'company' ? ' Dividends tax returns (DTR01) for dividends it pays (turnover tax exempts the first R200 000 a year) aren’t included unless they’re listed above.' : ''}`,
         yours,
       ];
     case 'partners':
