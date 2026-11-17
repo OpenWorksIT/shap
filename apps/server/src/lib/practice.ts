@@ -69,10 +69,10 @@ export class ClientDbs {
       return sql;
     }
     while (this.pools.size >= MAX_CLIENT_POOLS) {
-      const [oldest, pool] = this.pools.entries().next().value as [string, Sql];
-      this.pools.delete(oldest);
-      // A query still running on it finishes first (postgres.js ends gracefully).
-      void pool.end({ timeout: 30 }).catch(() => undefined);
+      // The least used is let go, never ended: a request still using it carries on (it holds the
+      // pool itself), and its connections close by themselves once idle (60 seconds).
+      const [oldest] = this.pools.keys();
+      this.pools.delete(oldest!);
     }
     sql = createDb(this.urlFor(dbName), { max: 3, idleSeconds: 60 });
     this.pools.set(dbName, sql);
@@ -112,6 +112,20 @@ export class ClientDbs {
     await practice.unsafe(`drop database if exists "${dbName}" with (force)`);
   }
 
+  /**
+   * A pool of its own for a job in the background (the checks after an update, the monthly
+   * invoices): never shared with requests, so ending it when the job is done can't cut one short.
+   */
+  async withOwn<T>(dbName: string, job: (sql: Sql) => Promise<T>): Promise<T> {
+    if (!dbName.startsWith(`${this.practiceDb}__c_`) || !/^[a-z0-9_]{1,63}$/.test(dbName)) throw new Error(`Not one of this practice's client databases: ${dbName}`);
+    const sql = createDb(this.urlFor(dbName), { max: 2, idleSeconds: 10 });
+    try {
+      return await job(sql);
+    } finally {
+      await sql.end({ timeout: 5 }).catch(() => undefined);
+    }
+  }
+
   async forget(dbName: string): Promise<void> {
     const sql = this.pools.get(dbName);
     this.pools.delete(dbName);
@@ -134,20 +148,22 @@ export class ClientDbs {
 export async function migrateClients(practice: Sql, clients: ClientDbs, log: { info: (m: string) => void; warn: (o: object, m: string) => void }): Promise<{ ok: string[]; failed: string[] }> {
   const ok: string[] = [];
   const failed: string[] = [];
-  // A client whose database was never finished (the server stopped while it was made): gone.
-  await practice`delete from practice_clients where db_name is null and created_at < now() - interval '1 hour'`;
+  // A client whose database was never finished (the server stopped while it was made): its
+  // database and its row both go.
+  for (const c of await practice<{ id: string }[]>`select id from practice_clients where db_name is null and created_at < now() - interval '1 hour'`) {
+    await clients.drop(practice, clientDbName(clients.practiceDb, c.id)).catch((err) => log.warn({ err }, 'a client’s unfinished database couldn’t be dropped'));
+    await practice`delete from practice_clients where id = ${c.id}`;
+  }
   for (const c of await practice<{ id: string; dbName: string }[]>`select id, db_name from practice_clients where db_name is not null order by created_at`) {
     try {
       await clients.revokePublic(practice, c.dbName);
-      await migrate(clients.get(c.dbName), (m) => log.info(`a client's books: ${m}`));
+      await clients.withOwn(c.dbName, (sql) => migrate(sql, (m) => log.info(`a client's books: ${m}`)));
       await practice`update practice_clients set migrate_error = null where id = ${c.id} and migrate_error is not null`;
       ok.push(c.id);
     } catch (err) {
       log.warn({ err }, 'a client’s books: migrations failed');
       await practice`update practice_clients set migrate_error = ${String((err as Error).message).slice(0, 500)} where id = ${c.id}`;
       failed.push(c.id);
-    } finally {
-      await clients.forget(c.dbName);
     }
   }
   return { ok, failed };
@@ -164,11 +180,9 @@ export async function refreshAllHealth(practice: Sql, clients: ClientDbs, ids: s
   for (const c of await practice<{ id: string; dbName: string }[]>`select id, db_name from practice_clients where id = any(${ids}::uuid[]) and archived_at is null`) {
     const started = new Date();
     try {
-      await saveHealth(practice, c.id, await healthOf(clients.get(c.dbName), today(), log), started);
+      await saveHealth(practice, c.id, await clients.withOwn(c.dbName, (sql) => healthOf(sql, today(), log)), started);
     } catch (err) {
       log.warn({ err }, 'practice: a client’s checks failed');
-    } finally {
-      await clients.forget(c.dbName);
     }
   }
 }

@@ -34,8 +34,9 @@ describe('Settings → Updates & backups', () => {
   });
 
   it('lists and downloads only this company’s backups — not other companies’ dumps', async () => {
-    // current_database() in tests is shap_test, so this company's dumps are "shap_test-…".
-    const mine = 'shap_test-daily-2026-10-19_0230.dump';
+    // This company's dumps are named after its own database ("shap_test-…" in CI).
+    const db = (await env.sql<{ db: string }[]>`select current_database() as db`)[0]!.db;
+    const mine = `${db}-daily-2026-10-19_0230.dump`;
     writeFileSync(join(backups, mine), 'PGDMP fake');
     writeFileSync(join(backups, 'notes.txt'), 'not a backup');
     // shap-ctl dumps every database on the box into one shared folder, so another company's dump
@@ -47,7 +48,7 @@ describe('Settings → Updates & backups', () => {
     expect((await owner.call({ method: 'GET', url: `/api/system/backups/${mine}` })).statusCode).toBe(400);
     expect((await owner.call({ method: 'POST', url: `/api/system/backups/${mine}/link`, payload: { password: 'nope-nope-1' } })).statusCode).toBe(400);
     const { url } = await owner.post(`/api/system/backups/${mine}/link`, { password: 'test-password-1' });
-    expect((await owner.call({ method: 'GET', url: url.replace('shap_test-daily', 'shap_test-manual') })).statusCode).toBe(400);
+    expect((await owner.call({ method: 'GET', url: url.replace(`${db}-daily`, `${db}-manual`) })).statusCode).toBe(400);
     const dl = await owner.call({ method: 'GET', url });
     expect(dl.statusCode).toBe(200);
     expect(dl.body).toBe('PGDMP fake');

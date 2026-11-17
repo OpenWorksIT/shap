@@ -662,6 +662,28 @@ tests (`apps/server/test/review-1.27/`, and `test/accountant/practice.test.ts`):
   OpenWorks to decide: an indemnity from a practice against its clients' claims would be a terms
   change (everyone accepts again).
 
+- The fixes, checked by a separate agent: a page still in a client's books after it closed could,
+  once a refusal had cleared its cookies (the live stream reconnecting, a PDF link), read and write
+  the practice's own books under the client's name; the page now says which client's books it's
+  in on every request (and the live stream), and a request not routed there is refused. A
+  recorded approval's PDF said the director "approved in Shap": it says signed on the day and
+  recorded in Shap by the practice person, from the signed page, which now opens from the screen
+  (and a reopen clears it); reopening a client's approved statements is the practice's owner's.
+  Pools let go when twelve are open are no longer ended under a request still using them, and the
+  background jobs (the checks after an update, the clients' monthly invoices) use pools of their
+  own. A client the server stopped making has its database dropped too. The penetration test's
+  walls section gives site staff the task it needs (and takes it away after), adds from an address
+  of its own, and fails rather than skips the demo. The wipe screen says the clients' books stay; a
+  client's statements screen says the practice compiles and records; "The owner who approves"; the
+  Regulation 29(5) sentence beside a review only; an unexpected error on any screen in a client's
+  books sends people to the practice's Feedback; a trust brought in from a company file keeps a
+  February year end (existing books are left as they are); the misplaced comments and the EMP501
+  interim season's source; the filing season tied to `SARS_CHECKED_TO` by a test; the disclaimer's
+  section says a practice uses Shap on its clients' behalf, without narrowing the terms' "you".
+  Tests that didn't prove their fix now do (`test/review-1.27/fix-check.test.ts`: the returns for
+  the day shown, an earlier year not approved, the role checked, a half-made database dropped, the
+  rate limit, the pool cap), and the backups test names its dumps after its own database.
+
 ### Code scanning (CodeQL), first run
 
 - The Accounts screen's download links carried the period's dates unencoded (flagged as text

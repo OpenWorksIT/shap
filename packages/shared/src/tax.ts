@@ -377,7 +377,6 @@ export function vat201Due(periodEnd: string): string {
   return businessDayOnOrBefore(new Date(Date.UTC(y, m + 1, 0)).toISOString().slice(0, 10));
 }
 
-/** The last business day of a month, public holidays included (turnover tax and provisional tax payments). */
 /** A VAT period's name, as Home and the practice's list both say it: "VAT201 for Sep to Oct 26". */
 export function vat201Label(p: { start: string; end: string }): string {
   const s = p.start.slice(0, 7);
@@ -391,7 +390,8 @@ export function vat201Label(p: { start: string; end: string }): string {
  * (docs/SARS.md); a season not yet announced isn't here.
  * - Individuals and trusts, 2026: https://www.sars.gov.za/types-of-tax/personal-income-tax/tax-season/
  * - IT3(t) and the trusts' season: https://www.sars.gov.za/media-release/trust-filing-season-set-to-open/
- * - The employers' interim season (EMP501, March to August 2026), 21 September to 31 October 2026: the same page.
+ * - The employers' interim season (EMP501, March to August 2026), 21 September to 31 October 2026:
+ *   https://www.sars.gov.za/latest-news/paye-interim-filing-season-opens-today-21-september-2026/
  */
 export const FILING_SEASON_DATES: readonly { key: string; label: string; due: string; who: 'individual' | 'partners' | 'trust' | 'employer' }[] = [
   { key: 'itr12-2026', label: 'ITR12 for the year to February 2026 (a provisional taxpayer’s)', due: '2027-01-22', who: 'individual' },
@@ -401,6 +401,7 @@ export const FILING_SEASON_DATES: readonly { key: string; label: string; due: st
   { key: 'emp501-2027-interim', label: 'EMP501 interim reconciliation (March to August 2026)', due: '2026-10-30', who: 'employer' },
 ];
 
+/** The last business day of a month, public holidays included (turnover tax and provisional tax payments). */
 export function lastBusinessDay(year: number, month: number): string {
   return businessDayOnOrBefore(new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10));
 }

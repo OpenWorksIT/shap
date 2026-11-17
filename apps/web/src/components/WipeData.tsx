@@ -15,8 +15,9 @@ export function WipeData() {
     <section className="panel panel-pad stack narrow-wide">
       <h3>Wipe all data</h3>
       <p className="small">
-        Deletes the books on this server: invoices, quotes, clients, costs and slip photos, workers, payroll and settings. Shap starts again from the first-run
-        questions. The people who sign in and the audit log stay. Backups already made aren’t touched (delete those yourself if they must go too).
+        Deletes this business’s own books on this server: invoices, quotes, clients, costs and slip photos, workers, payroll and settings. Shap starts again from the
+        first-run questions. The people who sign in and the audit log stay. With Shap Accountant on, your clients’ books, and the list of them and who opens each,
+        stay too (archive a client to close it). Backups already made aren’t touched (delete those yourself if they must go too).
       </p>
       <button className="btn danger" style={{ alignSelf: 'flex-start' }} onClick={() => setOpen(true)}>
         <Icon name="trash" size={18} />

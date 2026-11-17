@@ -335,12 +335,13 @@ export async function runClientsMonthly(ctx: Ctx, on?: string): Promise<number> 
   let made = 0;
   for (const c of await real<{ id: string; name: string; dbName: string }[]>`
     select id, name, db_name from practice_clients where db_name is not null and archived_at is null and migrate_error is null order by created_at`) {
-    const sql = ctx.clients.get(c.dbName);
     try {
-      const [any] = await sql`select 1 from monthly_invoices where active limit 1`;
-      if (!any) continue;
-      const r = await dbScope.run({ demo: false, client: { id: c.id, name: c.name, sql } }, () => runMonthly(sql, ctx.mailer, { emailOn: false, on }));
-      made += r.created;
+      // A pool of its own, so this never ends one a request is using (lib/practice.ts withOwn).
+      made += await ctx.clients.withOwn(c.dbName, async (sql) => {
+        const [any] = await sql`select 1 from monthly_invoices where active limit 1`;
+        if (!any) return 0;
+        return (await dbScope.run({ demo: false, client: { id: c.id, name: c.name, sql } }, () => runMonthly(sql, ctx.mailer, { emailOn: false, on }))).created;
+      });
     } catch {
       /* this client's books: tried again on the next check (the schedule keeps its error) */
     }

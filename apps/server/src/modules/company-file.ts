@@ -8,7 +8,7 @@
  * and updated; nothing is deleted.
  */
 import type { FastifyInstance } from 'fastify';
-import { brandInput, clientInput, settingsInput } from '@shap/shared';
+import { brandInput, clientInput, entity, settingsInput } from '@shap/shared';
 import { z } from 'zod';
 import { confirmPassword, requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -142,6 +142,9 @@ export async function restoreCompanyFile(tx: Tx, raw: unknown) {
     await tx`update settings set ${tx(SETTINGS_COLUMNS[k])} = ${checked.data as never} where id`;
   }
   await applyBusinessType(tx, (await getSettings(tx)).businessType);
+  // A trust's, a sole proprietor's and a partnership's year of assessment ends in February: their
+  // books' year too, as Settings keeps it (so the VAT201s, Home and the practice's list agree).
+  if (entity((await getSettings(tx)).businessType).febYearEnd) await tx`update settings set fy_end_month = 2 where id and fy_end_month <> 2`;
 
   // Trading names
   for (const b of file.brands) {

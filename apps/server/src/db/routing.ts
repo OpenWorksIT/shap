@@ -18,7 +18,8 @@ import type { Sql } from './index.js';
  */
 export interface DbScope {
   demo: boolean;
-  client?: { id: string; name: string; sql: Sql } | null;
+  /** A practice's client's books (Shap Accountant); practiceOwner: opened by the practice's own owner. */
+  client?: { id: string; name: string; sql: Sql; practiceOwner?: boolean } | null;
 }
 export const dbScope = new AsyncLocalStorage<DbScope>();
 

@@ -32,6 +32,14 @@ async function run() {
     let live = false;
     try {
       const res = await fetch(apiUrl('/api/live'), { headers: authHeaders(), credentials: 'same-origin', signal: c.signal });
+      // A client's books that were open here aren't any more: back to the practice (lib/api.ts).
+      if (res.status === 409) {
+        const body = (await res.json().catch(() => ({}))) as { code?: string };
+        if (body.code === 'client_closed') {
+          window.location.assign('/practice');
+          return;
+        }
+      }
       if (!res.ok || !res.body) throw new Error(String(res.status));
       const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
       let buf = '';

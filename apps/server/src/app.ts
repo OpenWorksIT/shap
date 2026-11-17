@@ -170,7 +170,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
       reply.header('vary', 'Origin');
       if (req.method === 'OPTIONS') {
         reply.header('access-control-allow-methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-        reply.header('access-control-allow-headers', 'content-type,authorization,x-shap-version,x-shap-client');
+        reply.header('access-control-allow-headers', 'content-type,authorization,x-shap-version,x-shap-client,x-shap-books');
         reply.header('access-control-max-age', '600');
         return reply.code(204).send();
       }

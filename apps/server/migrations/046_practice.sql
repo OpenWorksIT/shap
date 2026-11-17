@@ -32,3 +32,5 @@ create table if not exists practice_access (
 -- In a client's books the practice records the directors' approval of the statements rather than
 -- giving it (Companies Act s30(3)(c)): the page a director signed, kept with the approved set.
 alter table financial_statements add column if not exists approval_signed_id uuid references attachments(id);
+alter table financial_statements add column if not exists approval_recorded_by text;
+

@@ -755,7 +755,11 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
   // never go out with nobody, or the wrong people, on the signature lines.
   const approvers = details.directors.filter((d) => d.name.trim()).length;
   const gov = governingFor(bt);
-  checks.push({ label: `The ${gov.many} who approve the statements are named`, ok: approvers > 0, detail: approvers ? `${approvers} named` : `none named: name the ${gov.many} in the details on this screen` });
+  checks.push({
+    label: gov.plural ? `The ${gov.many} who approve the statements are named` : `The ${gov.one} who approves the statements is named`,
+    ok: approvers > 0,
+    detail: approvers ? `${approvers} named` : `none named: name the ${gov.many} in the details on this screen`,
+  });
 
   // ---------------------------------------------------------------- for the accountant to look at
   // What the standard asks that Shap can't settle from the books alone: shown with the checks, never

@@ -22,6 +22,7 @@ import {
   type StatementStatus,
 } from '@shap/shared';
 import { PdfPreview } from '../components/PdfPreview';
+import { FileButton } from '../components/Files';
 import { Drawer, Empty, ErrorBox, Field, Icon, Kpi, Loading, Money, useToast } from '../components/ui';
 import { api, ApiError, apiBlob } from '../lib/api';
 import { sharePdf } from '../lib/share-pdf';
@@ -78,6 +79,9 @@ interface StatementsView {
     compilerReportId: string | null;
     approvedName: string;
     approvedOn: string | null;
+    /** In a practice's client's books: the page the directors signed, and who recorded it. */
+    approvalSignedId?: string | null;
+    approvalRecordedBy?: string | null;
   } | null;
   changedSince: boolean;
   audit: { level: 'fail' | 'warn'; section: string; text: string }[];
@@ -177,7 +181,11 @@ export function FinancialStatements() {
     <div className="stack">
       <p className="small muted">
         Drawn up from the books under the IFRS for SMEs Accounting Standard: the statement of financial position, of comprehensive income, of changes in equity and of cash flows, with the notes, the {s?.governing.many ?? 'directors'}’ report and a detailed income statement.
-        {accountant ? ' Check them, word the notes, then compile and sign.' : ' Your accountant compiles and signs them; then you approve them and the year is finished.'}
+        {accountant
+          ? ' Check them, word the notes, then compile and sign.'
+          : client
+            ? ` The practice compiles them here (Practice → Open to compile); then one of the ${s?.governing.many ?? 'directors'} signs their approval, and you record it with the page they signed.`
+            : ' Your accountant compiles and signs them; then you approve them and the year is finished.'}
       </p>
       <div className="row wrap">
         {years.data.map((y) => (
@@ -209,9 +217,17 @@ export function FinancialStatements() {
                 {v.row.compiler.how === 'uploaded' ? ', the signed report uploaded' : ', signed in Shap'}.
               </span>
             )}
+            {status === 'approved' && v.row?.approvalSignedId && (
+              <FileButton path={`/api/statements/${s?.fyEnd}/approval-page`} className="btn small quiet" title="The signed approval">
+                The page they signed
+              </FileButton>
+            )}
             {status === 'approved' && v.row?.approvedOn && (
               <span className="small">
-                Approved and signed by {v.row.approvedName} on {formatDate(v.row.approvedOn, 'long')}. The year is agreed and closed.
+                {v.row.approvalRecordedBy
+                  ? `Signed by ${v.row.approvedName} on ${formatDate(v.row.approvedOn, 'long')}, recorded in Shap by ${v.row.approvalRecordedBy} from the signed page.`
+                  : `Approved and signed by ${v.row.approvedName} on ${formatDate(v.row.approvedOn, 'long')}.`}{' '}
+                The year is agreed and closed.
               </span>
             )}
             {v.changedSince && <span className="small">The books have changed since these were signed, so they no longer agree with them. Reopen them and send them to your accountant again.</span>}

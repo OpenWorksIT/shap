@@ -3,7 +3,7 @@
  * A native (Capacitor) build sets VITE_API_URL to the Shap server and stores the
  * bearer token returned at login, because cross-origin cookies are unreliable in webviews.
  */
-import { scrubPath, UNEXPECTED } from '@shap/shared';
+import { scrubPath, UNEXPECTED, UNEXPECTED_IN_A_CLIENT } from '@shap/shared';
 
 const BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? '';
 const NATIVE = Boolean(import.meta.env.VITE_API_URL);
@@ -40,9 +40,20 @@ export function setNativeToken(t: string | null) {
   }
 }
 
+/**
+ * Which practice client's books this page is in (Shap Accountant), once it knows (ClientBanner):
+ * sent with every request, so a request the server no longer routes there (the client was archived,
+ * or the person taken off it) is refused, never answered from the practice's own books.
+ */
+let booksHere: string | null = null;
+export function setBooksHere(clientId: string | null) {
+  booksHere = clientId;
+}
+export const inClientBooks = () => booksHere !== null;
+
 export function authHeaders(): Record<string, string> {
   const t = token();
-  return t ? { Authorization: `Bearer ${t}` } : {};
+  return { ...(t ? { Authorization: `Bearer ${t}` } : {}), ...(booksHere ? { 'X-Shap-Books': booksHere } : {}) };
 }
 
 export function apiUrl(path: string): string {
@@ -93,7 +104,7 @@ export async function api<T = unknown>(path: string, opts: { method?: string; bo
     if (res.status === 409 && d.code === 'client_closed' && !NATIVE) window.location.assign('/practice');
     // One the server didn't expect: where, into Feedback's trail (redacted there).
     if (res.status >= 500) console.error(`${opts.method ?? (opts.body !== undefined ? 'POST' : 'GET')} ${scrubPath(path)} → ${res.status}`);
-    throw new ApiError(res.status, d.error ?? (res.status >= 500 ? UNEXPECTED : `Request failed (${res.status})`), d.code ?? 'error', d.details?.fields ?? {}, d.details);
+    throw new ApiError(res.status, d.error ?? (res.status >= 500 ? (booksHere ? UNEXPECTED_IN_A_CLIENT : UNEXPECTED) : `Request failed (${res.status})`), d.code ?? 'error', d.details?.fields ?? {}, d.details);
   }
   return data as T;
 }

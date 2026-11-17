@@ -1,3 +1,4 @@
+import { UNEXPECTED as SHARED_UNEXPECTED, UNEXPECTED_IN_A_CLIENT } from '@shap/shared';
 /**
  * How the app talks: casual (South African, "Howzit", "lekker") or formal, chosen in the
  * first-run questions and in Settings. Only greetings, confirmations and a few friendly lines
@@ -9,7 +10,13 @@ export const setTone = (t: Tone | undefined) => void (tone = t === 'formal' ? 'f
 export const getTone = () => tone;
 
 /** The words for an error nobody expected: the same from the server (`@shap/shared`). */
-export { UNEXPECTED } from '@shap/shared';
+/**
+ * The words for an unexpected error: in a practice's client's books (Shap Accountant), where Feedback
+ * is the practice's, they send people back there for it (ClientBanner sets it). A live binding, so
+ * every screen that shows it reads the right one.
+ */
+export let UNEXPECTED: string = SHARED_UNEXPECTED;
+export const setClientWords = (inClient: boolean) => void (UNEXPECTED = inClient ? UNEXPECTED_IN_A_CLIENT : SHARED_UNEXPECTED);
 
 const CHEERS = ['Lekker', 'Sharp', 'Shap', 'Nice one', 'Sorted'];
 

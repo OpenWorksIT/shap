@@ -33,7 +33,7 @@ import type { Db } from '../db/index.js';
 import { audit } from '../lib/audit.js';
 import { effectiveLock, freshTotals, getSettings, today } from '../lib/books.js';
 import { badRequest, forbidden, notFound } from '../lib/errors.js';
-import { inClient } from '../db/routing.js';
+import { dbScope, inClient } from '../db/routing.js';
 import { parse } from '../lib/validate.js';
 import { auditBooks } from '../audit/books.js';
 import { buildStatements, yearStartOf, type Statements } from '../statements/build.js';
@@ -60,6 +60,8 @@ interface Row {
   approvedName: string;
   approvedOn: string | null;
   finalPdfId: string | null;
+  approvalSignedId: string | null;
+  approvalRecordedBy: string | null;
 }
 
 /**
@@ -117,7 +119,7 @@ export async function currentStatements(db: Db, fyEnd: string): Promise<{ statem
 
 const signaturesOf = (r: Row | null): Signatures => ({
   compiler: r?.compiler ?? null,
-  approved: r?.status === 'approved' && r.approvedOn ? { name: r.approvedName, date: r.approvedOn } : null,
+  approved: r?.status === 'approved' && r.approvedOn ? { name: r.approvedName, date: r.approvedOn, recordedBy: r.approvalRecordedBy } : null,
 });
 
 /** Ready to sign: the statements add up and the books audit finds nothing to fix. */
@@ -321,6 +323,20 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
     return reply.send(f.bytes);
   });
 
+  /** The page the directors signed, where the practice recorded their approval (Shap Accountant). */
+  app.get('/api/statements/:fyEnd/approval-page', { preHandler: requireAccess('reports.view') }, async (req, reply) => {
+    const { fyEnd } = parse(fyParam, req.params);
+    const r = await row(sql, fyEnd);
+    if (!r?.approvalSignedId) throw notFound('Signed page');
+    const [f] = await sql<{ filename: string; mime: string; bytes: Buffer }[]>`select filename, mime, bytes from attachments where id = ${r.approvalSignedId}`;
+    if (!f) throw notFound('Signed page');
+    const safe = f.mime === 'application/pdf' || /^image\/(png|jpeg|webp)$/.test(f.mime);
+    reply.header('content-type', safe ? f.mime : 'application/octet-stream');
+    reply.header('content-disposition', `${safe ? 'inline' : 'attachment'}; filename="${f.filename.replace(/[^\w.\- ]/g, '_')}"`);
+    reply.header('content-security-policy', "script-src 'none'; object-src 'none'; frame-ancestors 'none'");
+    return reply.send(f.bytes);
+  });
+
   /** The directors approve and sign: the year is agreed at the signed figures and closed. */
   app.post('/api/statements/:fyEnd/approve', owner, async (req) => {
     const user = userOrThrow(req);
@@ -343,7 +359,7 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
     if (input.date < (r.compiledOn ?? fyEnd)) throw badRequest('They’re approved on or after the day they were compiled');
     const now = await buildStatements(sql, fyEnd, r.snapshot.details);
     if (!stillSigned(r as { snapshot: Statements; snapshotHash: string | null }, now)) throw badRequest('The books have changed since the statements were compiled, so they no longer give the signed figures. Send them to your accountant again.');
-    const sig: Signatures = { compiler: r.compiler, approved: { name: input.name, date: input.date } };
+    const sig: Signatures = { compiler: r.compiler, approved: { name: input.name, date: input.date, recordedBy: recorded ? user.name : null } };
     const pdf = await renderStatementsPdf(r.snapshot, sig);
     const settings = await getSettings(sql);
     await sql.begin(async (tx) => {
@@ -360,7 +376,7 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
         values (${`${settings.companyName} financial statements ${fyEnd.slice(0, 4)} (signed).pdf`.replace(/[^\w.\- ]/g, '')}, 'application/pdf', ${pdf.length}, ${pdf}, ${user.id})
         returning id`;
       await tx`update financial_statements set status = 'approved', approved_by = ${user.id}, approved_name = ${input.name}, approved_on = ${input.date}::date, approved_at = now(),
-        final_pdf_id = ${f!.id}, approval_signed_id = ${recorded ? input.signedId : null}, updated_at = now() where fy_end = ${fyEnd}::date`;
+        final_pdf_id = ${f!.id}, approval_signed_id = ${recorded ? input.signedId : null}, approval_recorded_by = ${recorded ? user.name : null}, updated_at = now() where fy_end = ${fyEnd}::date`;
       await audit(tx, {
         userId: user.id,
         action: recorded ? 'record_statements_approval' : 'approve_statements',
@@ -380,6 +396,10 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
     const { reason } = parse(reopenStatementsInput, req.body);
     const r = await row(sql, fyEnd);
     if (!r || r.status === 'draft') throw badRequest('These statements are still a draft');
+    // A client's approved statements are its directors' decision (Shap Accountant): reopening them is
+    // for the practice's owner, not anyone given the books to write up.
+    const client = dbScope.getStore()?.client;
+    if (client && r.status === 'approved' && !client.practiceOwner) throw forbidden('Reopening a client’s approved statements is for the practice’s owner: their directors approved them.');
     await sql.begin(async (tx) => {
       // A set that was compiled (or approved and signed) is kept as it was, with its PDFs and why it
       // was reopened (Companies Act s24: the statements are kept seven years).
@@ -388,7 +408,7 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
           select fy_end, to_jsonb(fs), final_pdf_id, compiler_report_id, ${user.id}, ${reason} from financial_statements fs where fy_end = ${fyEnd}::date`;
       }
       await tx`update financial_statements set status = 'draft', snapshot = null, snapshot_hash = null, compiled_by = null, compiler = null, compiled_on = null,
-        compiled_at = null, approved_by = null, approved_name = '', approved_on = null, approved_at = null, updated_at = now() where fy_end = ${fyEnd}::date`;
+        compiled_at = null, approved_by = null, approved_name = '', approved_on = null, approved_at = null, approval_signed_id = null, approval_recorded_by = null, updated_at = now() where fy_end = ${fyEnd}::date`;
     });
     await audit(sql, { userId: user.id, action: 'reopen_statements', entity: 'financial_statements', entityId: fyEnd, ip: req.ip, details: { reason, was: r.status } });
     return { ok: true };

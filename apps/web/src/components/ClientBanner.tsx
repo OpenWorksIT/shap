@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { api, ApiError } from '../lib/api';
-import { UNEXPECTED } from '../lib/words';
+import { api, ApiError, setBooksHere } from '../lib/api';
+import { UNEXPECTED, setClientWords } from '../lib/words';
 
 interface Here {
   client: { id: string; name: string } | null;
@@ -11,7 +11,9 @@ let cached: Promise<Here> | null = null;
 export function useClientHere(): Here['client'] | undefined {
   const [h, setH] = useState<Here['client'] | undefined>(undefined);
   useEffect(() => {
-    cached ??= api<Here>('/api/practice/here').catch(() => ({ client: null }));
+    cached ??= api<Here>('/api/practice/here')
+      .catch(() => ({ client: null }))
+      .then((x) => (setBooksHere(x.client?.id ?? null), setClientWords(Boolean(x.client)), x));
     void cached.then((x) => setH(x.client));
   }, []);
   return h;

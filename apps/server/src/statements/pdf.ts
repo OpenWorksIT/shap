@@ -19,7 +19,8 @@ const RULE = '#cfc8bd';
 
 export interface Signatures {
   compiler?: { name: string; qualification?: string; body?: string; number?: string; practice?: string; address?: string; date: string; how: 'in_shap' | 'uploaded' } | null;
-  approved?: { name: string; date: string } | null;
+  /** recordedBy: in a practice's client's books, the practice person who recorded the directors' signed approval. */
+  approved?: { name: string; date: string; recordedBy?: string | null } | null;
 }
 
 const amt = (c: number | null | undefined) => (c == null ? '' : c === 0 ? '–' : formatAmount(c));
@@ -182,15 +183,21 @@ export function renderStatementsPdf(s: Statements, sig: Signatures = {}): Promis
   );
   para(`The financial statements set out on the pages that follow, prepared on the going concern basis, were approved by the ${many} ${final ? `on ${formatDate(sig.approved!.date, 'long')}` : 'on ________________'} and are signed on their behalf by:`);
   pdf.moveDown(2);
-  const signLine = (who: string, signedName?: string, date?: string) => {
+  const signLine = (who: string, signedName?: string, date?: string, recordedBy?: string | null) => {
     ensure(60);
     const y = pdf.y;
     pdf.moveTo(L, y).lineTo(L + 220, y).lineWidth(0.6).strokeColor(INK).stroke();
     pdf.font(regular).fontSize(9).fillColor(MUTED).text(who, L, y + 4);
-    if (signedName) pdf.font(bold).fontSize(9.5).fillColor(INK).text(`${signedName}, approved in Shap on ${formatDate(date!, 'long')}`, L, y - 14, { width: 300 });
+    // Signed outside Shap and recorded by the practice (Shap Accountant), or approved in Shap itself.
+    if (signedName)
+      pdf
+        .font(bold)
+        .fontSize(9.5)
+        .fillColor(INK)
+        .text(recordedBy ? `${signedName}, signed on ${formatDate(date!, 'long')}; recorded in Shap by ${recordedBy} from the signed page` : `${signedName}, approved in Shap on ${formatDate(date!, 'long')}`, L, y - (recordedBy ? 24 : 14), { width: 360 });
     pdf.y = y + 30;
   };
-  if (final) signLine(s.governing.signs, sig.approved!.name, sig.approved!.date);
+  if (final) signLine(s.governing.signs, sig.approved!.name, sig.approved!.date, sig.approved!.recordedBy);
   else for (const d of s.details.directors.length ? s.details.directors : [{ name: '', role: s.governing.signs }]) signLine(`${d.name || s.governing.signs}${d.role ? ` (${d.role})` : ''}`);
 
   // ---------------------------------------------------------------- directors' report

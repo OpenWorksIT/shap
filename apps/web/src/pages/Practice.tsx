@@ -201,7 +201,8 @@ export default function PracticePage() {
                           </p>
                           {st.assurance && st.status !== 'approved' && (
                             <p className="small">
-                              <strong>Assurance:</strong> {st.assurance} The independent reviewer can’t be anyone in your practice who prepared or compiled them (Companies Regulation 29(5)).
+                              <strong>Assurance:</strong> {st.assurance}
+                              {/audit/i.test(st.assurance) ? '' : ' The independent reviewer can’t be anyone in your practice who prepared or compiled them (Companies Regulation 29(5)).'}
                             </p>
                           )}
                           {st.unapprovedEarlier && (

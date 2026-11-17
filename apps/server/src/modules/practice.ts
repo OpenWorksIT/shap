@@ -90,6 +90,17 @@ export function registerPracticeScope(app: FastifyInstance, ctx: Ctx): void {
   };
 
   app.addHook('onRequest', async (req, reply) => {
+    await scopeClient(req, reply);
+    // The page says which client's books it's in (lib/api.ts): a request not routed there now
+    // (the cookies went with an earlier refusal) is refused too, never answered from the practice's own.
+    const claimed = req.headers['x-shap-books'];
+    const p = routePath(req);
+    if (typeof claimed === 'string' && claimed && p.startsWith('/api/') && dbScope.getStore()?.client?.id !== claimed && !dbScope.getStore()?.demo) {
+      if (!IN_A_CLIENT_TOO.includes(p) && !(req.method === 'GET' && p === '/api/auth/me') && !p.startsWith('/api/auth/logout')) throw new HttpError(409, CLOSED, 'client_closed');
+    }
+  });
+
+  async function scopeClient(req: FastifyRequest, reply: FastifyReply) {
     const id = req.cookies?.[CLIENT_COOKIE];
     const scope = dbScope.getStore();
     if (!id || !scope || scope.demo || !routePath(req).startsWith('/api/')) return;
@@ -118,9 +129,9 @@ export function registerPracticeScope(app: FastifyInstance, ctx: Ctx): void {
           select s.user_id, u.role from sessions s join users u on u.id = s.user_id where s.token_hash = ${sha256(token)} and s.expires_at > now() and u.active`
       : [];
     if (!s || s.userId !== user.id || !rolesFor(level).includes(s.role)) return fail();
-    scope.client = { id: c.id, name: c.name, sql };
+    scope.client = { id: c.id, name: c.name, sql, practiceOwner: user.role === 'owner' };
     if (under(p, NOT_IN_A_CLIENT) && !IN_A_CLIENT_TOO.includes(p)) throw forbidden('That’s the practice’s own, so it isn’t done in a client’s books: tap Back to the practice, at the top, first.');
-  });
+  }
 }
 
 export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -258,7 +269,7 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (here && token) {
       await here.sql`delete from sessions where token_hash = ${sha256(token)}`.catch(() => undefined);
       const [c] = await real<{ healthAt: Date | null }[]>`select health_at from practice_clients where id = ${here.id}`;
-      if (!c?.healthAt || Date.now() - c.healthAt.getTime() > 60_000) {
+      if (!c?.healthAt || Date.now() - c.healthAt.getTime() > 10_000) {
         await Promise.race([refreshHealth(here.id, here.sql), new Promise((r) => setTimeout(r, 8000).unref())]);
       }
     }
