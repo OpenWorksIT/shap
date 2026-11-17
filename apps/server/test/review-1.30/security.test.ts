@@ -10,7 +10,7 @@
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ACCOUNTANT_TERMS_VERSION, LINK_PATHS, LINK_SESSION_HOURS, plainName } from '@shap/shared';
+import { ACCOUNTANT_TERMS_VERSION, LINK_PATHS, LINK_SESSION_HOURS, linkText, plainName } from '@shap/shared';
 import { linkBaseProblem, linkCall, LinkError, neverReached, privateAddress } from '../../src/lib/link-call.js';
 import { appVersion } from '../../src/modules/system.js';
 import { expectCleanAudit, login, setup, type TestEnv } from '../helpers.js';
@@ -130,6 +130,13 @@ describe('someone from a linked practice, in the client’s own Shap', () => {
       expect((await p.own.app.inject({ method: 'POST', url, payload: {} })).statusCode, url).toBe(409);
       expect((await p.own.app.inject({ method: 'POST', url, payload: {}, headers: { 'x-shap-version': appVersion() } })).statusCode, url).toBe(401);
     }
+  });
+
+  it('makes the link’s text in a time that doesn’t grow with the square of its slashes (code scanning)', () => {
+    expect(linkText('https://books.made-up.example//', 'c'.repeat(43))).toBe(`https://books.made-up.example/link#${'c'.repeat(43)}`);
+    const started = Date.now();
+    linkText(`https://books.made-up.example${'/'.repeat(100_000)}x`, 'c'.repeat(43));
+    expect(Date.now() - started).toBeLessThan(200);
   });
 
   it('reads only a small body from another server (security 8)', async () => {

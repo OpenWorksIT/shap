@@ -85,7 +85,10 @@ export function compilerDefaults<C extends { name: string; practice: string; qua
 
 /** The link the client's owner gives their accountant: their Shap's address, and the code after the #. */
 export function linkText(publicUrl: string, code: string): string {
-  return `${publicUrl.replace(/\/+$/, '')}/link#${code}`;
+  // (Its trailing slashes off without a pattern, which many slashes not at the end would slow.)
+  let end = publicUrl.length;
+  while (end > 0 && publicUrl[end - 1] === '/') end--;
+  return `${publicUrl.slice(0, end)}/link#${code}`;
 }
 
 /** The client's Shap's address and the code, from a link pasted in (or null if it isn't one). */
