@@ -673,7 +673,8 @@ tests (`apps/server/test/review-1.27/`, and `test/accountant/practice.test.ts`):
   background jobs (the checks after an update, the clients' monthly invoices) use pools of their
   own. A client the server stopped making has its database dropped too. The penetration test's
   walls section gives site staff the task it needs (and takes it away after), adds from an address
-  of its own, and fails rather than skips the demo. The wipe screen says the clients' books stay; a
+  of its own, and fails rather than skips the demo where the server has one (CI runs with the
+  demo off: there the in-process tests try its wall). The wipe screen says the clients' books stay; a
   client's statements screen says the practice compiles and records; "The owner who approves"; the
   Regulation 29(5) sentence beside a review only; an unexpected error on any screen in a client's
   books sends people to the practice's Feedback; a trust brought in from a company file keeps a
