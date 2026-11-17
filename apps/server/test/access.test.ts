@@ -76,7 +76,10 @@ describe('every door, for every task', () => {
   ]);
 
   it('gives every route a door: some roles, some tasks, or anyone signed in on purpose', () => {
-    const unguarded = Object.entries(env.doors).filter(([r, d]) => !d && !r.startsWith('POST /api/auth/') && !r.startsWith('GET /api/auth/') && !/^(GET \/api\/(health|demo\/status)|POST \/api\/(demo|practice)\/leave)$/.test(r));
+    // (A linked practice's server's routes take its link's code or credential, never a session: links.ts, linked.test.ts.)
+    const unguarded = Object.entries(env.doors).filter(
+      ([r, d]) => !d && !r.startsWith('POST /api/auth/') && !r.startsWith('GET /api/auth/') && !/^(GET \/api\/(health|demo\/status)|POST \/api\/(demo|practice)\/leave)$/.test(r) && !/^(GET|POST) \/api\/link\/(redeem|sign-in|enter|health|person-off|unlink)$/.test(r),
+    );
     expect(unguarded.map(([r]) => r)).toEqual([]);
     const anyone = Object.entries(env.doors).filter(([, d]) => d?.roles && d.roles.length === 0).map(([r]) => r);
     expect(anyone.sort()).toEqual([...ANYONE].sort());

@@ -87,6 +87,16 @@ capturing slips or invoicing against one gives the open jobs to pick by name. Ti
 each person's own (whoever makes the invoices sees everyone's unbilled time, to put on them). Without "See payroll", the tax pack and the books audit leave employees'
 names and pay out.
 
+## Your accountant
+
+If the business's accountant uses Shap Accountant, the owner links their practice under **Settings
+→ People → Your accountant** (docs/ACCOUNTANT.md, "A client on its own Shap"): they choose whether
+the practice reads the books and compiles the statements (as an accountant here) or writes them up
+too (as staff with every task but closing and reopening months), and make a link that works once,
+for a week. The practice's people open the books from their own Shap, each time with a sign-in
+that works once; they're never in the people list here, never sign in with a password, and are
+named in the audit log with their practice. **Unlink** takes them all out at once.
+
 ## How it's checked
 
 `apps/server/test/access.test.ts` tries every route for every job: each job (with what it needs)

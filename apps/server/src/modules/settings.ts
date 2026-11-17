@@ -369,7 +369,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     const rows = await sql<{ role: Role; profileAccess: string[] | null; accessAdd: string[]; accessRemove: string[] }[]>`
       select u.id, u.name, u.email, u.role, u.active, u.last_login_at, u.totp_enabled_at is not null as mfa,
         u.profile_id, p.name as profile_name, p.access as profile_access, u.access_add, u.access_remove
-      from users u left join profiles p on p.id = u.profile_id order by u.name`;
+      from users u left join profiles p on p.id = u.profile_id where u.link_id is null order by u.name`;
     // What each can do now: their profile's, changed for them.
     return rows.map((r) => ({ ...r, access: accessOf(r) }));
   });
@@ -396,8 +396,10 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = parse(idParam, req.params);
     const input = parse(userInput, req.body);
     if (id === me.id && (input.role !== 'owner' || input.active === false)) throw badRequest('You can’t remove your own owner access');
-    const [target] = await sql<{ role: string }[]>`select role from users where id = ${id}`;
+    const [target] = await sql<{ role: string; linkId: string | null }[]>`select role, link_id from users where id = ${id}`;
     if (!target) throw notFound('Someone');
+    // Someone from a linked accountant's practice is theirs to change, and yours to unlink (Your accountant).
+    if (target.linkId) throw badRequest('They’re from your accountant’s practice: unlink it under Your accountant to take them out of your books.');
     // Step-up re-authentication for the moves a stolen owner session could use to take over or
     // lock someone out: changing your own email/password (as before), resetting someone else's
     // password, making someone an owner, or editing an existing owner. Not just your own record.

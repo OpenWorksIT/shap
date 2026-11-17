@@ -3,6 +3,22 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.30.0 (17 November 2026)
+
+- **Link your accountant** (Settings → People → Your accountant). If your accountant's practice
+  uses Shap Accountant, link it to your Shap: choose whether they read your books and compile the
+  statements, or write them up too, and give them the link it makes (it works once, for a week).
+  They open your books from their Shap, each time with a sign-in that works once; who they are is
+  in your audit log, and they're never in your people list. Unlink whenever you like.
+- **Shap Accountant: clients on their own Shap** (docs/ACCOUNTANT.md, "A client on its own Shap").
+  Paste a client's link under Practice (On their own Shap): their books stay on their Shap, and
+  your people open them there, in a new tab, as given here and never more than the client allows.
+  Run the checks shows what their Shap's checks find. When someone's access changes, or either side
+  unlinks, the client's Shap takes them out. A practice's Shap reaches only public https addresses
+  for this.
+- The Shap Accountant terms of use (version 2026-11-17.2) cover a client's books on its own Shap;
+  a practice's owner accepts them again on the Practice page.
+
 ## 1.29.1 (17 November 2026)
 
 - **The Shap Accountant terms of use** ([openworks.co.za/shap/accountant-terms](https://www.openworks.co.za/shap/accountant-terms/)).

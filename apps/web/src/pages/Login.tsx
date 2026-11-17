@@ -17,7 +17,10 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [useRecovery, setUseRecovery] = useState(false);
-  const [error, setError] = useState('');
+  // Back from a linked accountant's sign-in that no longer works (modules/links.ts): it works once, within a minute.
+  const [error, setError] = useState(() =>
+    new URLSearchParams(window.location.search).get('link') === 'expired' ? 'That sign-in from your practice has been used or has expired: open their books again from Shap Accountant.' : '',
+  );
   const [busy, setBusy] = useState(false);
 
   const run = async (fn: () => Promise<void>) => {

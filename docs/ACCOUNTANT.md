@@ -52,7 +52,7 @@ them, don't change.
 | Kept by the practice | A database of its own on the practice's server | Now (1.27) |
 | Brought in from another package | The same, from Xero's, QuickBooks' or Sage's trial balance and general ledger exports | Now (1.28) |
 | A Shap Pocket share | A read-only copy of the owner's phone books, stamped, the next share marking what changed | Now (1.29) |
-| Linked from the client's own Shap | On the client's own server; Open signs the practice in to it | Planned |
+| Linked from the client's own Shap | On the client's own server; Open signs the practice's person in to it, in a new tab | Now (1.30) |
 
 **Add client** (for whoever may add clients) makes a new set of books named for the business.
 **Open their books** puts this browser into them, with Shap's screens; the first time, Shap asks
@@ -208,6 +208,48 @@ Pocket), and the copy's own books aren't written in. Adjustments the practice fi
 the owner, to make in Pocket and share again. The figures are the client's, as the share has them:
 Shap doesn't check them against the client's records (`POCKET_SHARE_NOTE`).
 
+## A client on its own Shap
+
+A business that runs its own Shap links its accountant itself: in its Shap, **Settings → People →
+Your accountant**, its owner chooses what the practice may do there and makes a link (it takes
+their password). The two ways are the practice's own:
+
+| What the client lets the practice do | Who they are in the client's Shap |
+|---|---|
+| Read the books and compile the statements | Its accountant (read only), as for any accountant |
+| Write up the books, and compile the statements | Staff, with every task but closing and reopening months (`LINKED_BOOKS_TASKS`); or its accountant, to compile |
+
+What stays the client owner's either way: their settings, the people who sign in, the year end,
+tax estimates, dividends and profit shares, approving the statements, backups and the system.
+
+The link is the client's Shap's address and a code (`https://their-shap/link#…`). It works once,
+for a week, and only its hash is kept. In the practice, someone who adds clients chooses **On their
+own Shap** and pastes it in: Shap Accountant shows the code to the client's Shap once, and gets a
+credential for this link (sealed with the server's secret here; only its hash there). From then
+on the two servers talk only for this:
+
+- **Open their books** (as given in the practice, never more than the client allows): the
+  practice's server asks the client's for a sign-in for that person, and their browser opens it
+  in a new tab. It works once, within a minute. In the client's Shap they're someone of their own
+  (their name and the practice's), never signing in with a password, and kept out of the owner's
+  people list; what they do is in the client's audit log by name. The bar at the top says whose
+  Shap it is, and from which practice. They sign out there when done.
+- **Run the checks**: the client's Shap runs its own checks and sends what they found (the books
+  audit's first findings, the statements' standing and the returns' inputs, read here only as
+  that list has them). Nothing else of the client's books comes to the practice's server.
+- **Who opens it** changed or taken away: the client's Shap takes that person out at once.
+- **Unlink**, from either side: the credential goes, and the practice's people are taken out of
+  the client's books. To link again, the client makes a new link (**Link again** keeps the
+  practice's choices of who opens it).
+
+What goes between the servers, and nothing else: to the client's, the code and the practice's name
+once, then who opens the books (an id and their name) and at what level; back, the client's name,
+what it allows, sign-ins and the checks' findings. OpenWorks gets none of it. A practice's server
+reaches only public https addresses (a name that resolves to a private one is refused when
+connecting, no redirects followed, ten seconds, a small answer: `lib/link-call.ts`); on a
+practice's own network, `LINK_PRIVATE=true` lets it reach private addresses, over http too.
+Both Shaps need 1.30 or later.
+
 ## Who opens which
 
 The practice's owner opens every client, to write up or to compile. Anyone else needs **Open the
@@ -218,7 +260,8 @@ clients they're given** ticked (Settings → People who sign in) and the client 
   reopening closed periods included, and they record the client's approval of the financial
   statements (below). They can also open the books to compile. In a Shap Pocket client's copy, they
   bring in the shares, compile, and record the approval: the books themselves change only in Shap
-  Pocket (above).
+  Pocket (above). On a client's own Shap, they do what the client lets the practice do there
+  (above): never more.
 - **Reads them and compiles the statements, as their accountant in Shap (read only)**: the
   financial statements, docs/STATEMENTS.md.
 

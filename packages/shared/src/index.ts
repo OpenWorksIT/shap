@@ -28,3 +28,4 @@ export * from './documents.js';
 export * from './errors.js';
 export * from './practice.js';
 export * from './pocket-share.js';
+export * from './link.js';

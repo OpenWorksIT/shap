@@ -49,7 +49,7 @@ export const IMPORT_NOTE =
  * Shap's terms change, the Shap Accountant terms' Part A changes with them, and both versions go up
  * (ACCOUNTANT_TERMS_VERSION is never older than TERMS_VERSION: accountant-terms.test.ts).
  */
-export const ACCOUNTANT_TERMS_VERSION = '2026-11-17';
+export const ACCOUNTANT_TERMS_VERSION = '2026-11-17.2';
 export const ACCOUNTANT_TERMS_URL = 'https://www.openworks.co.za/shap/accountant-terms/';
 /** The practice's owner, accepting the Shap Accountant terms for the practice. */
 export const ACCOUNTANT_TERMS_TICK = 'I accept the Shap Accountant terms of use for my practice, and I’m authorised to agree to them on its behalf.';
@@ -72,7 +72,7 @@ export function accountantTermsPoints(): { title: string; body: string }[] {
     },
     {
       title: 'Your clients’ books and information are in your care',
-      body: 'Your clients’ books are kept on your practice’s server. Its security, the books’ backups, who in your practice opens which books, and your clients’ personal information (POPIA) are your practice’s responsibility. Books brought in from another package, or from a client’s Shap Pocket share, are for your practice to check against where they came from.',
+      body: 'The clients’ books your practice keeps are on its server: its security, the books’ backups, who in your practice opens which books, and your clients’ personal information (POPIA) are your practice’s responsibility. A client on its own Shap that links your practice decides what it may do there, and can unlink it at any time. Books brought in from another package, or from a client’s Shap Pocket share, are for your practice to check against where they came from.',
     },
     {
       title: 'Your practice indemnifies OpenWorks',

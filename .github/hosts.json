@@ -75,6 +75,11 @@
    "host": "www.ifrs.org",
    "kind": "link",
    "why": "the IFRS for SMEs Accounting Standard, cited for the financial statements"
+  },
+  {
+   "host": "(each linked client's own Shap)",
+   "kind": "sends",
+   "why": "Shap Accountant, only for a client whose owner made the practice a link in their own Shap (Settings → People → Your accountant), at the address in that link: the link's code and the practice's name once, then with the link's credential: who in the practice opens the books (their name and an id) and at what level, asking for the client's checks, taking someone out, or unlinking. Nothing from the practice's own books. Public https addresses only, unless LINK_PRIVATE is set (lib/link-call.ts)."
   }
  ]
 }

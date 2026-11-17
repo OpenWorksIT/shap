@@ -17,7 +17,7 @@ import { createReadStream, existsSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { ACCOUNTANT_TERMS_URL, ACCOUNTANT_TERMS_VERSION, deadlinesFor, featureOn, LEVELS, PRACTICE_TERMS_TICK, TERMS_URL, TERMS_VERSION, type Level } from '@shap/shared';
+import { ACCOUNTANT_TERMS_URL, ACCOUNTANT_TERMS_VERSION, BUSINESS_TYPES, deadlinesFor, featureOn, LEVELS, PRACTICE_TERMS_TICK, readLink, TERMS_URL, TERMS_VERSION, VAT_CATEGORIES, type Level } from '@shap/shared';
 import { z } from 'zod';
 import { browserName, can, CLIENT_COOKIE, confirmPassword, CLIENT_SESSION_COOKIE, loadUser, requireAccess, requireRole, SESSION_COOKIE, userOrThrow, type AuthUser } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -30,7 +30,8 @@ import { routePath } from '../lib/http.js';
 import { clientDbName, healthOf, mirrorUser, roleFor, rolesFor, saveHealth, unmirrorUser, type ClientHealth } from '../lib/practice.js';
 import { SERVER_ONLY, under } from '../lib/server-only.js';
 import { applyPocketShare, readPocketShare } from './import/pocket-share.js';
-import { BACKUP_NAME } from './system.js';
+import { appVersion, BACKUP_NAME } from './system.js';
+import { linkCall, LinkError } from '../lib/link-call.js';
 import { newToken, sha256 } from '../lib/tokens.js';
 import { parse } from '../lib/validate.js';
 
@@ -67,7 +68,46 @@ interface ClientRow {
   health: ClientHealth | null;
   healthAt: Date | null;
   migrateError: string | null;
+  /** A client on its own Shap: its address, the credential (sealed), and what it lets the practice do. */
+  linkUrl: string | null;
+  linkCredential: string | null;
+  linkLevel: Level | null;
 }
+
+/**
+ * What a linked client's Shap says its checks found, read as the practice keeps it: only what the
+ * list shows, each of the right kind (the returns are worked out here from it), so a client's
+ * server can't put anything else on the practice's list.
+ */
+const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const words = z.string().max(500);
+const linkedHealth = z.object({
+  at: z.string().max(40),
+  company: z.string().max(200),
+  setupDone: z.boolean(),
+  vatRegistered: z.boolean(),
+  audit: z.object({ fail: z.number().int().min(0).max(1e6), warn: z.number().int().min(0).max(1e6), items: z.array(z.object({ level: z.enum(['fail', 'warn']), section: words, text: words })).max(12) }),
+  statements: z
+    .union([
+      z.object({ yearEnd: date, status: z.enum(['draft', 'sent', 'compiled', 'approved']), changedSince: z.boolean(), failing: z.array(words).max(50), look: z.array(words).max(50), assurance: words.nullable(), unapprovedEarlier: date.nullable() }),
+      z.object({ yearEnd: date.nullable(), error: z.literal(true) }),
+      z.object({ yearEnd: z.null(), firstYearEnds: date }),
+    ])
+    .nullable(),
+  lockedThrough: date.nullable(),
+  deadlineInputs: z
+    .object({
+      businessType: z.enum(BUSINESS_TYPES),
+      vatRegistered: z.boolean(),
+      vatCategory: z.enum(VAT_CATEGORIES),
+      fyEndMonth: z.number().int().min(1).max(12),
+      turnoverTax: z.boolean(),
+      employer: z.boolean(),
+      approvedPbo: z.boolean().optional(),
+      dividendsPaid: z.array(date).max(60).optional(),
+    })
+    .nullable(),
+});
 
 /** The practice's owner has accepted the Shap Accountant terms as they are now (terms.ts). */
 const accountantTermsAccepted = async (real: Sql) => {
@@ -204,7 +244,7 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     await assertOn();
     const rows = await real<(ClientRow & { level: Level | null })[]>`
       select c.*, a.level from practice_clients c left join practice_access a on a.client_id = c.id and a.user_id = ${user.id}
-      where c.db_name is not null order by c.archived_at nulls first, lower(c.name)`;
+      where c.db_name is not null or c.kind = 'linked' order by c.archived_at nulls first, lower(c.name)`;
     const manages = can(user, 'practice.manage');
     // Who manages sees every client (they can give themselves any of them); others, theirs.
     const mine = user.role === 'owner' || manages ? rows : rows.filter((r) => r.level);
@@ -219,6 +259,8 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
         kind: r.kind,
         archived: r.archivedAt != null,
         notUpToDate: r.migrateError != null,
+        // On their own Shap: where, what they let the practice do, and whether it's still linked.
+        linked: r.kind === 'linked' ? { host: r.linkUrl ? new URL(r.linkUrl).host : '', level: r.linkLevel, unlinked: !r.linkCredential } : null,
         level: user.role === 'owner' ? 'books' : r.level,
         // The returns are worked out again for today, so a date moves to past by itself.
         health: r.health ? { ...r.health, deadlines: r.health.deadlineInputs ? deadlinesFor(r.health.deadlineInputs, now) : [] } : null,
@@ -255,10 +297,125 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** Open a client's books in this browser: as given, or, for someone who writes them up, to compile (read only). */
+  /* ---------------------------------------- a client on its own Shap (linked) */
+
+  const practiceName = async () => {
+    const [p] = await real<{ companyName: string; tradingName: string }[]>`select company_name, trading_name from settings where id`;
+    return (p?.tradingName || p?.companyName || 'A practice').slice(0, 200);
+  };
+  /** Asks the client's own Shap (lib/link-call.ts), with this link's credential. */
+  const callLinked = <T>(c: ClientRow, method: 'GET' | 'POST', path: string, body?: unknown) =>
+    linkCall<T>({ base: c.linkUrl!, method, path, credential: ctx.secrets.open(c.linkCredential!), body, allowPrivate: config.LINK_PRIVATE, version: appVersion() });
+  /** What the client's Shap said, as the practice is told it; an unlinked client is marked so. */
+  const linkRefusal = async (c: ClientRow, err: unknown) => {
+    if (!(err instanceof LinkError)) return err;
+    if (err.code === 'link_gone') {
+      await real`update practice_clients set link_credential = null where id = ${c.id}`;
+      return badRequest('They’ve unlinked your practice in their Shap, so it no longer opens their books. To link again, ask them for a new link (Settings → People → Your accountant, in their Shap).', { code: 'link_gone' });
+    }
+    return new HttpError(err.status >= 500 ? 502 : 400, err.message, err.code);
+  };
+  const linked = (c: ClientRow) => {
+    if (!c.linkUrl || !c.linkCredential) throw badRequest('They’ve unlinked your practice in their Shap, so it no longer opens their books. To link again, ask them for a new link (Settings → People → Your accountant, in their Shap).', { code: 'link_gone' });
+    return c;
+  };
+  const linkedHealthOf = async (c: ClientRow, log: { warn: (o: object, m: string) => void }): Promise<ClientHealth> => {
+    const started = new Date();
+    let answer: { health: unknown; level?: Level };
+    try {
+      answer = await callLinked<{ health: unknown; level?: Level }>(linked(c), 'GET', '/api/link/health');
+    } catch (err) {
+      throw await linkRefusal(c, err);
+    }
+    const read = linkedHealth.safeParse(answer.health);
+    if (!read.success) {
+      log.warn({ issues: read.error.issues.slice(0, 5) }, 'practice: a linked client’s checks came back unread');
+      throw new HttpError(502, 'Their Shap’s checks came back in a way this Shap doesn’t read: one of the two may need updating.', 'link_answer');
+    }
+    const health = read.data as ClientHealth;
+    await saveHealth(real, c.id, health, started);
+    if (answer.level && answer.level !== c.linkLevel && LEVELS.includes(answer.level)) await real`update practice_clients set link_level = ${answer.level} where id = ${c.id}`;
+    return health;
+  };
+
+  /** A client on its own Shap: the link its owner made there, pasted in here (packages/shared link.ts). */
+  app.post('/api/practice/clients/link', { ...manage, config: limit(10) }, async (req) => {
+    const user = userOrThrow(req);
+    await assertOn();
+    const { link, id } = parse(z.object({ link: z.string().trim().min(10).max(400), id: z.string().uuid().optional() }), req.body);
+    const read = readLink(link);
+    if (!read) throw badRequest('That isn’t a link from Shap. In their own Shap, the client makes one under Settings → People → Your accountant: it starts with their Shap’s address and ends with /link# and a code.');
+    const again = id ? await clientOr404(id) : null;
+    if (again && again.kind !== 'linked') throw badRequest('That client’s books aren’t on their own Shap.');
+    let answer: { credential: string; company: string; level: Level; api?: number };
+    try {
+      answer = await linkCall({ base: read.base, method: 'POST', path: '/api/link/redeem', body: { code: read.code, practice: { name: await practiceName() } }, allowPrivate: config.LINK_PRIVATE, version: appVersion() });
+    } catch (err) {
+      if (err instanceof LinkError) throw new HttpError(err.status >= 500 ? 502 : 400, err.message, err.code);
+      throw err;
+    }
+    if (typeof answer.credential !== 'string' || answer.credential.length < 20 || !LEVELS.includes(answer.level)) throw new HttpError(502, 'Their Shap answered in a way this Shap doesn’t read: one of the two may need updating.', 'link_answer');
+    const name = (typeof answer.company === 'string' && answer.company.trim() ? answer.company.trim() : read.base).slice(0, 200);
+    const sealed = ctx.secrets.seal(answer.credential);
+    const clientId = await real.begin(async (tx) => {
+      const [c] = again
+        ? await tx<{ id: string }[]>`update practice_clients set link_url = ${read.base}, link_credential = ${sealed}, link_level = ${answer.level}, archived_at = null where id = ${again.id} returning id`
+        : await tx<{ id: string }[]>`insert into practice_clients (name, kind, created_by, link_url, link_credential, link_level) values (${name}, 'linked', ${user.id}, ${read.base}, ${sealed}, ${answer.level}) returning id`;
+      await audit(tx, { userId: user.id, action: 'practice_client_link', entity: 'practice_client', entityId: c!.id, ip: req.ip, details: { host: new URL(read.base).host, level: answer.level } });
+      return c!.id;
+    });
+    // What their checks find, for the list, now (it's there next time anyway).
+    await linkedHealthOf(await clientOr404(clientId), req.log).catch((err) => req.log.warn({ err }, 'practice: a linked client’s first checks failed'));
+    return { id: clientId, name, level: answer.level };
+  });
+
+  /** The practice unlinks a client on its own Shap: their Shap takes the practice's people out too. */
+  app.post('/api/practice/clients/:id/unlink', { ...manage, config: limit(10) }, async (req) => {
+    const user = userOrThrow(req);
+    await assertOn();
+    const c = await clientOr404((req.params as { id: string }).id);
+    if (c.kind !== 'linked') throw badRequest('That client’s books aren’t on their own Shap.');
+    let told = true;
+    if (c.linkCredential)
+      await callLinked(c, 'POST', '/api/link/unlink').catch((err) => {
+        told = err instanceof LinkError && err.code === 'link_gone';
+        req.log.warn({ err }, 'practice: a linked client’s Shap didn’t take the unlink');
+      });
+    await real.begin(async (tx) => {
+      await tx`update practice_clients set link_credential = null, archived_at = coalesce(archived_at, now()) where id = ${c.id}`;
+      await audit(tx, { userId: user.id, action: 'practice_client_unlink', entity: 'practice_client', entityId: c.id, ip: req.ip, details: { told } });
+    });
+    return { ok: true, told };
+  });
+
+  /** Opening a linked client: a sign-in their Shap makes for this person, opened in a new tab. */
+  const openLinked = async (req: FastifyRequest, user: AuthUser, c: ClientRow) => {
+    const given = await levelFor(real, user, c.id);
+    if (!given) throw forbidden(NOT_GIVEN);
+    const { as } = parse(z.object({ as: z.enum(LEVELS).optional() }), req.body ?? {});
+    if (as === 'books' && given !== 'books') throw forbidden('You’ve been given these books to read and compile, not to write up.');
+    // As given, and never more than the client lets the practice do.
+    let level: Level = as ?? given;
+    if (level === 'books' && c.linkLevel !== 'books') {
+      if (as === 'books') throw forbidden('The client lets your practice read their books and compile the statements, not write them up.');
+      level = 'compile';
+    }
+    let path: string;
+    try {
+      ({ path } = await callLinked<{ path: string }>(linked(c), 'POST', '/api/link/sign-in', { person: { id: user.id, name: user.name }, level }));
+    } catch (err) {
+      throw await linkRefusal(c, err);
+    }
+    if (typeof path !== 'string' || !/^\/api\/link\/enter\?t=[A-Za-z0-9_%-]{20,200}$/.test(path)) throw new HttpError(502, 'Their Shap answered in a way this Shap doesn’t read: one of the two may need updating.', 'link_answer');
+    await audit(real, { userId: user.id, action: 'practice_client_open', entity: 'practice_client', entityId: c.id, ip: req.ip, details: { level, linked: true } });
+    return { ok: true, name: c.name, level, url: `${c.linkUrl}${path}` };
+  };
+
   app.post('/api/practice/clients/:id/open', { ...view, config: limit(30) }, async (req, reply) => {
     const user = userOrThrow(req);
     await assertOn();
     const c = await clientOr404((req.params as { id: string }).id);
+    if (c.kind === 'linked') return openLinked(req, user, c);
     const dbName = usable(c);
     const given = await levelFor(real, user, c.id);
     if (!given) throw forbidden(NOT_GIVEN);
@@ -322,6 +479,11 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const user = userOrThrow(req);
     await assertOn();
     const c = await clientOr404((req.params as { id: string }).id);
+    if (c.kind === 'linked') {
+      if (!(await levelFor(real, user, c.id))) throw forbidden(NOT_GIVEN);
+      const health = await linkedHealthOf(c, req.log);
+      return { health: { ...health, deadlines: health.deadlineInputs ? deadlinesFor(health.deadlineInputs, today()) : [] } };
+    }
     const dbName = usable(c);
     if (!(await levelFor(real, user, c.id))) throw forbidden(NOT_GIVEN);
     const health = await refreshHealth(c.id, clients.get(dbName));
@@ -346,6 +508,11 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     // Whoever lost the client, or whose level changed, is out of its books at once (open it again, as given now).
     const now = new Map(access.map((a) => [a.userId, a.level]));
     if (c.dbName) for (const b of before) if (now.get(b.userId) !== b.level) await unmirrorUser(clients.get(c.dbName), b.userId);
+    // On the client's own Shap: asked to take them out (best done now; their next sign-in is as given anyway).
+    if (c.kind === 'linked' && c.linkCredential)
+      for (const b of before)
+        if (now.get(b.userId) !== b.level)
+          await callLinked(c, 'POST', '/api/link/person-off', { personId: b.userId }).catch((err) => req.log.warn({ err }, 'practice: a linked client’s Shap didn’t take someone out'));
     return { ok: true };
   });
 
@@ -355,6 +522,7 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     await assertOn();
     const c = await clientOr404((req.params as { id: string }).id);
     const { archived } = parse(z.object({ archived: z.boolean() }), req.body);
+    if (c.kind === 'linked' && c.linkCredential) throw badRequest('A client on their own Shap is unlinked instead (Unlink): their books stay theirs, on their Shap.');
     await real.begin(async (tx) => {
       await tx`update practice_clients set archived_at = ${archived ? new Date() : null} where id = ${c.id}`;
       await audit(tx, { userId: user.id, action: archived ? 'practice_client_archive' : 'practice_client_unarchive', entity: 'practice_client', entityId: c.id, ip: req.ip });

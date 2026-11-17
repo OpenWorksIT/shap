@@ -58,6 +58,11 @@ const envSchema = z.object({
    * shared from it (no anonymous prices or usage notes). Set on the server, never from the app.
    */
   TEST_SERVER: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  /**
+   * Shap Accountant may reach linked clients' Shaps on private addresses, over http too (a
+   * practice's own network, and the tests). Off, it reaches only public https addresses (lib/link-call.ts).
+   */
+  LINK_PRIVATE: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
 });
 
 export type Config = Omit<z.infer<typeof envSchema>, 'MFA_REQUIRED'> & {

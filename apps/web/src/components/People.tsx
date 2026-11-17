@@ -9,6 +9,7 @@ import { useMemo, useState, type FormEvent } from 'react';
 import { formatDate, neededBy, passwordProblem, ROLE_HINTS, ROLE_LABELS, shownGroups, TASKS, withNeeds, type Role, type Task } from '@shap/shared';
 import { Drawer, ErrorBox, Field, Icon, Loading, useToast } from './ui';
 import { usePasswordPrompt } from './PasswordPrompt';
+import { YourAccountant } from './YourAccountant';
 import { api, ApiError } from '../lib/api';
 import { useApi } from '../lib/hooks';
 import { useAuthed } from '../lib/session';
@@ -124,6 +125,8 @@ export function People() {
           </ul>
         )}
       </section>
+
+      <YourAccountant />
 
       {edit && profiles.data && <UserDrawer user={edit === 'new' ? null : edit} profiles={profiles.data} onClose={() => setEdit(null)} onSaved={reload} />}
       {profile && <ProfileDrawer profile={profile === 'new' ? null : profile} onClose={() => setProfile(null)} onSaved={reload} />}

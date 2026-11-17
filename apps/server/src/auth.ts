@@ -145,7 +145,8 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
     // UPLOAD_MB of it): only signing in itself, leaving the demo and the collector take one.
     if (!req.user && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
       const path = req.url.split('?')[0]!;
-      if (path.startsWith('/api/') && !path.startsWith('/api/auth/') && path !== '/api/demo/leave' && path !== '/api/practice/leave') throw unauthorized();
+      // (A linked practice's server shows its link's credential, or the link's code, instead: links.ts.)
+      if (path.startsWith('/api/') && !path.startsWith('/api/auth/') && !path.startsWith('/api/link/') && path !== '/api/demo/leave' && path !== '/api/practice/leave') throw unauthorized();
     }
   });
 
@@ -432,7 +433,10 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
 
   app.get('/api/auth/me', async (req) => {
     if (!req.user) throw unauthorized();
-    return { user: req.user };
+    // Someone from a linked accountant's practice (modules/links.ts): which practice, for the bar at the top.
+    const [link] = await sql<{ practiceName: string | null }[]>`
+      select a.practice_name from users u join accountant_links a on a.id = u.link_id where u.id = ${req.user.id}`;
+    return { user: req.user, fromPractice: link?.practiceName ?? null };
   });
 }
 

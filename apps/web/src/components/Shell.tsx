@@ -89,6 +89,11 @@ export function Shell({ children }: { children: ReactNode }) {
 
       <main className="main" id="main">
         <TestServerBanner />
+        {user.fromPractice && (
+          <div className="banner small" role="status">
+            You’re in <strong data-private>{settings.tradingName || settings.companyName}</strong>’s own Shap, from <strong data-private>{user.fromPractice}</strong>, as they let your practice. Sign out here when you’re done.
+          </div>
+        )}
         <Notices />
         <ScreenClip />
         {children}

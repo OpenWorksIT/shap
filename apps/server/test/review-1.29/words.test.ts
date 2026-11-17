@@ -28,7 +28,7 @@ describe('the words of a Shap Pocket client’s copy (words 4, 7, 10; check 5, 7
   });
 
   it('who opens it: a Pocket client’s copy isn’t written in, so it doesn’t say they can do all the owner could', () => {
-    expect(page).toMatch(/\{client\.kind === 'pocket' \? WHO_OPENS_POCKET : WHO_OPENS_KEPT\}/);
+    expect(page).toMatch(/\{client\.kind === 'pocket' \? WHO_OPENS_POCKET : client\.kind === 'linked' \? WHO_OPENS_LINKED : WHO_OPENS_KEPT\}/);
     const pocket = page.slice(page.indexOf('const WHO_OPENS_POCKET'), page.indexOf('const POCKET_RESTORED'));
     expect(pocket).toMatch(/Their books change only in Shap Pocket \(on their phone or computer\)/);
     expect(pocket).toMatch(/records the approval of whoever signs them for the business/);

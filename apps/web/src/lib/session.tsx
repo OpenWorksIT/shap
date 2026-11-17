@@ -58,8 +58,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     setUnauthorizedHandler(() => setUser(null));
-    api<{ user: User }>('/api/auth/me')
-      .then((r) => enter(r.user))
+    api<{ user: User; fromPractice?: string | null }>('/api/auth/me')
+      .then((r) => enter({ ...r.user, fromPractice: r.fromPractice ?? null }))
       .catch(() => {})
       .finally(() => setReady(true));
   }, [enter]);

@@ -220,6 +220,14 @@ describe('breaking in', () => {
       const [method, path] = r.split(' ') as [string, string];
       const url = path.replace(/:[a-zA-Z]+/g, id);
       const opts = { method: method as never, url, payload: method === 'GET' || method === 'DELETE' ? undefined : ({} as never), headers: V };
+      // A linked practice's server's (links.ts): answered only with a link's code or credential,
+      // never a session, so the same with one as without: a code wanted, a sign-in gone, or refused.
+      if (path.startsWith('/api/link/')) {
+        const want = path === '/api/link/redeem' ? 400 : path === '/api/link/enter' ? 303 : 401;
+        const got = [(await env.app.inject(opts)).statusCode, (await acc.call(opts)).statusCode, (await site.call(opts)).statusCode];
+        if (got.some((g) => g !== want)) problems.push(`${r} answered ${got.join('/')}, not ${want}`);
+        continue;
+      }
       if (!open.has(r) && (await env.app.inject(opts)).statusCode !== 401) problems.push(`${r} open when signed out`);
       if (method !== 'GET') {
         const a = (await acc.call(opts)).statusCode;
