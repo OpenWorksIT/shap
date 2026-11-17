@@ -62,7 +62,7 @@ export async function practiceAndPhone(phoneDb: string) {
     const res = await owner.call({ method: 'POST', url: `/api/practice/clients/${id}/open`, payload: { as } });
     if (res.statusCode !== 200) throw new Error(res.body);
     const cookies = Object.fromEntries(res.cookies.filter((c) => c.value).map((c) => [c.name, c.value]));
-    return { get: (url: string) => owner.call({ method: 'GET', url, cookies }) };
+    return { get: (url: string) => owner.call({ method: 'GET', url, cookies }), send: (method: 'POST' | 'PUT', url: string, payload: unknown) => owner.call({ method, url, payload: payload as never, cookies }) };
   };
   const close = async () => {
     await env.ctx.clients.end();

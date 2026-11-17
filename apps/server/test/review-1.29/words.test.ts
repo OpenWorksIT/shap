@@ -19,18 +19,20 @@ describe('the words of a Shap Pocket client’s copy (words 4, 7, 10; check 5, 7
   const docs = read('docs/ACCOUNTANT.md');
   const drawer = page.slice(page.indexOf('function ShareDrawer('));
 
-  it('the copy says the practice compiles and records the directors’ approval, not that it approves', () => {
+  it('the copy says the practice compiles and records the approval of whoever signs, not that it approves', () => {
     expect(POCKET_COPY).not.toMatch(/compiles and approves/);
-    expect(POCKET_COPY).toMatch(/Here the practice compiles their statements and records the directors’ approval\./);
+    // Many Pocket clients are sole proprietors or partnerships, not companies.
+    expect(POCKET_COPY).toMatch(/Here the practice compiles their statements and records the approval of whoever signs them for the business \(its directors, members, partners or owner\)\./);
     expect(docs).not.toMatch(/compiles and approves the statements there/);
-    expect(docs).toMatch(/compiles the statements there and\s+records the directors' approval/);
+    expect(docs).toMatch(/compiles the statements there and\s+records the approval of whoever signs them for the business \(its directors, members, partners or\s+owner/);
   });
 
   it('who opens it: a Pocket client’s copy isn’t written in, so it doesn’t say they can do all the owner could', () => {
     expect(page).toMatch(/\{client\.kind === 'pocket' \? WHO_OPENS_POCKET : WHO_OPENS_KEPT\}/);
     const pocket = page.slice(page.indexOf('const WHO_OPENS_POCKET'), page.indexOf('const POCKET_RESTORED'));
-    expect(pocket).toMatch(/Their books change only in Shap Pocket/);
-    expect(pocket).toMatch(/records the directors’ approval/);
+    expect(pocket).toMatch(/Their books change only in Shap Pocket \(on their phone or computer\)/);
+    expect(pocket).toMatch(/records the approval of whoever signs them for the business/);
+    expect(pocket).not.toMatch(/directors’ approval/);
     expect(pocket).not.toMatch(/reopening closed periods|everything the client’s owner could/);
     expect(docs).toMatch(/In a Shap Pocket client's copy, they\s+bring in the shares, compile, and record the approval/);
   });
@@ -44,8 +46,8 @@ describe('the words of a Shap Pocket client’s copy (words 4, 7, 10; check 5, 7
   it('a restored phone is what the stamp suggests, not what Shap knows (check 7)', () => {
     expect(page).not.toMatch(/The share is from books restored or begun again on their phone/);
     expect(page).not.toMatch(/'\s*\(from books restored on their phone\)'/);
-    expect(page).toMatch(/which usually means their books were restored from a backup or begun again on their phone: check with them/);
-    expect(page).toMatch(/their books restored on their phone, it seems/);
+    expect(page).toMatch(/which usually means their books were restored from a backup or begun again in Shap Pocket: check with them/);
+    expect(page).toMatch(/their books restored in Shap Pocket, it seems/);
     expect(docs).toMatch(/a lower number made later is taken to mean the books were restored\s+or begun again on the phone/);
   });
 
@@ -61,9 +63,12 @@ describe('the words of a Shap Pocket client’s copy (words 4, 7, 10; check 5, 7
   });
 
   it('the docs say what a share carries as the panel does (check 5)', () => {
-    for (const goes of ['whatever their dates', 'income tax numbers (a', "sole proprietor's income tax number is their own", 'where trips went']) expect(docs.replace(/\s+/g, ' ')).toContain(goes);
+    for (const goes of ['whatever their dates', 'income tax numbers (a', "sole proprietor's income tax number is their own", 'where trips went from and to', "the logbook's vehicle", 'the tax estimates saved in Pocket', 'on its trading names'])
+      expect(docs.replace(/\s+/g, ' ')).toContain(goes);
     expect(docs).not.toMatch(/Left out: who signs in, photos of slips, people's ID, tax and bank numbers, and contact details/);
     expect(SHARE_WHAT_GOES).toMatch(/whatever its date/);
-    expect(SHARE_WHAT_GOES).toMatch(/where your trips went/);
+    expect(SHARE_WHAT_GOES).toMatch(/where your trips went from and to, and your vehicle’s name; and the tax estimates you’ve saved/);
+    // On a computer there's no share sheet: a download.
+    expect(SHARE_WHAT_GOES).toMatch(/Nothing goes until you choose where to send or save it/);
   });
 });

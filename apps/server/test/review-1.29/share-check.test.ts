@@ -8,6 +8,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { financialYear } from '@shap/shared';
 import { taxFigures } from '../../src/modules/yearend.js';
+import { buildStatements } from '../../src/statements/build.js';
 import { expectCleanAudit } from '../helpers.js';
 import { makeShare, practiceAndPhone, tbOf } from '../accountant/phone.js';
 
@@ -94,6 +95,17 @@ describe('Shap’s own accounts in a Pocket client’s copy (check 3)', () => {
     await expectCleanAudit(db, '2026-11-17');
   });
 
+  it('a share that gives one of Shap’s own accounts’ codes to another account, leaving Shap’s out, is refused', async () => {
+    const id = await t.client('Made-up Tools clash');
+    const clash = await makeShare(t.phone.sql, { number: 1, madeAt: '2026-11-10T08:00:00.000Z', through: '2026-11-10', books: '5a7c9e1b-4d6f-4a8b-9c0d-2e3f4a5b6c7d' });
+    const code = clash.records.accounts!.find((a) => a.system_key === 'receivables')!.code;
+    clash.records.accounts = clash.records.accounts!.filter((a) => a.system_key !== 'receivables');
+    clash.records.accounts.find((a) => !a.system_key)!.code = code;
+    const res = await t.bringIn(id, clash);
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatch(new RegExp(`account ${code} is one Shap keeps itself`));
+  });
+
   it('a share with an account Pocket keeps itself that this Shap doesn’t know is refused', async () => {
     const id = await t.client('Made-up Tools again');
     const odd = await makeShare(t.phone.sql, { number: 1, madeAt: '2026-11-10T08:00:00.000Z', through: '2026-11-10', books: OTHER });
@@ -101,5 +113,53 @@ describe('Shap’s own accounts in a Pocket client’s copy (check 3)', () => {
     const res = await t.bringIn(id, odd);
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toMatch(/an account Shap Pocket keeps itself that this Shap doesn’t know\. If they’ve updated Shap Pocket, this Shap may need updating too/);
+  });
+});
+
+describe('a compiled year, and an account renamed on the phone (second check 2)', () => {
+  let t: Awaited<ReturnType<typeof practiceAndPhone>>;
+  beforeAll(async () => {
+    t = await practiceAndPhone(`${new URL(process.env.DATABASE_URL!).pathname.slice(1)}_name_phone`);
+  });
+  afterAll(async () => {
+    await expectCleanAudit(t.phone.sql, '2026-11-17');
+    await t.close();
+  });
+
+  it('is refused when the statements place the account by its name, and its cash flow would move', async () => {
+    const { me, r } = t;
+    const { settings } = await me.get('/api/reference');
+    await me.post('/api/settings', { ...settings, companyName: 'Made-up Signed (Pty) Ltd', businessType: 'company', fyEndMonth: 2, features: { ...settings.features, statements: true } }, 'PUT');
+    // An account of the plant's, named for its depreciation (the statements add that back by name).
+    const dep = await me.post('/api/accounts', { code: '6977', name: 'Made-up depreciation', type: 'expense' });
+    const acc = await me.post('/api/accounts', { code: '1577', name: 'Made-up accumulated depreciation', type: 'asset' });
+    const loan = await me.post('/api/accounts', { code: '2477', name: 'Made-up loan', type: 'liability' });
+    await t.phone.sql`update accounts set statement_line = 'ppe' where id = ${acc.id}`;
+    const bank = await r.acc('bank');
+    await me.post('/api/journals', { date: '2025-04-01', description: 'Loan in (made up)', lines: [{ accountId: bank, debitCents: 50_000 }, { accountId: loan.id, creditCents: 50_000 }] });
+    await me.post('/api/journals', { date: '2025-08-01', description: 'Year-end adjustments (made up)', lines: [{ accountId: dep.id, debitCents: 10_000 }, { accountId: bank, debitCents: 5_000 }, { accountId: acc.id, creditCents: 10_000 }, { accountId: loan.id, creditCents: 5_000 }] });
+    const id = await t.client('Made-up Signed (Pty) Ltd');
+    const books = '6d4f2b3c-8e5a-4f7b-8c9d-2e3f4a5b6c7d';
+    expect((await t.bringIn(id, await makeShare(t.phone.sql, { number: 1, madeAt: '2026-11-10T08:00:00.000Z', through: '2026-11-10', books }))).statusCode).toBe(200);
+    const inside = await t.open(id, 'compile');
+    const details = (await inside.get('/api/statements/2026-02-28')).json().details;
+    expect((await inside.send('PUT', '/api/statements/details', { ...details, directors: [{ name: 'Made-up Director', role: 'Director' }] })).statusCode).toBe(200);
+    const compiled = await inside.send('POST', '/api/statements/2026-02-28/compile', { date: '2026-11-15', compiler: { name: 'Made-up Compiler', qualification: 'Professional Accountant (SA)', body: 'SAIPA', number: '00000', practice: 'Made-up Practice' } });
+    expect(compiled.statusCode, compiled.body).toBe(200);
+    const db = await t.copyOf(id);
+    const scf = async () => JSON.stringify((await buildStatements(db, '2026-02-28')).scf);
+    const signed = await scf();
+    // Renamed on the phone, nothing else: the depreciation would no longer be added back.
+    await t.phone.sql`update accounts set name = 'Made-up trailer' where id = ${acc.id}`;
+    const two = await t.bringIn(id, await makeShare(t.phone.sql, { number: 2, madeAt: '2026-11-16T08:00:00.000Z', through: '2026-11-16', books, previous: 1 }));
+    expect(two.statusCode).toBe(400);
+    expect(two.json().error).toMatch(/Share 2 changes what the statements to 28 Feb 2026 show, where they were compiled here: an account’s kind, name or the line it’s shown on/);
+    expect(await scf()).toBe(signed);
+    // A rename the statements don't place by: it comes in.
+    await t.phone.sql`update accounts set name = 'Made-up accumulated depreciation' where id = ${acc.id}`;
+    await t.phone.sql`update accounts set name = 'Made-up bank loan' where id = ${loan.id}`;
+    const three = await t.bringIn(id, await makeShare(t.phone.sql, { number: 3, madeAt: '2026-11-17T08:00:00.000Z', through: '2026-11-17', books, previous: 1 }));
+    expect(three.statusCode, three.body).toBe(200);
+    await expectCleanAudit(db, '2026-11-17');
   });
 });

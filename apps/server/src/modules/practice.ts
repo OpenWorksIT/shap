@@ -53,7 +53,7 @@ export const IN_A_CLIENT_TOO = ['/api/practice/here', '/api/practice/leave'];
  * statements, compiled and approved here, and the files for them).
  */
 export const POCKET_COPY_MAY = [/^\/api\/statements\//, /^\/api\/attachments$/, /^\/api\/auth\//, /^\/api\/feedback$/, /^\/api\/practice\/(here|leave)$/];
-export const POCKET_COPY = 'These books are a Shap Pocket client’s, from their shares: they change them in Shap Pocket and share them again. Here the practice compiles their statements and records the directors’ approval.';
+export const POCKET_COPY = 'These books are a Shap Pocket client’s, from their shares: they change them in Shap Pocket and share them again. Here the practice compiles their statements and records the approval of whoever signs them for the business (its directors, members, partners or owner).';
 
 const CLOSED = 'Those books are no longer open here: go back to the practice (Practice, in the menu) and open them again.';
 const NOT_GIVEN = 'You haven’t been given this client: ask whoever runs the practice’s Shap.';
@@ -344,13 +344,13 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
    */
   const SHARE_WHO = 'Bringing in their shares is for the practice’s owner, or whoever is given their books to write up (Who opens it).';
   // Who may, before the file (up to the upload size) is read, or anything more about the client is
-  // said. (A client that isn't there is the handler's to say.)
+  // said. Someone not given the practice's clients at all is refused at the door, as for any route.
   const mayBringIn = async (req: FastifyRequest) => {
-    const id = (req.params as { id: string }).id;
-    if (!/^[0-9a-f-]{36}$/i.test(id)) return;
     const user = userOrThrow(req);
-    const [known] = await real`select 1 from practice_clients where id = ${id}`;
-    if (known && (await levelFor(real, user, id)) !== 'books') throw forbidden(SHARE_WHO);
+    if (!can(user, 'practice.clients')) return;
+    await assertOn();
+    const c = await clientOr404((req.params as { id: string }).id);
+    if ((await levelFor(real, user, c.id)) !== 'books') throw forbidden(SHARE_WHO);
   };
   app.post('/api/practice/clients/:id/pocket-share', { ...view, onRequest: mayBringIn, bodyLimit: Math.round(config.UPLOAD_MB * 1024 * 1024 * 1.4), config: limit(10) }, async (req) => {
     const user = userOrThrow(req);

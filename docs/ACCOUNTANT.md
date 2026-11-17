@@ -135,15 +135,18 @@ Share your books with your accountant**, in Pocket, makes one file of the whole 
 Pocket's records themselves, whatever their dates (the invoices, costs, assets, pay runs, journals,
 logbook trips and the rest, as captured), with their references, descriptions and notes, which can
 name the business's customers, suppliers, workers, employees, partners and shareholders and what
-they were paid (and, for payroll, the employees' age bands and medical aid members); the accounts;
-and the business's details: its name, its registration, VAT, PAYE, UIF and income tax numbers (a
-sole proprietor's income tax number is their own), its year end and invoice terms, and what the
-owner filled in for its financial statements (directors, addresses, secretary, bankers). Left out:
-who signs in, photos of slips, employees' ID, tax and bank numbers, the contact details, addresses
-and notes of customers, workers and jobs, the business's own address, phone, email and bank
-details, and where trips went (`SHARE_TABLES` in packages/shared pocket-share.ts; the panel's words,
-`SHARE_WHAT_GOES`, are tested against a file). It goes only where the owner sends it, from the
-phone's share sheet. Each share is numbered, stamped with the day it was made and with these
+they were paid (and, for payroll, the employees' age bands and medical aid members); each trip's
+date, kilometres and reason, and the logbook's odometer readings; the accounts; and the business's
+details: its name, its registration, VAT, PAYE, UIF and income tax numbers (a sole proprietor's
+income tax number is their own), its year end and invoice terms, and what the owner filled in for
+its financial statements (directors, addresses, secretary, bankers). Left out: who signs in, photos
+of slips, employees' ID, tax and bank numbers, the contact details, addresses and notes of
+customers, workers and jobs, the address, phone, email and bank details in the business's settings
+and on its trading names, where trips went from and to, the logbook's vehicle, and the tax
+estimates saved in Pocket (a sole proprietor's carry their income from elsewhere)
+(`SHARE_TABLES` in packages/shared pocket-share.ts; the panel's words, `SHARE_WHAT_GOES`, are tested
+against a file). It goes only where the owner sends or saves it, from Pocket's share sheet (on a
+computer, a download). Each share is numbered, stamped with the day it was made and with these
 books' own id, and says what changed since the last one shared. Pocket counts it as shared once
 the owner picks where it goes on the share sheet (on a computer, once it's saved), whether or not
 it reaches you: Shap works out what changed from what it holds, so a share that never arrived does
@@ -164,15 +167,16 @@ share again, or an older one (a lower number made later is taken to mean the boo
 or begun again on the phone, and marked so); a share with an account Pocket keeps itself that this
 Shap doesn't know (one of the two may need updating); and, once the practice has compiled or
 approved a year's statements here, a share that moves that year's entries (the refusal lists
-them), changes what its statements show (an account's kind or the line it's shown on, say), or
+them), changes what its statements show (an account's kind, name or the line it's shown on, say), or
 changes the kind of business, the year end or VAT registration they were drawn up on (renamed
 customers or changed memos come in). One share comes in at a time. Shap's own accounts in the copy
 keep their ids whatever a share has. Refunds and stock records, which are otherwise never changed
 or deleted, are replaced with the phone's in the share's own transaction only.
 
 The copy is the practice's to compile in: whoever opens it compiles the statements there and
-records the directors' approval (recording it, and nothing else: the year ends and closed months
-are the owner's, from the phone), and the copy's own books aren't written in. Adjustments the practice finds go to
+records the approval of whoever signs them for the business (its directors, members, partners or
+owner; recording it, and nothing else: the year ends and closed months are the owner's, from
+Pocket), and the copy's own books aren't written in. Adjustments the practice finds go to
 the owner, to make in Pocket and share again. The figures are the client's, as the share has them:
 Shap doesn't check them against the client's records (`POCKET_SHARE_NOTE`).
 

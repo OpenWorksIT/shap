@@ -123,10 +123,15 @@ export async function applyPocketShare(tx: Db, share: PocketShare & { fileHash: 
       );
   }
 
-  // The copy's entries before: what changed, and what a compiled year had.
+  // The copy's entries before: what changed, and what a compiled year had; and what each year
+  // compiled or approved here shows, figure by figure, drawn the same way after.
   await freshTotals(tx);
   const before = await shareEntries(query(tx));
   const beforeBy = new Map(before.map((e) => [e.key, e]));
+  const signed = await tx<{ fyEnd: string; snapshot: Statements; snapshotHash: string | null }[]>`
+    select fy_end::text as fy_end, snapshot, snapshot_hash from financial_statements where status in ('compiled', 'approved') and snapshot is not null order by fy_end`;
+  const shownBefore = new Map<string, string>();
+  for (const r of signed) shownBefore.set(r.fyEnd, figuresShown(await buildStatements(tx, r.fyEnd, r.snapshot.details)));
 
   // Out with the copy's records (theirs from the last share), then in with the share's, in order.
   // Stock records and refunds are otherwise never changed or deleted (migration 049): here they're
@@ -240,15 +245,17 @@ export async function applyPocketShare(tx: Db, share: PocketShare & { fileHash: 
     }
   }
 
-  // And every year compiled or approved here still gives the figures signed: its accounts' kinds
-  // and statement lines too (a share brings the phone's chart), not only its entries.
-  const signed = await tx<{ fyEnd: string; snapshot: Statements; snapshotHash: string | null }[]>`
-    select fy_end::text as fy_end, snapshot, snapshot_hash from financial_statements where status in ('compiled', 'approved') and snapshot is not null order by fy_end`;
+  // And every year compiled or approved here still gives the figures signed, and shows them as it
+  // did: its accounts' kinds, names and statement lines too (a share brings the phone's chart, and
+  // the statements place some accounts by name), not only its entries.
   const unsigned: string[] = [];
-  for (const r of signed) if (!stillSigned(r, await buildStatements(tx, r.fyEnd, r.snapshot.details))) unsigned.push(r.fyEnd);
+  for (const r of signed) {
+    const now = await buildStatements(tx, r.fyEnd, r.snapshot.details);
+    if (!stillSigned(r, now) || figuresShown(now) !== shownBefore.get(r.fyEnd)) unsigned.push(r.fyEnd);
+  }
   if (unsigned.length)
     throw badRequest(
-      `Share ${st.number} changes what the statements to ${unsigned.map((d) => formatDate(d)).join(' and ')} show, where they were compiled here: an account’s kind or the line it’s shown on, or what the statements are drawn from. Ask the client what they changed in their accounts; reopen those statements first (Accounts → Financial statements) if it should come in.`,
+      `Share ${st.number} changes what the statements to ${unsigned.map((d) => formatDate(d)).join(' and ')} show, where they were compiled here: an account’s kind, name or the line it’s shown on, or what the statements are drawn from. Ask the client what they changed in their accounts; reopen those statements first (Accounts → Financial statements) if it should come in.`,
     );
 
   const d = shareDiff(Object.fromEntries(before.map((e) => [e.key, entryHash(e)])), Object.fromEntries(afterAll.map((e) => [e.key, entryHash(e)])));
@@ -320,5 +327,8 @@ async function replaceAccounts(tx: Db, theirs: Record<string, unknown>[], here: 
   }
   return idOf;
 }
+
+/** A year's four statements, line by line and figure by figure (their words left out). */
+const figuresShown = (s: Statements) => JSON.stringify({ sfp: s.sfp, sci: s.sci, soce: s.soce.rows.map((r) => r.values), scf: s.scf }, (k, v: unknown) => (k === 'label' ? undefined : v));
 
 const camel = (k: string) => k.replace(/_([a-z])/g, (_m, c: string) => c.toUpperCase());

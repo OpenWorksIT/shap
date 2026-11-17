@@ -340,11 +340,11 @@ export default function PracticePage() {
 const WHO_OPENS_KEPT =
   'As their owner in Shap, someone who writes up the books can do everything the client’s owner could, reopening closed periods included, and records the client’s approval of the financial statements (with the page they signed). Approving the statements is the client’s own decision.';
 const WHO_OPENS_POCKET =
-  'Their books change only in Shap Pocket, on their phone. Someone who writes them up here brings in their shares, compiles the statements and records the directors’ approval (with the page they signed): approving the statements is the client’s own decision.';
+  'Their books change only in Shap Pocket (on their phone or computer). Someone who writes them up here brings in their shares, compiles the statements and records the approval of whoever signs them for the business (with the page they signed): approving the statements is the client’s own decision.';
 /** A share numbered lower than the last, made later: what Shap takes it to mean, not what it knows. */
 const POCKET_RESTORED =
-  'It numbers lower than the share before but was made later, which usually means their books were restored from a backup or begun again on their phone: check with them that this is the share they meant to send.';
-const POCKET_RESTORED_SHORT = 'numbered lower than the share before: their books restored on their phone, it seems';
+  'It numbers lower than the share before but was made later, which usually means their books were restored from a backup or begun again in Shap Pocket: check with them that this is the share they meant to send.';
+const POCKET_RESTORED_SHORT = 'numbered lower than the share before: their books restored in Shap Pocket, it seems';
 
 function AccessDrawer({ client, people, onClose, onSaved }: { client: PracticeClient; people: Practice['people']; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();

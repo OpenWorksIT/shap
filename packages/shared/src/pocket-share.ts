@@ -8,8 +8,9 @@
  * runs, journals and the rest: SHARE_TABLES), not only their postings, so Shap's copy works out the
  * VAT201s, the payroll returns, the statements and the checks from what Pocket does. Left out: who
  * signs in, photos of slips, employees' ID, tax and bank numbers, the contact details of customers,
- * workers and jobs, the business's own contact and bank details, where trips went, and Pocket's own
- * statements and approvals (the practice's are in Shap). What goes is said in SHARE_WHAT_GOES, and
+ * workers and jobs, the business's own contact and bank details (in its settings and on its trading
+ * names), where trips went from and to, the logbook's vehicle, the tax estimates saved on the phone,
+ * and Pocket's own statements and approvals (the practice's are in Shap). What goes is said in SHARE_WHAT_GOES, and
  * tested against a file. With it, every entry's key and hash, so Shap checks it reads the records
  * into the same postings Pocket did, and says what changed.
  */
@@ -67,10 +68,12 @@ export const SHARE_TABLES: { table: string; leaveOut?: string[]; later?: string[
   { table: 'year_ends' },
   { table: 'year_end_figures' },
   { table: 'sbc_years' },
-  { table: 'tax_estimates' },
+  // (Not the tax estimates saved on the phone: a sole proprietor's carry their own income from
+  // elsewhere, retirement contributions and age. The practice works out its own.)
   // Where a trip went can be a customer's home: its date, kilometres and reason go.
   { table: 'trips', leaveOut: ['from_place', 'to_place'] },
-  { table: 'logbook_years' },
+  // The vehicle's name can be its registration: the year's odometer readings go.
+  { table: 'logbook_years', leaveOut: ['vehicle'] },
   { table: 'time_entries' },
   { table: 'balance_checks' },
   { table: 'statement_details' },
@@ -199,7 +202,7 @@ export function shareDiff(before: Record<string, string>, after: Record<string, 
 
 /** On Pocket's share panel: what goes in the file, and where. (Shap's disclaimer and privacy page say the same.) */
 export const SHARE_WHAT_GOES =
-  'One file of the whole of your books as at today, for your accountant’s Shap. In it: every invoice, cost, asset, pay run, journal, logbook trip and the rest, whatever its date, with its references, descriptions and notes, which can name your customers, suppliers, workers, employees, partners and shareholders and what you paid them (and, for payroll, your employees’ age bands and medical aid members); your accounts; and your business’s details: its name, its registration, VAT, PAYE, UIF and income tax numbers (a sole proprietor’s income tax number is their own), its year end and invoice terms, and what you’ve filled in for its financial statements, such as directors, addresses, secretary and bankers. Left out: photos of your slips; your employees’ ID, tax and bank numbers; your customers’, workers’ and jobs’ contact details, addresses and notes; your business’s own address, phone, email and bank details; and where your trips went. Nothing goes until you choose where on the share sheet, and then only there: OpenWorks never gets it, and once it’s sent Pocket can’t take it back. Each share is numbered and says what’s new, changed or gone since the last one you shared.';
+  'One file of the whole of your books as at today, for your accountant’s Shap. In it: every invoice, cost, asset, pay run, journal, logbook trip and the rest, whatever its date, with its references, descriptions and notes, which can name your customers, suppliers, workers, employees, partners and shareholders and what you paid them (and, for payroll, your employees’ age bands and medical aid members); each trip’s date, kilometres and reason, and the logbook’s odometer readings; your accounts; and your business’s details: its name, its registration, VAT, PAYE, UIF and income tax numbers (a sole proprietor’s income tax number is their own), its year end and invoice terms, and what you’ve filled in for its financial statements, such as directors, addresses, secretary and bankers. Left out: photos of your slips; your employees’ ID, tax and bank numbers; your customers’, workers’ and jobs’ contact details, addresses and notes; the address, phone, email and bank details in your settings and on your trading names; where your trips went from and to, and your vehicle’s name; and the tax estimates you’ve saved (with any income from elsewhere). Nothing goes until you choose where to send or save it, and then only there: OpenWorks never gets it, and once it’s sent Pocket can’t take it back. Each share is numbered and says what’s new, changed or gone since the last one you shared.';
 
 /** The share sheet's message with the file. */
 export function pocketShareMessage(s: { number: number; through: string; previous: number | null; changes: number }, formatDate: (d: string) => string): string {

@@ -852,8 +852,7 @@ entry for entry) and `test/review-1.29/statements.test.ts`; Pocket's `share.test
   the brand's address and the trips' places stay on the phone (`SHARE_WHAT_GOES`, the docs, the
   changelogs and the website's privacy page; Pocket's `share-file.test.ts` holds the words to a file,
   and makes Shap's fixtures). Pocket checks the read limits Shap holds a file to before it offers
-  one (`shareProblem`, shared). The copy says the practice compiles and records the directors'
-  approval; Who opens it says what writing up a Pocket client's copy is; a restored phone is said as
+  one (`shareProblem`, shared). The copy says the practice compiles and records the approval; Who opens it says what writing up a Pocket client's copy is; a restored phone is said as
   what the stamp suggests. Who may bring a share in is asked before its file is read, not after.
   Tests: the two-at-once test with shares that differ (it fails without
   the lock), recording an approval in a copy (no year end, no lock), the partners and an asset's
@@ -861,6 +860,20 @@ entry for entry) and `test/review-1.29/statements.test.ts`; Pocket's `share.test
   an account's kind following the phone in an open year, the share route for a client kept here,
   and the words (`test/review-1.29/share-check.test.ts`, `words.test.ts`, and
   `test/accountant/pocket-share.test.ts` with both of Pocket's own share files).
+- Those fixes, checked again by another agent: a sole proprietor's saved tax estimates (their
+  income from elsewhere, retirement contributions, age) and the logbook's vehicle went in a share,
+  and nothing said so: they stay on the phone now, and the share-file test makes both and finds
+  neither. Renaming an account on the phone could still move a compiled year's cash flow (the
+  statements add depreciation back partly by an account's name, which the signed fingerprint
+  leaves out): each compiled or approved year's four statements are drawn before the share and
+  after, and must show the same figures line by line. The early check of who may bring one in
+  answered someone without the practice's clients differently for a client that exists: they're
+  refused at the door as for any route, and the check uses the route's own not-found. The words
+  say which address stays (the one in Settings and on the trading names), that a trip's reason
+  goes, "whoever signs them for the business" rather than the directors (sole proprietors and
+  partnerships), and the computer as well as the phone. Tests: a renamed account in a compiled
+  year (`share-check.test.ts`), the same refusal at the door for a client that is or isn't there,
+  a code taken from one of Shap's own accounts, and the words.
 
 ### Code scanning (CodeQL), first run
 

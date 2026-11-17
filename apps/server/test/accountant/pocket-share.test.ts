@@ -164,7 +164,7 @@ describe('a Shap Pocket client in the practice', () => {
     const db = await copy();
     expect((await db<{ termsVersion: string }[]>`select terms_version from settings where id`)[0]!.termsVersion).toBe(TERMS_VERSION);
     // The same trial balance as the phone's, at every date.
-    for (const d of ['2026-02-28', '2026-07-31', '2026-11-10']) { if (process.env.DBG) console.log(d, JSON.stringify(await tbOf(db, d)), JSON.stringify(await tbOf(phone.sql, d))); expect(await tbOf(db, d)).toEqual(await tbOf(phone.sql, d)); }
+    for (const d of ['2026-02-28', '2026-07-31', '2026-11-10']) expect(await tbOf(db, d)).toEqual(await tbOf(phone.sql, d));
     // Their people's contact details stayed on the phone.
     expect((await db<{ email: string | null }[]>`select email from clients`)[0]!.email ?? '').toBe('');
     // The record keeps the file's fingerprint, and counts, not descriptions (security 10, IFRS 7).
@@ -316,7 +316,7 @@ describe('a Shap Pocket client in the practice', () => {
     await phone.sql`update accounts set type = 'asset' where code = '6990'`;
     const kind = await bringIn(await makeShare(phone.sql, { number: 8, madeAt: '2026-11-17T09:00:00.000Z', through: '2026-11-17', previous: 5 }));
     expect(kind.statusCode).toBe(400);
-    expect(kind.json().error).toMatch(/Share 8 changes what the statements to 28 Feb 2026 show, where they were compiled here: an account’s kind or the line it’s shown on/);
+    expect(kind.json().error).toMatch(/Share 8 changes what the statements to 28 Feb 2026 show, where they were compiled here: an account’s kind, name or the line it’s shown on/);
     await phone.sql`update accounts set type = 'expense' where code = '6990'`;
     await phone.sql`update accounts set statement_line = 'borrowings_non_current' where code = '2410'`;
     const line = await bringIn(await makeShare(phone.sql, { number: 8, madeAt: '2026-11-17T09:00:00.000Z', through: '2026-11-17', previous: 5 }));
@@ -358,8 +358,10 @@ describe('a Shap Pocket client in the practice', () => {
     expect(new Map(await tbOf(db, '2026-12-31')).get('1000')).toBe(115_000 - 23_000 - 9_500 - 1_500 - 1_000);
     // On the VAT201: the invoice and the counter sale less the half refunded; the cable's VAT.
     expect(await vat201(db, '2026-09-01', '2026-10-31')).toMatchObject(FIXTURE_VAT);
-    // What stayed on the phone isn't here: the trip's places, the brand's address.
+    // What stayed on the phone isn't here: the trip's places, the brand's address, the vehicle.
     expect((await db<{ toPlace: string | null }[]>`select to_place from trips`)[0]!.toPlace ?? '').toBe('');
+    expect((await db<{ address: string | null }[]>`select address from brands`).map((b) => b.address ?? '')).not.toContain('7 Made-up Lane, Fictional Town');
+    expect(await db`select 1 from tax_estimates`).toHaveLength(0);
     await expectCleanAudit(db, '2026-11-17');
   });
 
@@ -369,6 +371,14 @@ describe('a Shap Pocket client in the practice', () => {
     const res = await bringIn({ not: 'a share' }, { who: clerk });
     expect(res.statusCode).toBe(403);
     expect(res.json().error).toMatch(/for the practice’s owner, or whoever is given their books to write up/);
+    // Someone not given the practice's clients is refused at the door, as for any route: nothing
+    // says whether there's a client by that id.
+    await createUser(env.sql, { name: 'Made-up Cashier', email: 'cashier@example.co.za', password: 'test-password-1', role: 'staff', accessAdd: ['costs.capture'] });
+    const cashier = await login(env.app, 'cashier@example.co.za');
+    const there = await bringIn({ not: 'a share' }, { who: cashier });
+    const notThere = await cashier.call({ method: 'POST', url: '/api/practice/clients/0b7c3d1e-5f2a-4b6c-9d8e-7f6a5b4c3d2e/pocket-share', payload: { name: 'x.json', dataBase64: b64({}) }, remoteAddress: `10.68.2.${++n & 255}` });
+    expect([there.statusCode, notThere.statusCode]).toEqual([403, 403]);
+    expect(there.json().error).toBe(notThere.json().error);
     // A client kept here: the clerk isn't told it isn't on Shap Pocket; the owner is.
     const { id: kept } = await owner.post('/api/practice/clients', { name: 'Made-up Kept Client', kind: 'kept' });
     const at = (who: typeof owner) => who.call({ method: 'POST', url: `/api/practice/clients/${kept}/pocket-share`, payload: { name: 'x.json', dataBase64: b64({ not: 'a share' }) }, remoteAddress: `10.68.0.${++n & 255}` });
