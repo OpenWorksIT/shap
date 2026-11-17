@@ -4,6 +4,11 @@ export function todayIso(timeZone = 'Africa/Johannesburg'): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 }
 
+/** The day a moment fell on in South Africa (a timestamp's own date is UTC's, a day behind before 02:00). */
+export function dayOf(at: string | Date, timeZone = 'Africa/Johannesburg'): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(at));
+}
+
 export function addDays(iso: string, days: number): string {
   const d = new Date(`${iso}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);

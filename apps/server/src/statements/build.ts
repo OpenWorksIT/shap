@@ -251,7 +251,8 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
       // one): what it credits to the accumulated depreciation, up to the expenses it debits.
       const only = lines.every((l) => fixed.has(l.accountId) || plIds.has(l.accountId));
       let room = only ? Infinity : sum(lines.filter((l) => plIds.has(l.accountId) && Number(l.cents) > 0).map((l) => Number(l.cents)));
-      const moved = only ? lines.filter((x) => fixed.has(x.accountId)) : lines.filter((x) => written.has(x.accountId) && Number(x.cents) < 0);
+      // (A debit to an asset's cost, against an expense, is the asset put right: bought, not written down.)
+      const moved = only ? lines.filter((x) => fixed.has(x.accountId) && (written.has(x.accountId) || Number(x.cents) < 0)) : lines.filter((x) => written.has(x.accountId) && Number(x.cents) < 0);
       for (const whole of moved) {
         const cents = only ? Number(whole.cents) : -Math.min(-Number(whole.cents), room);
         if (!only) room -= -cents;
@@ -822,6 +823,7 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
       false,
       `These books begin with the trial balance brought in at ${formatDate(startTb.d)}: before it, the comparatives, the opening equity and cash, the changes in equity and the cash flows start from nil (IFRS for SMEs 3.14, 6, 7). Bring in the trial balance at the year end before it, and the one before that for comparatives, first.`,
     );
+  else await openingMovedIn(db, first?.d ?? null, priorStart, fyEnd, look);
   // Income tax (section 29): a business taxed on its own profit has the year's tax in the books.
   let taxEstimate: Statements['taxEstimate'] = null;
   if (taxNow) {
@@ -1106,4 +1108,20 @@ async function nonCashAssets(db: Db, p: { priorStart: string; priorEnd: string; 
     if ([e.investing, e.payables, e.owner, e.loan, noted.bill].some((a) => a.current || a.prior)) out.push({ ...e, noted });
   }
   return out;
+}
+
+/**
+ * Books that begin with the opening balances moved in from an old package (movein.ts, a journal of
+ * kind 'opening'), inside the years shown: before it, those years start from nil, so the
+ * comparatives and the opening position aren't the business's (IFRS for SMEs 3.14). The same in
+ * Shap Pocket's statements.
+ */
+async function openingMovedIn(db: Db, first: string | null, priorStart: string, fyEnd: string, look: (label: string, ok: boolean, detail: string) => void) {
+  const [o] = await db<{ d: string | null }[]>`select min(date)::text as d from journals where kind = 'opening'`;
+  if (o?.d && first && o.d <= first && o.d >= priorStart && o.d <= fyEnd)
+    look(
+      'The opening position is in the books',
+      false,
+      `These books begin with the opening balances moved in on ${formatDate(o.d)}: before it, the comparatives, the opening equity and cash, the changes in equity and the cash flows start from nil (IFRS for SMEs 3.14, 6, 7). The year before comes from the old package's statements: your accountant decides how to show it.`,
+    );
 }

@@ -365,7 +365,12 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
     await sql.begin(async (tx) => {
       const [agreed] = await tx`select 1 from year_ends where fy_end = ${fyEnd}::date`;
       // Agreed at the figures signed (the books as they are), unless the accountant agreed it already.
-      if (!agreed) await agreeYear(tx, { fyEnd, fyStart: yearStartOf(fyEnd), note: `Financial statements approved by ${input.name} on ${input.date}`, lock: true, figures: [], keepImport: true });
+      // A Shap Pocket client's year ends and closed months are the owner's, from their phone (each
+      // share brings them): there, approving is recorded and nothing else (pocket-share.ts keeps
+      // every approved year's figures as they are).
+      if (dbScope.getStore()?.client?.kind === 'pocket') {
+        /* recorded below */
+      } else if (!agreed) await agreeYear(tx, { fyEnd, fyStart: yearStartOf(fyEnd), note: `Financial statements approved by ${input.name} on ${input.date}`, lock: true, figures: [], keepImport: true });
       else await tx`update settings set lock_date = greatest(coalesce(lock_date, ${fyEnd}::date), ${fyEnd}::date) where id`;
       // The year is closed at exactly the figures signed, or not at all.
       if (!stillSigned(r as { snapshot: Statements; snapshotHash: string | null }, await buildStatements(tx, fyEnd, r.snapshot!.details))) {

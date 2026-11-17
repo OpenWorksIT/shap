@@ -17,7 +17,7 @@ import { createReadStream, existsSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { deadlinesFor, featureOn, LEVELS, type Level } from '@shap/shared';
+import { deadlinesFor, featureOn, LEVELS, PRACTICE_TERMS_TICK, TERMS_URL, TERMS_VERSION, type Level } from '@shap/shared';
 import { z } from 'zod';
 import { browserName, can, CLIENT_COOKIE, confirmPassword, CLIENT_SESSION_COOKIE, loadUser, requireAccess, requireRole, SESSION_COOKIE, userOrThrow, type AuthUser } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -46,6 +46,14 @@ const isUuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-
  */
 export const NOT_IN_A_CLIENT = [...SERVER_ONLY, '/api/demo', '/api/test-server', '/api/users', '/api/profiles', '/api/practice', '/api/auth/login', '/api/auth/password', '/api/auth/mfa'];
 export const IN_A_CLIENT_TOO = ['/api/practice/here', '/api/practice/leave'];
+
+/**
+ * A Shap Pocket client's books are the owner's, on their phone, and each share replaces the copy's
+ * records (import/pocket-share.ts): in the copy, only the practice's own work on them is done (the
+ * statements, compiled and approved here, and the files for them).
+ */
+export const POCKET_COPY_MAY = [/^\/api\/statements\//, /^\/api\/attachments$/, /^\/api\/auth\//, /^\/api\/feedback$/, /^\/api\/practice\/(here|leave)$/];
+export const POCKET_COPY = 'These books are a Shap Pocket client’s, from their shares: they change them in Shap Pocket and share them again. Here the practice compiles and approves their statements.';
 
 const CLOSED = 'Those books are no longer open here: go back to the practice (Practice, in the menu) and open them again.';
 const NOT_GIVEN = 'You haven’t been given this client: ask whoever runs the practice’s Shap.';
@@ -130,8 +138,9 @@ export function registerPracticeScope(app: FastifyInstance, ctx: Ctx): void {
           select s.user_id, u.role from sessions s join users u on u.id = s.user_id where s.token_hash = ${sha256(token)} and s.expires_at > now() and u.active`
       : [];
     if (!s || s.userId !== user.id || !rolesFor(level).includes(s.role)) return fail();
-    scope.client = { id: c.id, name: c.name, sql, practiceOwner: user.role === 'owner' };
+    scope.client = { id: c.id, name: c.name, sql, practiceOwner: user.role === 'owner', kind: c.kind };
     if (under(p, NOT_IN_A_CLIENT) && !IN_A_CLIENT_TOO.includes(p)) throw forbidden('That’s the practice’s own, so it isn’t done in a client’s books: tap Back to the practice, at the top, first.');
+    if (c.kind === 'pocket' && req.method !== 'GET' && req.method !== 'HEAD' && !POCKET_COPY_MAY.some((re) => re.test(p))) throw forbidden(POCKET_COPY);
   }
 }
 
@@ -228,8 +237,8 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { as } = parse(z.object({ as: z.enum(LEVELS).optional() }), req.body ?? {});
     // Never more than given: writing up takes in compiling, not the other way round.
     if (as === 'books' && given !== 'books') throw forbidden('You’ve been given these books to read and compile, not to write up.');
-    // A Shap Pocket client's books are the owner's, on their phone: here they're a copy to read and compile.
-    const level = c.kind === 'pocket' ? 'compile' : (as ?? given);
+    // (A Shap Pocket client's copy takes only the practice's own work on it, at either level: POCKET_COPY_MAY.)
+    const level = as ?? given;
     const sql = clients.get(dbName);
     await mirrorUser(sql, user, level);
     const token = newToken();
@@ -327,28 +336,38 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /**
-   * A Shap Pocket share into a Pocket client's books (lib: import/pocket-share.ts), for whoever writes
-   * up the client's books here (the owner, or someone given them to write up): the whole of the books,
-   * entry by entry, with what changed since the last share. Its checks run again for the list.
+   * A Shap Pocket share into a Pocket client's copy of their books (import/pocket-share.ts), for the
+   * practice's owner or whoever is given the client's books to write up: the share's records replace
+   * the copy's, checked entry by entry against the phone's. The first share (and the first after the
+   * terms change) records the practice's acceptance of the terms for these books. The checks run
+   * again for the list.
    */
-  app.post('/api/practice/clients/:id/pocket-share', { ...view, bodyLimit: 60 * 1024 * 1024, config: limit(10) }, async (req) => {
+  app.post('/api/practice/clients/:id/pocket-share', { ...view, bodyLimit: Math.round(config.UPLOAD_MB * 1024 * 1024 * 1.4), config: limit(10) }, async (req) => {
     const user = userOrThrow(req);
     await assertOn();
     const c = await clientOr404((req.params as { id: string }).id);
+    // Who may, before anything about the client is said.
+    if ((await levelFor(real, user, c.id)) !== 'books') throw forbidden('Bringing in their shares is for the practice’s owner, or whoever is given their books to write up (Who opens it).');
     const dbName = usable(c);
     if (c.kind !== 'pocket') throw badRequest('This client’s books aren’t kept on Shap Pocket.');
-    if ((await levelFor(real, user, c.id)) !== 'books') throw forbidden('Bringing in their share is for whoever writes up their books.');
-    const { name, dataBase64 } = parse(z.object({ name: z.string().max(200), dataBase64: z.string().max(80_000_000) }), req.body);
+    const { name, dataBase64, acceptTerms } = parse(z.object({ name: z.string().max(200), dataBase64: z.string().max(Math.round(config.UPLOAD_MB * 1024 * 1024 * 1.4)), acceptTerms: z.boolean().default(false) }), req.body);
     const share = readPocketShare(name, Buffer.from(dataBase64, 'base64'));
     const sql = clients.get(dbName);
+    const [terms] = await sql<{ termsVersion: string }[]>`select terms_version from settings where id`;
+    const accepting = (terms?.termsVersion ?? '') !== TERMS_VERSION;
+    if (accepting && !acceptTerms) throw badRequest(`Tick that you accept the terms of use for your practice’s use of Shap on these books first (${PRACTICE_TERMS_TICK}).`, { needsTerms: true });
     // The practice person is there by name, as the copy's reader.
     await mirrorUser(sql, user, 'compile');
     const result = await sql.begin(async (tx) => {
       const r = await applyPocketShare(tx, share, name, user.id);
-      await audit(tx, { userId: user.id, action: 'pocket_share_in', entity: 'pocket_share', entityId: String(r.number), ip: req.ip, details: { added: r.changes.added.length, changed: r.changes.changed.length, removed: r.changes.removed.length } });
+      if (accepting) {
+        await tx`update settings set terms_version = ${TERMS_VERSION}, terms_accepted_at = now() where id`;
+        await audit(tx, { userId: user.id, action: 'accept_terms', entity: 'settings', ip: req.ip, details: { version: TERMS_VERSION, url: TERMS_URL, for: 'the practice’s use of Shap on these books' } });
+      }
+      await audit(tx, { userId: user.id, action: 'pocket_share_in', entity: 'pocket_share', entityId: String(r.number), ip: req.ip, details: { through: r.through, added: r.changes.added, changed: r.changes.changed, removed: r.changes.removed, restored: r.restored, file: name.slice(0, 200), hash: share.fileHash } });
       return r;
     });
-    await audit(real, { userId: user.id, action: 'practice_pocket_share', entity: 'practice_client', entityId: c.id, ip: req.ip, details: { number: result.number } });
+    await audit(real, { userId: user.id, action: 'practice_pocket_share', entity: 'practice_client', entityId: c.id, ip: req.ip, details: { number: result.number, hash: share.fileHash } });
     await refreshHealth(c.id, sql);
     return result;
   });
