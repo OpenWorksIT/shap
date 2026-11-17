@@ -228,7 +228,10 @@ describe('a month written up in a linked client’s own Shap, and the same month
     const linked = (await owner.post<{ health: Record<string, unknown> }>(`/api/practice/clients/${linkedId}/checks`, {})).health;
     const keptH = (await owner.post<{ health: Record<string, unknown> }>(`/api/practice/clients/${keptId}/checks`, {})).health;
     const direct = JSON.parse(JSON.stringify(healthForLink(await healthOf(own.sql))));
-    const drop = ({ at: _a, pocket: _p, ...h }: Record<string, unknown>) => h;
+    // The kept client's checks also keep its trial balance's fingerprint (`tb`, 1.31): the practice's own, for its list, never sent over a link.
+    expect(keptH.tb).toMatchObject({ fyEnd: '2026-02-28', hash: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    expect(linked.tb).toBeUndefined();
+    const drop = ({ at: _a, pocket: _p, tb: _t, ...h }: Record<string, unknown>) => h;
     expect(drop(linked)).toEqual(drop(keptH));
     expect(drop(linked)).toEqual({ ...drop(direct), deadlines: linked.deadlines });
     const list = (await owner.get('/api/practice')).clients;
