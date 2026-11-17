@@ -260,7 +260,7 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
   });
 
   // A compiled set is reopened before it's compiled again, so the signed one is kept (financial_statement_versions).
-  const COMPILED_ALREADY = 'These statements are compiled already: reopen them to compile them again (the signed set is kept).';
+  const COMPILED_ALREADY = 'These statements are compiled already: the business’s owner reopens them first, to compile them again (the signed set is kept).';
 
   /** The accountant compiles and signs, signed in to Shap as themselves. */
   app.post('/api/statements/:fyEnd/compile', readers, async (req) => {
@@ -363,7 +363,7 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
     }
     if (input.date < (r.compiledOn ?? fyEnd)) throw badRequest('They’re approved on or after the day they were compiled');
     const now = await buildStatements(sql, fyEnd, r.snapshot.details);
-    if (!stillSigned(r as { snapshot: Statements; snapshotHash: string | null }, now)) throw badRequest('The books have changed since the statements were compiled, so they no longer give the signed figures. Send them to your accountant again.');
+    if (!stillSigned(r as { snapshot: Statements; snapshotHash: string | null }, now)) throw badRequest('The books have changed since the statements were compiled, so they no longer give the signed figures. Reopen them and send them to your accountant again.');
     const sig: Signatures = { compiler: r.compiler, approved: { name: input.name, date: input.date, recordedBy: recorded ? user.name : null } };
     const pdf = await renderStatementsPdf(r.snapshot, sig);
     const settings = await getSettings(sql);

@@ -22,6 +22,8 @@ interface Health {
   pocket?: { number: number; through: string; importedAt: string; added: number; changed: number; removed: number; restored?: boolean } | null;
   /** A linked client's Shap's last answer couldn't be read: this is from before it. */
   stale?: true;
+  /** Nothing of its checks was read but what the returns are worked out from. */
+  unread?: true;
   deadlines: { key: string; label: string; due: string; past: boolean }[];
 }
 interface PracticeClient {
@@ -314,69 +316,75 @@ export default function PracticePage() {
                   </p>
                 ) : (
                   <div className="stack-sm">
-                    <p className="small">
-                      <strong>Books check:</strong> {h.audit.fail === 0 && h.audit.warn === 0 ? 'nothing to fix' : [h.audit.fail ? `${h.audit.fail} to fix` : '', h.audit.warn ? `${h.audit.warn} to look at` : ''].filter(Boolean).join(', ')}
-                      {h.audit.items.length > 0 && (
-                        <button className="link-btn small" onClick={() => setOpenFindings(openFindings === c.id ? null : c.id)}>
-                          {openFindings === c.id ? ' Hide' : ' Show'}
-                        </button>
-                      )}
-                    </p>
-                    {openFindings === c.id && (
-                      <ul className="small" data-private>
-                        {h.audit.items.map((i, n) => (
-                          <li key={n} className={i.level === 'fail' ? 'warn-text' : undefined}>
-                            {i.section}: {i.text}
-                          </li>
-                        ))}
-                        {h.audit.fail + h.audit.warn > h.audit.items.length && <li className="muted">(the first {h.audit.items.length}: open their books for the rest)</li>}
-                      </ul>
-                    )}
-                    {st?.error ? (
-                      <p className="small warn-text">
-                        <strong>Statements{st.yearEnd ? ` for the year to ${formatDate(st.yearEnd)}` : ''}:</strong> Shap’s checks couldn’t run on them. Open their books and look.
-                      </p>
-                    ) : st?.firstYearEnds ? (
-                      <p className="small">
-                        <strong>Statements:</strong> their first year in these books ends {formatDate(st.firstYearEnds)}.
-                      </p>
+                    {h.unread ? (
+                      <p className="small warn-text">Their Shap’s checks couldn’t be read: only the returns coming up are shown, from what it sent.</p>
                     ) : (
-                      st &&
-                      'status' in st && (
-                        <>
-                          <p className="small">
-                            <strong>Statements for the year to {formatDate(st.yearEnd)}</strong> ({STATEMENT_STATUS_LABELS[st.status].toLowerCase()}):{' '}
-                            {st.changedSince
-                              ? 'the books have changed since they were signed, so they no longer give the signed figures'
-                              : st.status === 'approved'
-                                ? 'signed'
-                                : st.failing.length === 0 && st.look.length === 0
-                                  ? 'Shap’s checks pass'
-                                  : [st.failing.length ? `${counted(st.failing.length, 'check')} not passing` : '', st.look.length ? `${st.look.length} to look at` : ''].filter(Boolean).join(', ')}
+                      <>
+                        <p className="small">
+                          <strong>Books check:</strong> {h.audit.fail === 0 && h.audit.warn === 0 ? 'nothing to fix' : [h.audit.fail ? `${h.audit.fail} to fix` : '', h.audit.warn ? `${h.audit.warn} to look at` : ''].filter(Boolean).join(', ')}
+                          {h.audit.items.length > 0 && (
+                            <button className="link-btn small" onClick={() => setOpenFindings(openFindings === c.id ? null : c.id)}>
+                              {openFindings === c.id ? ' Hide' : ' Show'}
+                            </button>
+                          )}
+                        </p>
+                        {openFindings === c.id && (
+                          <ul className="small" data-private>
+                            {h.audit.items.map((i, n) => (
+                              <li key={n} className={i.level === 'fail' ? 'warn-text' : undefined}>
+                                {i.section}: {i.text}
+                              </li>
+                            ))}
+                            {h.audit.fail + h.audit.warn > h.audit.items.length && <li className="muted">(the first {h.audit.items.length}: open their books for the rest)</li>}
+                          </ul>
+                        )}
+                        {st?.error ? (
+                          <p className="small warn-text">
+                            <strong>Statements{st.yearEnd ? ` for the year to ${formatDate(st.yearEnd)}` : ''}:</strong> Shap’s checks couldn’t run on them. Open their books and look.
                           </p>
-                          {st.assurance && st.status !== 'approved' && (
-                            <p className="small">
-                              <strong>Assurance:</strong> {st.assurance}
-                              {/audit/i.test(st.assurance) ? '' : ' The independent reviewer can’t be anyone in your practice who prepared or compiled them (Companies Regulation 29(5)).'}
-                            </p>
-                          )}
-                          {st.unapprovedEarlier && (
-                            <p className="small">
-                              <strong>Earlier:</strong> the statements for the year to {formatDate(st.unapprovedEarlier)} aren’t approved in Shap.
-                            </p>
-                          )}
-                        </>
-                      )
+                        ) : st?.firstYearEnds ? (
+                          <p className="small">
+                            <strong>Statements:</strong> their first year in these books ends {formatDate(st.firstYearEnds)}.
+                          </p>
+                        ) : (
+                          st &&
+                          'status' in st && (
+                            <>
+                              <p className="small">
+                                <strong>Statements for the year to {formatDate(st.yearEnd)}</strong> ({STATEMENT_STATUS_LABELS[st.status].toLowerCase()}):{' '}
+                                {st.changedSince
+                                  ? 'the books have changed since they were signed, so they no longer give the signed figures'
+                                  : st.status === 'approved'
+                                    ? 'signed'
+                                    : st.failing.length === 0 && st.look.length === 0
+                                      ? 'Shap’s checks pass'
+                                      : [st.failing.length ? `${counted(st.failing.length, 'check')} not passing` : '', st.look.length ? `${st.look.length} to look at` : ''].filter(Boolean).join(', ')}
+                              </p>
+                              {st.assurance && st.status !== 'approved' && (
+                                <p className="small">
+                                  <strong>Assurance:</strong> {st.assurance}
+                                  {/audit/i.test(st.assurance) ? '' : ' The independent reviewer can’t be anyone in your practice who prepared or compiled them (Companies Regulation 29(5)).'}
+                                </p>
+                              )}
+                              {st.unapprovedEarlier && (
+                                <p className="small">
+                                  <strong>Earlier:</strong> the statements for the year to {formatDate(st.unapprovedEarlier)} aren’t approved in Shap.
+                                </p>
+                              )}
+                            </>
+                          )
+                        )}
+                        {h.pocket && (
+                          <p className="small">
+                            <strong>Their last share:</strong> share {h.pocket.number}, their books as at {formatDate(h.pocket.through)}, brought in {formatDate(dayOf(h.pocket.importedAt))}
+                            {h.pocket.restored ? ` (${POCKET_RESTORED_SHORT})` : h.pocket.added + h.pocket.changed + h.pocket.removed > 0 ? `: ${h.pocket.added} new, ${h.pocket.changed} changed and ${h.pocket.removed} gone since the share before` : ''}.
+                          </p>
+                        )}
+                        <p className="small">
+                          <strong>Books closed:</strong> {h.lockedThrough ? `up to ${formatDate(h.lockedThrough)}` : 'not yet'}
+                        </p>
+                      </>
                     )}
-                    {h.pocket && (
-                      <p className="small">
-                        <strong>Their last share:</strong> share {h.pocket.number}, their books as at {formatDate(h.pocket.through)}, brought in {formatDate(dayOf(h.pocket.importedAt))}
-                        {h.pocket.restored ? ` (${POCKET_RESTORED_SHORT})` : h.pocket.added + h.pocket.changed + h.pocket.removed > 0 ? `: ${h.pocket.added} new, ${h.pocket.changed} changed and ${h.pocket.removed} gone since the share before` : ''}.
-                      </p>
-                    )}
-                    <p className="small">
-                      <strong>Books closed:</strong> {h.lockedThrough ? `up to ${formatDate(h.lockedThrough)}` : 'not yet'}
-                    </p>
                     {(next.length > 0 || past.length > 0) && (
                       <p className="small">
                         <strong>Some returns coming up:</strong>{' '}

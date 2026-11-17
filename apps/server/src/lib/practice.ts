@@ -246,6 +246,8 @@ export interface ClientHealth {
   deadlineInputs: DeadlineInputs | null;
   /** A linked client's Shap's last answer couldn't be read: what's here is from before it. */
   stale?: true;
+  /** Nothing of a linked client's checks was ever read but what the returns are worked out from. */
+  unread?: true;
 }
 
 const ASSURANCE = 'The assurance fits the public interest score';
@@ -266,6 +268,12 @@ export async function healthOf(db: Sql, now = today(), log?: { warn: (o: object,
     throw err;
   }
 }
+
+/** The month before a day's month, as YYYY-MM. */
+const financialMonthBefore = (day: string): string => {
+  const [y, m] = day.split('-').map(Number) as [number, number];
+  return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
+};
 
 /** Long words cut to length, as the practice's list shows them (each check's text, a name). */
 export const cutWords = (s: string, n = 500): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
@@ -346,15 +354,23 @@ async function healthNow(db: Sql, now: string, log: { warn: (o: object, m: strin
     const [runs] = await tx<{ n: number }[]>`select count(*)::int as n from pay_runs where pay_date >= ${addDays(now, -100)}::date`;
     const employer = Boolean(s.payeRef?.trim()) || (featureOn(s.features, 'payroll') && (emp?.n ?? 0) > 0) || (runs?.n ?? 0) > 0;
     // Dividends paid: Shap's own records, dividends in ledgers brought in from another package
-    // (the day each was declared there: a trial balance's own journal has no such day), and a
-    // journal by hand to Dividends (taken as paid on its day: the return is listed, not missed).
+    // (the day each was declared there: a trial balance's own journal has no such day), and
+    // journals by hand to Dividends: a month whose hand journals come to a dividend paid (one undone
+    // in the month comes to nothing), on its first such day. Far enough back for the DTR01s still
+    // on the list (deadlinesFor's 45 days back: due at the end of the month after).
+    const back = addDays(now, -45);
+    const since = `${financialMonthBefore(back)}-01`;
     const paid = await tx<{ d: string }[]>`
-      select distinct paid_on::text as d from dividends where paid_on >= ${addDays(now, -100)}::date
+      select distinct paid_on::text as d from dividends where paid_on >= ${since}::date
       union
-      select distinct j.date::text from journals j left join ledger_imports i on i.id = j.ledger_import_id
+      select distinct j.date::text from journals j join ledger_imports i on i.id = j.ledger_import_id and i.kind = 'ledger'
         join journal_lines jl on jl.journal_id = j.id join accounts a on a.id = jl.account_id
-        where a.system_key = 'dividends' and jl.debit_cents > 0 and j.date >= ${addDays(now, -100)}::date
-          and (i.kind = 'ledger' or (j.kind = 'manual' and j.ledger_import_id is null))
+        where a.system_key = 'dividends' and jl.debit_cents > 0 and j.date >= ${since}::date
+      union
+      select min(case when jl.debit_cents > 0 then j.date end)::text from journals j
+        join journal_lines jl on jl.journal_id = j.id join accounts a on a.id = jl.account_id
+        where a.system_key = 'dividends' and j.kind = 'manual' and j.ledger_import_id is null and j.date >= ${since}::date
+        group by date_trunc('month', j.date) having sum(jl.debit_cents - jl.credit_cents) > 0
       order by 1`;
     return {
       at: new Date().toISOString(),

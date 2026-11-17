@@ -8,6 +8,8 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { ACCOUNTANT_TERMS_VERSION, deadlinesFor } from '@shap/shared';
 import { today } from '../../src/lib/books.js';
 import { healthForLink, healthOf, migrateClients } from '../../src/lib/practice.js';
@@ -15,6 +17,7 @@ import { expectCleanAudit, ledgerTotal, login, ref, setup, type TestEnv } from '
 import { linkPair, type LinkPair } from '../accountant/link-pair.js';
 
 const quiet = { info: () => {}, warn: () => {} };
+const read = (p: string) => readFileSync(join(import.meta.dirname, '../../../..', p), 'utf8');
 
 describe('a linked client, through a restart and a wipe, and with long findings', () => {
   let p: LinkPair;
@@ -76,6 +79,18 @@ describe('a linked client, through a restart and a wipe, and with long findings'
     expect(h.deadlineInputs.dividendsPaid).toContain(day);
     expect(h.deadlines.some((d) => /DTR01|Dividends tax/i.test(d.label))).toBe(true);
     await p.theirs.post('/api/journals', { date: day, description: 'Made-up dividend paid, undone', lines: [{ accountId: await r.acc('bank'), debitCents: 50_000 }, { accountId: await r.acc('dividends'), creditCents: 50_000 }] });
+    // Undone in the same month: no dividend paid, no return (the fixes' check).
+    expect((await healthOf(p.own.sql)).deadlineInputs!.dividendsPaid).not.toContain(day);
+  });
+
+  it('looks back far enough for a dividends tax return still on the list (the fixes’ check)', async () => {
+    const r = await ref(p.own.sql);
+    await p.theirs.post('/api/journals', { date: '2026-10-02', description: 'Made-up dividend paid in October', lines: [{ accountId: await r.acc('dividends'), debitCents: 40_000 }, { accountId: await r.acc('bank'), creditCents: 40_000 }] });
+    // On 14 January 2027 its DTR01 (due 30 November) is 45 days back: still listed.
+    const h = await healthOf(p.own.sql, '2027-01-14');
+    expect(h.deadlineInputs!.dividendsPaid).toContain('2026-10-02');
+    expect(deadlinesFor(h.deadlineInputs!, '2027-01-14').some((d) => d.key === 'dtr01-2026-10')).toBe(true);
+    await p.theirs.post('/api/journals', { date: '2026-10-02', description: 'Made-up dividend undone', lines: [{ accountId: await r.acc('bank'), debitCents: 40_000 }, { accountId: await r.acc('dividends'), creditCents: 40_000 }] });
   });
 
   it('the owner wipes their books once the practice has opened them, and the link stays (accounting 2, security 3)', async () => {
@@ -160,5 +175,14 @@ describe('a client’s Shap whose checks the practice can’t read', () => {
       health = { ...good(), ...odd };
       expect((await owner.call({ method: 'POST', url: `/api/practice/clients/${id}/checks`, payload: {} })).statusCode).toBe(502);
     }
+  });
+
+  it('a first answer it can’t read keeps the returns, said to be all that was read (the fixes’ check)', async () => {
+    health = { ...good(), lockedThrough: 'never' };
+    const { id } = await owner.post<{ id: string }>('/api/practice/clients/link', { link: `${base}/link#${'b'.repeat(43)}` });
+    const shown = (await owner.get('/api/practice')).clients.find((c: { id: string }) => c.id === id);
+    expect(shown.health).toMatchObject({ stale: true, unread: true, deadlineInputs: { vatCategory: 'B' } });
+    expect(shown.health.deadlines.length).toBeGreaterThan(0);
+    expect(read('apps/web/src/pages/Practice.tsx')).toMatch(/Their Shap’s checks couldn’t be read: only the returns coming up are shown, from what it sent\./);
   });
 });

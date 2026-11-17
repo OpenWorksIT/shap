@@ -41,7 +41,7 @@ export const LINK_STAYS_OWNERS = staysOwners('your');
 export const LINK_LEVEL_WORDS: Record<Level, { title: string; hint: string }> = {
   compile: {
     title: 'Read the books and compile the statements',
-    hint: 'As your accountant in Shap: they see all of your books, and can download and print what’s in them; they compile your financial statements (filling in the statements’ details and the small business corporation answer as they do), and change nothing else. They can’t approve the statements: that’s for whoever signs them for the business.',
+    hint: 'As your accountant in Shap: they see all of your books (the audit log too), and can download and print what’s in them; they compile your financial statements (filling in the statements’ details and the small business corporation answer as they do), and change nothing else. They can’t approve the statements: that’s for whoever signs them for the business.',
   },
   books: {
     title: 'Write up the books, and compile the statements',
@@ -73,6 +73,16 @@ export function ownName(user: { name: string; fromPractice?: string | null }): s
   return tail && user.name.endsWith(tail) ? user.name.slice(0, -tail.length) : user.name;
 }
 
+/**
+ * The compiler's details a compile form starts from: what's saved; but someone from a linked
+ * practice whose saved details are another practice's (the client's last accountant) starts from
+ * their own name and practice, and nothing of the other's, so nobody signs as someone else.
+ */
+export function compilerDefaults<C extends { name: string; practice: string; qualification: string; body: string; number: string }>(saved: C, user: { name: string; fromPractice?: string | null }): C {
+  if (user.fromPractice && saved.practice && saved.practice !== user.fromPractice) return { ...saved, name: ownName(user), practice: user.fromPractice, qualification: '', body: '', number: '' };
+  return { ...saved, name: saved.name || ownName(user), practice: saved.practice || user.fromPractice || '' };
+}
+
 /** The link the client's owner gives their accountant: their Shap's address, and the code after the #. */
 export function linkText(publicUrl: string, code: string): string {
   return `${publicUrl.replace(/\/+$/, '')}/link#${code}`;
@@ -97,11 +107,11 @@ export function readLink(text: string): { base: string; code: string } | null {
  * what's theirs. Each is a point of its own on the screen.
  */
 export const LINK_WHAT_GOES: readonly string[] = [
-  `Your accountant’s practice opens your books on this server, from its own Shap Accountant, as you choose here. Each time, its Shap asks this one for a sign-in for one of its people that works once; they’re then in your books for ${LINK_SESSION_HOURS} hours at most. Who it is, and when, is shown here and in your audit log, with their IP address and browser, as for anyone who signs in.`,
-  'They sign in at their practice, not here. Where this Shap requires two-factor sign-in, it requires it of them too.',
-  'What you let them do, they do as you could: see, download and print what’s in your books, and, writing them up, send what Shap sends in your business’s name.',
+  `Your accountant’s practice opens your books on this server, from its own Shap Accountant, as you choose here. Each time, its Shap asks this one for a sign-in for one of its people that works once; they’re then in your books for ${LINK_SESSION_HOURS} hours at most. Who it is, and when, is shown here and in your audit log; their IP address and browser are kept with it, as for anyone who signs in.`,
+  'They sign in at their practice, not here. Where this Shap requires two-factor sign-in, they must have it on at their practice.',
+  'Within what you let them do, they work as you would: see, download and print what’s in your books, and, writing them up, send what Shap sends in your business’s name.',
   'Their Shap is sent your business’s name and what you let them do; and, when your practice links and whenever it runs the checks, what Shap’s checks find in your books (which can name your customers and suppliers), where your statements stand, how far your books are closed, and what the returns coming up are worked out from: the kind of business, VAT registration and category, the year-end month, turnover tax, whether you employ people, public benefit organisation approval, and the days dividends were paid lately. Nothing else of your books goes, and nothing goes to OpenWorks IT because of it.',
-  'Unlink whenever you like: nobody from the practice opens your books after that. What their Shap was already sent stays with the practice.',
+  'Unlink whenever you like: nobody from the practice opens your books after that. What their Shap was already sent stays on the practice’s server.',
   'Give the link only to your accountant, as you would a password: whoever uses it first is linked. Once they’ve linked, check the practice’s name here, and unlink if it isn’t theirs.',
   'What they do in your books is between you and them, as is checking it. Linking gives them nothing with SARS, the Department of Employment and Labour or CIPC, and Shap files nothing.',
 ];

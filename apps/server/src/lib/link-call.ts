@@ -27,6 +27,8 @@ for (const [net, bits, list] of [
   ['100.64.0.0', 10, blocked],
   ['127.0.0.0', 8, blocked],
   ['169.254.0.0', 16, never],
+  // A cloud server's metadata where it isn't link-local (Alibaba's).
+  ['100.100.100.200', 32, never],
   ['172.16.0.0', 12, blocked],
   ['192.0.0.0', 24, blocked],
   ['192.168.0.0', 16, blocked],
@@ -47,19 +49,46 @@ for (const [net, bits, list] of [
   ['2002::', 16, blocked],
   ['fc00::', 7, blocked],
   ['fe80::', 10, never],
+  // AWS's metadata over IPv6.
+  ['fd00:ec2::254', 128, never],
   ['fec0::', 10, blocked],
   ['ff00::', 8, never],
 ] as const)
   list.addSubnet(net, bits, 'ipv6');
 
-/** An IPv4 address written as IPv6 (::ffff:10.0.0.1, or ::ffff:a00:1) is the IPv4 address. */
+/** An IPv6 address's eight groups (16 bits each), whichever way it's written; null if it isn't one. */
+function groups(ip: string): number[] | null {
+  let text = ip.toLowerCase();
+  const dotted = /(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(text);
+  if (dotted) {
+    const [a, b, c, d] = dotted.slice(1).map(Number) as [number, number, number, number];
+    text = `${text.slice(0, dotted.index)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+  const [head, tail, more] = text.split('::');
+  if (more !== undefined) return null;
+  const h = head ? head.split(':') : [];
+  const t = tail === undefined ? [] : tail ? tail.split(':') : [];
+  const all = tail === undefined ? h : [...h, ...Array(8 - h.length - t.length).fill('0'), ...t];
+  return all.length === 8 ? all.map((g) => parseInt(g, 16)) : null;
+}
+
+/**
+ * The IPv4 address an IPv6 one carries, where it carries one: mapped (::ffff:a.b.c.d), compatible
+ * (::a.b.c.d), translated (::ffff:0:a.b.c.d), NAT64 (64:ff9b::/96, 64:ff9b:1::/48), 6to4 (2002::/16)
+ * and Teredo (2001::/32, the client's address inverted), so it's judged as that IPv4 address is.
+ */
 function asIpv4(ip: string): string | null {
-  const dotted = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(ip)?.[1];
-  if (dotted) return dotted;
-  const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(ip);
-  if (!hex) return null;
-  const [a, b] = [parseInt(hex[1]!, 16), parseInt(hex[2]!, 16)];
-  return `${a >> 8}.${a & 255}.${b >> 8}.${b & 255}`;
+  const g = groups(ip);
+  if (!g) return null;
+  const v4 = (hi: number, lo: number) => `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`;
+  const zero = (from: number, to: number) => g.slice(from, to).every((x) => x === 0);
+  if (zero(0, 5) && g[5] === 0xffff) return v4(g[6]!, g[7]!);
+  if (zero(0, 6) && (g[6]! | g[7]!) !== 0 && !(g[6] === 0 && g[7] === 1)) return v4(g[6]!, g[7]!);
+  if (zero(0, 4) && g[4] === 0xffff && g[5] === 0) return v4(g[6]!, g[7]!);
+  if (g[0] === 0x64 && g[1] === 0xff9b && (zero(2, 6) || g[2] === 1)) return v4(g[6]!, g[7]!);
+  if (g[0] === 0x2002) return v4(g[1]!, g[2]!);
+  if (g[0] === 0x2001 && g[1] === 0) return v4(g[6]! ^ 0xffff, g[7]! ^ 0xffff);
+  return null;
 }
 
 /** An address no linked client's Shap is ever reached at, private ones allowed or not. */
@@ -67,7 +96,7 @@ export function neverReached(ip: string): boolean {
   const family = isIP(ip);
   if (!family) return true;
   const v4 = family === 6 ? asIpv4(ip) : null;
-  if (v4) return neverReached(v4);
+  if (v4 && neverReached(v4)) return true;
   return never.check(ip, family === 6 ? 'ipv6' : 'ipv4');
 }
 
@@ -75,10 +104,12 @@ export function neverReached(ip: string): boolean {
 export function privateAddress(ip: string): boolean {
   const family = isIP(ip);
   if (!family) return true;
-  // (A BlockList checks IPv4 against IPv6 rules as such already, so ::ffff:0:0/96 can't be a rule:
-  // it would take in every one.)
+  // The IPv4 address inside is judged as itself, and the IPv6 form by its own rules too. (A
+  // BlockList checks IPv4 against IPv6 rules as such already, so ::ffff:0:0/96 can't be a rule: it
+  // would take in every one.)
   const v4 = family === 6 ? asIpv4(ip) : null;
-  if (v4) return privateAddress(v4);
+  if (v4 && privateAddress(v4)) return true;
+  if (v4 && /^::ffff:/i.test(ip)) return false;
   const list = family === 6 ? 'ipv6' : 'ipv4';
   return never.check(ip, list) || blocked.check(ip, list);
 }
@@ -163,18 +194,20 @@ export async function linkCall<T>(c: LinkCall): Promise<T> {
         });
         res.on('end', () => {
           const text = Buffer.concat(chunks).toString('utf8');
-          let json: Record<string, unknown> = {};
+          let json: Record<string, unknown> | null = {};
           try {
             json = text ? (JSON.parse(text) as Record<string, unknown>) : {};
           } catch {
             return reject(new LinkError(`Their Shap answered with something Shap Accountant doesn’t read (${res.statusCode}).`, 502, 'link_answer'));
           }
           const status = res.statusCode ?? 0;
+          // A JSON object, or nothing that's read as one.
+          if (status < 300 && (json === null || typeof json !== 'object' || Array.isArray(json))) return reject(new LinkError('Their Shap answered in a way this Shap doesn’t read: one of the two may need updating.', 502, 'link_answer'));
           if (status >= 300 && status < 400) return reject(new LinkError('Their Shap sent Shap Accountant somewhere else: ask them for the link again, from the address they use for their Shap.', 502, 'link_redirect'));
           if (status === 404) return reject(new LinkError('Their Shap doesn’t link to an accountant yet: it needs Shap 1.30 or later. Ask whoever runs it to update it.', 502, 'link_old'));
           // What their Shap says in words isn't passed on (whoever runs a server can make it say
           // anything, in Shap's name): only its code, which the practice puts in its own words.
-          if (status >= 400) return reject(new LinkError(`Their Shap refused (${status}).`, status, typeof json.code === 'string' && /^[a-z_]{1,40}$/.test(json.code) ? json.code : undefined));
+          if (status >= 400) return reject(new LinkError(`Their Shap refused (${status}).`, status, typeof json?.code === 'string' && /^[a-z_]{1,40}$/.test(json.code) ? json.code : undefined));
           resolve(json as T);
         });
         res.on('error', reject);

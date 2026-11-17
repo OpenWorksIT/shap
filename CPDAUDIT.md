@@ -1030,6 +1030,33 @@ words, the deadline, the credential, the addresses; `words`; `accounting`: the m
 bill's payment matched, the suggestions in the log), and in Pocket `accounting`, `bank` and `sales`;
 each fails without its fix.
 
+The fixes, checked by the same five agents (`74b7a13..085c4ac`, the website's `6ab57a7..f034db2`,
+Pocket's `2b01e84..4b647ef`): every finding fixed, and these found in the fixes. The penetration
+test expected an unused sign-in where the owner is signed in to go to `/?link=expired`: it expects
+`/?link=signed-in` there now (0 to fix, 49 OK, rerun). `LINK_PATHS` was compared with the path
+when no route matched, so a signed-out `POST /api/link/enter` (no such route) had its whole body
+read: only the route Fastify matched counts now. A client's Shap answering `null` gave the practice
+a 500: anything but a JSON object is `link_answer`. AWS's IPv6 and Alibaba's metadata addresses,
+and 169.254.169.254 written as an IPv4-compatible, translated, NAT64, 6to4 or Teredo address, were
+reachable with `LINK_PRIVATE`: every form's IPv4 is read and judged as itself. A password or
+two-factor reset, or someone changing their own password, took them out of the practice's sessions
+but not a linked client's: now both. A dividend journalled by hand and undone in the month still
+listed a DTR01: a month counts only when its hand journals come to a dividend paid; and the 100
+days looked back missed a DTR01 still on the list (from before 1.30, kept clients too): it looks
+back to the start of the month before the list's 45 days. A first answer that couldn't be read lost
+the returns: they're kept, and the card says they're all that was read (`unread`). A compile form
+on a client whose details hold its last accountant's would have filled them in for the practice's
+person to sign: they start from their own (`compilerDefaults`). Words: the IP address and browser
+are kept, not shown; the practice works within what the owner allows, not as the owner could; it
+must have two-factor on at the practice (its Shap says so), which the hosts list says goes; what
+the practice was sent stays on its server (Shap gives it no way to delete it, so nothing says it
+can); reopening is the owner's, said to anyone else; the directors approve, signed by the owner;
+the chart of accounts is under Lists. Known, as for kept clients: one person from the practice has
+one user on the client's Shap, so opening to compile turns their open write-up tab read-only, and
+the other way round. Shap Accountant switched off leaves its people in a linked client's Shap until
+their sign-in ends (8 hours at most). Tests: in `test/review-1.30/` (`security`, `data`, `words`),
+each failing without its fix.
+
 ### Code scanning (CodeQL), first run
 
 - The Accounts screen's download links carried the period's dates unencoded (flagged as text

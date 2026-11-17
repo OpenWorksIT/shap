@@ -240,7 +240,8 @@ only its hash there). From then on the two servers talk only for this:
   at most, however busy (use doesn't make it longer). In the client's Shap they're someone of their
   own (their name and the practice's), never signing in with a password, and kept out of the
   owner's people list; what they do is in the client's audit log by name. Where the client's Shap
-  requires two-factor sign-in of everyone, it requires them to have it on at their practice. A
+  requires two-factor sign-in of everyone, they must have it on at their practice (their practice's
+  Shap says whether they do). A
   browser where someone else is signed in to the client's Shap isn't signed out by it: they sign
   out there first. The bar at the top says whose Shap it is, and from which practice. They sign
   out there when done.
@@ -255,8 +256,8 @@ only its hash there). From then on the two servers talk only for this:
   sign-in there ends.
 - **Unlink**, from either side: the credential goes, and the practice's people are taken out of
   the client's books. To link again, the client makes a new link (**Link again** keeps the
-  practice's choices of who opens it). What the practice's server was sent stays there: it's the
-  practice's to keep or delete.
+  practice's choices of who opens it). What the practice's server was sent stays there, with the
+  client in its list (unlinked).
 
 What goes between the servers, and nothing else: to the client's, the code and the practice's name
 once, then who opens the books (an id, their name and whether they use two-factor) and at what

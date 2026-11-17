@@ -3,8 +3,9 @@
 **Settings → People who sign in.** Everyone signs in as themselves, and each person is one of these:
 
 - **Owner**: everything, including the settings and the people who sign in.
-- **Accountant (read only)**: sees and exports everything, changes nothing, and compiles the
-  financial statements (docs/STATEMENTS.md).
+- **Accountant (read only)**: sees and exports everything, changes nothing but the statements'
+  details and the small business corporation answer, and compiles the financial statements
+  (docs/STATEMENTS.md).
 - **Staff**: does only the jobs ticked for them.
 
 ## Profiles
@@ -97,7 +98,8 @@ them up too (as staff with every task but closing and reopening months), and mak
 works once, for a week. The practice's people open the books from their own Shap, each time with a
 sign-in that works once, and are then in for 8 hours at most; they're never in the people list
 here, never sign in with a password, and are named in the audit log with their practice. Their
-practice takes them out when it takes their access away. **Unlink** takes them all out at once; to
+practice asks this Shap to take them out when it takes their access away (and is told if it
+couldn't). **Unlink** takes them all out at once; to
 change what the practice may do, unlink and make a new link.
 
 ## How it's checked

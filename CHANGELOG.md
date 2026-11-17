@@ -10,8 +10,8 @@ entries newer than the version you're running before you update.
   compile the statements, or write them up too, and give them the link it makes (it works once, for
   a week; give it to them as you would a password). They open your books from their Shap, each time
   with a sign-in that works once, and are then in for 8 hours at most; who they are is in your
-  audit log, and they're never in your people list. Where your Shap requires two-factor sign-in, it
-  requires it of them too. The panel says what they can do, what stays yours, and what goes to
+  audit log, and they're never in your people list. Where your Shap requires two-factor sign-in,
+  they must have it on at their practice. The panel says what they can do, what stays yours, and what goes to
   their Shap. Unlink whenever you like.
 - **Shap Accountant: clients on their own Shap** (docs/ACCOUNTANT.md, "A client on its own Shap").
   Paste a client's link under Practice (On their own Shap): their books stay on their Shap, and

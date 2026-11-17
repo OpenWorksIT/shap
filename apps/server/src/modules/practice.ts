@@ -159,7 +159,7 @@ export function linkWords(err: LinkError): string {
     link_unknown: 'That link doesn’t work: it was used already, it’s more than a week old, or it was unlinked. Ask the client for a new one (Settings → People who sign in → Your accountant, in their Shap).',
     link_gone: UNLINKED,
     link_level: 'The client lets your practice read their books and compile the statements, not write them up.',
-    link_mfa: 'Their Shap requires two-factor sign-in of everyone who opens its books: turn it on for yourself here (Your account, at the top of the page), then open their books again.',
+    link_mfa: 'Their Shap requires two-factor sign-in of everyone who opens its books: turn it on for yourself here (Your account: your name, in the menu), then open their books again.',
   };
   return words[err.code ?? ''] ?? err.message;
 }
@@ -181,19 +181,21 @@ export async function linkedLevels(real: Sql, userIds: string[]): Promise<Map<st
 }
 
 /**
- * Whoever may now open a linked client less than before (or not at all) is taken out of its own
- * Shap at once: asked of each client's Shap, all at once. Returns those not taken out, as
+ * Whoever may now open a linked client less than before (or not at all), or everyone given who
+ * had their password or two-factor reset, is taken out of its own Shap at once: asked of each client's Shap, all at once. Returns those not taken out, as
  * "person (client)", for the screen to say: they're out when their sign-in there ends anyway
  * (LINK_SESSION_HOURS), and their next one is as given now.
  */
-export async function takeOutOfLinked(ctx: Ctx, real: Sql, before: Map<string, Map<string, Level | null>>, log: { warn: (o: object, m: string) => void }): Promise<string[]> {
+export async function takeOutOfLinked(ctx: Ctx, real: Sql, before: Map<string, Map<string, Level | null>>, log: { warn: (o: object, m: string) => void }, opts: { all?: boolean } = {}): Promise<string[]> {
   if (!before.size) return [];
   const after = await linkedLevels(real, [...before.keys()]);
   const asks: { clientId: string; userId: string }[] = [];
   for (const [userId, was] of before)
     for (const [clientId, level] of was) {
       const now = after.get(userId)?.get(clientId) ?? null;
-      if (level && (!now || RANK[now] < RANK[level])) asks.push({ clientId, userId });
+      // (`all`: their password or two-factor was reset: out of every client they may open, as out
+      // of their own sessions here; they open it again as given.)
+      if (level && (opts.all || !now || RANK[now] < RANK[level])) asks.push({ clientId, userId });
     }
   const missed: string[] = [];
   await Promise.all(
@@ -416,6 +418,11 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
       const inputs = deadlineInputs.safeParse((answer.health as { deadlineInputs?: unknown } | null)?.deadlineInputs);
       const [was] = await real<{ health: ClientHealth | null }[]>`select health from practice_clients where id = ${c.id}`;
       if (was?.health) await real`update practice_clients set health = ${real.json({ ...was.health, stale: true, ...(inputs.success ? { deadlineInputs: inputs.data } : {}) } as never)} where id = ${c.id}`;
+      else if (inputs.success && inputs.data) {
+        // Nothing read before: the returns alone, said to be all that could be read.
+        const only: ClientHealth = { at: started.toISOString(), company: c.name, setupDone: true, vatRegistered: inputs.data.vatRegistered, audit: { fail: 0, warn: 0, items: [] }, statements: null, lockedThrough: null, deadlineInputs: inputs.data, stale: true, unread: true };
+        await saveHealth(real, c.id, only, started);
+      }
       throw new HttpError(502, 'Their Shap’s checks came back in a way this Shap doesn’t read, so what’s shown is from before: one of the two may need updating.', 'link_answer');
     }
     const health = read.data as ClientHealth;

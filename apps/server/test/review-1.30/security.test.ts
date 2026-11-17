@@ -68,12 +68,30 @@ describe('someone from a linked practice, in the client’s own Shap', () => {
     site = await login(p.practice.app, 'site@example.co.za');
   });
 
+  it('is out at once when their password or two-factor is reset, or they change their own password (the fixes’ check)', async () => {
+    const inside = async () => p.enter((await site.post<{ url: string }>(`/api/practice/clients/${linked}/open`, {})).url);
+    const a = await inside();
+    const r = await p.owner.post<{ linkedStillIn: string[] }>(`/api/users/${siteId}/reset-mfa`, { password: 'test-password-1' });
+    expect(r.linkedStillIn).toEqual([]);
+    expect((await p.asThem(a.cookie!).get('/api/auth/me')).statusCode).toBe(401);
+    site = await login(p.practice.app, 'site@example.co.za');
+    const b = await inside();
+    await site.post('/api/auth/password', { currentPassword: 'test-password-1', newPassword: 'made-up-river-lamp-42' });
+    expect((await p.asThem(b.cookie!).get('/api/auth/me')).statusCode).toBe(401);
+    // Their password back as it was, by the owner: a reset, so out again.
+    const c = await inside();
+    const u = (await p.owner.get<{ id: string; name: string; email: string; profileId: string | null; access: string[] }[]>('/api/users')).find((x) => x.id === siteId)!;
+    await p.owner.post(`/api/users/${siteId}`, { name: u.name, email: u.email, role: 'staff', profileId: u.profileId, access: u.access, password: 'test-password-1', currentPassword: 'test-password-1' }, 'PUT');
+    expect((await p.asThem(c.cookie!).get('/api/auth/me')).statusCode).toBe(401);
+    site = await login(p.practice.app, 'site@example.co.za');
+  });
+
   it('needs two-factor at their practice where the client’s Shap requires it of everyone (security 4)', async () => {
     p.own.ctx.config.mfaRequired = true;
     try {
       const r = await site.call({ method: 'POST', url: `/api/practice/clients/${linked}/open`, payload: {} });
       expect(r.statusCode).toBe(403);
-      expect(r.json().error).toBe('Their Shap requires two-factor sign-in of everyone who opens its books: turn it on for yourself here (Your account, at the top of the page), then open their books again.');
+      expect(r.json().error).toBe('Their Shap requires two-factor sign-in of everyone who opens its books: turn it on for yourself here (Your account: your name, in the menu), then open their books again.');
       await p.practice.sql`update users set totp_enabled_at = now() where id = ${siteId}`;
       expect((await site.call({ method: 'POST', url: `/api/practice/clients/${linked}/open`, payload: {} })).statusCode).toBe(200);
     } finally {
@@ -103,6 +121,11 @@ describe('someone from a linked practice, in the client’s own Shap', () => {
     const linkRoutes = p.own.routes.filter((r) => r.split(' ')[1]!.startsWith('/api/link/')).map((r) => r.split(' ')[1]!);
     expect([...new Set(linkRoutes)].sort()).toEqual([...LINK_PATHS].sort());
     // Anything else under /api/link/ is for someone signed in, as any route is.
+    // A link path with no route for that method isn't a link route: a big body isn't read either (the fixes' check).
+    for (const [method, url] of [['POST', '/api/link/enter'], ['POST', '/api/link/health'], ['PUT', '/api/link/redeem']] as const) {
+      const r = await p.own.app.inject({ method, url, payload: 'x'.repeat(1_000_000), headers: { 'content-type': 'text/plain', 'x-shap-version': appVersion() } });
+      expect(r.statusCode, `${method} ${url}`).toBe(401);
+    }
     for (const url of ['/api/link/other', '/api/link/redeem/x', '/api/link']) {
       expect((await p.own.app.inject({ method: 'POST', url, payload: {} })).statusCode, url).toBe(409);
       expect((await p.own.app.inject({ method: 'POST', url, payload: {}, headers: { 'x-shap-version': appVersion() } })).statusCode, url).toBe(401);
@@ -171,6 +194,19 @@ describe('a client’s Shap that answers as it shouldn’t', () => {
     await practice.close();
   });
 
+  it('answers a client’s Shap that says nothing at all (null) with its own words, not an error (the fixes’ check)', async () => {
+    const { id } = await owner.post<{ id: string }>('/api/practice/clients/link', { link: `${base}/link#${'g'.repeat(43)}` });
+    say = (req) => (req.url === '/api/link/health' || req.url === '/api/link/sign-in' ? { body: null } : undefined);
+    for (const url of [`/api/practice/clients/${id}/checks`, `/api/practice/clients/${id}/open`]) {
+      const r = await owner.call({ method: 'POST', url, payload: {} });
+      expect([r.statusCode, r.json().details?.code ?? r.json().code], url).toEqual([502, 'link_answer']);
+    }
+    say = (req) => (req.url === '/api/link/redeem' ? { body: null } : undefined);
+    const r = await owner.call({ method: 'POST', url: '/api/practice/clients/link', payload: { link: `${base}/link#${'h'.repeat(43)}` } });
+    expect([r.statusCode, r.json().details?.code ?? r.json().code]).toEqual([502, 'link_answer']);
+    say = () => undefined;
+  });
+
   it('doesn’t keep a credential it wouldn’t send (security 7)', async () => {
     say = (req) => (req.url === '/api/link/redeem' ? { body: { credential: 'c'.repeat(100_000), company: 'Made-up', level: 'books' } } : undefined);
     const r = await owner.call({ method: 'POST', url: '/api/practice/clients/link', payload: { link: `${base}/link#${'d'.repeat(43)}` } });
@@ -215,7 +251,10 @@ describe('a client’s Shap that answers as it shouldn’t', () => {
       expect(privateAddress(ip), ip).toBe(true);
     for (const ip of ['41.0.0.1', '2c0f:f4c0::1', '2001:4860:4860::8888', '::ffff:808:808']) expect(privateAddress(ip), ip).toBe(false);
     expect(linkBaseProblem('https://[::127.0.0.1]', false)).toMatch(/private address/);
-    for (const ip of ['169.254.169.254', '::ffff:a9fe:a9fe', 'fe80::1']) expect(neverReached(ip), ip).toBe(true);
+    // A cloud server's metadata, however it's written (the fixes' check).
+    for (const ip of ['169.254.169.254', '::ffff:a9fe:a9fe', 'fe80::1', 'fd00:ec2::254', '100.100.100.200', '::169.254.169.254', '::ffff:0:a9fe:a9fe', '64:ff9b::a9fe:a9fe', '64:ff9b:1::a9fe:a9fe', '2002:a9fe:a9fe::', '2001:0:4136:e378:8000:63bf:5601:5601'])
+      expect(neverReached(ip), ip).toBe(true);
+    for (const ip of ['127.0.0.1', '10.0.0.1', '::1', '8.8.8.8', '2c0f:f4c0::1']) expect(neverReached(ip), ip).toBe(false);
     expect(linkBaseProblem('http://169.254.169.254', true)).toMatch(/private address/);
     expect(linkBaseProblem('http://127.0.0.1:3000', true)).toBeNull();
   });

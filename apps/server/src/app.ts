@@ -185,8 +185,9 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   app.addHook('onRequest', async (req, reply) => {
     if (!routePath(req).startsWith('/api/') || req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return;
     // A linked practice's server (links.ts): it shows its link's credential or code, never a cookie,
-    // so another site can't act with anyone's session there, and it runs its own version.
-    if (LINK_PATHS.includes(routePath(req))) return;
+    // so another site can't act with anyone's session there, and it runs its own version. (Only a
+    // route Fastify matched: a path with no route, or another method, is guarded as any is.)
+    if (LINK_PATHS.includes(req.routeOptions?.url ?? '')) return;
     const theirs = req.headers['x-shap-version'];
     // Shap's own pages always send their version; a form or script on another site can't add that
     // header (browsers only allow it from Shap's own address), so a change without it is refused.

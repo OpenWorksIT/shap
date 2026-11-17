@@ -8,7 +8,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { LINK_LEVEL_WORDS, LINK_SESSION_HOURS, LINK_STAYS_OWNERS, LINK_WHAT_GOES, LINKED_LEVEL_WORDS, ownName, WHO_OPENS_LINKED } from '@shap/shared';
+import { compilerDefaults, LINK_LEVEL_WORDS, LINK_SESSION_HOURS, LINK_STAYS_OWNERS, LINK_WHAT_GOES, LINKED_LEVEL_WORDS, ownName, WHO_OPENS_LINKED } from '@shap/shared';
 import { LinkError } from '../../src/lib/link-call.js';
 import { healthForLink, type ClientHealth } from '../../src/lib/practice.js';
 import { linkWords } from '../../src/modules/practice.js';
@@ -22,8 +22,14 @@ describe('what the owner is told before linking (words 1, 2, 7, 11; security 4; 
     expect(goes).not.toMatch(/they sign in for that time only/);
     expect(goes).toContain(`they’re then in your books for ${LINK_SESSION_HOURS} hours at most`);
     expect(goes).toMatch(/see, download and print what’s in your books, and, writing them up, send what Shap sends in your business’s name/);
-    expect(goes).toMatch(/Where this Shap requires two-factor sign-in, it requires it of them too/);
-    expect(goes).toMatch(/with their IP address and browser/);
+    // What's so: their practice's Shap says whether they have two-factor on; the IP address and browser are kept, not shown.
+    expect(goes).toMatch(/Where this Shap requires two-factor sign-in, they must have it on at their practice/);
+    expect(goes).toMatch(/their IP address and browser are kept with it/);
+    expect(goes).not.toMatch(/shown here and in your audit log, with their IP address/);
+    // Within what the owner lets them do, not all the owner could.
+    expect(goes).toMatch(/Within what you let them do, they work as you would/);
+    expect(goes).not.toMatch(/they do as you could/);
+    expect(LINK_LEVEL_WORDS.compile.hint).toMatch(/\(the audit log too\)/);
   });
 
   it('what goes to the practice’s Shap is what healthForLink sends, and when', () => {
@@ -46,7 +52,9 @@ describe('what the owner is told before linking (words 1, 2, 7, 11; security 4; 
   });
 
   it('what happens on unlinking, giving the link, and SARS', () => {
-    expect(goes).toMatch(/What their Shap was already sent stays with the practice/);
+    // Stays there: Shap gives the practice no way to delete it, so nothing says it can.
+    expect(goes).toMatch(/What their Shap was already sent stays on the practice’s server/);
+    expect(read('docs/ACCOUNTANT.md')).not.toMatch(/practice's to keep or delete/);
     expect(goes).toMatch(/Give the link only to your accountant, as you would a password: whoever uses it first is linked\. Once they’ve linked, check the practice’s name here, and unlink if it isn’t theirs/);
     expect(goes).toMatch(/Linking gives them nothing with SARS, the Department of Employment and Labour or CIPC, and Shap files nothing/);
     expect(goes).toMatch(/nothing goes to OpenWorks IT because of it/);
@@ -105,11 +113,22 @@ describe('what the practice reads (words 3, 5, 8, 12; IFRS 2, 4, 5)', () => {
 
   it('a practice’s person in the client’s Shap is told who approves, and compiles in their own name', () => {
     const fs = read('apps/web/src/pages/FinancialStatements.tsx');
-    expect(fs).toMatch(/user\.fromPractice\s*\?\s*` Your practice compiles them here \(in Shap Accountant, open these books to compile\); then the business approves them in this Shap, through its owner/);
-    expect(fs).toMatch(/name: compiler\.name \|\| ownName\(user\), practice: compiler\.practice \|\| user\.fromPractice \|\| ''/);
+    expect(fs).toMatch(/user\.fromPractice\s*\?\s*` Your practice compiles them here \(in Shap Accountant, open these books to compile\); then the \$\{s\?\.governing\.many \?\? 'directors'\} approve them, signed here by the business’s owner/);
+    expect(fs).toMatch(/useState\(compilerDefaults\(compiler, user\)\)/);
+    // Reopening is the owner's: anyone else is told so.
+    expect(fs).toMatch(/isOwner \? 'Reopen them and send them to your accountant again\.' : 'The business’s owner reopens them; then they’re compiled again\.'/);
+    const me = { name: 'Made-up Person (Made-up Practice Inc)', fromPractice: 'Made-up Practice Inc' };
+    const blank = { name: '', practice: '', qualification: '', body: '', number: '' };
+    expect(compilerDefaults(blank, me)).toMatchObject({ name: 'Made-up Person', practice: 'Made-up Practice Inc' });
+    // The client's last accountant's details: not theirs to sign under.
+    const theirs = { name: 'Earlier Accountant', practice: 'Earlier Practice CC', qualification: 'CA(SA)', body: 'SAICA', number: '99999' };
+    expect(compilerDefaults(theirs, me)).toEqual({ name: 'Made-up Person', practice: 'Made-up Practice Inc', qualification: '', body: '', number: '' });
+    // Their own practice's saved details, or someone not from a practice: as saved.
+    expect(compilerDefaults({ ...theirs, practice: 'Made-up Practice Inc' }, me)).toEqual({ ...theirs, practice: 'Made-up Practice Inc' });
+    expect(compilerDefaults(theirs, { name: 'Accountant', fromPractice: null })).toEqual(theirs);
     expect(ownName({ name: 'Made-up Person (Made-up Practice Inc)', fromPractice: 'Made-up Practice Inc' })).toBe('Made-up Person');
     expect(ownName({ name: 'Made-up Person', fromPractice: null })).toBe('Made-up Person');
-    expect(fs).toMatch(/Settings → Chart of accounts, which is the owner’s/);
+    expect(fs).toMatch(/Settings → Lists → Chart of accounts, which is the owner’s/);
   });
 });
 

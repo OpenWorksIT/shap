@@ -9,7 +9,6 @@ import { audit } from './lib/audit.js';
 import { badRequest, forbidden, HttpError, unauthorized } from './lib/errors.js';
 import { newToken, sha256 } from './lib/tokens.js';
 import { newRecoveryCodes, newTotpSecret, normaliseRecoveryCode, otpauthUrl, verifyTotp } from './lib/totp.js';
-import { routePath } from './lib/http.js';
 import { parse } from './lib/validate.js';
 
 /**
@@ -147,8 +146,8 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
     if (!req.user && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
       const path = req.url.split('?')[0]!;
       // (A linked practice's server shows its link's credential, or the link's code, instead: links.ts,
-      // on those routes alone, as Fastify matched them.)
-      if (path.startsWith('/api/') && !path.startsWith('/api/auth/') && !LINK_PATHS.includes(routePath(req)) && path !== '/api/demo/leave' && path !== '/api/practice/leave') throw unauthorized();
+      // on those routes alone, as Fastify matched them: not a path with no route, or another method.)
+      if (path.startsWith('/api/') && !path.startsWith('/api/auth/') && !LINK_PATHS.includes(req.routeOptions?.url ?? '') && path !== '/api/demo/leave' && path !== '/api/practice/leave') throw unauthorized();
     }
   });
 
@@ -415,6 +414,12 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
       await endOtherSessions(tx, req.user!.id, tokenFrom(req));
       await audit(tx, { userId: req.user!.id, action: 'password_changed', entity: 'user', entityId: req.user!.id, ip: req.ip });
     });
+    // In a practice (Shap Accountant): out of its clients' own Shaps too, as out of their other
+    // sessions here (loaded when needed: practice.ts reads this file).
+    if (!inDemo() && !inClient()) {
+      const { linkedLevels, takeOutOfLinked } = await import('./modules/practice.js');
+      await takeOutOfLinked(ctx, ctx.dbs.real, await linkedLevels(ctx.dbs.real, [req.user.id]), req.log, { all: true });
+    }
     return { ok: true };
   });
 

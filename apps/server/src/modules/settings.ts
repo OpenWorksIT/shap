@@ -430,7 +430,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (input.active === false) await tx`delete from sessions where user_id = ${id}`;
       await audit(tx, { userId: me.id, action: 'update', entity: 'user', entityId: id, ip: req.ip, details: { role: input.role, profileId: access.profileId, add: access.accessAdd, remove: access.accessRemove, passwordReset: Boolean(input.password) } });
     });
-    return { ok: true, linkedStillIn: await takeOutOfLinked(ctx, ctx.dbs.real, linkedBefore, req.log) };
+    return { ok: true, linkedStillIn: await takeOutOfLinked(ctx, ctx.dbs.real, linkedBefore, req.log, { all: Boolean(input.password) || input.active === false }) };
   });
 
   // ---- profiles: the jobs a kind of staff does, given to each person on it
@@ -488,7 +488,8 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
       else await tx`delete from sessions where user_id = ${id}`;
       await audit(tx, { userId: me.id, action: 'mfa_reset', entity: 'user', entityId: id, ip: req.ip });
     });
-    return { ok: true };
+    // Out of a linked client's own Shap too, as out of their sessions here (Shap Accountant).
+    return { ok: true, linkedStillIn: await takeOutOfLinked(ctx, ctx.dbs.real, await linkedOf([id]), req.log, { all: true }) };
   });
 
   /**
