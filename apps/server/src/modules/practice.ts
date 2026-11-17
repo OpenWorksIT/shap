@@ -74,7 +74,7 @@ const accountantTermsAccepted = async (real: Sql) => {
   const [s] = await real<{ accountantTermsVersion: string }[]>`select accountant_terms_version from settings where id`;
   return s?.accountantTermsVersion === ACCOUNTANT_TERMS_VERSION;
 };
-export const ACCOUNTANT_TERMS_NEEDED = 'The Shap Accountant terms of use have changed, or haven’t been accepted for this practice yet: its owner accepts them on the Practice page before any client’s books are opened. The books are untouched.';
+export const ACCOUNTANT_TERMS_NEEDED = 'The Shap Accountant terms of use have changed, or haven’t been accepted for this practice yet: its owner accepts them on the Practice page before any client’s books are opened. Nothing in the clients’ books changes meanwhile, except monthly invoices set up there, which are still made on their day; their backups can still be downloaded from the Practice page.';
 
 const practiceOn = async (real: Sql) => {
   const [s] = await real<{ features: Record<string, boolean> | null }[]>`select features from settings where id`;
@@ -159,8 +159,11 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
   const view = { preHandler: requireAccess('practice.clients') };
   const manage = { preHandler: requireAccess('practice.manage') };
 
-  const assertOn = async () => {
+  const assertSwitchedOn = async () => {
     if (!(await practiceOn(real))) throw badRequest('Shap Accountant is off. The owner switches it on under Settings → Features.');
+  };
+  const assertOn = async () => {
+    await assertSwitchedOn();
     if (!(await accountantTermsAccepted(real))) throw badRequest(ACCOUNTANT_TERMS_NEEDED, { needsAccountantTerms: true });
   };
   const clientOr404 = async (id: string) => {
@@ -389,7 +392,7 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const sql = clients.get(dbName);
     const [terms] = await sql<{ termsVersion: string }[]>`select terms_version from settings where id`;
     const accepting = (terms?.termsVersion ?? '') !== TERMS_VERSION;
-    if (accepting && !acceptTerms) throw badRequest(`Tick that you accept the Shap Accountant terms of use for your practice’s use of Shap on these books first (${PRACTICE_TERMS_TICK}).`, { needsTerms: true });
+    if (accepting && !acceptTerms) throw badRequest(`Confirm that you accept the Shap Accountant terms of use for your practice’s use of Shap on these books first: ${PRACTICE_TERMS_TICK}`, { needsTerms: true });
     // The practice person is there by name, as the copy's reader.
     await mirrorUser(sql, user, 'compile');
     const result = await sql.begin(async (tx) => {
@@ -421,14 +424,20 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
       .map(({ name, s }) => ({ name, sizeBytes: s.size, at: s.mtime.toISOString() }))
       .sort((a, b) => b.at.localeCompare(a.at));
   };
+  // A client's backups, to hand them their books or keep them as the law asks: whether or not the
+  // practice has accepted the Shap Accountant terms as they are now (ACCOUNTANT_TERMS_NEEDED).
+  app.get('/api/practice/records', owner, async () => {
+    await assertSwitchedOn();
+    return { clients: await real<{ id: string; name: string; archived: boolean }[]>`select id, name, archived_at is not null as archived from practice_clients where db_name is not null order by archived_at nulls first, lower(name)` };
+  });
   app.get('/api/practice/clients/:id/backups', owner, async (req) => {
-    await assertOn();
+    await assertSwitchedOn();
     const c = await clientOr404((req.params as { id: string }).id);
     return { backups: c.dbName ? await backupsOf(c.dbName) : [] };
   });
   app.post('/api/practice/clients/:id/backups/:name/link', { ...owner, config: limit(10) }, async (req) => {
     const user = userOrThrow(req);
-    await assertOn();
+    await assertSwitchedOn();
     const { id, name } = parse(z.object({ id: z.string(), name: z.string().max(200) }), req.params);
     const c = await clientOr404(id);
     if (!c.dbName || !BACKUP_NAME.test(name) || !name.startsWith(`${c.dbName}-`)) throw notFound('Backup');
@@ -438,6 +447,7 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
   app.get('/api/practice/clients/:id/backups/:name', owner, async (req, reply) => {
     const user = userOrThrow(req);
+    await assertSwitchedOn();
     const { id, name } = parse(z.object({ id: z.string(), name: z.string().max(200) }), req.params);
     const c = await clientOr404(id);
     if (!c.dbName || !BACKUP_NAME.test(name) || !name.startsWith(`${c.dbName}-`)) throw notFound('Backup');

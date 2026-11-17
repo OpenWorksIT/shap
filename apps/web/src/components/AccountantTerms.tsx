@@ -5,7 +5,7 @@
  * terms change (Practice). Shap's own terms, for everyone else, don't change with them.
  */
 import { useState } from 'react';
-import { ACCOUNTANT_TERMS_TICK, ACCOUNTANT_TERMS_URL, ACCOUNTANT_TERMS_VERSION, accountantTermsPoints, TERMS_URL } from '@shap/shared';
+import { ACCOUNTANT_TERMS_MEANS, ACCOUNTANT_TERMS_TICK, ACCOUNTANT_TERMS_URL, ACCOUNTANT_TERMS_VERSION, accountantTermsPoints, TERMS_URL } from '@shap/shared';
 import { api, ApiError } from '../lib/api';
 import { useAuthed } from '../lib/session';
 
@@ -73,7 +73,7 @@ export function AccountantTermsAccept({ cautions = [], onAccepted }: { cautions?
         <input type="checkbox" checked={ticked} onChange={(e) => setTicked(e.target.checked)} />
         <span>
           <strong className="small">{ACCOUNTANT_TERMS_TICK}</strong>
-          <div className="xs muted">Including that my practice’s work for its clients is its own, that Shap’s checks and returns are aids, that my practice looks after its clients’ books and personal information, and that it indemnifies OpenWorks against claims over that work.</div>
+          <div className="xs muted">{ACCOUNTANT_TERMS_MEANS}</div>
         </span>
       </label>
       {error && <div className="banner alert small">{error}</div>}

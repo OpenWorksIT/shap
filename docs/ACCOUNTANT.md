@@ -19,22 +19,29 @@ opens them, their personal information (POPIA), and checking what Shap shows.
 
 A practice uses Shap Accountant on the [Shap Accountant terms of
 use](https://www.openworks.co.za/shap/accountant-terms/): Shap's terms (Part A), with what a
-practice takes on (Part B): its work for its clients is its own, Shap's checks and returns are
-aids, its clients' books and personal information (POPIA) are in its care, and it indemnifies
-OpenWorks against claims over that work (clause 13). Only practices accept them, so Shap's own
-terms, and everyone else's acceptance of them, don't change.
+practice takes on (Part B): its work for its clients is its own, Shap's checks, returns and tax
+figures are aids and estimates, its clients' books and personal information (POPIA) are in its
+care, and it indemnifies OpenWorks against claims by its clients or anyone else over that work, its
+use of Shap on their books, the personal information it keeps there, or a breach of the terms
+(clause 13). Only practices accept them, so Shap's own terms, and everyone else's acceptance of
+them, don't change.
 
 - **The practice's owner accepts them for the practice** (`POST /api/practice/terms`, the owner's
   only, in the practice's own books): before Shap Accountant is switched on (Settings → What you
   use shows them, with what the practice answers for), and again whenever
   `ACCOUNTANT_TERMS_VERSION` changes (Practice shows them). Until then the practice's routes
-  refuse, and no client's books open: someone already in one is taken back to the practice. The
-  books are untouched. The version and when are kept in the practice's settings, and the audit
-  log has `accept_accountant_terms`.
-- **In each client's books**, the practice accepts them for its use of Shap on those books
-  (`PRACTICE_TERMS_TICK`, at setup, on the first Pocket share, and when Shap's terms change):
-  that books' audit log records both versions.
-- When Shap's terms change, Part A changes with them, and both versions.
+  refuse, and no client's books open: someone already in one is taken back to the practice.
+  Nothing in the clients' books changes meanwhile, except monthly invoices set up there, which are
+  still made on their day (held back, a later catch-up could land in a month closed since). The
+  owner can still download each client's backups (`GET /api/practice/records`, and the backup
+  routes check only that Shap Accountant is on), so a practice can always hand a client its books.
+  The version and when are kept in the practice's settings, and the audit log has
+  `accept_accountant_terms`. That acceptance covers every client's books the practice keeps.
+- **In each client's books**, the practice records its acceptance for its use of Shap on those
+  books (`PRACTICE_TERMS_TICK`, under the owner's acceptance for the practice: at setup, on the
+  first Pocket share, and when Shap's terms change): those books' audit log records both versions.
+- When Shap's terms change, Part A changes with them, and both versions go up
+  (`ACCOUNTANT_TERMS_VERSION` is never older than `TERMS_VERSION`).
 
 ## The clients
 
@@ -225,9 +232,12 @@ the giving, themselves included, and see every client.
 ## The financial statements in a client's books
 
 The practice compiles them in Shap, as itself (**Open to compile**): a compiler's report isn't
-uploaded in a client's books. Approving them is the client's own: one of the directors (members,
-trustees, partners or the owner) named in the statements' details signs, and the practice records
-it, uploading the page they signed (**Record the directors' approval**). Shap won't compile until
+uploaded in a client's books. Approving them is the client's own decision, taken by those the law
+and its own rules give it to (a company's board, with a director it authorises signing; a close
+corporation's members holding at least half of the members' interest; a trust's trustees; the
+partners; the owner), and the practice records it, uploading the page signed and the name of one of
+those named in the statements' details (**Record the directors' approval**). Shap checks only that
+the name is one of those, not the signature, the decision or anyone's authority to give it. Shap won't compile until
 those who approve are named. In a new client nothing is taken for granted: nobody is named and the
 company isn't taken as owner-managed (every shareholder a director) until the practice says so.
 

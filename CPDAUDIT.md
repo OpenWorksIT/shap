@@ -52,7 +52,8 @@ each review's findings are written up in section 7.
    new duty on the owner or a further limit on OpenWorks' liability is a terms change
    (`TERMS_VERSION`, everyone accepts again). One that's only a practice's (Shap Accountant) goes
    in the Shap Accountant terms instead (`accountant-terms.md`, `ACCOUNTANT_TERMS_VERSION`: only
-   practices accept again), whose Part A follows `terms.md`. The terms aren't changed otherwise. The
+   practices accept again), whose Part A follows `terms.md`: when `terms.md` changes, Part A and
+   `ACCOUNTANT_TERMS_VERSION` change with it. The terms aren't changed otherwise. The
    rest is plain South African English: clear, kind, no jargon without its meaning, the same word
    for the same thing, money as the app shows it (`formatZar`).
 
@@ -876,6 +877,66 @@ entry for entry) and `test/review-1.29/statements.test.ts`; Pocket's `share.test
   partnerships), and the computer as well as the phone. Tests: a renamed account in a compiled
   year (`share-check.test.ts`), the same refusal at the door for a client that is or isn't there,
   a code taken from one of Shap's own accounts, and the words.
+
+### The five reviews of 1.29.1 (the Shap Accountant terms of use; before release)
+
+The owner's decision: a practice's indemnity of OpenWorks, and what else only a practice takes on,
+go in terms of their own (openworks.co.za/shap/accountant-terms: Shap's terms as Part A, adapted
+for a practice, and Part B), accepted by the practice's owner, so Shap's own terms don't change and
+nobody else accepts again. Five separate agents reviewed `b77d7a0..7885f0b` and the website's
+`accountant-terms.md`.
+
+- Security and privacy, with the penetration test: the penetration test switched Shap Accountant
+  on without accepting the new terms, so CI's audit job would fail and the walls between clients
+  go untested: it accepts them first (and `accountant-terms.test.ts` checks it does). Staff who
+  see only names and pickers got no `accountantTermsVersion` in `/api/reference`, so Practice asked
+  them for the terms for ever: it's there now. A client backup's download link worked with the
+  terms out of date while the list and link didn't: all three now need Shap Accountant on, and not
+  the terms (below). Nothing got past the terms: every practice route but `here`, `leave`, `terms`
+  and the backups refuses until they're accepted, sessions already in a client are taken back,
+  and switching it on any other way is refused.
+- IFRS for SMEs and company law: clause 9.3 had whoever signs approving a client's statements; the
+  law has a company's board (s30(3)(c)), a close corporation's members with at least half the
+  members' interest (CC Act s58(3)), a trust's trustees, the partners, the owner, and Shap checks
+  only that the name is one named in the details: said so in the terms, the points and the docs.
+  The public interest score, with the audit or review it points to, is called an estimate; the
+  accounting officer's and directors' reports are listed with the compilation report; Shap prints
+  the compiler's details as entered; company records are kept seven years (s24; the docs and the
+  disclaimer too). Left for the next release, in Shap and Pocket together: the compiler's report is
+  headed "Independent compiler's report" whatever the compiler's independence (ISRS 4410 doesn't
+  ask for it): "Practitioner's compilation report".
+- SARS and tax: no figure changed. Clients' backups couldn't be downloaded until the terms were
+  accepted, though the law asks the records be kept and the terms put that on the practice: the
+  backup routes check only that Shap Accountant is on, and Practice shows the owner each client's
+  backups while the terms wait (`GET /api/practice/records`). Clause 9.4 now has each person in the
+  practice who must be registered as a tax practitioner (TAA s240), and the practice's authority
+  from each client; 3.2 keeps the practice's own registrations and the list of taxes; 3.4 and 10.1
+  where and how long records are kept (TAA s29 to s32, s30 for records kept abroad); the points
+  say the tax figures are estimates and that Shap files nothing.
+- Accounting and arithmetic: no figure moves on upgrade (a 1.29.0 practice with a kept, an
+  imported and a Pocket client, every table and balance compared), a signed year stays signed, and
+  the practice gets back in once its owner accepts. Monthly invoices in a client's books are still
+  made while the terms wait: kept so (a later catch-up could land in a month closed since), and the
+  words that said the books were untouched now say so. Left for later: CI's upgrade job checks only
+  the demo company's database, not a practice's clients'.
+- Words on screen and liability: the tick's line, the changelog and the docs described the
+  indemnity more narrowly than clause 13.1, and point 4 left out a breach of the terms: they all
+  say what 13.1 does (`ACCOUNTANT_TERMS_MEANS`, under both ticks and in the share's confirm). 13.1
+  says plainly that it covers a claim that Shap, or OpenWorks' negligence, caused the loss (an
+  indemnity covers negligence only if it says so), and 13.2's carve-out covers OpenWorks' people as
+  13.1 does (CPA s51(1)(c)); 13.3 is clearer on notice, defence and settling. Clause 1.2 said
+  OpenWorks doesn't host and then that it might: a separate hosting agreement governs the hosting,
+  the backups and OpenWorks' role as operator, 4.1, 4.2, 10.1 and 11.2 apply subject to it, and 8.3
+  includes it. Part A says it's Shap's terms adapted, applying in their place for the practice. The
+  duties on the practice are in bold; the ticks read "I'm authorised to agree" and record the
+  owner's acceptance in a client's books. A test holds `ACCOUNTANT_TERMS_VERSION` to never be older
+  than `TERMS_VERSION`. Whether the Consumer Protection Act makes a small practice a consumer here
+  (and so clause 13 presumed unfair, regulation 44(3)(e)) is for an attorney: the owner is asked to
+  have clause 13 read. The same hosting tension is in `terms.md` 1.2, for its next version.
+
+Tests: `test/accountant/accountant-terms.test.ts` (the backups and monthly invoices while the terms
+wait, the staff view, the words and the indemnity's scope, the pentest accepting first), each
+failing without its fix.
 
 ### Code scanning (CodeQL), first run
 

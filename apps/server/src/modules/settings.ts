@@ -126,6 +126,8 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
           companyName: s.companyName, tradingName: s.tradingName, fyEndMonth: s.fyEndMonth, vatRegistered: s.vatRegistered, vatRateBp: s.vatRateBp,
           defaultCostSourceId: s.defaultCostSourceId, defaultWageSourceId: s.defaultWageSourceId, defaultReceiptSourceId: s.defaultReceiptSourceId, lockDate: s.lockDate,
           features: s.features, businessType: s.businessType, industry: s.industry, setupDone: s.setupDone,
+          // Whether the practice's owner has accepted the Shap Accountant terms (Practice asks until then).
+          accountantTermsVersion: s.accountantTermsVersion,
         },
       };
     }

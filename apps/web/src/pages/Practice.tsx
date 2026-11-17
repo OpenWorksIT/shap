@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { ACCOUNTANT_TERMS_URL, ACCOUNTANT_TERMS_VERSION, dayOf, formatDate, LEVEL_WORDS, POCKET_SHARE_NOTE, PRACTICE_NOTE, PRACTICE_TERMS_TICK, STATEMENT_STATUS_LABELS, todayIso, type Level, type StatementStatus } from '@shap/shared';
+import { ACCOUNTANT_TERMS_MEANS, ACCOUNTANT_TERMS_URL, ACCOUNTANT_TERMS_VERSION, dayOf, formatDate, LEVEL_WORDS, POCKET_SHARE_NOTE, PRACTICE_NOTE, PRACTICE_TERMS_TICK, STATEMENT_STATUS_LABELS, todayIso, type Level, type StatementStatus } from '@shap/shared';
 import { AccountantPoints, AccountantTermsAccept } from '../components/AccountantTerms';
 import { PageHead } from '../components/Shell';
 import { Drawer, Empty, ErrorBox, Field, Loading, Money, useToast } from '../components/ui';
@@ -111,7 +111,7 @@ export default function PracticePage() {
         r.readAsDataURL(file);
       });
       const send = (acceptTerms: boolean) => api<ShareResult>(`/api/practice/clients/${c.id}/pocket-share`, { body: { name: file.name, dataBase64, acceptTerms } });
-      const terms = `${PRACTICE_TERMS_TICK}\n\nThe Shap Accountant terms of use: ${ACCOUNTANT_TERMS_URL}`;
+      const terms = `${PRACTICE_TERMS_TICK}\n\n${ACCOUNTANT_TERMS_MEANS}\n\nThe Shap Accountant terms of use: ${ACCOUNTANT_TERMS_URL}`;
       // The first share records the practice's acceptance of the terms for these books.
       const first = !c.health?.pocket;
       if (first && !confirm(terms)) return;
@@ -144,8 +144,12 @@ export default function PracticePage() {
     return (
       <div className="stack-lg narrow-wide">
         <PageHead title="Practice" sub={settings.accountantTermsVersion ? 'The Shap Accountant terms of use have changed' : 'Before you carry on: the Shap Accountant terms of use'} />
-        <p className="small muted">Your clients’ books are untouched. {isOwner ? 'Read the terms, accept them for your practice, and carry on where you were.' : 'The practice’s owner accepts them for the practice before anyone opens a client’s books: ask them to open Practice.'}</p>
+        <p className="small muted">
+          Nothing in your clients’ books changes meanwhile, except monthly invoices set up there, which are still made on their day.{' '}
+          {isOwner ? 'Read the terms, accept them for your practice, and carry on where you were.' : 'The practice’s owner accepts them for the practice before anyone opens a client’s books: ask them to open Practice.'}
+        </p>
         {isOwner ? <AccountantTermsAccept onAccepted={reload} /> : <AccountantPoints />}
+        {isOwner && <ClientRecords />}
       </div>
     );
   if (error) return <ErrorBox error={error} onRetry={reload} />;
@@ -412,7 +416,37 @@ function AccessDrawer({ client, people, onClose, onSaved }: { client: PracticeCl
 }
 
 /** A client's own backups, for the practice's owner: each download takes the owner's password. */
-function BackupsDrawer({ client, onClose }: { client: PracticeClient; onClose: () => void }) {
+/**
+ * Before the Shap Accountant terms are accepted: each client's backups, so a practice can hand a
+ * client its books, or keep them as the law asks, whether or not it accepts them.
+ */
+function ClientRecords() {
+  const { data } = useApi<{ clients: { id: string; name: string; archived: boolean }[] }>('/api/practice/records');
+  const [backupsFor, setBackupsFor] = useState<{ id: string; name: string } | null>(null);
+  if (!data?.clients.length) return null;
+  return (
+    <section className="panel panel-pad stack">
+      <strong className="small">Your clients’ backups</strong>
+      <p className="xs muted">To hand a client its books, or keep them as the law asks, whether or not you accept the terms.</p>
+      <ul className="list" data-private>
+        {data.clients.map((c) => (
+          <li key={c.id} className="list-row">
+            <span className="grow small">
+              {c.name}
+              {c.archived ? ' (archived)' : ''}
+            </span>
+            <button type="button" className="btn small" onClick={() => setBackupsFor(c)}>
+              Backups
+            </button>
+          </li>
+        ))}
+      </ul>
+      {backupsFor && <BackupsDrawer client={backupsFor} onClose={() => setBackupsFor(null)} />}
+    </section>
+  );
+}
+
+function BackupsDrawer({ client, onClose }: { client: Pick<PracticeClient, 'id' | 'name'>; onClose: () => void }) {
   const toast = useToast();
   const { data, error } = useApi<{ backups: { name: string; sizeBytes: number; at: string }[] }>(`/api/practice/clients/${client.id}/backups`);
   const [password, setPassword] = useState('');

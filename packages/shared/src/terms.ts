@@ -39,19 +39,25 @@ export const IMPORT_NOTE =
 /**
  * The Shap Accountant terms of use: Shap's terms, with what applies to a practice keeping its
  * clients' books in Shap (its own work, its clients' books and information, an indemnity). Published
- * on the website (ACCOUNTANT_TERMS_URL). Only a practice accepts them: its owner, before Shap
- * Accountant is switched on and again whenever ACCOUNTANT_TERMS_VERSION changes (Practice asks;
- * until then no client's books open), and the practice again for each client's books it keeps.
- * Recorded in the practice's settings and audit log. Shap's own terms (TERMS_VERSION) don't change
- * with them, so nobody else is asked again. When Shap's terms change, the Shap Accountant terms'
- * Part A changes with them, and both versions.
+ * on the website (ACCOUNTANT_TERMS_URL). Only a practice accepts them: its owner, for the practice,
+ * before Shap Accountant is switched on and again whenever ACCOUNTANT_TERMS_VERSION changes
+ * (Practice asks; until then no client's books open, though their backups can be downloaded).
+ * Recorded in the practice's settings and audit log; that acceptance covers every client's books
+ * the practice keeps. Each client's books also record, in their own audit log, the practice's
+ * acceptance for them, when they're set up and when Shap's terms change (PRACTICE_TERMS_TICK).
+ * Shap's own terms (TERMS_VERSION) don't change with them, so nobody else is asked again. When
+ * Shap's terms change, the Shap Accountant terms' Part A changes with them, and both versions go up
+ * (ACCOUNTANT_TERMS_VERSION is never older than TERMS_VERSION: accountant-terms.test.ts).
  */
 export const ACCOUNTANT_TERMS_VERSION = '2026-11-17';
 export const ACCOUNTANT_TERMS_URL = 'https://www.openworks.co.za/shap/accountant-terms/';
 /** The practice's owner, accepting the Shap Accountant terms for the practice. */
-export const ACCOUNTANT_TERMS_TICK = 'I accept the Shap Accountant terms of use for my practice, and I may agree to them on its behalf';
-/** In a client's books, the terms are accepted for the practice's use of Shap on them. */
-export const PRACTICE_TERMS_TICK = 'I accept the Shap Accountant terms of use for my practice’s use of Shap on these books.';
+export const ACCOUNTANT_TERMS_TICK = 'I accept the Shap Accountant terms of use for my practice, and I’m authorised to agree to them on its behalf.';
+/** In a client's books, the terms are accepted for the practice's use of Shap on them (under its owner's acceptance for the practice). */
+export const PRACTICE_TERMS_TICK = 'I accept the Shap Accountant terms of use, which my practice’s owner has accepted for the practice, for my practice’s use of Shap on these books.';
+/** Under the tick: what accepting the Shap Accountant terms means, with the indemnity as clause 13 has it. */
+export const ACCOUNTANT_TERMS_MEANS =
+  'Including that my practice’s work for its clients is its own; that Shap’s checks, returns, statements and tax figures are aids and estimates, not advice; that my practice looks after its clients’ books and personal information; and that it indemnifies OpenWorks against claims by its clients or anyone else over that work, its use of Shap on their books, the personal information it keeps there, or a breach of the terms.';
 
 /** What the Shap Accountant terms add to Shap's, in plain words (shown before the practice agrees). */
 export function accountantTermsPoints(): { title: string; body: string }[] {
@@ -62,7 +68,7 @@ export function accountantTermsPoints(): { title: string; body: string }[] {
     },
     {
       title: 'Shap’s checks and returns are aids',
-      body: 'What Shap’s checks find, the returns and due dates it lists and the statements it drafts are aids for your practitioners to check: not complete, and not advice. Approving a client’s financial statements is the client’s own decision: Shap records it as your practice enters it.',
+      body: 'What Shap’s checks find, the returns and due dates it lists and the statements and reports it drafts are aids for your practitioners to check: not complete, and not advice. Its tax figures (income tax, provisional tax, turnover tax, the tax pack) and the public interest score, with the audit or independent review it points to, are estimates only. Shap files nothing with SARS, the Department of Employment and Labour or CIPC. Approving a client’s financial statements is the client’s own decision, taken by those the law and its own rules give it to (for a company, its board; for a close corporation, members holding at least half of the members’ interest; for a trust, its trustees; for a partnership, its partners; for a sole proprietor, its owner): Shap records it as your practice enters it.',
     },
     {
       title: 'Your clients’ books and information are in your care',
@@ -70,11 +76,11 @@ export function accountantTermsPoints(): { title: string; body: string }[] {
     },
     {
       title: 'Your practice indemnifies OpenWorks',
-      body: 'If a client, or anyone else, claims against OpenWorks IT over your practice’s work for its clients or its use of Shap on their books, your practice covers OpenWorks for that claim and its costs, except where OpenWorks’ own fraud, gross negligence or wilful misconduct caused it.',
+      body: 'If a client, or anyone else, claims against OpenWorks IT or its people over your practice’s work for its clients, its use of Shap on their books, the personal information it keeps there, or a breach of these terms by your practice or anyone it lets in, your practice covers them for that claim and its costs, even where the claim says Shap or OpenWorks’ negligence caused it, but not where the fraud, gross negligence or wilful misconduct of OpenWorks or its people did.',
     },
     {
       title: 'Shap’s terms of use apply too',
-      body: 'Everything in Shap’s terms applies to your practice’s use of Shap: it’s free, as is, with no warranty; OpenWorks isn’t an accountant and isn’t liable for what is filed or paid; and keeping it up to date is yours.',
+      body: 'Everything in Shap’s terms applies to your practice’s use of Shap, its own books included: it’s free, as is, with no warranty; OpenWorks IT are not accountants, tax practitioners or auditors, and aren’t liable for what is filed or paid; and keeping it up to date is yours.',
     },
   ];
 }

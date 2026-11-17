@@ -7,12 +7,15 @@ entries newer than the version you're running before you update.
 
 - **The Shap Accountant terms of use** ([openworks.co.za/shap/accountant-terms](https://www.openworks.co.za/shap/accountant-terms/)).
   A practice now uses Shap Accountant on terms of its own: Shap's terms, with what a practice takes
-  on when it keeps its clients' books in Shap. Its work for its clients is its own, Shap's checks
-  and returns are aids, its clients' books and personal information are in its care, and it
-  indemnifies OpenWorks against claims over that work. The practice's owner accepts them before
-  Shap Accountant is switched on, and a practice already using it is asked once, on the Practice
-  page, before any client's books open again. The books are untouched. Shap's own terms haven't
-  changed: nobody else is asked to accept anything again.
+  on when it keeps its clients' books in Shap. Its work for its clients is its own, Shap's checks,
+  returns and tax figures are aids and estimates, its clients' books and personal information are
+  in its care, and it indemnifies OpenWorks against claims by its clients or anyone else over that
+  work, its use of Shap on their books, the personal information it keeps there, or a breach of the
+  terms. The practice's owner accepts them before Shap Accountant is switched on, and a practice
+  already using it is asked once, on the Practice page, before any client's books open again.
+  Nothing in the clients' books changes meanwhile, except monthly invoices set up there, which are
+  still made on their day, and the owner can still download each client's backups. Shap's own terms
+  haven't changed: nobody else is asked to accept anything again.
 
 ## 1.29.0 (17 November 2026)
 

@@ -158,7 +158,7 @@ describe('a Shap Pocket client in the practice', () => {
     const one = await makeShare(phone.sql, { number: 1, madeAt: '2026-11-10T08:00:00.000Z', through: '2026-11-10' });
     const no = await bringIn(one);
     expect(no.statusCode).toBe(400);
-    expect(no.json().error).toMatch(/Tick that you accept the Shap Accountant terms of use for your practice’s use of Shap on these books first/);
+    expect(no.json().error).toMatch(/Confirm that you accept the Shap Accountant terms of use for your practice’s use of Shap on these books first: I accept the Shap Accountant terms of use, which my practice’s owner has accepted/);
     const res = await bringIn(one, { terms: true });
     expect(res.statusCode, res.body).toBe(200);
     expect(res.json()).toMatchObject({ number: 1, first: true, restored: false, changes: { added: 0, changed: 0, removed: 0 } });

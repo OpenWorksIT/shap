@@ -4,7 +4,7 @@
  * accepted (at the end of setup, and again when the published terms change).
  */
 import { useState } from 'react';
-import { PRACTICE_TERMS_TICK, TERMS_URL, TERMS_VERSION, termsPoints } from '@shap/shared';
+import { ACCOUNTANT_TERMS_MEANS, PRACTICE_TERMS_TICK, TERMS_URL, TERMS_VERSION, termsPoints } from '@shap/shared';
 import { AccountantPoints } from './AccountantTerms';
 import { useClientHere } from './ClientBanner';
 import { api, ApiError } from '../lib/api';
@@ -52,7 +52,7 @@ export function TermsReview({ cautions, accepted, onAccepted, tick }: { cautions
         <input type="checkbox" checked={accepted} onChange={(e) => onAccepted(e.target.checked)} />
         <span>
           <strong className="small">{tick ?? 'I have read and accept the terms of use'}</strong>
-          <div className="xs muted">Including that OpenWorks isn’t an accountant, doesn’t keep or back up my data, and isn’t liable for what I file or pay. I’m responsible for backups, updates and checking the figures.</div>
+          <div className="xs muted">{tick ? ACCOUNTANT_TERMS_MEANS : 'Including that OpenWorks isn’t an accountant, doesn’t keep or back up my data, and isn’t liable for what I file or pay. I’m responsible for backups, updates and checking the figures.'}</div>
         </span>
       </label>
     </div>
