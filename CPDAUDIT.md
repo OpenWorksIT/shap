@@ -1051,7 +1051,12 @@ are kept, not shown; the practice works within what the owner allows, not as the
 must have two-factor on at the practice (its Shap says so), which the hosts list says goes; what
 the practice was sent stays on its server (Shap gives it no way to delete it, so nothing says it
 can); reopening is the owner's, said to anyone else; the directors approve, signed by the owner;
-the chart of accounts is under Lists. Known, as for kept clients: one person from the practice has
+the chart of accounts is under Lists. The accounting check ran the wipe on a practice with a kept
+and a linked client, the test server's wipe on a client's own Shap (twice, and after unlinking), and
+found the bank amounts for bill payments are only shown, never totalled; three loose ends, closed:
+the stale mark is one statement and never over a summary saved since the checks began; a client's
+Shap that can't be reached marks what's shown as from before too; and a kept client's findings are
+cut to length as a linked one's are, so the two lists say the same (`findingsForList`). Known, as for kept clients: one person from the practice has
 one user on the client's Shap, so opening to compile turns their open write-up tab read-only, and
 the other way round. Shap Accountant switched off leaves its people in a linked client's Shap until
 their sign-in ends (8 hours at most). Tests: in `test/review-1.30/` (`security`, `data`, `words`),

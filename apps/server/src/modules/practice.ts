@@ -17,7 +17,7 @@ import { createReadStream, existsSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { ACCOUNTANT_TERMS_URL, ACCOUNTANT_TERMS_VERSION, BUSINESS_TYPES, deadlinesFor, featureOn, LEVELS, plainName, PRACTICE_TERMS_TICK, readLink, TERMS_URL, TERMS_VERSION, VAT_CATEGORIES, type Level } from '@shap/shared';
+import { ACCOUNTANT_TERMS_URL, ACCOUNTANT_TERMS_VERSION, BUSINESS_TYPES, deadlinesFor, featureOn, LEVELS, plainName, PRACTICE_TERMS_TICK, readLink, TERMS_URL, TERMS_VERSION, VAT_CATEGORIES, type DeadlineInputs, type Level } from '@shap/shared';
 import { z } from 'zod';
 import { browserName, can, CLIENT_COOKIE, confirmPassword, CLIENT_SESSION_COOKIE, loadUser, requireAccess, requireRole, SESSION_COOKIE, userOrThrow, type AuthUser } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -402,23 +402,35 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!c.linkUrl || !c.linkCredential) throw badRequest(c.linkUrl ? UNLINKED : 'This client isn’t linked yet.', { code: 'link_gone' });
     return c;
   };
+  /**
+   * What was shown before is marked as from before (their Shap didn't answer, or its answer couldn't
+   * be read), with what the returns are worked out from if that reads on its own; in one statement,
+   * and not over a summary saved since these checks began (another run, at the same time).
+   */
+  const markStale = async (c: ClientRow, started: Date, inputs: DeadlineInputs | null | undefined) => {
+    const add = { stale: true, ...(inputs !== undefined ? { deadlineInputs: inputs } : {}) };
+    const r = await real`update practice_clients set health = health || ${real.json(add as never)}::jsonb
+      where id = ${c.id} and health is not null and (health_at is null or health_at <= ${started}) returning id`;
+    return r.length > 0;
+  };
   const linkedHealthOf = async (c: ClientRow, log: { warn: (o: object, m: string) => void }): Promise<ClientHealth> => {
     const started = new Date();
     let answer: { health: unknown; level?: Level };
     try {
       answer = await callLinked<{ health: unknown; level?: Level }>(linked(c), 'GET', '/api/link/health');
     } catch (err) {
+      // Not reached, or not answering: what's shown is from before (unlinked is said on its own).
+      if (err instanceof LinkError && err.code !== 'link_gone') await markStale(c, started, undefined);
       throw await linkRefusal(c, err);
     }
     const read = linkedHealth.safeParse(answer.health);
     if (!read.success) {
       log.warn({ issues: read.error.issues.slice(0, 5).map((i) => ({ path: i.path, code: i.code })) }, 'practice: a linked client’s checks came back unread');
-      // What was shown before is marked as from before; what the returns are worked out from is
-      // taken on its own if it reads, so the returns coming up aren't lost with the rest.
+      // What the returns are worked out from is taken on its own if it reads, so the returns
+      // coming up aren't lost with the rest.
       const inputs = deadlineInputs.safeParse((answer.health as { deadlineInputs?: unknown } | null)?.deadlineInputs);
-      const [was] = await real<{ health: ClientHealth | null }[]>`select health from practice_clients where id = ${c.id}`;
-      if (was?.health) await real`update practice_clients set health = ${real.json({ ...was.health, stale: true, ...(inputs.success ? { deadlineInputs: inputs.data } : {}) } as never)} where id = ${c.id}`;
-      else if (inputs.success && inputs.data) {
+      const marked = await markStale(c, started, inputs.success ? inputs.data : undefined);
+      if (!marked && inputs.success && inputs.data) {
         // Nothing read before: the returns alone, said to be all that could be read.
         const only: ClientHealth = { at: started.toISOString(), company: c.name, setupDone: true, vatRegistered: inputs.data.vatRegistered, audit: { fail: 0, warn: 0, items: [] }, statements: null, lockedThrough: null, deadlineInputs: inputs.data, stale: true, unread: true };
         await saveHealth(real, c.id, only, started);

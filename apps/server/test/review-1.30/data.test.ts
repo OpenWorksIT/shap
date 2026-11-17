@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ACCOUNTANT_TERMS_VERSION, deadlinesFor } from '@shap/shared';
+import { auditBooks } from '../../src/audit/books.js';
 import { today } from '../../src/lib/books.js';
 import { healthForLink, healthOf, migrateClients } from '../../src/lib/practice.js';
 import { expectCleanAudit, ledgerTotal, login, ref, setup, type TestEnv } from '../helpers.js';
@@ -55,9 +56,9 @@ describe('a linked client, through a restart and a wipe, and with long findings'
       const item = await p.theirs.post<{ id: string }>('/api/items', { description: `Made-up item ${i} ${'with a long descriptive name '.repeat(7)}`.slice(0, 200), stocked: true, unitPriceCents: 10_000 });
       await p.theirs.post(`/api/items/${item.id}/opening`, { date: '2026-10-01', qty: 1, unitCostCents: 5_000, from: 'costs' });
     }
-    const direct = await healthOf(p.own.sql);
-    const long = direct.audit.items.find((i) => i.text.length > 500);
+    const long = (await auditBooks(p.own.sql)).find((i) => i.text.length > 500);
     expect(long, 'a finding over 500 characters').toBeDefined();
+    const direct = await healthOf(p.own.sql);
     const r = await p.owner.call({ method: 'POST', url: `/api/practice/clients/${linked}/checks`, payload: {} });
     expect(r.statusCode, r.body).toBe(200);
     const h = r.json().health;
@@ -175,6 +176,26 @@ describe('a client’s Shap whose checks the practice can’t read', () => {
       health = { ...good(), ...odd };
       expect((await owner.call({ method: 'POST', url: `/api/practice/clients/${id}/checks`, payload: {} })).statusCode).toBe(502);
     }
+  });
+
+  it('a client’s Shap that can’t be reached leaves what was shown marked as from before (the fixes’ check)', async () => {
+    health = good();
+    const { id } = await owner.post<{ id: string }>('/api/practice/clients/link', { link: `${base}/link#${'k'.repeat(43)}` });
+    expect((await owner.get('/api/practice')).clients.find((c: { id: string }) => c.id === id).health.stale).toBeUndefined();
+    // Nothing listening there now.
+    await practice.sql`update practice_clients set link_url = 'http://127.0.0.1:1' where id = ${id}`;
+    const r = await owner.call({ method: 'POST', url: `/api/practice/clients/${id}/checks`, payload: {} });
+    expect(r.statusCode).toBe(502);
+    expect((await owner.get('/api/practice')).clients.find((c: { id: string }) => c.id === id).health).toMatchObject({ stale: true, company: 'Made-up Odd Books' });
+    // A summary saved since these checks began (another run at the same time) isn't marked.
+    await practice.sql`update practice_clients set link_url = ${base} where id = ${id}`;
+    health = good();
+    await owner.post(`/api/practice/clients/${id}/checks`, {});
+    await practice.sql`update practice_clients set health_at = now() + interval '1 hour' where id = ${id}`;
+    await practice.sql`update practice_clients set link_url = 'http://127.0.0.1:1' where id = ${id}`;
+    expect((await owner.call({ method: 'POST', url: `/api/practice/clients/${id}/checks`, payload: {} })).statusCode).toBe(502);
+    expect((await owner.get('/api/practice')).clients.find((c: { id: string }) => c.id === id).health.stale).toBeUndefined();
+    await practice.sql`update practice_clients set link_url = ${base}, health_at = now() where id = ${id}`;
   });
 
   it('a first answer it can’t read keeps the returns, said to be all that was read (the fixes’ check)', async () => {

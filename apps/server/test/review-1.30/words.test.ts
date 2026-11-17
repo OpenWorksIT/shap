@@ -100,7 +100,7 @@ describe('what the practice reads (words 3, 5, 8, 12; IFRS 2, 4, 5)', () => {
 
   it('the checks are shown as their Shap sent them, and a stale answer is said', () => {
     expect(page).toMatch(/Their Shap’s checks ran \$\{formatDate\(dayOf\(h\.at\)\)\}, and are shown as their Shap sent them\./);
-    expect(page).toMatch(/Their Shap’s answer since couldn’t be read, so this is from before/);
+    expect(page).toMatch(/Their Shap couldn’t be reached, or its answer read, since: this is from before\./);
     expect(page).not.toMatch(/open them, or run the checks\.' : 'Shap’s checks haven’t run/);
   });
 

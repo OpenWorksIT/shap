@@ -396,7 +396,7 @@ export default function PracticePage() {
                     )}
                     <p className={h.stale ? 'xs warn-text' : 'xs muted'}>
                       {c.linked ? `Their Shap’s checks ran ${formatDate(dayOf(h.at))}, and are shown as their Shap sent them.` : `Shap’s checks ran ${formatDate(dayOf(h.at))}.`}
-                      {h.stale ? ' Their Shap’s answer since couldn’t be read, so this is from before: one of the two may need updating.' : ''}
+                      {h.stale ? ' Their Shap couldn’t be reached, or its answer read, since: this is from before.' : ''}
                     </p>
                   </div>
                 )}

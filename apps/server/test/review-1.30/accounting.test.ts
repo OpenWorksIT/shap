@@ -253,6 +253,9 @@ describe('a month written up in a linked client’s own Shap, and the same month
     const shown = (await owner.get('/api/practice')).clients.find((x: { id: string }) => x.id === linkedId);
     expect([shown.health.audit.fail, shown.health.audit.warn]).toEqual([keptR.json().health.audit.fail, keptR.json().health.audit.warn]);
     expect(shown.health.audit.items.every((i: { text: string }) => i.text.length <= 500)).toBe(true);
+    // Cut the same for a kept client: one rule, so the two lists say the same (the fixes' check).
+    const keptShown = (await owner.get('/api/practice')).clients.find((x: { id: string }) => x.id === keptId);
+    expect(shown.health.audit.items).toEqual(keptShown.health.audit.items);
     // Back to what it was, for the books audit at the end: the stock counted.
     for (const api of [them, kept]) {
       const items = await api.get<{ id: string; stocked: boolean }[]>('/api/items');

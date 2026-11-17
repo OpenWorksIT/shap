@@ -304,7 +304,8 @@ export function healthForLink(h: ClientHealth): ClientHealth {
 export function findingsForList(items: { level: string; section: string; text: string }[]): { fail: number; warn: number; items: { level: 'fail' | 'warn'; section: string; text: string }[] } {
   const bad = items.filter((a): a is typeof a & { level: 'fail' | 'warn' } => a.level === 'fail' || a.level === 'warn');
   const ordered = [...bad.filter((a) => a.level === 'fail'), ...bad.filter((a) => a.level === 'warn')];
-  return { fail: ordered.filter((a) => a.level === 'fail').length, warn: ordered.filter((a) => a.level === 'warn').length, items: ordered.slice(0, 12).map((a) => ({ level: a.level, section: a.section, text: a.text })) };
+  // Cut to what the list shows, kept or linked alike (healthForLink).
+  return { fail: ordered.filter((a) => a.level === 'fail').length, warn: ordered.filter((a) => a.level === 'warn').length, items: ordered.slice(0, 12).map((a) => ({ level: a.level, section: cutWords(a.section), text: cutWords(a.text) })) };
 }
 
 async function healthNow(db: Sql, now: string, log: { warn: (o: object, m: string) => void } | undefined, deps: HealthDeps): Promise<ClientHealth> {
@@ -338,9 +339,9 @@ async function healthNow(db: Sql, now: string, log: { warn: (o: object, m: strin
             yearEnd: ended,
             status,
             changedSince,
-            failing: [...st.checks.filter((c) => !c.ok && c.level !== 'look').map((c) => c.label), ...atYearEnd],
-            look: st.checks.filter((c) => !c.ok && c.level === 'look' && c.label !== ASSURANCE).map((c) => c.label),
-            assurance,
+            failing: [...st.checks.filter((c) => !c.ok && c.level !== 'look').map((c) => c.label), ...atYearEnd].slice(0, 50).map((w) => cutWords(w)),
+            look: st.checks.filter((c) => !c.ok && c.level === 'look' && c.label !== ASSURANCE).map((c) => cutWords(c.label)).slice(0, 50),
+            assurance: assurance === null ? null : cutWords(assurance),
             unapprovedEarlier: earlier,
           };
         }
