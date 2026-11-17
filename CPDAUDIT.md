@@ -685,6 +685,77 @@ tests (`apps/server/test/review-1.27/`, and `test/accountant/practice.test.ts`):
   the day shown, an earlier year not approved, the role checked, a half-made database dropped, the
   rate limit, the pool cap), and the backups test names its dumps after its own database.
 
+### The five reviews of 1.28 (Shap Accountant, phase 2: books from another package; before release)
+
+A trial balance and a general ledger from Xero, QuickBooks or Sage, read from the package's own
+exports and brought into a client's books. Every finding fixed, each with a test that fails on the
+code reviewed (fdd10b3): `apps/server/test/review-1.28/` (security, IFRS, accounting and SARS
+files, the reviewers' own scenarios; run against fdd10b3, 50 of 54 fail, the other four checking
+what was already right: the column cap, a day's lines together, three applies at once, the totals
+after a take-out), and `test/accountant/books-import.test.ts`.
+
+- Security and privacy: reading an .xlsx took time with the square of its size and blocked every
+  request on the server meanwhile (10,000 rows: 33 s; a 6 KB file with one cell far off: minutes);
+  only the cells the sheet holds are read now, counted (2 million a file, 4 million a request), and
+  a cell past the 200th column is refused. The zip guard believed the file's own directory: each
+  entry is unpacked and counted as it comes (64 MB at most), one spreadsheet at a time. A CSV
+  millions of columns wide took 7 s and 684 MB: 500 columns and 5 million cells at most, refused
+  as it's read (every CSV Shap reads). Staff given books.adjust could add accounts to the chart
+  through an import, and one file could add 200,000: only the owner adds them, 500 at most an
+  import. A long account name was a server error, and an account brought in without a code got
+  one from its name that broke its ledger's download and was longer than the chart allows: names
+  cut to fit, codes that fit the chart (IMP-1, …), and download names cleaned. A journal brought
+  in could be changed or deleted on its own: refused (bring the period in again). The feedback
+  trail named a changed field by its label, which can carry an account's or a person's name: a
+  field or button in a list or among private details is named only by where it was (shared:
+  `trailFieldName`, `trailButtonName`). The penetration test's never-reads lists have the import,
+  and section 5 sends a spreadsheet with a far-off cell, one whose directory lies and a CSV
+  millions of columns wide, each to be answered within 3 s with the server answering everyone
+  else meanwhile. Agreeing a year deleted what was brought in, and taking out an import could leave
+  a later trial balance wrong: below. Two cited addresses added to `.github/hosts.json`.
+- IFRS for SMEs and company law: agreeing a year end (and replacing a company file, and the old
+  tracker's replace) deleted every journal brought in up to it: only the tracker's own journal is
+  replaced now, and an agreed year takes nothing more. New accounts went on the wrong statement
+  lines (a fixed asset and its depreciation as other current assets, a long-term loan as a trade
+  payable, the bank not as cash): the line comes from the package's type and the account's name,
+  and Shap's own accounts (VAT, PAYE, income tax, dividends, retained earnings, debtors and
+  creditors and others) are suggested for theirs. An expense could be mapped to an asset, and a
+  code alone suggested an account across kinds: refused, and a code only with the same name. A
+  trial balance brought in again undid the practice's own entries: they stay on top (what was
+  brought in is measured against the imports only), and the check says how many. Depreciation in
+  a journal (by hand, or within a trial balance's) wasn't added back in the cash flows (7.8): it
+  is. A difference in an earlier, closed year landed in this year as an equity movement: refused
+  as a prior-period matter (10.21), and shown when the years are open. A package year other than
+  these books' double-counted silently: the preview shows the year a trial balance is taken for,
+  the check shows what it would move account by account, and a title's other start is refused.
+  Taking out a ledger under a trial balance left it wrong: refused. Each file's SHA-256 is kept,
+  and the log has each import, each replaced and each taken out (ISRS 4410 (Revised) 38(b)). An
+  account's kind is taken from whichever file gives it. Brought in alone, a trial balance's
+  statements start from nil before it: the statements' checks say so, and docs/ACCOUNTANT.md says
+  which trial balances to bring in. Not confirmed: Xero's YTD columns against a real export.
+- SARS and tax: the VAT201 screen and the tax pack showed nil returns for VAT brought in, and the
+  books audit said the VAT agreed: those periods say "From another package" (Shap doesn't work
+  them out or check them) and the audit leaves them out and says why; PAYE journals brought in are
+  counted apart from those by hand. The provisional and turnover tax estimates counted the months
+  after the last import as nil: they project from the last day brought in, and say so (the VAT
+  registration watch too). The package's tax accounts became ordinary new ones (income tax
+  deducted, a sole proprietor's interest counted as turnover): Shap's own are suggested. A trust's
+  package year landed in the wrong year of assessment: the preview shows the year, and a title
+  with another start is refused. A trust's distributions brought in were taken as nil: shown, not
+  taken off (s25B is the accountant's). A dividend in a ledger brought in now lists its DTR01.
+- Accounting and arithmetic: lines outside the title's period were posted (past the lock): the day
+  order is the one that fits the title, a line outside it is refused, and the lock and approvals
+  are checked on every line's date. Real accounts and transactions were dropped as totals or
+  opening rows (QuickBooks' "Opening Balance Equity", a memo "Opening Balance", a garage called
+  "Total"): only rows wholly a total or such a phrase are skipped. A trial balance with opening and
+  closing columns was read from the month's movements: the closing or YTD columns, with opening +
+  debit − credit = closing checked, and movements beside an opening column refused; Sage's export
+  steps say to summarise profit and loss. Dividends ran to date where Shap closes them each year:
+  closed, as Shap's own trial balance does. A bare Type column in a ledger is the transaction's, not
+  the account's; an inactive remembered account isn't used; the "already" count is of entries; an
+  Excel number with three decimals, "R (1 234.56)" and "1 234.56 Cr" are read right (`parseMoney`,
+  also Shap Pocket's); the count of journals is of those made.
+
 ### Code scanning (CodeQL), first run
 
 - The Accounts screen's download links carried the period's dates unencoded (flagged as text

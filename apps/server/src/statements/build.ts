@@ -241,9 +241,22 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
       : [];
     const byJournal = new Map<string, JL[]>();
     for (const r of jl) byJournal.set(r.journalId, [...(byJournal.get(r.journalId) ?? []), r]);
+    // The accumulated depreciation (or amortisation, or impairment) on a fixed asset: credited only
+    // by writing the asset down, never by cash.
+    const written = new Set(accounts.filter((a) => fixed.has(a.id) && (a.systemKey === 'accumulated_depreciation' || /depreciation|amorti[sz]|impairment/i.test(a.name))).map((a) => a.id));
     for (const lines of byJournal.values()) {
-      if (!lines.every((l) => fixed.has(l.accountId) || plIds.has(l.accountId)) || !lines.some((l) => plIds.has(l.accountId))) continue;
-      for (const l of lines.filter((x) => fixed.has(x.accountId))) {
+      if (!lines.some((l) => plIds.has(l.accountId))) continue;
+      // Fixed assets against income and expenses only: all of it. A journal that moves other accounts
+      // too (a trial balance brought in from another package brings every account to its figures in
+      // one): what it credits to the accumulated depreciation, up to the expenses it debits.
+      const only = lines.every((l) => fixed.has(l.accountId) || plIds.has(l.accountId));
+      let room = only ? Infinity : sum(lines.filter((l) => plIds.has(l.accountId) && Number(l.cents) > 0).map((l) => Number(l.cents)));
+      const moved = only ? lines.filter((x) => fixed.has(x.accountId)) : lines.filter((x) => written.has(x.accountId) && Number(x.cents) < 0);
+      for (const whole of moved) {
+        const cents = only ? Number(whole.cents) : -Math.min(-Number(whole.cents), room);
+        if (!only) room -= -cents;
+        if (!cents) continue;
+        const l = { ...whole, cents: String(cents) };
         const e = byAcc.get(l.accountId);
         if (!e) continue;
         const cols: Col[] = ['atEnd', ...(l.date <= priorEnd ? (['atPrior', 'mvPrior'] as Col[]) : (['mvCur'] as Col[]))];

@@ -155,11 +155,15 @@ export async function balanceSheet(db: Db, date: string) {
 
 function sendCsv(reply: FastifyReply, filename: string, csv: string) {
   reply.header('content-type', 'text/csv; charset=utf-8');
-  reply.header('content-disposition', `attachment; filename="${filename}"`);
+  // Names can carry an account's code from another package ("Café – Sales"): only plain characters in a header.
+  reply.header('content-disposition', `attachment; filename="${filename.replace(/[^\w.\- ]/g, '_')}"`);
   return reply.send(csv);
 }
 
 /** Journals the app posts itself; changed only where they come from. */
+/** Journals brought in from another package (books-import.ts): changed by bringing the period in again. */
+const BROUGHT_IN = 'This entry was brought in from another package (Accounts → From another package): change it in their package and bring the period in again, or take that import out. Your own adjustments go in a journal of your own.';
+
 const MADE_BY_APP: Record<string, string> = { payroll: 'a pay run (Payroll)', dividend: 'a dividend (Payroll → Dividends)', sars: 'a payment to SARS (Payroll → SARS)', profit_share: 'the partners’ profit share (Accounts → Year end)' };
 
 export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -299,9 +303,10 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = parse(idParam, req.params);
     const input = parse(journalInput, req.body);
     checkJournal(input);
-    const [old] = await sql<{ date: string; kind: string }[]>`select date, kind from journals where id = ${id}`;
+    const [old] = await sql<{ date: string; kind: string; ledgerImportId: string | null }[]>`select date, kind, ledger_import_id from journals where id = ${id}`;
     if (!old) throw notFound('Journal');
     if (MADE_BY_APP[old.kind]) throw badRequest(`This entry was made by ${MADE_BY_APP[old.kind]}: change it there.`);
+    if (old.ledgerImportId) throw badRequest(BROUGHT_IN);
     await assertOpen(sql, old.date, input.date);
     await sql.begin(async (tx) => {
       await tx`update journals set date = ${input.date}, description = ${input.description}, reference = ${input.reference} where id = ${id}`;
@@ -314,9 +319,10 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.delete('/api/journals/:id', { preHandler: requireAccess('books.adjust') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
-    const [old] = await sql<{ date: string; kind: string }[]>`select date, kind from journals where id = ${id}`;
+    const [old] = await sql<{ date: string; kind: string; ledgerImportId: string | null }[]>`select date, kind, ledger_import_id from journals where id = ${id}`;
     if (!old) throw notFound('Journal');
     if (MADE_BY_APP[old.kind]) throw badRequest(`This entry was made by ${MADE_BY_APP[old.kind]}: change it there.`);
+    if (old.ledgerImportId) throw badRequest(BROUGHT_IN);
     await assertOpen(sql, old.date);
     await sql.begin(async (tx) => {
       await tx`delete from journals where id = ${id}`;

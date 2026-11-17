@@ -10,6 +10,7 @@ import { ACCOUNT_TYPES, formatDate, STATEMENT_LINES, type AccountType } from '@s
 import { ErrorBox, Field, Icon, Loading, Money, useToast } from '../components/ui';
 import { api, ApiError } from '../lib/api';
 import { useApi } from '../lib/hooks';
+import { useAuthed } from '../lib/session';
 import { UNEXPECTED } from '../lib/words';
 
 interface ReadFile {
@@ -19,6 +20,8 @@ interface ReadFile {
   asAt: string | null;
   from: string | null;
   to: string | null;
+  /** A trial balance: the year its income and expenses are taken to be for (these books' year). */
+  yearFrom: string | null;
   lines: number;
   debits: number;
   credits: number;
@@ -90,6 +93,8 @@ const toBase64 = (f: File) =>
 
 export default function BooksImport() {
   const toast = useToast();
+  // Only the owner adds accounts to the chart (the server holds to it too): anyone else chooses one.
+  const mayAdd = useAuthed().user.role === 'owner';
   const list = useApi<{ imports: Import[] }>('/api/books-import');
   const [files, setFiles] = useState<{ name: string; dataBase64: string; asAt: string | null }[]>([]);
   const [read, setRead] = useState<Read | null>(null);
@@ -108,7 +113,7 @@ export default function BooksImport() {
       const r = await api<Read>('/api/books-import/read', { body: { files: next } });
       setRead(r);
       // As Shap suggests: an account in these books, or a new one of the type their file gives.
-      setMapping(Object.fromEntries(r.accounts.map((a) => [key(a), a.accountId ?? (a.type ? `new:${a.type}` : '')])));
+      setMapping(Object.fromEntries(r.accounts.map((a) => [key(a), a.accountId ?? (a.type && mayAdd ? `new:${a.type}` : '')])));
     } catch (err) {
       if (!(err instanceof ApiError)) console.error(err);
       setError(err instanceof ApiError ? err.message : UNEXPECTED);
@@ -227,6 +232,11 @@ export default function BooksImport() {
                       {f.debits !== f.credits && <span className="warn-text"> (they don’t balance: export it again with every account)</span>}
                     </span>
                   )}
+                  {f.kind === 'trialBalance' && f.yearFrom && f.asAt && (
+                    <span className="xs muted">
+                      Its income and expenses are taken as {formatDate(f.yearFrom)} to {formatDate(f.asAt)}, these books’ year (their year end, in Settings). If the package’s year runs otherwise, set it the same there first. Shap draws statements for 12 months: a first year that’s longer or shorter isn’t drawn here.
+                    </span>
+                  )}
                   {f.kind === 'trialBalance' && !f.asAt && (
                     <Field label="The trial balance’s date">{(p) => <input {...p} className="input" type="date" value={files[i]?.asAt ?? ''} onChange={(e) => dateFor(f.name, e.target.value)} />}</Field>
                   )}
@@ -243,7 +253,11 @@ export default function BooksImport() {
 
           <section className="panel panel-pad stack">
             <h3>Their accounts, and where each goes in these books</h3>
-            <p className="xs muted">Shap suggests one where it used it last time, or where the code or the name is the same. Otherwise, a new account of the kind their file gives: choose one where it doesn’t say.</p>
+            <p className="xs muted">
+              {mayAdd
+                ? 'Shap suggests one where it used it last time, or where the code or the name is the same. Otherwise, a new account of the kind their file gives: choose one where it doesn’t say.'
+                : 'Shap suggests one where it used it last time, or where the code or the name is the same. Choose one for the rest: only the owner adds new accounts to the chart.'}
+            </p>
             <ul className="list" data-private>
               {read.accounts.map((a) => (
                 <li key={key(a)} className="list-row row wrap" style={{ gap: 8 }}>
@@ -256,13 +270,15 @@ export default function BooksImport() {
                   </span>
                   <select className="select" aria-label={`Where ${a.name} goes`} value={mapping[key(a)] ?? ''} onChange={(e) => (setMapping({ ...mapping, [key(a)]: e.target.value }), setCheck(null))} style={{ maxWidth: 320 }}>
                     <option value="">Choose…</option>
-                    <optgroup label="A new account">
-                      {ACCOUNT_TYPES.map((t) => (
-                        <option key={t} value={`new:${t}`}>
-                          New: {TYPE_WORDS[t]}
-                        </option>
-                      ))}
-                    </optgroup>
+                    {mayAdd && (
+                      <optgroup label="A new account">
+                        {ACCOUNT_TYPES.map((t) => (
+                          <option key={t} value={`new:${t}`}>
+                            New: {TYPE_WORDS[t]}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
                     {ACCOUNT_TYPES.map((t) => (
                       <optgroup key={t} label={`In these books: ${GROUP_WORDS[t]}`}>
                         {read.ours

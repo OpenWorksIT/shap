@@ -141,6 +141,14 @@ Checked 11 November 2026.
 - A year shorter than twelve months (a new company's first year): SARS scales the SBC table (the
   proviso to s12E(4)); the estimate doesn't.
 - Special trusts (taxed at the individual tables) and a trust's beneficiaries' tax.
+- Books brought in from another package (docs/ACCOUNTANT.md): a VAT201 or payroll worked out
+  there. A VAT period whose VAT came in from the package is marked on the VAT201 screen and in the
+  tax pack ("From another package") and left out of the books audit's VAT check; PAYE journals
+  brought in are counted apart from journals by hand. The estimates project from the last day
+  brought in. A trust's distributions in the books brought in are shown, not taken off (s25B:
+  which part is this year's income to residents is the accountant's to work out). A dividend in a
+  ledger brought in lists its dividends tax return on the practice list; one inside a trial
+  balance can't (it has no day of its own).
 - A sole proprietor's estimate leaves out the medical credits and the interest exemption; payroll
   has the credits.
 - VAT category D ending in months other than February and August, and E at a month other than the

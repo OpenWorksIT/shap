@@ -305,6 +305,10 @@ export function suggestMatches(rows: ClientCsvRow[], clients: MatchClient[]) {
  */
 export const MAX_CSV_CELL = 4000;
 export const MAX_CSV_ROWS = 100_000;
+/** No export has more columns than this: a line of thousands of commas is refused as it's read. */
+export const MAX_CSV_COLUMNS = 500;
+/** Every cell in the file, at most (a year's bank statement or ledger is far fewer). */
+export const MAX_CSV_CELLS = 5_000_000;
 
 /** Minimal RFC 4180 CSV reader (quoted fields, embedded commas and newlines). */
 export function parseCsv(text: string): string[][] {
@@ -315,6 +319,12 @@ export function parseCsv(text: string): string[][] {
   const src = text.replace(/^\uFEFF/, '');
   const firstLine = src.split(/\r?\n/, 1)[0] ?? '';
   const delim = (firstLine.match(/;/g)?.length ?? 0) > (firstLine.match(/,/g)?.length ?? 0) ? ';' : ',';
+  let cells = 0;
+  const cell = (v: string) => {
+    if (row.length >= MAX_CSV_COLUMNS) throw badRequest(`That file has too many columns (${MAX_CSV_COLUMNS} at most)`);
+    if (++cells > MAX_CSV_CELLS) throw badRequest('That file is too big to read');
+    row.push(v.length > MAX_CSV_CELL ? v.slice(0, MAX_CSV_CELL) : v);
+  };
   for (let i = 0; i < src.length; i++) {
     const ch = src[i]!;
     if (quoted) {
@@ -325,11 +335,11 @@ export function parseCsv(text: string): string[][] {
       else field += ch;
     } else if (ch === '"') quoted = true;
     else if (ch === delim) {
-      row.push(field.length > MAX_CSV_CELL ? field.slice(0, MAX_CSV_CELL) : field);
+      cell(field);
       field = '';
     } else if (ch === '\n' || ch === '\r') {
       if (ch === '\r' && src[i + 1] === '\n') i++;
-      row.push(field.length > MAX_CSV_CELL ? field.slice(0, MAX_CSV_CELL) : field);
+      cell(field);
       rows.push(row);
       if (rows.length > MAX_CSV_ROWS) throw badRequest(`That file has too many rows (${MAX_CSV_ROWS.toLocaleString('en-ZA')} at most)`);
       row = [];
@@ -337,7 +347,7 @@ export function parseCsv(text: string): string[][] {
     } else field += ch;
   }
   if (field || row.length) {
-    row.push(field.length > MAX_CSV_CELL ? field.slice(0, MAX_CSV_CELL) : field);
+    cell(field);
     rows.push(row);
   }
   return rows.filter((r) => r.some((c) => c.trim()));

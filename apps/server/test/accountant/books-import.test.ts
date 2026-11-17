@@ -107,7 +107,7 @@ describe('reading the packages’ exports', () => {
     const ws = wb.addWorksheet('Trial Balance');
     for (const row of parseCsv(XERO_TB)) ws.addRow(row);
     const bytes = Buffer.from(await wb.xlsx.writeBuffer());
-    expect(unpackedSize(bytes)).toBeGreaterThan(0);
+    expect(await unpackedSize(bytes)).toBeGreaterThan(0);
     const f = readLedger('TB.xlsx', await sheetRows('TB.xlsx', bytes));
     expect([f.kind, f.asAt, f.tb.length]).toEqual(['trialBalance', '2026-10-31', 3]);
     // A made-up zip whose directory says one entry unpacks to 4 GB.

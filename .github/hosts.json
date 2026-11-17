@@ -47,6 +47,11 @@
    "why": "the government news agency's notice of a declared public holiday, cited in dates.ts and docs/SARS.md"
   },
   {
+   "host": "cdn.cdata.com",
+   "kind": "link",
+   "why": "a description of Xero's trial balance columns, cited in a comment in import/ledger.ts; nothing is sent there"
+  },
+  {
    "host": "tradeshield-help.freshdesk.com",
    "kind": "link",
    "why": "CIPC registration number formats, cited"

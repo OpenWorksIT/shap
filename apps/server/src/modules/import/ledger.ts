@@ -15,6 +15,7 @@
  * Xero's trial balance has a month's Debit and Credit and the year's YTD Debit and YTD Credit: the
  * YTD columns are the balances (CData: https://cdn.cdata.com/help/DXM/py/pg_accountingtable-trialbalance.htm).
  */
+import { createInflateRaw } from 'node:zlib';
 import ExcelJS from 'exceljs';
 import type { AccountType, StatementLineKey } from '@shap/shared';
 import { badRequest } from '../../lib/errors.js';
@@ -61,7 +62,8 @@ export interface LedgerFile {
   columns: string;
 }
 
-const MAX_ROWS = 200_000;
+/** A year's ledger for a small business, with room to spare (a CSV is held to the same: MAX_CSV_ROWS). */
+const MAX_ROWS = 100_000;
 const MAX_COLUMNS = 200;
 
 /* ---------------------------------------------------------------- the file as rows */
@@ -81,8 +83,13 @@ function cellText(v: ExcelJS.CellValue): string {
   return '';
 }
 
-/** How much an Excel file (a zip) unpacks to, from its own directory, before anything is unpacked. */
-export function unpackedSize(bytes: Buffer): number | null {
+/**
+ * What an Excel file (a zip) really unpacks to: each entry unpacked here and counted as it comes,
+ * never taken at its directory's word (a doctored directory can say anything, and the zip reader
+ * only compares the two after it has unpacked everything). Past the cap: the cap and one, as soon
+ * as it's seen. Null: not a zip Shap reads (its directory doesn't match what's in it).
+ */
+export async function unpackedSize(bytes: Buffer, cap = MAX_UNPACKED): Promise<number | null> {
   // The end of the central directory: its signature, within the last 64 KB (a comment may follow it).
   for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65_557); i--) {
     if (bytes.readUInt32LE(i) !== 0x06054b50) continue;
@@ -91,40 +98,90 @@ export function unpackedSize(bytes: Buffer): number | null {
     let total = 0;
     for (let n = 0; n < entries; n++) {
       if (at + 46 > bytes.length || bytes.readUInt32LE(at) !== 0x02014b50) return null;
+      const method = bytes.readUInt16LE(at + 10);
+      const packed = bytes.readUInt32LE(at + 20);
       const size = bytes.readUInt32LE(at + 24);
+      const local = bytes.readUInt32LE(at + 42);
       // A ZIP64 entry (0xFFFFFFFF) is bigger than any export Shap reads.
-      if (size === 0xffffffff) return Number.MAX_SAFE_INTEGER;
-      total += size;
+      if (size === 0xffffffff || packed === 0xffffffff) return cap + 1;
+      if (local + 30 > bytes.length || bytes.readUInt32LE(local) !== 0x04034b50) return null;
+      const start = local + 30 + bytes.readUInt16LE(local + 26) + bytes.readUInt16LE(local + 28);
+      if (start + packed > bytes.length) return null;
+      const data = bytes.subarray(start, start + packed);
+      let real = 0;
+      if (method === 0) real = data.length;
+      else if (method === 8) {
+        // A chunk at a time, counted and dropped: nothing unpacked here is kept.
+        const inflate = createInflateRaw();
+        inflate.end(data);
+        try {
+          for await (const chunk of inflate) {
+            real += (chunk as Buffer).length;
+            if (total + real > cap) {
+              inflate.destroy();
+              return cap + 1;
+            }
+          }
+        } catch {
+          return null;
+        }
+      } else return null;
+      if (real !== size) return null;
+      total += real;
       at += 46 + bytes.readUInt16LE(at + 28) + bytes.readUInt16LE(at + 30) + bytes.readUInt16LE(at + 32);
     }
     return total;
   }
   return null;
 }
-const MAX_UNPACKED = 200 * 1024 * 1024;
+/** What one Excel file may unpack to: a year's ledger of 100,000 lines is about half of it. */
+const MAX_UNPACKED = 64 * 1024 * 1024;
+/** Every cell read from a sheet, at most (100,000 lines of 20 columns). */
+const MAX_CELLS = 2_000_000;
+
+/** One spreadsheet opened at a time on this server: each can take a few hundred MB while it's read. */
+let opening: Promise<unknown> = Promise.resolve();
+function oneAtATime<T>(job: () => Promise<T>): Promise<T> {
+  const run = opening.then(job, job);
+  opening = run.catch(() => undefined);
+  return run;
+}
 
 /** A CSV or Excel file (its first sheet) as rows of cell text. */
 export async function sheetRows(name: string, bytes: Buffer): Promise<string[][]> {
   if (/\.xlsx$/i.test(name) || (bytes[0] === 0x50 && bytes[1] === 0x4b)) {
-    // A small file that unpacks to something huge isn't an export: refused before it's opened.
-    const size = unpackedSize(bytes);
-    if (size == null || size > MAX_UNPACKED) throw badRequest(`“${name}” isn’t a spreadsheet Shap can read: export it again as Excel (.xlsx) or CSV.`);
-    const wb = new ExcelJS.Workbook();
-    try {
-      await wb.xlsx.load(bytes as unknown as ArrayBuffer);
-    } catch {
-      throw badRequest(`“${name}” isn’t a spreadsheet Shap can read: export it again as Excel (.xlsx) or CSV.`);
-    }
-    const ws = wb.worksheets[0];
-    if (!ws) return [];
-    if (ws.rowCount > MAX_ROWS || ws.columnCount > MAX_COLUMNS) throw badRequest(`“${name}” is too big to read (${MAX_ROWS.toLocaleString('en-ZA')} rows and ${MAX_COLUMNS} columns at most)`);
-    const rows: string[][] = [];
-    ws.eachRow({ includeEmpty: true }, (row, n) => {
-      const cells: string[] = [];
-      for (let c = 1; c <= Math.min(ws.columnCount, MAX_COLUMNS); c++) cells.push(cellText(row.getCell(c).value));
-      rows[n - 1] = cells;
+    const cannot = () => badRequest(`“${name}” isn’t a spreadsheet Shap can read: export it again as Excel (.xlsx) or CSV.`);
+    const tooBig = () => badRequest(`“${name}” is too big to read (${MAX_ROWS.toLocaleString('en-ZA')} rows and ${MAX_COLUMNS} columns at most)`);
+    return oneAtATime(async () => {
+      // A small file that unpacks to something huge isn't an export: refused before it's opened.
+      const size = await unpackedSize(bytes);
+      if (size == null) throw cannot();
+      if (size > MAX_UNPACKED) throw tooBig();
+      const wb = new ExcelJS.Workbook();
+      try {
+        await wb.xlsx.load(bytes as unknown as ArrayBuffer);
+      } catch {
+        throw cannot();
+      }
+      const ws = wb.worksheets[0];
+      if (!ws) return [];
+      if (ws.rowCount > MAX_ROWS) throw tooBig();
+      // Only the rows and cells the sheet holds (an empty cell far off makes nothing), counted.
+      // (Never ws.columnCount in a loop: exceljs walks the whole sheet each time it's asked.)
+      const rows: string[][] = [];
+      let cells = 0;
+      ws.eachRow((row, n) => {
+        const values = row.values as ExcelJS.CellValue[];
+        if (values.length - 1 > MAX_COLUMNS && values.slice(MAX_COLUMNS + 1).some((v) => v != null && v !== '')) throw tooBig();
+        const width = Math.max(Math.min(values.length - 1, MAX_COLUMNS), 0);
+        cells += width;
+        if (cells > MAX_CELLS) throw tooBig();
+        const out: string[] = new Array<string>(width);
+        for (let c = 1; c <= width; c++) out[c - 1] = cellText(values[c]);
+        rows[n - 1] = out;
+      });
+      return Array.from(rows, (r) => r ?? []);
     });
-    return Array.from(rows, (r) => r ?? []);
   }
   if (/\.xls$/i.test(name)) throw badRequest(`“${name}” is an old Excel file: save it as .xlsx or CSV and try again.`);
   const rows = parseCsv(bytes.toString('utf8'));
@@ -196,9 +253,18 @@ function findHeader(rows: string[][]): number {
 /** A cell that's only an account number ("1000/000", "4000"). */
 const CODE_ONLY = /^[0-9][0-9./-]{0,19}$/;
 
+/** No package's account code or name is longer: a longer one is cut, so it fits wherever it's kept. */
+const MAX_CODE = 40;
+const MAX_NAME = 200;
+
 /** "Sales (200)", "200 - Sales", "1000/000 Bank", "4000 · Sales", or a separate code → { code, name }. */
 export function splitAccount(cell: string, codeCell = ''): { code: string; name: string } {
-  const text = cell.trim();
+  const a = splitAccountText(cell, codeCell);
+  return { code: a.code.slice(0, MAX_CODE).trim(), name: a.name.slice(0, MAX_NAME).trim() };
+}
+
+function splitAccountText(cell: string, codeCell: string): { code: string; name: string } {
+  const text = cell.trim().slice(0, MAX_NAME + MAX_CODE + 10);
   if (codeCell.trim()) return { code: codeCell.trim(), name: text || codeCell.trim() };
   if (CODE_ONLY.test(text)) return { code: text, name: text };
   let m = /^(.*\S)\s*\(([A-Za-z0-9./-]{1,20})\)$/.exec(text);

@@ -57,11 +57,20 @@ interface ReadFile extends LedgerFile {
   hash: string;
 }
 
+/** Every cell read in one request, across its files (each is held to less on its own: ledger.ts). */
+const MAX_CELLS_PER_REQUEST = 4_000_000;
+/** New accounts one import may add to the chart: a package's whole chart is a few hundred. */
+export const MAX_NEW_ACCOUNTS = 500;
+
 async function readFiles(files: z.infer<typeof filesInput>['files']): Promise<ReadFile[]> {
   const out: ReadFile[] = [];
+  let cells = 0;
   for (const f of files) {
     const bytes = Buffer.from(f.dataBase64, 'base64');
-    const read = readLedger(f.name, await sheetRows(f.name, bytes));
+    const rows = await sheetRows(f.name, bytes);
+    cells += rows.reduce((n, r) => n + r.length, 0);
+    if (cells > MAX_CELLS_PER_REQUEST) throw badRequest('These files are too big to read together: bring them in a few at a time.');
+    const read = readLedger(f.name, rows);
     out.push({ ...(f.asAt && read.kind === 'trialBalance' ? { ...read, asAt: f.asAt } : read), hash: sha256Hex(bytes.toString('latin1')) });
   }
   return out;
@@ -165,6 +174,7 @@ export function registerBooksImportRoutes(app: FastifyInstance, ctx: Ctx): void 
   app.post('/api/books-import/read', { ...may, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) => {
     const { files } = parse(filesInput, req.body);
     const read = await readFiles(files);
+    const settings = await getSettings(sql);
     const accounts = await suggest(sql, accountsIn(read));
     const ours = await sql<ShapAccount[]>`select id, code, name, type, system_key, active from accounts where active order by code`;
     const out = [];
@@ -181,7 +191,10 @@ export function registerBooksImportRoutes(app: FastifyInstance, ctx: Ctx): void 
             and not (l.source = 'journal' and l.source_id in (select id from journals where ledger_import_id is not null))`;
         already = r?.n ?? 0;
       }
-      out.push({ name: f.name, kind: f.kind, source: f.source, asAt: f.asAt, from: f.from, to: f.to, lines: lines.length, debits, credits, already, outside: f.outside, columns: f.columns, skipped: f.skipped.slice(0, 20) });
+      // A trial balance's income and expenses are taken as the year to date of these books' year (the
+      // year end in Settings): shown, so a package whose year runs otherwise is seen before it comes in.
+      const yearFrom = f.kind === 'trialBalance' && f.asAt ? financialYear(f.asAt, settings.fyEndMonth).start : null;
+      out.push({ name: f.name, kind: f.kind, source: f.source, asAt: f.asAt, from: f.from, to: f.to, yearFrom, lines: lines.length, debits, credits, already, outside: f.outside, columns: f.columns, skipped: f.skipped.slice(0, 20) });
     }
     return {
       files: out,
@@ -197,7 +210,7 @@ export function registerBooksImportRoutes(app: FastifyInstance, ctx: Ctx): void 
     const files = await checked(input);
     try {
       await sql.begin(async (tx) => {
-        throw new Rollback(await applyImport(tx, files, input.mapping, user.id));
+        throw new Rollback(await applyImport(tx, files, input.mapping, user.id, user.role === 'owner'));
       });
     } catch (err) {
       if (err instanceof Rollback) return err.result as ImportResult;
@@ -211,7 +224,7 @@ export function registerBooksImportRoutes(app: FastifyInstance, ctx: Ctx): void 
     const input = parse(applyInput, req.body);
     const files = await checked(input);
     return sql.begin(async (tx) => {
-      const result = await applyImport(tx, files, input.mapping, user.id);
+      const result = await applyImport(tx, files, input.mapping, user.id, user.role === 'owner');
       await audit(tx, {
         userId: user.id,
         action: 'books_import',
@@ -220,6 +233,9 @@ export function registerBooksImportRoutes(app: FastifyInstance, ctx: Ctx): void 
         ip: req.ip,
         details: { files: result.results.map((r) => ({ id: r.importId, name: r.name, kind: r.kind, from: r.from, to: r.to, lines: r.lines, hash: r.hash })), replaced: result.replaced },
       });
+      // Each import it replaced, on the record by itself: which file's figures went out of the books.
+      for (const o of result.replaced)
+        await audit(tx, { userId: user.id, action: 'replace', entity: 'ledger_import', entityId: o.id, ip: req.ip, details: { kind: o.kind, from: o.from, to: o.to, file: o.file, by: result.results.map((r) => r.importId).join(',') } });
       return result;
     });
   });
@@ -275,7 +291,11 @@ export interface ImportResult {
 }
 
 /** Into the books: accounts, the ledgers (replacing the same period), then the trial balances. */
-export async function applyImport(tx: Db, files: ReadFile[], mapping: z.infer<typeof applyInput>['mapping'], userId: string | null): Promise<ImportResult> {
+/**
+ * `mayAddAccounts`: only the owner adds accounts to the chart (Settings → Accounts is theirs alone,
+ * settings.ts); anyone else bringing books in chooses an account here for each of theirs.
+ */
+export async function applyImport(tx: Db, files: ReadFile[], mapping: z.infer<typeof applyInput>['mapping'], userId: string | null, mayAddAccounts = false): Promise<ImportResult> {
   const settings = await getSettings(tx);
   // Every date anything lands on: each ledger's lines and period, each trial balance's date.
   const dates = files.flatMap((f) => (f.kind === 'trialBalance' ? [f.asAt!] : [f.from!, f.to!, ...f.lines.map((l) => l.date)])).sort();
@@ -314,16 +334,20 @@ export async function applyImport(tx: Db, files: ReadFile[], mapping: z.infer<ty
       // (Its account from last time, still in use: not made twice by a preview applied again.)
       accountOf.set(keyOf(a), remembered.get(keyOf(a))!);
     } else {
+      const named = `“${a.code ? `${a.code} ` : ''}${a.name}”`;
+      if (!mayAddAccounts) throw new HttpError(403, `Choose an account in these books for ${named}: only the owner adds accounts to the chart (or ask them to bring this in).`, 'forbidden');
+      if (created >= MAX_NEW_ACCOUNTS) throw badRequest(`That would add more than ${MAX_NEW_ACCOUNTS} accounts to the chart: choose accounts in these books for some of theirs, or bring the files in a few at a time.`);
       const type = m?.newType ?? a.type;
-      if (!type) throw badRequest(`Choose an account in these books for “${a.code ? `${a.code} ` : ''}${a.name}”, or what kind of account a new one is`);
+      if (!type) throw badRequest(`Choose an account in these books for ${named}, or what kind of account a new one is`);
       if (a.type && side(a.type) !== side(type)) throw badRequest(`“${a.name}” is on ${side(a.type)} in their file: a new account for it is too.`);
-      // Their code if it's free here, else theirs marked as brought in.
-      let code = (a.code || a.name.slice(0, 12)).slice(0, 30);
-      for (let n = 1; codes.has(code.toLowerCase()); n++) code = `${(a.code || 'X').slice(0, 24)}-in${n > 1 ? n : ''}`;
+      // Their code if it fits the chart (10 characters, Settings → Accounts) and is free here; else
+      // one marked as brought in (their own code stays with the mapping, for next time).
+      let code = a.code && a.code.length <= 10 && /^[\w./-]+$/.test(a.code) ? a.code : '';
+      for (let n = 1; !code || codes.has(code.toLowerCase()); n++) code = `IMP-${n}`;
       codes.add(code.toLowerCase());
       // Where it sits on the statements, from the package's own words for its kind (Fixed Asset, Bank…).
       const line = type === a.type ? lineFromWords(a.typeWords ?? '', a.name, type) : lineFromWords('', a.name, type);
-      const [row] = await tx<{ id: string }[]>`insert into accounts (code, name, type, statement_line) values (${code}, ${a.name.slice(0, 200)}, ${type}, ${line}) returning id`;
+      const [row] = await tx<{ id: string }[]>`insert into accounts (code, name, type, statement_line) values (${code}, ${a.name.slice(0, 120)}, ${type}, ${line}) returning id`;
       accountOf.set(keyOf(a), row!.id);
       existing.set(row!.id, { id: row!.id, code, name: a.name, type, systemKey: null, active: true });
       created++;

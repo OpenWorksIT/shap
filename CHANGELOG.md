@@ -3,6 +3,32 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.28.0 (17 November 2026)
+
+- **Books from another package** (Shap Accountant; docs/ACCOUNTANT.md). For a client who keeps their
+  books in Xero, QuickBooks or Sage (Accounting or Pastel): in their books, **Accounts → From
+  another package** brings in the trial balance at a date and the general ledger for a period, from
+  the package's own Excel or CSV exports, to check and compile here while the client stays on
+  their package. Each of their accounts goes to one of these books' (remembered for next time) or,
+  for the owner, a new one on the statement line their package's type gives. **Check what it would
+  do** shows each journal and what each trial balance would move before anything comes in. A
+  ledger's journals come in as its transactions; a trial balance brings the books to its figures,
+  with the practice's own entries left on top. Nothing goes into a closed period, an agreed year or
+  approved statements; a trial balance brought in earlier is never left wrong; each file's
+  fingerprint (SHA-256) is kept, and the activity log has what came in, what it replaced and what
+  was taken out. The statements need the year end's trial balance and the two before it: brought
+  in alone, the statements' checks say the years start from nil before it. A VAT201 or payroll
+  worked out in the other package isn't Shap's to work out or check, and the screens, the tax pack
+  and the books audit say so; the tax estimates project from the last day brought in. Shap's
+  figures are estimates only.
+- Depreciation posted by journal (by hand, or in books brought in) is added back in the statement of
+  cash flows, not shown as an asset sold (IFRS for SMEs 7.8).
+- Amounts such as "R (1 234.56)" and "1 234.56 Cr" in a moved-in or brought-in file are read as
+  credits.
+- A spreadsheet or CSV made to hold the server up (a cell far off, a zip that says it's smaller than
+  it is, millions of columns) is refused quickly, and the server goes on answering everyone else.
+- The feedback trail names a field or button among people's or accounts' names only by where it was.
+
 ## 1.27.0 (17 November 2026)
 
 - **Shap Accountant, for a practice** (Settings → Features; docs/ACCOUNTANT.md). Off unless switched

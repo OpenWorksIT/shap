@@ -5,7 +5,7 @@
  * label (or only "in a list", for a row's button, which can carry a name), and edits only which
  * field changed.
  */
-import { redactText, scrubPath } from '@shap/shared';
+import { redactText, scrubPath, trailButtonName, trailFieldName, type TrailPlace } from '@shap/shared';
 
 export interface TrailEntry {
   t: number; // ms since epoch
@@ -33,6 +33,8 @@ export function getTrail(): TrailEntry[] {
 
 const redact = redactText;
 const short = (s: string | null | undefined, n = 40) => (s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
+/** Among private details, or in a list's row: where a label can carry someone's or an account's name. */
+const placeOf = (el: Element): TrailPlace => ({ private: Boolean(el.closest('[data-private]')), inList: Boolean(el.closest('tr, li, [role="row"], [role="listitem"], .list-row')) });
 
 function describe(el: Element): string | null {
   if (el.closest('[data-feedback]')) return null; // the feedback widget itself
@@ -41,12 +43,10 @@ function describe(el: Element): string | null {
   const button = el.closest('button, [role="button"], [role="tab"], [role="radio"]');
   if (button) {
     const role = button.getAttribute('role') ?? 'button';
-    // A button in a row of a list or table can carry a client's or worker's name: say where it
-    // was, not what it said. Elsewhere its label, with anything like an email address or phone
-    // number blanked, cut short.
-    if (button.closest('tr, li, [role="row"], [role="listitem"], .list-row')) return `${role} in a list`;
-    const label = button.getAttribute('aria-label') || short(button.textContent);
-    return `${role} “${redact(label) || '(no label)'}”`;
+    // A button in a row of a list or table, or among private details, can carry a client's or
+    // worker's name: say where it was, not what it said. Elsewhere its label, with anything like
+    // an email address or phone number blanked, cut short (shared/trail.ts).
+    return trailButtonName(role, button.getAttribute('aria-label') || short(button.textContent), placeOf(button));
   }
   const summary = el.closest('summary');
   if (summary) return `toggle “${short(summary.textContent)}”`;
@@ -56,7 +56,8 @@ function describe(el: Element): string | null {
 function fieldName(el: Element): string {
   const id = el.getAttribute('id');
   const label = (id && document.querySelector(`label[for="${CSS.escape(id)}"]`)?.textContent) || el.getAttribute('aria-label') || el.getAttribute('name') || el.getAttribute('placeholder');
-  return short(label) || el.tagName.toLowerCase();
+  // A field's label in a list's row or among private details can carry a name: not recorded there.
+  return trailFieldName(short(label), placeOf(el), el.tagName.toLowerCase());
 }
 
 /** Starts listening. Safe to call more than once. */

@@ -34,8 +34,16 @@ export function parseMoney(raw: string | undefined): number | null {
   let s = raw.trim();
   if (!s) return null;
   let neg = false;
+  // "1 234.56 Cr", "Dr 1 234.56" (Sage, Pastel): a credit is negative, debits positive as everywhere here.
+  const side = /^(cr|dr)\.?\s+|\s*(cr|dr)\.?$/i.exec(s);
+  if (side) {
+    neg = (side[1] ?? side[2])!.toLowerCase() === 'cr';
+    s = (s.slice(0, side.index) + s.slice(side.index + side[0].length)).trim();
+  }
+  // A currency in front of brackets ("R (1 234.56)") isn't part of the figure.
+  s = s.replace(/^(R|ZAR)\s*(?=\()/i, '');
   if (/^\(.*\)$/.test(s)) {
-    neg = true;
+    neg = !neg;
     s = s.slice(1, -1);
   }
   if (s.endsWith('-')) {
