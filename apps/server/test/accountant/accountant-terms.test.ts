@@ -133,10 +133,20 @@ describe('the Shap Accountant terms of use', () => {
 
   it('say what a practice takes on: its own work, aids not advice, its clients’ books and information, the indemnity', () => {
     const points = accountantTermsPoints();
-    expect(points.map((p) => p.title)).toEqual(['Your work for your clients is your own', 'Shap’s checks and returns are aids', 'Your clients’ books and information are in your care', 'Your practice indemnifies OpenWorks', 'Shap’s terms of use apply too']);
+    expect(points.map((p) => p.title)).toEqual([
+      'Your work for your clients is your own',
+      'Shap’s checks and returns are aids',
+      'Engagement letters and working papers are aids too',
+      'Your clients’ books and information are in your care',
+      'Your practice indemnifies OpenWorks',
+      'Shap’s terms of use apply too',
+    ]);
     const all = points.map((p) => p.body).join(' ');
+    // The letters Shap drafts and the working papers, as clause 9.2 has them (1.31).
+    expect(points[2]!.body).toMatch(/An engagement letter Shap drafts is a starting point for your practice’s own letter: not complete, not legal advice, and not checked against the law or your professional body’s rules for the client\. What it says, and the engagement it records, are between your practice and the client\./);
+    expect(points[2]!.body).toMatch(/Shap doesn’t check the work behind them, and nothing there stops anyone compiling or filing/);
     // The indemnity as clause 13 has it: its whole scope, its people, ordinary negligence, and the carve-out for theirs too.
-    expect(points[3]!.body).toMatch(
+    expect(points.find((p) => p.title === 'Your practice indemnifies OpenWorks')!.body).toMatch(
       /over your practice’s work for its clients, its use of Shap on their books, the personal information it keeps or opens there, or a breach of these terms by your practice or anyone it lets in, your practice covers them for that claim and its costs, even where the claim says Shap or OpenWorks’ negligence caused it, but not where the fraud, gross negligence or wilful misconduct of OpenWorks or its people did/,
     );
     expect(ACCOUNTANT_TERMS_MEANS).toMatch(/indemnifies OpenWorks against claims by its clients or anyone else over that work, its use of Shap on their books, the personal information it keeps or opens there, or a breach of the terms/);
