@@ -436,6 +436,7 @@ function NewLetter({ base, years, onClose, onDone }: { base: string; years: stri
       onDone();
       onClose();
     } catch (err) {
+      if (!(err instanceof ApiError)) console.error(err);
       toast(err instanceof ApiError ? err.message : UNEXPECTED, 'error');
       setBusy(false);
     }
@@ -492,6 +493,7 @@ function EditLetter({ base, letter, onClose, onDone }: { base: string; letter: L
       onDone();
       onClose();
     } catch (err) {
+      if (!(err instanceof ApiError)) console.error(err);
       toast(err instanceof ApiError ? err.message : UNEXPECTED, 'error');
       setBusy(false);
     }
@@ -554,6 +556,7 @@ function AcceptLetter({ base, letter, onClose, onDone }: { base: string; letter:
       onDone();
       onClose();
     } catch (err) {
+      if (!(err instanceof ApiError)) console.error(err);
       toast(err instanceof ApiError ? err.message : UNEXPECTED, 'error');
       setBusy(false);
     }
