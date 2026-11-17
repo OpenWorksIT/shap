@@ -626,7 +626,7 @@ export function ProvisionalTax() {
                   <div className="xs muted">Distributions this year marked as this year’s income to a beneficiary living in South Africa: they’re taxed on it, not the trust. Given to someone abroad, or out of capital, it stays the trust’s.</div>
                   {data.distributedBroughtInCents ? (
                     <div className="xs warn-text">
-                      The books brought in from another package show {formatZar(data.distributedBroughtInCents)} distributed this year. Shap can’t tell which part is this year’s income to beneficiaries in South Africa, so none of it is taken off here: your accountant works that out (section 25B), and this estimate is only right once they have.
+                      The books brought in from another package show {formatZar(data.distributedBroughtInCents)} distributed this year. Shap can’t tell which part is this year’s income to beneficiaries in South Africa, so none of it is taken off here: your accountant works that out (section 25B). Until then this estimate may be too high.
                     </div>
                   ) : null}
                 </td>

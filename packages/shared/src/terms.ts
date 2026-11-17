@@ -23,7 +23,13 @@ export const PRACTICE_NOTE =
   'What Shap’s checks find and the returns shown are worked out from what’s captured in each client’s books and its settings, and from Shap’s SARS tables, which may be out of date. They’re aids for you to check, not advice, and not every check or return: Shap lists only those it can work out. Shap files nothing with SARS or CIPC and signs nothing. Shap is free software from OpenWorks IT, who are not accountants, tax practitioners or auditors.';
 /** Said back before Shap Accountant is switched on: what the practice answers for. */
 export const PRACTICE_CAUTION =
-  'Shap Accountant keeps your clients’ books on this server. Their backups, who in your practice opens them, and their personal information (POPIA) are your practice’s responsibility, and what Shap’s checks find and the returns it shows are aids for your practitioners to check, not advice.';
+  'Shap Accountant keeps your clients’ books on this server. Their backups, who in your practice opens them, and their personal information (POPIA) are your practice’s responsibility, what Shap’s checks find and the returns it shows are aids for your practitioners to check, not advice, and books brought in from another package are for you to check against it.';
+/**
+ * On Accounts → From another package (books-import.ts): what bringing books in does and doesn't do.
+ * The disclaimer's "Books from another accounting package" says the same (openworks.co.za/shap/disclaimer).
+ */
+export const IMPORT_NOTE =
+  'Shap reads these files as it finds them and suggests where each account goes. It doesn’t check them against the package or the client’s records, and the figures stay the package’s. After bringing them in, compare these books’ trial balance with the package’s before you rely on them. Shap is free software from OpenWorks IT, who are not accountants, tax practitioners or auditors, and this is not advice.';
 /** In a client's books, the terms are accepted for the practice's use of Shap on them. */
 export const PRACTICE_TERMS_TICK = 'I accept the terms of use for my practice’s use of Shap on these books.';
 /** The short form, where there's no room for the whole note. */

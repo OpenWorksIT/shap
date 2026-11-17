@@ -20,6 +20,8 @@ interface Vat201Data {
   fields: Record<string, number>;
   /** VAT brought in from another package in the period: not in the boxes, not Shap’s to check. */
   importedVatCents: number;
+  /** How many lines on the VAT account came in that way (any at all: the return isn’t Shap’s). */
+  importedVatLines?: number;
 }
 
 const periodLabel = (p: { start: string; end: string }) =>
@@ -63,9 +65,15 @@ export function Vat201() {
       </div>
       <EstimateNote />
       {pending && <div className="banner signal small">This period hasn’t ended yet: the figures will still change.</div>}
-      {data.importedVatCents ? (
+      {data.importedVatLines || data.importedVatCents ? (
         <div className="banner alert small">
-          The VAT account moved by <Money cents={data.importedVatCents} /> in this period through books brought in from another package (Accounts → From another package). Shap can’t split that into the VAT201’s boxes, so the boxes below leave it out: this period’s return is the one worked out in that package. Shap doesn’t work it out or check it.
+          {data.importedVatCents ? (
+            <>
+              The VAT account moved by <Money cents={data.importedVatCents} /> in this period through books brought in from another package (Accounts → From another package).
+            </>
+          ) : (
+            'VAT came in on the VAT account in this period (netting to nil) through books brought in from another package (Accounts → From another package).'
+          )} Shap can’t split that into the VAT201’s boxes, so the boxes below leave it out and aren’t this period’s return. The return is the business’s, from their own records (or as their package worked it out): Shap doesn’t work it out or check it.
         </div>
       ) : null}
       <section className="panel">

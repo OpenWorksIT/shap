@@ -109,7 +109,7 @@ export default function PracticePage() {
       <p className="xs muted">{PRACTICE_NOTE}</p>
       {manage && (
         <form className="panel panel-pad row wrap" style={{ gap: 8, alignItems: 'flex-end' }} onSubmit={add}>
-          <Field label="A client whose books you keep" className="grow">
+          <Field label="A client" className="grow">
             {(p) => <input {...p} className="input" value={name} maxLength={200} placeholder="Their business’s name" onChange={(e) => setName(e.target.value)} />}
           </Field>
           <Field label="Their books are written up">

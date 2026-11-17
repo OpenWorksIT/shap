@@ -66,7 +66,7 @@ describe('the books audit', () => {
   it('finds nothing to fix in books kept through the app, and checks what it says it does', async () => {
     const items = await expectCleanAudit(env.sql, ON);
     const said = items.map((i) => i.text).join('\n');
-    expect(said).toMatch(/the VAT account moved by what Shap's VAT201 shows for each period/);
+    expect(said).toMatch(/the VAT account moved by what Shap’s VAT201 shows for each period/);
     expect(said).toMatch(/the debtors account agrees with the open invoices/);
     expect(said).toMatch(/the creditors account agrees with the unpaid bills \(R 130\.00\)/);
     expect(said).toMatch(/PAYE, UIF and SDL owed agree with the pay runs less the EMP201 payments/);

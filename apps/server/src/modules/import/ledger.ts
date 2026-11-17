@@ -17,7 +17,7 @@
  */
 import { createInflateRaw } from 'node:zlib';
 import ExcelJS from 'exceljs';
-import type { AccountType, StatementLineKey } from '@shap/shared';
+import { formatDate, formatZar, type AccountType, type StatementLineKey } from '@shap/shared';
 import { badRequest } from '../../lib/errors.js';
 import { parseCsv } from '../clients.js';
 import { guessDayOrder, parseDate, parseMoney, type DayOrder } from '../movein.js';
@@ -151,7 +151,7 @@ function oneAtATime<T>(job: () => Promise<T>): Promise<T> {
 export async function sheetRows(name: string, bytes: Buffer): Promise<string[][]> {
   if (/\.xlsx$/i.test(name) || (bytes[0] === 0x50 && bytes[1] === 0x4b)) {
     const cannot = () => badRequest(`“${name}” isn’t a spreadsheet Shap can read: export it again as Excel (.xlsx) or CSV.`);
-    const tooBig = () => badRequest(`“${name}” is too big to read (${MAX_ROWS.toLocaleString('en-ZA')} rows and ${MAX_COLUMNS} columns at most)`);
+    const tooBig = () => badRequest(`“${name}” is too big to read (${MAX_ROWS.toLocaleString('en-ZA')} rows, ${MAX_COLUMNS} columns and ${(MAX_CELLS / 1_000_000).toLocaleString('en-ZA')} million cells at most): export a shorter period.`);
     return oneAtATime(async () => {
       // A small file that unpacks to something huge isn't an export: refused before it's opened.
       const size = await unpackedSize(bytes);
@@ -185,7 +185,7 @@ export async function sheetRows(name: string, bytes: Buffer): Promise<string[][]
   }
   if (/\.xls$/i.test(name)) throw badRequest(`“${name}” is an old Excel file: save it as .xlsx or CSV and try again.`);
   const rows = parseCsv(bytes.toString('utf8'));
-  if (rows.length > MAX_ROWS) throw badRequest(`“${name}” is too big to read (${MAX_ROWS.toLocaleString('en-ZA')} rows at most)`);
+  if (rows.length > MAX_ROWS) throw badRequest(`“${name}” is too big to read (${MAX_ROWS.toLocaleString('en-ZA')} rows at most): export a shorter period.`);
   return rows;
 }
 
@@ -539,10 +539,10 @@ export function transactionsOf(lines: GlLine[]): { date: string; reference: stri
     const off = ls.reduce((s, l) => s + l.cents, 0);
     if (off !== 0) {
       throw badRequest(
-        `The ledger lines on ${date} don’t balance (debits and credits are R ${(Math.abs(off) / 100).toFixed(2)} apart): the export is missing accounts or lines. Export the whole ledger for the period, every account, and try again.`,
+        `The ledger lines on ${formatDate(date)} don’t balance (debits and credits are ${formatZar(Math.abs(off))} apart): the export may be missing accounts or lines. Export the whole ledger for the period, every account, and try again.`,
       );
     }
-    out.push({ date, reference: '', description: `Lines of ${date}`, lines: ls });
+    out.push({ date, reference: '', description: `Lines of ${formatDate(date)}`, lines: ls });
   }
   return out.sort((a, b) => a.date.localeCompare(b.date));
 }

@@ -30,7 +30,7 @@ interface Dashboard {
   uncapturedCosts: { n: number; total: number };
   statementsMissing?: { sourceId: string; sourceName: string; months: string[] }[];
   duplicateCosts?: number;
-  vat?: { state: 'over' | 'near' | 'voluntary' | null; last12Cents: number; peak12Cents: number; peakTo: string; pace12Cents: number; compulsoryCents: number };
+  vat?: { state: 'over' | 'near' | 'voluntary' | null; last12Cents: number; peak12Cents: number; peakTo: string; pace12Cents: number; compulsoryCents: number; broughtInThrough?: string | null };
   monthlyInvoices?: {
     failed: { id: string; documentId: string; title: string; clientName: string | null; error: string }[];
     waiting: { id: string; scheduleId: string; number: string; clientName: string | null; mode: string }[];
@@ -257,7 +257,7 @@ function OwnerHome() {
             </>
           ) : (
             <>
-              <strong>Nearing the VAT line:</strong> <Money cents={data.vat.peak12Cents} whole /> in {data.vat.peak12Cents !== data.vat.last12Cents ? `the 12 months to ${formatDate(data.vat.peakTo)}` : 'the last 12 months'}
+              <strong>Nearing the VAT line:</strong> <Money cents={data.vat.peak12Cents} whole /> in {data.vat.peak12Cents !== data.vat.last12Cents ? `the 12 months to ${formatDate(data.vat.peakTo)}` : data.vat.broughtInThrough ? `the 12 months to ${formatDate(data.vat.broughtInThrough)} (as far as the books brought in from another package reach)` : 'the last 12 months'}
               {data.vat.pace12Cents > data.vat.compulsoryCents ? <>, and lately running at <Money cents={data.vat.pace12Cents} whole /> over 12 months</> : null}. Registration is
               compulsory once any 12 months in a row pass <Money cents={data.vat.compulsoryCents} whole />.
             </>

@@ -6,7 +6,7 @@
  * them in at once. The accounts chosen are remembered, so next period's files map by themselves.
  */
 import { useState } from 'react';
-import { ACCOUNT_TYPES, formatDate, STATEMENT_LINES, type AccountType } from '@shap/shared';
+import { ACCOUNT_TYPES, formatDate, IMPORT_NOTE, STATEMENT_LINES, type AccountType } from '@shap/shared';
 import { ErrorBox, Field, Icon, Loading, Money, useToast } from '../components/ui';
 import { api, ApiError } from '../lib/api';
 import { useApi } from '../lib/hooks';
@@ -79,7 +79,7 @@ const KIND_WORDS = { trialBalance: 'Trial balance', ledger: 'General ledger', un
 const HOW: { name: string; steps: string }[] = [
   { name: 'Xero', steps: 'Reports → Trial Balance (at the date) and General Ledger Detail or Account Transactions (for the period) → Export → Excel or CSV.' },
   { name: 'QuickBooks Online', steps: 'Reports → Trial Balance (at the date) and Journal (for the period) → Export to Excel.' },
-  { name: 'Sage Accounting', steps: 'Reports → Trial Balance “As of” the date, with “Summarise profit and loss values” ticked (so income and expenses are for the year), and Detailed General Ledger (or Account Transactions) → Export to Excel.' },
+  { name: 'Sage Accounting', steps: 'Reports → Trial Balance, its period “As of” the date, with the box that rolls earlier years’ profit and loss into retained earnings ticked (so income and expenses are for the year), and the Detailed General Ledger (or Account Transactions) → export as CSV.' },
   { name: 'Sage Pastel', steps: 'Reports → Ledger → Trial Balance and Ledger Transactions → print to a file (Excel or CSV).' },
 ];
 
@@ -178,6 +178,7 @@ export default function BooksImport() {
       await api(`/api/books-import/${i.id}`, { method: 'DELETE' });
       await list.reload();
     } catch (err) {
+      if (!(err instanceof ApiError)) console.error(err);
       toast(err instanceof ApiError ? err.message : UNEXPECTED, 'error');
     }
   };
@@ -189,8 +190,9 @@ export default function BooksImport() {
     <div className="stack-lg">
       <section className="panel panel-pad stack">
         <p className="small">
-          Bring in a client’s books from the package they keep them in: its trial balance at a date, and its general ledger for a period. Each ledger comes in as its transactions; a trial balance brings every account to its figures on that date (for the year, the income and expenses; to date, the rest). The same period brought in again replaces what came in before.
+          Bring in books kept in another package: its trial balance at a date, and its general ledger for a period. Each ledger comes in as its transactions; a trial balance brings every account to its figures on that date (for the year, the income and expenses; to date, the rest). The same period brought in again replaces what came in before.
         </p>
+        <p className="xs muted">{IMPORT_NOTE}</p>
         <details className="small">
           <summary>How to export them</summary>
           <ul>
@@ -200,6 +202,7 @@ export default function BooksImport() {
               </li>
             ))}
           </ul>
+          <p className="xs muted">Menus differ by version and country: if these don’t match, the package’s own help says how to export them.</p>
         </details>
         <label className="btn" style={{ alignSelf: 'flex-start' }}>
           <Icon name="upload" size={18} />
@@ -234,14 +237,14 @@ export default function BooksImport() {
                   )}
                   {f.kind === 'trialBalance' && f.yearFrom && f.asAt && (
                     <span className="xs muted">
-                      Its income and expenses are taken as {formatDate(f.yearFrom)} to {formatDate(f.asAt)}, these books’ year (their year end, in Settings). If the package’s year runs otherwise, set it the same there first. Shap draws statements for 12 months: a first year that’s longer or shorter isn’t drawn here.
+                      Its income and expenses are taken as {formatDate(f.yearFrom)} to {formatDate(f.asAt)}, these books’ year (their year end, in Settings). If the package’s year runs otherwise, check with the client which year end is right before you bring it in. Shap draws statements for 12 months: a first year that’s longer or shorter isn’t drawn here.
                     </span>
                   )}
                   {f.kind === 'trialBalance' && !f.asAt && (
                     <Field label="The trial balance’s date">{(p) => <input {...p} className="input" type="date" value={files[i]?.asAt ?? ''} onChange={(e) => dateFor(f.name, e.target.value)} />}</Field>
                   )}
                   {f.already > 0 && (
-                    <span className="small warn-text">These books already have {f.already} entries in this period that weren’t brought in from a package: they’d be counted twice. Bring in a period these books don’t keep, or check before you go on.</span>
+                    <span className="small warn-text">These books already have {f.already} {f.already === 1 ? 'entry' : 'entries'} of their own in this period. If the package has them too, they’d be counted twice: bring in a period these books don’t keep, or take those entries out first.</span>
                   )}
                   {f.kind !== 'unknown' && f.columns && <span className="xs muted">Read from {f.columns}.</span>}
                   {f.outside > 0 && <span className="small warn-text">{f.outside} {f.outside === 1 ? 'line falls' : 'lines fall'} outside its period: check its dates (day or month first?) and export it again.</span>}
@@ -255,8 +258,8 @@ export default function BooksImport() {
             <h3>Their accounts, and where each goes in these books</h3>
             <p className="xs muted">
               {mayAdd
-                ? 'Shap suggests one where it used it last time, or where the code or the name is the same. Otherwise, a new account of the kind their file gives: choose one where it doesn’t say.'
-                : 'Shap suggests one where it used it last time, or where the code or the name is the same. Choose one for the rest: only the owner adds new accounts to the chart.'}
+                ? 'Shap suggests one where it used it last time, where the name is the same (or the code, with a name like it), or Shap’s own account for it (VAT, PAYE, retained earnings and others). Otherwise, a new account of the kind their file gives: choose one where it doesn’t say. Check each suggestion: they’re only Shap’s guesses.'
+                : 'Shap suggests one where it used it last time, where the name is the same (or the code, with a name like it), or Shap’s own account for it (VAT, PAYE, retained earnings and others). Choose one for the rest: only the owner adds new accounts to the chart. Check each suggestion: they’re only Shap’s guesses.'}
             </p>
             <ul className="list" data-private>
               {read.accounts.map((a) => (
@@ -309,13 +312,13 @@ export default function BooksImport() {
                     </strong>
                     {r.kind === 'ledger' ? (
                       <p className="small">
-                        {r.journals} {r.journals === 1 ? 'journal' : 'journals'}, {formatDate(r.from)} to {formatDate(r.to)}, as their package has them.
+                        {r.journals} {r.journals === 1 ? 'journal' : 'journals'}, {formatDate(r.from)} to {formatDate(r.to)}, from their package’s lines (where Shap can’t tell a day’s transactions apart, they come in as one journal for the day).
                       </p>
                     ) : (
                       <>
                         <p className="small">
                           Brings what was brought in from the package to their trial balance at {formatDate(r.to)}: the income and expenses for {formatDate(r.yearFrom)} to {formatDate(r.to)} (these books’ year), the rest to date.
-                          {r.ownEntries ? ` Your own ${r.ownEntries} ${r.ownEntries === 1 ? 'entry' : 'entries'} in these books up to then stay on top of it.` : ''}
+                          {r.ownEntries ? ` These books’ own ${r.ownEntries} ${r.ownEntries === 1 ? 'entry' : 'entries'} up to then ${r.ownEntries === 1 ? 'isn’t' : 'aren’t'} changed: ${r.ownEntries === 1 ? 'it’s' : 'they’re'} added to the trial balance’s figures, so these books will differ from it by ${r.ownEntries === 1 ? 'it' : 'them'}.` : ''}
                         </p>
                         {r.opening && (
                           <p className="small warn-text">
@@ -324,7 +327,7 @@ export default function BooksImport() {
                         )}
                         {r.earlierYearsCents ? (
                           <p className="small warn-text">
-                            It gives the years before {formatDate(r.yearFrom)} <Money cents={Math.abs(r.earlierYearsCents)} /> {r.earlierYearsCents < 0 ? 'more' : 'less'} profit than what was brought in before: that goes to retained earnings on {formatDate(r.to)}. That’s a matter for the accountant (an earlier period’s figures changed in the package).
+                            It gives the years before {formatDate(r.yearFrom)} <Money cents={Math.abs(r.earlierYearsCents)} /> {r.earlierYearsCents < 0 ? 'more' : 'less'} profit than what was brought in before. That goes to retained earnings on {formatDate(r.to)}. Shap can’t tell why: an earlier period’s figures may have changed in the package, or an account may go elsewhere here. It’s for the accountant to look into (a prior-period matter).
                           </p>
                         ) : null}
                         {r.adjustments && r.adjustments.length > 0 ? (

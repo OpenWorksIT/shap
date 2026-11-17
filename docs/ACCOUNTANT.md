@@ -46,16 +46,19 @@ the server, and in its backups. **Bring back** opens it again.
 ## Books from another package
 
 A client who keeps their books in Xero, QuickBooks or Sage (Accounting or Pastel) carries on there;
-the practice brings them into the client's books here, period by period, to check and compile
-them with Shap's checks (**Add client** → their books are written up in another package; then, in
+the practice brings them into the client's books here, period by period, to compile them here
+(**Add client** → their books are written up in another package; then, in
 their books, **Accounts → From another package**). It's what the working-paper packages do with
 the same exports.
 
 - **What to export:** a trial balance at a date, and the general ledger for a period. Xero: the
   Trial Balance and the General Ledger Detail (or Account Transactions). QuickBooks Online: the
   Trial Balance and the Journal report. Sage Accounting: the Trial Balance "As of" the date with
-  "Summarise profit and loss values" ticked, and the Detailed General Ledger. Pastel: the Trial
-  Balance and Ledger Transactions. Excel (.xlsx) or CSV.
+  the box that rolls earlier years' profit and loss into retained earnings ticked ("Summarize
+  retained earnings values" in [Sage's help](https://help.sageone.com/en_ca/start/accounting-view-the-trial-balance-report.html)),
+  and the Detailed General Ledger, as CSV. Pastel: the Trial Balance and Ledger Transactions.
+  Excel (.xlsx) or CSV. Menus differ by version and country (these are as their help pages had
+  them for 1.28, not confirmed on every edition): the package's own help says how to export them.
 - **Which trial balances the statements need:** the year end's, the year end before it (the
   opening position), and the one before that for the comparatives. Brought in alone, a trial
   balance is the books' first entry: before it, the comparatives, the opening equity and cash, the
@@ -69,8 +72,8 @@ the same exports.
   (Xero), its closing columns, or its closing balance, and opening, debit, credit and closing must
   add up; plain Debit and Credit beside an opening balance are the period's movements, refused. A
   ledger's dates are read the way round that puts every line inside the title's period, and a line
-  outside it is refused. Each transaction's lines must balance (else the export is missing
-  accounts, and Shap says so). Amounts such as "R (1 234.56)" and "1 234.56 Cr" are read as
+  outside it is refused. Each day's lines must balance (if not, the export may be missing
+  accounts or lines, and Shap says so). Amounts such as "R (1 234.56)" and "1 234.56 Cr" are read as
   credits.
 - **Their accounts:** each goes to one of these books' accounts (as last time; the same name, or
   the same code with the same name; or Shap's own account for VAT, PAYE, UIF, SDL, income tax,
@@ -81,22 +84,26 @@ the same exports.
   a balance sheet account here, or the other way round. Only the owner adds new accounts (at most
   500 an import); anyone else chooses one of these books' for each. The choice is remembered, so
   the next period's files map by themselves.
-- **A ledger** comes in as its transactions, as the client's package has them (dates, references
-  and descriptions kept). The same period brought in again replaces it; a period that overlaps an
+- **A ledger** comes in as its transactions, from the package's lines (dates, references and
+  descriptions kept; a transaction's lines on one account are added together, and where Shap can't
+  tell a day's transactions apart, they come in as one journal for the day). The same period brought in again replaces it; a period that overlaps an
   earlier one without covering it is refused. Its journals are changed only by bringing the period
   in again, or taken out with it: not one by one.
 - **A trial balance** brings what was brought in from the package to its figures on its date: the
   income and expense accounts and the dividends for the year (the year end in these books'
   settings, which the preview shows), the rest to date, and retained earnings to what the earlier
-  years left. The practice's own entries here stay on top of it. After the year's ledger it comes
-  to nothing, which checks the ledger is all there. A title that gives a period starting on any
-  other day than these books' year start is refused (a package whose year runs otherwise is set
-  the same there first; Shap draws statements for 12 months). A trial balance that would change
+  years left. The practice's own entries here aren't changed: they're added to its figures, so
+  these books differ from the package's trial balance by them. After the year's ledger it comes to
+  nothing, which shows the ledger's balances agree with it, account by account. A title that gives
+  a period starting on any other day than these books' year start is refused (where the package's
+  year runs otherwise, check with the client which year end is right; Shap draws statements for 12
+  months). A trial balance that would change
   the years before it (retained earnings) says how much, and is refused when those years are closed
   here: a prior-period matter for the accountant (IFRS for SMEs 10.21).
 - **Check what it would do:** runs it all and undoes it, to show each journal, what each trial
-  balance would move account by account, and the practice's own entries it leaves on top.
-- **Never left wrong:** a trial balance brought in earlier was worked out with the books as they
+  balance would move account by account, and how many of the practice's own entries it leaves as
+  they are.
+- **Brought in again together:** a trial balance brought in earlier was worked out with the books as they
   were, so a ledger or an earlier trial balance under it comes in together with it again, or is
   refused; and nothing under it is taken out while it stands.
 - Nothing goes into a closed period, an agreed year or a year whose statements were approved
@@ -110,9 +117,12 @@ the same exports.
   (64 MB at most, whatever its directory says), one at a time, its cells counted (2 million a file,
   4 million a request); a CSV is held to 500 columns and 5 million cells; names are cut to fit.
 
-The figures are the client's package's: Shap checks what it can from them (the books audit, the
-statements' checks), but a VAT201 or payroll worked out in the other package isn't Shap's to work
-out or check. A VAT period whose VAT came in from the package says so on the VAT201 screen and in
+The figures are the client's package's, as Shap read them: Shap reads the files as it finds them
+and suggests where each account goes, and doesn't check them against the package or the client's
+records. Compare these books' trial balance with the package's after bringing them in, before
+relying on them (the page says so, `IMPORT_NOTE`). Shap's checks (the books audit, the statements'
+checks) test only that the books here hang together, not that the package's figures are right, and
+a VAT201 or payroll worked out in the other package isn't Shap's to work out or check. A VAT period whose VAT came in from the package says so on the VAT201 screen and in
 the tax pack, and the books audit leaves it out of its VAT check and says why. The provisional and
 turnover tax estimates project from the last day brought in, and a trust's distributions in the
 books brought in are shown, not taken off (Shap can't tell which part is this year's income to

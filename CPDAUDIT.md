@@ -755,6 +755,27 @@ after a take-out), and `test/accountant/books-import.test.ts`.
   the account's; an inactive remembered account isn't used; the "already" count is of entries; an
   Excel number with three decimals, "R (1 234.56)" and "1 234.56 Cr" are read right (`parseMoney`,
   also Shap Pocket's); the count of journals is of those made.
+- Words on screen and liability (a second reviewer: the first stalled trying to open a browser,
+  and was stopped): nothing on the page said what was brought in isn't checked, and the docs said
+  Shap checked it. `IMPORT_NOTE` (shared) now says Shap reads the files as it finds them, doesn't
+  check them against the package or the client's records, and to compare the trial balance before
+  relying on them, with who OpenWorks are; `PRACTICE_CAUTION` and the docs say the same, and the
+  website's disclaimer has a section on books from another package (within terms 2.2 and 3.1: no
+  re-acceptance). The books audit said it checked every VAT period when the VAT of all of them came
+  in from the package: it says there's no VAT201 of Shap's to check. VAT charged and paid in one
+  period netted to nil and showed Shap's own nil return: any VAT line brought in marks the period
+  (`importedVat`, one helper for the screen, the tax pack and the audit), and the words say the
+  return is the business's, not "the one worked out in that package". The tax pack says the
+  year's figures came from another package, to the last day brought in, and a trust's
+  distributions brought in aren't taken off. The check step's "as their package has them", "stay
+  on top of it" and a cause stated as fact; "counted twice" without "if the package has them
+  too"; "only right once"; the mapping hint (a code only with a name like it); Sage's export steps
+  (the box's name, CSV) and a line that menus differ; "never left wrong", "is all there"; the
+  reader's dates, money and "may be missing"; the audit's fail lines naming what they leave out;
+  the year-end advice; the intro for any business; the Practice field; the journal refusal (that
+  file, not that period); the VAT watch's 12 months to the last day brought in. Tests:
+  `test/review-1.28/words.test.ts` (6, each failing on 984460a). The take-out error now goes to
+  the console too (the unexpected-error test).
 
 ### Code scanning (CodeQL), first run
 

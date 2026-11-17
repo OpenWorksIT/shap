@@ -137,6 +137,20 @@ export async function broughtInThrough(db: Db): Promise<string | null> {
   return r?.d ?? null;
 }
 
+/**
+ * VAT that came in with books brought in from another package in a VAT period: how many lines on
+ * the VAT account, and what they moved it by (credit positive: output VAT). Any line at all makes
+ * the period's return the package's (or the business's), not Shap's to work out or check, even
+ * when the lines net to nothing (VAT charged and paid in the same period).
+ */
+export async function importedVat(db: Db, start: string, end: string): Promise<{ lines: number; cents: number }> {
+  const [r] = await db<{ n: number; t: string }[]>`
+    select count(*)::int as n, coalesce(sum(jl.credit_cents - jl.debit_cents), 0)::bigint as t
+    from journal_lines jl join journals j on j.id = jl.journal_id join accounts a on a.id = jl.account_id
+    where a.system_key = 'vat' and j.ledger_import_id is not null and j.date between ${start}::date and ${end}::date`;
+  return { lines: r?.n ?? 0, cents: Number(r?.t ?? 0) };
+}
+
 export async function getSettings(db: Db): Promise<SettingsRow> {
   const [s] = await db<SettingsRow[]>`select * from settings where id`;
   return s!;

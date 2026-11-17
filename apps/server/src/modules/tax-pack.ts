@@ -15,7 +15,7 @@ import { entity, ESTIMATE_NOTE, ESTIMATE_SHORT, estimateTax, sbcApplies, feature
 import { z } from 'zod';
 import { requireAccess, can, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
-import { assessedLossBefore, freshTotals, getSettings, sbcAnswer, today } from '../lib/books.js';
+import { assessedLossBefore, broughtInThrough, freshTotals, getSettings, importedVat, sbcAnswer, today } from '../lib/books.js';
 import { parse } from '../lib/validate.js';
 import { usePdfFonts } from './pdf.js';
 import { vat201 } from './taxforms.js';
@@ -65,15 +65,13 @@ export async function taxPack(db: Db, fyEnd: string, o: { people?: boolean } = {
            coalesce((select sum(l.amount_cents) from ledger l join accounts a on a.id = l.account_id
                      where (a.system_key = 'income_tax' or a.statement_line = 'income_tax') and l.date between ${fy.start}::date and ${fy.end}::date), 0)::bigint as booked`;
   // VAT201s: each period that ends in the year.
-  const vat: { start: string; end: string; due: string; fields: Awaited<ReturnType<typeof vat201>>; brought: number }[] = [];
+  const vat: { start: string; end: string; due: string; fields: Awaited<ReturnType<typeof vat201>>; brought: number; broughtLines: number }[] = [];
   if (s.vatRegistered) {
     let p = vatPeriod(fy.end, s.vatCategory, s.fyEndMonth);
     while (p.end >= fy.start) {
-      // VAT brought in from another package (books-import.ts): that period's return is the package's.
-      const [imp] = await db<{ t: string }[]>`
-        select coalesce(sum(jl.debit_cents - jl.credit_cents), 0)::bigint as t from journal_lines jl join journals j on j.id = jl.journal_id join accounts a on a.id = jl.account_id
-        where a.system_key = 'vat' and j.ledger_import_id is not null and j.date between ${p.start}::date and ${p.end}::date`;
-      if (p.end <= fy.end) vat.unshift({ ...p, due: vat201Due(p.end), fields: await vat201(db, p.start, p.end), brought: -Number(imp?.t ?? 0) });
+      // VAT brought in from another package (books-import.ts): that period's return isn't Shap's.
+      const imp = await importedVat(db, p.start, p.end);
+      if (p.end <= fy.end) vat.unshift({ ...p, due: vat201Due(p.end), fields: await vat201(db, p.start, p.end), brought: imp.cents, broughtLines: imp.lines });
       p = vatPeriod(addMonths(p.start, -1), s.vatCategory, s.fyEndMonth);
     }
   }
@@ -94,6 +92,10 @@ export async function taxPack(db: Db, fyEnd: string, o: { people?: boolean } = {
     settings: s,
     fy,
     kind,
+    /** How far books brought in from another package reach (books-import.ts), or null. */
+    broughtInThrough: await broughtInThrough(db),
+    /** A trust's distributions in those books: shown, not taken off (section 25B). */
+    distributedBroughtInCents: extra.distributedBroughtInCents,
     accounts: shown,
     incomeCents: income,
     costsCents: costs,
@@ -179,7 +181,10 @@ export function renderTaxPack(t: Awaited<ReturnType<typeof taxPack>>): Promise<B
     pdf.moveDown(0.3);
   }
   pdf.moveDown(1);
-  para(`For the accountant or tax practitioner who files the returns: the year’s figures from the books kept in Shap. ${ESTIMATE_NOTE}`, 9);
+  para(
+    `For the accountant or tax practitioner who files the returns: the year’s figures from the books ${t.broughtInThrough ? `in Shap, brought in from another package up to ${formatDate(t.broughtInThrough, 'long')} (that package’s figures, as Shap read them)` : 'kept in Shap'}. ${ESTIMATE_NOTE}`,
+    9,
+  );
   para('Contents: the year in the books; income tax; ' + [t.vat.length ? 'VAT201s' : '', t.turnoverTax ? 'turnover tax' : '', t.payroll.length ? 'payroll (EMP201 and EMP501)' : '', t.dividends.length ? 'dividends' : '', t.assets.length ? 'assets bought and sold' : ''].filter(Boolean).join('; ') + '.', 9);
 
   // ---------------------------------------------------------------- the year in the books
@@ -220,6 +225,11 @@ export function renderTaxPack(t: Awaited<ReturnType<typeof taxPack>>): Promise<B
       [90, 70, 70, (W - 230) / 3, (W - 230) / 3, (W - 230) / 3],
     );
   } else para('No provisional tax estimates were saved in Shap for this year.', 9);
+  if (t.kind === 'trust' && t.distributedBroughtInCents)
+    para(
+      `The books brought in from another package show R${amt(t.distributedBroughtInCents)} distributed this year. Shap can’t tell which part is this year’s income to beneficiaries in South Africa, so none of it is taken off this estimate: your accountant works that out (section 25B). Until then this estimate may be too high.`,
+      9,
+    );
 
   // ---------------------------------------------------------------- VAT
   if (t.vat.length) {
@@ -227,14 +237,14 @@ export function renderTaxPack(t: Awaited<ReturnType<typeof taxPack>>): Promise<B
     table(
       ['Period', '1 / 4', '2 / 2A', '3', '14', '15', '20'],
       t.vat.map((v) =>
-        v.brought
+        v.broughtLines
           ? [`${formatDate(v.start)} – ${formatDate(v.end)}\ndue ${formatDate(v.due)}`, 'From another package', '', '', '', '', '']
           : [`${formatDate(v.start)} – ${formatDate(v.end)}\ndue ${formatDate(v.due)}`, `${amt(v.fields.field1)}\n${amt(v.fields.field4)}`, `${amt(v.fields.field2)}\n${amt(v.fields.field2A)}`, v.fields.field3, v.fields.field14, v.fields.field15, v.fields.field20],
       ),
       [120, (W - 120) / 6, (W - 120) / 6, (W - 120) / 6, (W - 120) / 6, (W - 120) / 6, (W - 120) / 6],
     );
-    if (t.vat.some((v) => v.brought))
-      para('“From another package”: the VAT for that period came in with books brought in from another package. Shap can’t split it into the boxes, so the return is the one worked out in that package: Shap doesn’t work it out or check it.', 8.5);
+    if (t.vat.some((v) => v.broughtLines))
+      para('“From another package”: the VAT for that period came in with books brought in from another package. Shap can’t split it into the boxes, so they aren’t shown: the return is the business’s, and Shap doesn’t work it out or check it.', 8.5);
     para('Field 1: standard-rated supplies (VAT included); 4: their output VAT; 2: zero-rated; 2A: exported; 3: exempt and non-supplies; 14: input VAT on capital goods; 15: other input VAT; 20: payable (refundable if negative). Fields 1A, 4A (assets sold) and 17 (bad debts) are on the VAT201 screen when they apply.', 8.5);
   }
 

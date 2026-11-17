@@ -114,7 +114,7 @@ describe('a VAT-registered company brought in from another package', () => {
     expect(pack.vat.find((p) => p.start <= '2026-10-31' && p.end >= '2026-09-01' && p.brought)?.brought).toBe(150_000);
     const items = await auditBooks(env.sql, '2026-11-30');
     const vat = items.find((i) => /VAT201/.test(i.text))!;
-    expect(vat.text).toMatch(/came in from another package, so that return is the package’s, not Shap’s to work out or check/);
+    expect(vat.text).toMatch(/came in from another package, so that return is the business’s, not Shap’s to work out or check/);
     const paye = items.find((i) => /PAYE, UIF and SDL/.test(i.text))!;
     expect(paye.text).not.toMatch(/journals by hand/);
   });

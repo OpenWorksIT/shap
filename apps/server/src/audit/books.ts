@@ -28,7 +28,7 @@ import type { Ctx } from '../context.js';
 type Db = Ctx['sql'];
 /** Journals typed in, not made by the app from a pay run, a SARS payment, a dividend or a profit share. */
 const BY_HAND = ['manual', 'opening', 'import', 'adjustment'];
-import { effectiveLock, freshTotals, getSettings, today } from '../lib/books.js';
+import { effectiveLock, freshTotals, getSettings, importedVat, today } from '../lib/books.js';
 import { FULL_TAX_INVOICE_CENTS } from '../modules/documents.js';
 import { balanceSheet, trialBalance } from '../modules/reports.js';
 import { vat201 } from '../modules/taxforms.js';
@@ -126,7 +126,7 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
     from documents d where d.kind = 'invoice' and d.status = 'issued'`;
   const debtors = await posted(['receivables']);
   if (debtors.app === n(deb!.expected)) ok(`the debtors account agrees with the open invoices (${rand(debtors.app)}${besides(debtors.byHand, debtors.brought)})`);
-  else fail(`the debtors account (${rand(debtors.app)}, not counting journals by hand or year-end adjustments) and the open invoices (${rand(n(deb!.expected))}) differ by ${rand(debtors.app - n(deb!.expected))}`);
+  else fail(`the debtors account (${rand(debtors.app)}, not counting journals by hand, books brought in from another package or year-end adjustments) and the open invoices (${rand(n(deb!.expected))}) differ by ${rand(debtors.app - n(deb!.expected))}`);
 
   const [cred] = await db<{ owing: number }[]>`
     select coalesce(sum(c.amount_cents - coalesce((select sum(p.amount_cents) from bill_payments p where p.cost_id = c.id), 0)
@@ -135,7 +135,7 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
   const payables = await posted(['payables']);
   const creditors = -payables.app;
   if (creditors === n(cred!.owing)) ok(`the creditors account agrees with the unpaid bills (${rand(creditors)}${besides(-payables.byHand, -payables.brought)})`);
-  else fail(`the creditors account (${rand(creditors)}, not counting journals by hand or year-end adjustments) and the unpaid bills (${rand(n(cred!.owing))}) differ by ${rand(creditors - n(cred!.owing))}`);
+  else fail(`the creditors account (${rand(creditors)}, not counting journals by hand, books brought in from another package or year-end adjustments) and the unpaid bills (${rand(n(cred!.owing))}) differ by ${rand(creditors - n(cred!.owing))}`);
 
   // Each VAT period of the last year: the VAT account's movement from documents, costs and assets
   // is exactly what Shap's VAT201 for the period says is payable (or refundable). Both are worked
@@ -154,10 +154,7 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
     // A period whose VAT came in from another package: its return is the package's, not Shap's to check.
     let brought = 0;
     for (const p of periods.values()) {
-      const [imp] = await db<{ t: number }[]>`
-        select coalesce(sum(jl.debit_cents - jl.credit_cents), 0)::bigint as t from journal_lines jl join journals j on j.id = jl.journal_id join accounts a on a.id = jl.account_id
-        where a.system_key = 'vat' and j.ledger_import_id is not null and j.date between ${p.start}::date and ${p.end}::date`;
-      if (n(imp!.t) !== 0) {
+      if ((await importedVat(db, p.start, p.end)).lines > 0) {
         brought++;
         continue;
       }
@@ -169,8 +166,10 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
       // The VAT account is a liability (credit negative): output VAT less input VAT is its movement, negated.
       if (-n(mv!.t) !== f.field20) off.push(`${p.start} to ${p.end} (VAT201 ${rand(f.field20)}, books ${rand(-n(mv!.t))})`);
     }
-    const notOurs = brought ? `; in ${brought} the VAT came in from another package, so that return is the package’s, not Shap’s to work out or check` : '';
-    if (!off.length) ok(`the VAT account moved by what Shap's VAT201 shows for each period of the last year (${periods.size - brought} of ${periods.size} periods${notOurs})`);
+    const notOurs = brought ? `; in the other ${brought} the VAT came in from another package, so that return is the business’s, not Shap’s to work out or check` : '';
+    if (brought === periods.size) ok(`no VAT201 of Shap’s to check: in each of the last year’s ${periods.size} periods the VAT came in from another package, so the return is the business’s, not Shap’s to work out or check`);
+    else if (!off.length)
+      ok(brought ? `the VAT account moved by what Shap’s VAT201 shows for the ${periods.size - brought} of the last year’s ${periods.size} periods it works out${notOurs}` : `the VAT account moved by what Shap’s VAT201 shows for each period of the last year (${periods.size} periods)`);
     else fail(`the VAT201 and the VAT account disagree for ${few(off, 3)}`);
   } else ok('not registered for VAT: no VAT201s to check');
 
@@ -182,7 +181,7 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
   const payroll = await posted(['paye_payable', 'uif_payable', 'sdl_payable']);
   const owedSars = -payroll.app;
   if (owedSars === n(sars[0]!.owed)) ok(`PAYE, UIF and SDL owed agree with the pay runs less the EMP201 payments (${rand(owedSars)}${besides(-payroll.byHand, -payroll.brought)})`);
-  else fail(`PAYE, UIF and SDL owed in the books (${rand(owedSars)}, not counting journals by hand or year-end adjustments) and by the pay runs less the EMP201 payments (${rand(n(sars[0]!.owed))}) differ by ${rand(owedSars - n(sars[0]!.owed))}`);
+  else fail(`PAYE, UIF and SDL owed in the books (${rand(owedSars)}, not counting journals by hand, books brought in from another package or year-end adjustments) and by the pay runs less the EMP201 payments (${rand(n(sars[0]!.owed))}) differ by ${rand(owedSars - n(sars[0]!.owed))}`);
 
   // ---------------------------------------------------------------- agreed years
   section = 'Agreed years';

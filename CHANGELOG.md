@@ -9,12 +9,13 @@ entries newer than the version you're running before you update.
   books in Xero, QuickBooks or Sage (Accounting or Pastel): in their books, **Accounts → From
   another package** brings in the trial balance at a date and the general ledger for a period, from
   the package's own Excel or CSV exports, to check and compile here while the client stays on
-  their package. Each of their accounts goes to one of these books' (remembered for next time) or,
+  their package. Shap reads the files as it finds them and doesn't check them against the package:
+  compare the trial balance after bringing them in. Each of their accounts goes to one of these books' (remembered for next time) or,
   for the owner, a new one on the statement line their package's type gives. **Check what it would
   do** shows each journal and what each trial balance would move before anything comes in. A
   ledger's journals come in as its transactions; a trial balance brings the books to its figures,
-  with the practice's own entries left on top. Nothing goes into a closed period, an agreed year or
-  approved statements; a trial balance brought in earlier is never left wrong; each file's
+  with the practice's own entries left as they are. Nothing goes into a closed period, an agreed year or
+  approved statements; a trial balance brought in earlier comes in again with what's brought in under it, or that's refused; each file's
   fingerprint (SHA-256) is kept, and the activity log has what came in, what it replaced and what
   was taken out. The statements need the year end's trial balance and the two before it: brought
   in alone, the statements' checks say the years start from nil before it. A VAT201 or payroll

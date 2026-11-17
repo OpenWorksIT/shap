@@ -8,7 +8,7 @@ import { addMonths, financialYear, lastBusinessDay, monthEnd, monthsBetween, tur
 import { z } from 'zod';
 import { requireAccess } from '../auth.js';
 import type { Ctx } from '../context.js';
-import { broughtInThrough, freshTotals, getSettings, today } from '../lib/books.js';
+import { broughtInThrough, freshTotals, getSettings, importedVat, today } from '../lib/books.js';
 import { badRequest } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 
@@ -91,11 +91,9 @@ export function registerTaxFormRoutes(app: FastifyInstance, ctx: Ctx): void {
       p = vatPeriod(addMonths(p.start, -1), cat, settings.fyEndMonth);
     }
     // VAT that came in from another package (books-import.ts): Shap can't split it into the boxes,
-    // so that period's return is the package's, not Shap's to work out or check.
-    const [imp] = await sql<{ t: string }[]>`
-      select coalesce(sum(jl.debit_cents - jl.credit_cents), 0)::bigint as t from journal_lines jl join journals j on j.id = jl.journal_id join accounts a on a.id = jl.account_id
-      where a.system_key = 'vat' and j.ledger_import_id is not null and j.date between ${period.start}::date and ${period.end}::date`;
-    return { category: cat, registered: settings.vatRegistered, vatNumber: settings.vatNumber, period, due: vat201Due(period.end), periods, fields: await vat201(sql, period.start, period.end), importedVatCents: -Number(imp?.t ?? 0) };
+    // so that period's return isn't Shap's to work out or check (any line at all: lib/books.ts).
+    const imp = await importedVat(sql, period.start, period.end);
+    return { category: cat, registered: settings.vatRegistered, vatNumber: settings.vatNumber, period, due: vat201Due(period.end), periods, fields: await vat201(sql, period.start, period.end), importedVatCents: imp.cents, importedVatLines: imp.lines };
   });
 
   /** Turnover tax for a year of assessment: turnover so far, the year projected, the two interim payments. */
