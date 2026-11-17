@@ -4,12 +4,14 @@
  * modules/share.ts); Shap brings it into the practice's copy of the books
  * (apps/server/src/modules/import/pocket-share.ts). This file is the same in both apps.
  *
- * A share carries Pocket's records themselves (its invoices, costs, assets, pay runs, journals and
- * the rest: SHARE_TABLES), not only their postings, so Shap's copy works out the VAT201s, the
- * payroll returns, the statements and the checks from what Pocket does. Left out: who signs in,
- * photos of slips, people's ID, tax and bank numbers and contact details, and Pocket's own
- * statements and approvals (the practice's are in Shap). With it, every entry's key and hash, so
- * Shap checks it reads the records into the same postings Pocket did, and says what changed.
+ * A share carries Pocket's records themselves, whatever their date (its invoices, costs, assets, pay
+ * runs, journals and the rest: SHARE_TABLES), not only their postings, so Shap's copy works out the
+ * VAT201s, the payroll returns, the statements and the checks from what Pocket does. Left out: who
+ * signs in, photos of slips, employees' ID, tax and bank numbers, the contact details of customers,
+ * workers and jobs, the business's own contact and bank details, where trips went, and Pocket's own
+ * statements and approvals (the practice's are in Shap). What goes is said in SHARE_WHAT_GOES, and
+ * tested against a file. With it, every entry's key and hash, so Shap checks it reads the records
+ * into the same postings Pocket did, and says what changed.
  */
 import { z } from 'zod';
 import { sha256Hex } from './sha256.js';
@@ -30,7 +32,7 @@ export const SHARE_TABLES: { table: string; leaveOut?: string[]; later?: string[
   { table: 'accounts' },
   { table: 'payment_sources' },
   { table: 'cost_categories' },
-  { table: 'brands', leaveOut: ['logo_id', 'email', 'phone', 'bank_details'] },
+  { table: 'brands', leaveOut: ['logo_id', 'email', 'phone', 'address', 'bank_details'] },
   { table: 'clients', leaveOut: ['contact_person', 'email', 'phone', 'address', 'notes'] },
   { table: 'work_types' },
   { table: 'workers', leaveOut: ['phone', 'notes'] },
@@ -66,7 +68,8 @@ export const SHARE_TABLES: { table: string; leaveOut?: string[]; later?: string[
   { table: 'year_end_figures' },
   { table: 'sbc_years' },
   { table: 'tax_estimates' },
-  { table: 'trips' },
+  // Where a trip went can be a customer's home: its date, kilometres and reason go.
+  { table: 'trips', leaveOut: ['from_place', 'to_place'] },
   { table: 'logbook_years' },
   { table: 'time_entries' },
   { table: 'balance_checks' },
@@ -90,6 +93,7 @@ export const pocketShareSchema = z.object({
   stamp: z.object({
     number: z.number().int().positive().max(MAX_SHARE_NUMBER),
     madeAt: z.string().datetime({ offset: true }),
+    /** The day it was made (the phone's date). The records are the whole of the books, whatever their dates. */
     through: date,
     previous: z.object({ number: z.number().int().positive().max(MAX_SHARE_NUMBER), madeAt: z.string().datetime({ offset: true }) }).nullable(),
     app: z.literal('Shap Pocket'),
@@ -100,7 +104,7 @@ export const pocketShareSchema = z.object({
   }),
   /** Each table's rows, as Pocket's database has them (SHARE_TABLES). */
   records: z.partialRecord(z.enum(SHARE_TABLE_NAMES as [string, ...string[]]), z.array(z.record(z.string().max(63), z.unknown())).max(MAX_SHARE_ROWS)),
-  /** Every entry in the books to `through`: its key and hashes (shareEntries, entryHash, figuresHash). */
+  /** Every entry in the books, whatever its date: its key and hashes (shareEntries, entryHash, figuresHash). */
   entries: z.array(z.object({ key: z.string().min(1).max(200), hash, figures: hash })).max(MAX_SHARE_ROWS),
   /** Since the last share sent, as the phone counts it (Shap counts its own). */
   changes: z.object({ added: z.number().int().nonnegative(), changed: z.number().int().nonnegative(), removed: z.number().int().nonnegative() }),
@@ -123,11 +127,13 @@ export interface ShareEntry {
 type Query = (strings: TemplateStringsArray, ...values: unknown[]) => Promise<readonly Record<string, unknown>[]>;
 
 /**
- * Every posting in the books to `through`, as entries: one for each thing posted (and each day, for
- * what posts on more than one day). Pocket and Shap run the same query on the same records, so the
- * same books give the same entries in both.
+ * Every posting in the books (to `through`, if given), as entries: one for each thing posted (and
+ * each day, for what posts on more than one day). Pocket and Shap run the same query on the same
+ * records, so the same books give the same entries in both. Nothing in the ledger depends on the
+ * day it's read (an asset's depreciation is there for its whole life), so a share's entries are all
+ * of them, and Shap checks every one.
  */
-export async function shareEntries(db: Query, through: string): Promise<ShareEntry[]> {
+export async function shareEntries(db: Query, through = '9999-12-31'): Promise<ShareEntry[]> {
   const rows = (await db`
     select l.date::text as date, l.source, l.source_id::text as source_id, coalesce(l.memo, '') as memo, l.amount_cents, a.code, coalesce(d.number, rd.number) as doc_number
     from ledger l join accounts a on a.id = l.account_id
@@ -193,10 +199,55 @@ export function shareDiff(before: Record<string, string>, after: Record<string, 
 
 /** On Pocket's share panel: what goes in the file, and where. (Shap's disclaimer and privacy page say the same.) */
 export const SHARE_WHAT_GOES =
-  'One file of your books to today, for your accountant’s Shap: your invoices, costs, assets, pay runs, journals and the rest, every one dated up to today (later ones go in a later share), with their dates, references and descriptions, which can name your customers, suppliers, workers, employees and shareholders and what you paid them; your accounts; and your business’s name, VAT number and year end. Left out: photos of your slips, people’s ID, tax and bank numbers, and contact details. Nothing goes until you choose where on the share sheet, and then only there: OpenWorks never gets it, and once it’s sent Pocket can’t take it back. Each share is numbered and says what’s new, changed or gone since the last one you shared.';
+  'One file of the whole of your books as at today, for your accountant’s Shap. In it: every invoice, cost, asset, pay run, journal, logbook trip and the rest, whatever its date, with its references, descriptions and notes, which can name your customers, suppliers, workers, employees, partners and shareholders and what you paid them (and, for payroll, your employees’ age bands and medical aid members); your accounts; and your business’s details: its name, its registration, VAT, PAYE, UIF and income tax numbers (a sole proprietor’s income tax number is their own), its year end and invoice terms, and what you’ve filled in for its financial statements, such as directors, addresses, secretary and bankers. Left out: photos of your slips; your employees’ ID, tax and bank numbers; your customers’, workers’ and jobs’ contact details, addresses and notes; your business’s own address, phone, email and bank details; and where your trips went. Nothing goes until you choose where on the share sheet, and then only there: OpenWorks never gets it, and once it’s sent Pocket can’t take it back. Each share is numbered and says what’s new, changed or gone since the last one you shared.';
 
 /** The share sheet's message with the file. */
 export function pocketShareMessage(s: { number: number; through: string; previous: number | null; changes: number }, formatDate: (d: string) => string): string {
-  const whole = `Share ${s.number}: the whole of the books to ${formatDate(s.through)}`;
-  return s.previous ? `${whole}, ${s.changes} ${s.changes === 1 ? 'change' : 'changes'} since share ${s.previous}.` : `${whole}.`;
+  const whole = `Share ${s.number}: the whole of the books as at ${formatDate(s.through)}`;
+  return s.previous ? `${whole}, with ${s.changes} ${s.changes === 1 ? 'change' : 'changes'} since share ${s.previous}.` : `${whole}.`;
+}
+
+/* ---------------------------------------------------------------- limits */
+
+/** Any one value in a record: no real one is longer or bigger. */
+export const MAX_SHARE_TEXT = 50_000;
+export const MAX_SHARE_FIGURE = 1e13;
+
+/**
+ * What's wrong with a share, past its schema, if anything: the limits Shap holds a file to when it
+ * reads one, and Pocket checks before it offers one (so a file Shap would refuse is never offered).
+ */
+export function shareProblem(s: PocketShare): { kind: 'column' | 'too_big' | 'rows' | 'settings' | 'twice'; table?: string } | null {
+  let rows = 0;
+  for (const [table, list] of Object.entries(s.records)) {
+    if (!list) continue;
+    rows += list.length;
+    for (const row of list)
+      for (const [col, v] of Object.entries(row)) {
+        if (!/^[a-z_][a-z0-9_]*$/.test(col)) return { kind: 'column', table };
+        if ((typeof v === 'string' && v.length > MAX_SHARE_TEXT) || (typeof v === 'number' && (!Number.isFinite(v) || Math.abs(v) > MAX_SHARE_FIGURE))) return { kind: 'too_big', table };
+      }
+  }
+  if (rows > MAX_SHARE_ROWS) return { kind: 'rows' };
+  if ((s.records.settings ?? []).length !== 1) return { kind: 'settings' };
+  const keys = new Set<string>();
+  for (const e of s.entries) {
+    if (keys.has(e.key)) return { kind: 'twice' };
+    keys.add(e.key);
+  }
+  return null;
+}
+
+/**
+ * Which of `theirs` (a share's entries) the books' own entries `ours` don't match, and how many of
+ * ours the share hasn't got: by key, in one pass each (a share can carry many thousands).
+ */
+export function entriesOff(theirs: { key: string; hash: string }[], ours: ShareEntry[]): number {
+  const want = new Map(theirs.map((e) => [e.key, e.hash]));
+  let off = 0;
+  for (const e of ours) {
+    if (want.get(e.key) !== entryHash(e)) off++;
+    want.delete(e.key);
+  }
+  return off + want.size;
 }

@@ -7,15 +7,17 @@ entries newer than the version you're running before you update.
 
 - **Shap Pocket clients** (Shap Accountant; docs/ACCOUNTANT.md, "A Shap Pocket share"). A
   one-person business on Shap Pocket shares its books from their phone; in the practice, a client
-  added as **On Shap Pocket** gets **Bring in a share**. Each share carries Pocket's records
-  themselves (people's ID, tax and bank numbers, contact details and photos of slips stay on the
+  added as **On Shap Pocket** gets **Bring in a share**. Each share carries the whole of Pocket's
+  records (employees' ID, tax and bank numbers, the contact details of customers, workers and jobs,
+  the business's own contact and bank details, where trips went and photos of slips stay on the
   phone), so the practice's copy works out the VAT201s, payroll, statements and checks from what
   Pocket does, and Shap checks it reads them into the same entries the phone did. Each share says
   what's new, changed and gone since the one before. A share of other books, an older one, or one
-  that would move a year the practice compiled or approved here is refused, with the entries it
-  would move. The practice compiles and approves the statements in the copy; the books themselves
-  change only in Shap Pocket. Shap reads a share as it finds it and doesn't check it against the
-  client's records: the figures stay theirs.
+  that would move a year the practice compiled or approved here (its entries, or what its
+  statements show) is refused, saying what it would move. The practice compiles the statements in
+  the copy and records the directors' approval; the books themselves change only in Shap Pocket.
+  Shap reads a share as it finds it and doesn't check it against the client's records: the figures
+  stay theirs.
 - A cost put right as an asset by journal shows as an asset bought in the statement of cash flows,
   not as negative depreciation; books that begin with the opening balances moved in say the years
   shown start from nil before them.

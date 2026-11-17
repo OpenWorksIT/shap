@@ -8,44 +8,25 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { entryHash, figuresHash, POCKET_SHARE_FORMAT, SHARE_TABLES, SHARE_USER_COLUMNS, shareEntries, TERMS_VERSION, type PocketShare } from '@shap/shared';
+import { entriesOff, entryHash, POCKET_SHARE_FORMAT, SHARE_TABLES, TERMS_VERSION, type PocketShare, type ShareEntry } from '@shap/shared';
 import { auditBooks } from '../../src/audit/books.js';
-import { freshTotals } from '../../src/lib/books.js';
 import { healthOf } from '../../src/lib/practice.js';
-import { trialBalance } from '../../src/modules/reports.js';
+import { sdlLine } from '../../src/modules/payroll.js';
 import { vat201 } from '../../src/modules/taxforms.js';
 import { readPocketShare } from '../../src/modules/import/pocket-share.js';
 import { buildStatements } from '../../src/statements/build.js';
 import { createUser } from '../../src/auth.js';
 import type { Sql } from '../../src/db/index.js';
 import { expectCleanAudit, login, ref, setup, type TestEnv } from '../helpers.js';
+import { b64, makeShare as makeShareOf, tbOf } from './phone.js';
 
 const BOOKS = '7a1c9a4e-2f6b-4c1d-9a3e-5b8d2c6f1a01';
+/** The VAT201 of the fixtures' books, September and October 2026, as Pocket's own VAT201 has it. */
+const FIXTURE_VAT = { field1: 119_600, field4: 15_600, field15: 3_000, field20: 12_600 };
+const PDF = Buffer.from('%PDF-1.4\n% made-up signed page\n').toString('base64');
 
-/** A share of `src`'s books, the way Pocket's engine makes one (modules/share.ts). */
-async function makeShare(src: Sql, o: { number: number; madeAt: string; through: string; books?: string; previous?: number | null }): Promise<PocketShare> {
-  await freshTotals(src);
-  const records: Record<string, Record<string, unknown>[]> = {};
-  for (const t of SHARE_TABLES) {
-    const rows = await src.unsafe<{ j: string }[]>(`select row_to_json(t)::text as j from ${t.table} t`);
-    records[t.table] = rows.map((r) => {
-      const row = JSON.parse(r.j) as Record<string, unknown>;
-      for (const c of t.leaveOut ?? []) delete row[c];
-      for (const c of SHARE_USER_COLUMNS) if (c in row) row[c] = null;
-      return row;
-    });
-  }
-  const entries = await shareEntries(src as never, o.through);
-  return {
-    format: POCKET_SHARE_FORMAT,
-    stamp: { number: o.number, madeAt: o.madeAt, through: o.through, previous: o.previous ? { number: o.previous, madeAt: '2026-10-01T08:00:00.000Z' } : null, app: 'Shap Pocket', books: o.books ?? BOOKS, version: '1.11.0' },
-    records,
-    entries: entries.map((e) => ({ key: e.key, hash: entryHash(e), figures: figuresHash(e) })),
-    changes: { added: 0, changed: 0, removed: 0 },
-  };
-}
-const b64 = (x: unknown) => Buffer.from(JSON.stringify(x)).toString('base64');
-const tbOf = async (db: Sql, d: string) => (await trialBalance(db, d)).rows.map((r) => [r.code, Number(r.balanceCents)] as [string, number]).filter(([, c]) => c !== 0);
+/** A share of the phone's books (phone.ts), these books' unless said. */
+const makeShare = (src: Sql, o: { number: number; madeAt: string; through: string; books?: string; previous?: number | null }) => makeShareOf(src, { ...o, books: o.books ?? BOOKS });
 /** What a year's statements say, figure by figure. */
 const figuresOf = (s: Awaited<ReturnType<typeof buildStatements>>) =>
   JSON.stringify({
@@ -73,6 +54,22 @@ describe('reading a Shap Pocket share', () => {
     const e = { key: 'cost:a:2026-10-01', hash: 'a'.repeat(64), figures: 'b'.repeat(64) };
     expect(read(ok({ entries: [e, e] }))).toThrow(/same entry twice/);
     expect(read(ok({ records: { costs: [] } } as never))).toThrow(/no business details/);
+  });
+
+  it('checks a share’s entries in one pass: many thousands don’t hold up the server (check 4)', () => {
+    const made = (n: number): ShareEntry[] => Array.from({ length: n }, (_, i) => ({ key: `cost:${String(i).padStart(8, '0')}:2026-10-01`, date: '2026-10-01', source: 'cost', reference: '', description: 'Made-up', lines: [{ code: '1000', cents: -i - 1, memo: '' }, { code: '6030', cents: i + 1, memo: '' }] }));
+    const ours = made(60_000);
+    const theirs = ours.map((e) => ({ key: e.key, hash: entryHash(e) }));
+    // The hashing alone, then the whole check: no more than a little over it (one comparing every
+    // entry with every other took seconds at this size).
+    let at = performance.now();
+    for (const e of ours) entryHash(e);
+    const hashing = performance.now() - at;
+    at = performance.now();
+    expect(entriesOff(theirs, ours)).toBe(0);
+    expect(performance.now() - at).toBeLessThan(hashing * 3 + 500);
+    // One missing, one changed, one the share hasn't got.
+    expect(entriesOff([...theirs.slice(1), { key: 'cost:x:2026-10-02', hash: 'a'.repeat(64) }].map((e, i) => (i === 5 ? { ...e, hash: 'b'.repeat(64) } : e)), ours)).toBe(3);
   });
 });
 
@@ -114,7 +111,7 @@ describe('a Shap Pocket client in the practice', () => {
     me = await login(phone.app, 'owner@example.co.za');
     r = await ref(phone.sql);
     const { settings } = await me.get('/api/reference');
-    await me.post('/api/settings', { ...settings, companyName: 'Made-up Spark (Pty) Ltd', businessType: 'company', fyEndMonth: 2, vatRegistered: true, vatNumber: '4740101508', vatCategory: 'B', payeRegistered: true, payeRef: '7230767891', features: { ...settings.features, dividends: true, statements: true } }, 'PUT');
+    await me.post('/api/settings', { ...settings, companyName: 'Made-up Spark (Pty) Ltd', businessType: 'company', fyEndMonth: 2, vatRegistered: true, vatNumber: '4740101508', vatCategory: 'B', payeRegistered: true, payeRef: '7230767891', sdl: true, features: { ...settings.features, dividends: true, statements: true, inventory: true } }, 'PUT');
     client = await me.post('/api/clients', { name: 'Made-up Guesthouse', email: 'guesthouse@example.co.za', address: '1 Made-up Road, Fictional Town' });
     // Last year: a sale and its money in.
     const old = await me.post('/api/documents', { kind: 'invoice', clientId: client.id, issueDate: '2025-06-10', lines: [{ category: 'labour', description: 'Rewiring (made up)', qty: 1, unitPriceCents: 200_000 }] });
@@ -126,6 +123,22 @@ describe('a Shap Pocket client in the practice', () => {
     cost = await me.post('/api/costs', { date: '2026-07-03', description: 'Cable (made up)', supplier: 'Made-up Wholesaler', amountCents: 23_000, vatCents: 3_000, vatCode: 'standard', categoryId: await r.cat('Parts'), sourceId: await r.src('Business bank') });
     await me.post('/api/assets', { name: 'Made-up trailer', category: 'vehicles', purchaseDate: '2026-03-10', costCents: 6_000_000, sourceId: await r.src('Business bank'), lifeMonths: 60, disposedOn: '2026-08-31', disposalProceedsCents: 8_000_000, disposalSourceId: await r.src('Business bank') });
     await me.post('/api/dividends', { declaredOn: '2026-07-01', paidOn: '2026-11-02', shareholder: 'Made-up Shareholder', grossCents: 1_000_000, sourceId: await r.src('Business bank') });
+    // Stock bought and sold over the counter, part of it refunded: refunds and stock records are
+    // never changed or deleted in Shap, and each share replaces them (check 2).
+    const till = (await phone.sql<{ id: string }[]>`select id from payment_sources where till`)[0]!.id;
+    const globe = await me.post('/api/items', { description: 'LED globe (made up)', unitPriceCents: 4_600, priceIncludesVat: true, stocked: true });
+    await me.post('/api/stock/purchases', { date: '2026-10-01', supplier: 'Made-up Wholesale', reference: 'MW-1', sourceId: await r.src('Business bank'), lines: [{ itemId: globe.id, qtyInvoiced: 10, unitCostCents: 2_000 }] });
+    const sale = await me.post('/api/sales', { date: '2026-10-10', sourceId: till, method: 'cash', lines: [{ itemId: globe.id, description: 'LED globe (made up)', qty: 2, unitPriceCents: 4_600 }] });
+    await me.post(`/api/documents/${sale.id}/refund`, { date: '2026-10-11', sourceId: till, reason: 'Wrong fitting (made up)', lines: [{ lineId: sale.lines[0].id, qty: 1, restock: true }] });
+    // A day's labour (SARS 8) and provisional tax paid (SARS 4).
+    const worker = await me.post('/api/workers', { name: 'Made-up Thabo', kind: 'casual', dayRateCents: 40_000 });
+    await me.post('/api/labour', { date: '2026-10-07', entries: [{ workerId: worker.id, days: 1, wageCents: 40_000 }] });
+    await me.post('/api/sars-payments', { kind: 'irp6', period: '2027-02', date: '2026-08-31', amountCents: 50_000, sourceId: await r.src('Business bank'), reference: 'Made-up IRP6' });
+    // Last year: tools (an expense) and vehicle finance (a liability), whose kind and line can change on the phone (check 1).
+    const tools = await me.post('/api/accounts', { code: '6990', name: 'Made-up tools', type: 'expense' });
+    const finance = await me.post('/api/accounts', { code: '2410', name: 'Made-up vehicle finance', type: 'liability' });
+    await me.post('/api/journals', { date: '2025-08-01', description: 'Tools (made up)', lines: [{ accountId: tools.id, debitCents: 300_000 }, { accountId: await r.acc('bank'), creditCents: 300_000 }] });
+    await me.post('/api/journals', { date: '2025-09-01', description: 'Vehicle finance (made up)', lines: [{ accountId: await r.acc('bank'), debitCents: 1_000_000 }, { accountId: finance.id, creditCents: 1_000_000 }] });
 
     owner = await login(env.app, 'owner@example.co.za');
     const s2 = (await owner.get('/api/reference')).settings;
@@ -177,6 +190,23 @@ describe('a Shap Pocket client in the practice', () => {
     expect(h.deadlineInputs!.dividendsPaid).toContain('2026-11-02');
     // Nothing in the copy says the VAT came "from another package".
     expect((await auditBooks(db, '2026-11-17')).map((i) => i.text).join(' ')).not.toMatch(/another package/);
+    // Provisional tax paid on the phone is paid in the copy (SARS 4), and its day wages are on the
+    // SDL reminder (SARS 8): from the records themselves.
+    const prov = async (sql: Sql) => (await sql<{ amountCents: number }[]>`select amount_cents from sars_payments where kind = 'irp6' and period = '2027-02'`).map((p) => Number(p.amountCents));
+    expect(await prov(db)).toEqual([50_000]);
+    const inside = await open('compile');
+    const theirsTax = (await me.get('/api/reports/provisional-tax?fyEnd=2027-02-28')).payments;
+    expect((await inside.get('/api/reports/provisional-tax?fyEnd=2027-02-28')).json().payments.map((p: { amountCents: number }) => p.amountCents)).toEqual(theirsTax.map((p: { amountCents: number }) => p.amountCents));
+    expect(await sdlLine(db, true, '2026-11-17')).toEqual(await sdlLine(phone.sql, true, '2026-11-17'));
+    expect((await sdlLine(db, true, '2026-11-17'))!.dayWagesCents).toBe(40_000);
+    // Every record the phone has is the copy's: the partners, the SARS payments, the assets sold,
+    // the day labour and the rest (what the share carries), by their ids where they have them.
+    const withId = new Set((await db<{ t: string }[]>`select table_name as t from information_schema.columns where table_schema = 'public' and column_name = 'id'`).map((x) => x.t));
+    for (const t of SHARE_TABLES.filter((x) => !['settings', 'accounts', 'statement_details'].includes(x.table))) {
+      const rows = async (sql: Sql) => (await sql.unsafe<{ k: string }[]>(withId.has(t.table) ? `select id::text as k from ${t.table} order by 1` : `select count(*)::text as k from ${t.table}`)).map((x) => x.k);
+      expect(await rows(db), t.table).toEqual(await rows(phone.sql));
+    }
+    expect((await db<{ n: number }[]>`select count(*)::int as n from refunds`)[0]!.n).toBe(1);
   });
 
   it('the same share again is already here; a lower one made earlier is refused (words 3)', async () => {
@@ -212,15 +242,23 @@ describe('a Shap Pocket client in the practice', () => {
     expect(await tbOf(await copy(), '2026-11-12')).toEqual(await tbOf(phone.sql, '2026-11-12'));
   });
 
-  it('two shares at once go in one after the other (security 3)', async () => {
-    await me.post('/api/costs', { date: '2026-11-12', description: 'Tape (made up)', supplier: 'Made-up Wholesaler', amountCents: 1_000, categoryId: await r.cat('Parts'), sourceId: await r.src('Business bank') });
+  it('two shares at once go in one after the other, the later one’s books last (security 3, check 6)', async () => {
+    // Shares 3 and 4 differ: a cost in 3 that's gone again by 4, and another in its place.
+    const tape = await me.post('/api/costs', { date: '2026-11-12', description: 'Tape (made up)', supplier: 'Made-up Wholesaler', amountCents: 1_000, categoryId: await r.cat('Parts'), sourceId: await r.src('Business bank') });
     const three = await makeShare(phone.sql, { number: 3, madeAt: '2026-11-13T08:00:00.000Z', through: '2026-11-13', previous: 2 });
+    await phone.sql`delete from costs where id = ${tape.id}`;
+    await me.post('/api/costs', { date: '2026-11-12', description: 'Glue (made up)', supplier: 'Made-up Wholesaler', amountCents: 3_000, categoryId: await r.cat('Parts'), sourceId: await r.src('Business bank') });
     const four = await makeShare(phone.sql, { number: 4, madeAt: '2026-11-13T09:00:00.000Z', through: '2026-11-13', previous: 3 });
+    const theirs = await tbOf(phone.sql, '2026-11-13');
     const both = await Promise.all([bringIn(four), bringIn(three)]);
-    expect(both.some((x) => x.statusCode === 200)).toBe(true);
+    // Either 3 then 4 (both come in), or 4 first and 3 refused as older: never the two at once.
+    expect(both[0]!.statusCode, both[0]!.body).toBe(200);
+    if (both[1]!.statusCode !== 200) expect(both[1]!.json().error).toMatch(/This is share 3, and Shap already has share 4 of these books: ask them for their latest share/);
     const db = await copy();
-    expect((await db<{ n: number }[]>`select max(number)::int as n from pocket_shares`)[0]!.n).toBe(4);
-    expect(await tbOf(db, '2026-11-13')).toEqual(await tbOf(phone.sql, '2026-11-13'));
+    const numbers = (await db<{ number: number }[]>`select number from pocket_shares order by imported_at, number`).map((x) => x.number);
+    expect(numbers.at(-1)).toBe(4);
+    expect(await tbOf(db, '2026-11-13')).toEqual(theirs);
+    expect((await db<{ n: number }[]>`select count(*)::int as n from costs where description = 'Tape (made up)'`)[0]!.n).toBe(0);
   });
 
   it('a phone restored from an older backup: a lower number made later comes in, marked so', async () => {
@@ -229,7 +267,7 @@ describe('a Shap Pocket client in the practice', () => {
     expect(res.json().restored).toBe(true);
   });
 
-  it('in the copy, the practice compiles and approves; the books themselves change only in Shap Pocket', async () => {
+  it('in the copy, the practice compiles and records the approval; the books themselves change only in Shap Pocket', async () => {
     const inside = await open('books');
     const no = await inside.send('POST', '/api/costs', { date: '2026-11-14', description: 'Made-up', amountCents: 100, categoryId: await r.cat('Parts'), sourceId: await r.src('Business bank') });
     expect(no.statusCode).toBe(403);
@@ -241,6 +279,17 @@ describe('a Shap Pocket client in the practice', () => {
     expect(saved.statusCode, saved.body).toBe(200);
     const compiled = await compiling.send('POST', '/api/statements/2026-02-28/compile', { date: '2026-11-15', compiler: { name: 'Made-up Compiler', qualification: 'Professional Accountant (SA)', body: 'SAIPA', number: '00000', practice: 'Made-up Practice' } });
     expect(compiled.statusCode, compiled.body).toBe(200);
+    // Recording the directors' approval records it, and nothing else: the year ends and closed
+    // months are the owner's, from the phone.
+    const writing = await open('books');
+    const signed = await writing.send('POST', '/api/attachments', { filename: 'signed approval.pdf', mime: 'application/pdf', dataBase64: PDF });
+    expect(signed.statusCode, signed.body).toBe(200);
+    const approved = await writing.send('POST', '/api/statements/2026-02-28/approve', { name: 'Made-up Director', date: '2026-11-16', signedId: signed.json().id });
+    expect(approved.statusCode, approved.body).toBe(200);
+    const db = await copy();
+    expect((await db<{ status: string }[]>`select status from financial_statements where fy_end = '2026-02-28'`)[0]!.status).toBe('approved');
+    expect(await db`select 1 from year_ends where fy_end = '2026-02-28'`).toHaveLength(0);
+    expect((await db<{ lockDate: string | null }[]>`select lock_date::text as lock_date from settings where id`)[0]!.lockDate).toBeNull();
   });
 
   it('a compiled year: its figures can’t move, its wording can, and its business details can’t change (security 1, IFRS 3, accounting 3)', async () => {
@@ -260,21 +309,57 @@ describe('a Shap Pocket client in the practice', () => {
     expect(yearEnd.statusCode).toBe(400);
     expect(yearEnd.json().error).toMatch(/changes the year end, and the statements to 28 Feb 2026 were drawn up on them here/);
     await phone.sql`update settings set fy_end_month = 2`;
+    // An account's kind, or the line it's shown on, changed on the phone: what the approved year's
+    // statements show would move, its entries the same. Refused, and the statements as they were (check 1).
+    const db = await copy();
+    const before = figuresOf(await buildStatements(db, '2026-02-28'));
+    await phone.sql`update accounts set type = 'asset' where code = '6990'`;
+    const kind = await bringIn(await makeShare(phone.sql, { number: 8, madeAt: '2026-11-17T09:00:00.000Z', through: '2026-11-17', previous: 5 }));
+    expect(kind.statusCode).toBe(400);
+    expect(kind.json().error).toMatch(/Share 8 changes what the statements to 28 Feb 2026 show, where they were compiled here: an account’s kind or the line it’s shown on/);
+    await phone.sql`update accounts set type = 'expense' where code = '6990'`;
+    await phone.sql`update accounts set statement_line = 'borrowings_non_current' where code = '2410'`;
+    const line = await bringIn(await makeShare(phone.sql, { number: 8, madeAt: '2026-11-17T09:00:00.000Z', through: '2026-11-17', previous: 5 }));
+    expect(line.statusCode).toBe(400);
+    await phone.sql`update accounts set statement_line = null where code = '2410'`;
+    expect(figuresOf(await buildStatements(db, '2026-02-28'))).toBe(before);
+    // In a year still open, an account's kind follows the phone from share to share (accounting 1).
+    const hand = await me.post('/api/accounts', { code: '6991', name: 'Made-up hand tools', type: 'expense' });
+    await me.post('/api/journals', { date: '2026-11-03', description: 'Hand tools (made up)', lines: [{ accountId: hand.id, debitCents: 20_000 }, { accountId: await r.acc('bank'), creditCents: 20_000 }] });
+    const eight = await bringIn(await makeShare(phone.sql, { number: 8, madeAt: '2026-11-17T09:00:00.000Z', through: '2026-11-17', previous: 5 }));
+    expect(eight.statusCode, eight.body).toBe(200);
+    await phone.sql`update accounts set type = 'asset' where code = '6991'`;
+    const nine = await bringIn(await makeShare(phone.sql, { number: 9, madeAt: '2026-11-17T10:00:00.000Z', through: '2026-11-17', previous: 8 }));
+    expect(nine.statusCode, nine.body).toBe(200);
+    expect((await db<{ type: string }[]>`select type from accounts where code = '6991'`)[0]!.type).toBe('asset');
+    expect(figuresOf(await buildStatements(db, '2027-02-28'))).toBe(figuresOf(await buildStatements(phone.sql, '2027-02-28')));
     await expectCleanAudit(await copy(), '2026-11-17');
     await expectCleanAudit(phone.sql, '2026-11-17');
   });
 
-  it('a share made by Shap Pocket’s own engine (test/fixtures) comes in entry for entry, so the two apps read the same records the same way', async () => {
-    const file = readFileSync(join(import.meta.dirname, '../fixtures/pocket-share-1.11.json'));
+  it('shares made by Shap Pocket’s own engine (test/fixtures, from its share-file test) come in entry for entry, the second after a refund too (check 2)', async () => {
+    const fixture = (n: string) => readFileSync(join(import.meta.dirname, `../fixtures/${n}`));
     const { id: other } = await owner.post('/api/practice/clients', { name: 'Made-up Mobile Sparky', kind: 'pocket' });
-    const res = await owner.call({ method: 'POST', url: `/api/practice/clients/${other}/pocket-share`, payload: { name: 'Made-up Mobile Sparky share 1.json', dataBase64: file.toString('base64'), acceptTerms: true }, remoteAddress: '10.67.0.1' });
-    expect(res.statusCode, res.body).toBe(200);
+    const send = (n: string, i: number) =>
+      owner.call({ method: 'POST', url: `/api/practice/clients/${other}/pocket-share`, payload: { name: `Made-up Mobile Sparky ${n}`, dataBase64: fixture(n).toString('base64'), acceptTerms: true }, remoteAddress: `10.67.0.${i}` });
+    const first = await send('pocket-share-1.11.json', 1);
+    expect(first.statusCode, first.body).toBe(200);
     const db = env.ctx.clients.get((await env.sql<{ dbName: string }[]>`select db_name from practice_clients where id = ${other}`)[0]!.dbName);
+    expect((await db<{ n: number }[]>`select count(*)::int as n from refunds`)[0]!.n).toBe(1);
+    // The second share replaces the refund with the phone's, as every share replaces every record.
+    const second = await send('pocket-share-1.11-2.json', 2);
+    expect(second.statusCode, second.body).toBe(200);
+    expect(second.json().changes).toMatchObject({ added: 1, changed: 0, removed: 0 });
     const tb = new Map(await tbOf(db, '2026-11-17'));
-    // The invoice (R1 000 + VAT) paid, the cable (R200 + VAT), a day's labour (R400), the bank charges (R95).
-    expect(tb.get('1000')).toBe(115_000 - 23_000 - 9_500);
+    // The invoice (R1 000 + VAT) paid, the cable (R200 + VAT), the bank charges (R95), the tape (R15);
+    // the cost dated 20 December not yet.
+    expect(tb.get('1000')).toBe(115_000 - 23_000 - 9_500 - 1_500);
     expect([...tb.values()].reduce((a, b) => a + b, 0)).toBe(0);
-    expect(await vat201(db, '2026-09-01', '2026-10-31')).toMatchObject({ field1: 115_000, field4: 15_000, field15: 3_000 });
+    expect(new Map(await tbOf(db, '2026-12-31')).get('1000')).toBe(115_000 - 23_000 - 9_500 - 1_500 - 1_000);
+    // On the VAT201: the invoice and the counter sale less the half refunded; the cable's VAT.
+    expect(await vat201(db, '2026-09-01', '2026-10-31')).toMatchObject(FIXTURE_VAT);
+    // What stayed on the phone isn't here: the trip's places, the brand's address.
+    expect((await db<{ toPlace: string | null }[]>`select to_place from trips`)[0]!.toPlace ?? '').toBe('');
     await expectCleanAudit(db, '2026-11-17');
   });
 
@@ -284,6 +369,19 @@ describe('a Shap Pocket client in the practice', () => {
     const res = await bringIn({ not: 'a share' }, { who: clerk });
     expect(res.statusCode).toBe(403);
     expect(res.json().error).toMatch(/for the practice’s owner, or whoever is given their books to write up/);
+    // A client kept here: the clerk isn't told it isn't on Shap Pocket; the owner is.
+    const { id: kept } = await owner.post('/api/practice/clients', { name: 'Made-up Kept Client', kind: 'kept' });
+    const at = (who: typeof owner) => who.call({ method: 'POST', url: `/api/practice/clients/${kept}/pocket-share`, payload: { name: 'x.json', dataBase64: b64({ not: 'a share' }) }, remoteAddress: `10.68.0.${++n & 255}` });
+    const theirs = await at(clerk);
+    expect(theirs.statusCode).toBe(403);
+    expect(theirs.json().error).not.toMatch(/Shap Pocket\./);
+    const ours = await at(owner);
+    expect(ours.statusCode).toBe(400);
+    expect(ours.json().error).toBe('This client’s books aren’t kept on Shap Pocket.');
+    // Asked before the file is read: a body that isn't even JSON is refused as theirs to send, not read.
+    const unread = await clerk.call({ method: 'POST', url: `/api/practice/clients/${id}/pocket-share`, payload: '{"name": "x.json", "dataBase64": "', headers: { 'content-type': 'application/json' }, remoteAddress: `10.68.1.${++n & 255}` });
+    expect(unread.statusCode).toBe(403);
+    expect(unread.json().error).toMatch(/for the practice’s owner, or whoever is given their books to write up/);
     await expectCleanAudit(env.sql);
   });
 });

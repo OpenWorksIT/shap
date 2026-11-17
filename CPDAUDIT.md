@@ -788,7 +788,7 @@ same books. Pocket's tables are Shap's (62 identical, the rest Shap's with a few
 the share now carries Pocket's records themselves (`SHARE_TABLES`, packages/shared
 pocket-share.ts, the same file in both apps), and Shap puts them into the copy: its screens then
 work from what Pocket's do. Tests: `test/accountant/pocket-share.test.ts` (a second database plays
-the phone; a share made by Pocket's own engine, `test/fixtures/pocket-share-1.11.json`, comes in
+the phone; two shares made by Pocket's own engine, `test/fixtures/pocket-share-1.11*.json`, come in
 entry for entry) and `test/review-1.29/statements.test.ts`; Pocket's `share.test.ts` and
 `shared-statements-1.28.test.ts`.
 
@@ -836,6 +836,31 @@ entry for entry) and `test/review-1.29/statements.test.ts`; Pocket's `share.test
   for the owner or whoever writes them up); a new Pocket client's card says to bring in its first
   share; the docs. The website's privacy page and disclaimer say what a share carries (within terms
   3.1, 3.8 and 4.1: no re-acceptance).
+- The fixes, checked by a separate agent: a second share failed for any client who had sold over
+  the counter (the copy's counter sale pointed at its receipt, and refunds and stock records,
+  never changed or deleted in Shap, were replaced with each share): what points forward is let
+  go first, and the share's own transaction may replace those records (migration 049, a setting
+  that ends with it). A compiled or approved year's statements could still move when an account's
+  kind or statement line changed on the phone, its entries the same: each such year must still give
+  its signed figures (`stillSigned`) or the share is refused, saying which. A share without one of
+  Shap's own accounts deleted it, and the next gave it another id, which the database's plans
+  don't see: Shap's own accounts are never taken out (one left out stays as it is), and a share with
+  one this Shap doesn't know is refused. The entries were checked against each other in a way that
+  took seconds at 40 000 (one pass now, shared: `entriesOff`). The panel said less went than does:
+  each share is now the whole of the books whatever their dates (every entry checked, not only to
+  the day it was made), the words name the business's tax numbers and its statements' details, and
+  the brand's address and the trips' places stay on the phone (`SHARE_WHAT_GOES`, the docs, the
+  changelogs and the website's privacy page; Pocket's `share-file.test.ts` holds the words to a file,
+  and makes Shap's fixtures). Pocket checks the read limits Shap holds a file to before it offers
+  one (`shareProblem`, shared). The copy says the practice compiles and records the directors'
+  approval; Who opens it says what writing up a Pocket client's copy is; a restored phone is said as
+  what the stamp suggests. Who may bring a share in is asked before its file is read, not after.
+  Tests: the two-at-once test with shares that differ (it fails without
+  the lock), recording an approval in a copy (no year end, no lock), the partners and an asset's
+  proceeds on turnover tax, provisional tax paid and day wages in a copy, every record across,
+  an account's kind following the phone in an open year, the share route for a client kept here,
+  and the words (`test/review-1.29/share-check.test.ts`, `words.test.ts`, and
+  `test/accountant/pocket-share.test.ts` with both of Pocket's own share files).
 
 ### Code scanning (CodeQL), first run
 

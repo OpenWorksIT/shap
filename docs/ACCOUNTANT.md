@@ -131,12 +131,18 @@ residents: section 25B is the accountant's to work out). Shap's figures are esti
 ## A Shap Pocket share
 
 A one-person business on Shap Pocket keeps its books on the owner's phone. **Accounts → Export →
-Share your books with your accountant**, in Pocket, makes one file of the books: Pocket's records
-themselves (the invoices, costs, assets, pay runs, journals and the rest, as captured), with their
-dates, references and descriptions, which can name the business's customers, suppliers, workers,
-employees and shareholders and what they were paid; the accounts; and the business's details.
-Left out: who signs in, photos of slips, people's ID, tax and bank numbers, and contact details
-(`SHARE_TABLES` in packages/shared pocket-share.ts). It goes only where the owner sends it, from the
+Share your books with your accountant**, in Pocket, makes one file of the whole of the books:
+Pocket's records themselves, whatever their dates (the invoices, costs, assets, pay runs, journals,
+logbook trips and the rest, as captured), with their references, descriptions and notes, which can
+name the business's customers, suppliers, workers, employees, partners and shareholders and what
+they were paid (and, for payroll, the employees' age bands and medical aid members); the accounts;
+and the business's details: its name, its registration, VAT, PAYE, UIF and income tax numbers (a
+sole proprietor's income tax number is their own), its year end and invoice terms, and what the
+owner filled in for its financial statements (directors, addresses, secretary, bankers). Left out:
+who signs in, photos of slips, employees' ID, tax and bank numbers, the contact details, addresses
+and notes of customers, workers and jobs, the business's own address, phone, email and bank
+details, and where trips went (`SHARE_TABLES` in packages/shared pocket-share.ts; the panel's words,
+`SHARE_WHAT_GOES`, are tested against a file). It goes only where the owner sends it, from the
 phone's share sheet. Each share is numbered, stamped with the day it was made and with these
 books' own id, and says what changed since the last one shared. Pocket counts it as shared once
 the owner picks where it goes on the share sheet (on a computer, once it's saved), whether or not
@@ -154,15 +160,19 @@ new, what changed (an entry moved to another day counts once) and what's gone si
 before, worked out from what it holds.
 
 What Shap refuses: a share of other books (each is tied to the first share's books id); the same
-share again, or an older one (a lower number made later is taken as books restored on the phone,
-and marked so); and, once the practice has compiled or approved a year's statements here, a share
-that moves that year's figures, or changes the kind of business, the year end or VAT registration
-they were drawn up on (renamed customers or changed memos come in). The refusal lists the entries.
-One share comes in at a time.
+share again, or an older one (a lower number made later is taken to mean the books were restored
+or begun again on the phone, and marked so); a share with an account Pocket keeps itself that this
+Shap doesn't know (one of the two may need updating); and, once the practice has compiled or
+approved a year's statements here, a share that moves that year's entries (the refusal lists
+them), changes what its statements show (an account's kind or the line it's shown on, say), or
+changes the kind of business, the year end or VAT registration they were drawn up on (renamed
+customers or changed memos come in). One share comes in at a time. Shap's own accounts in the copy
+keep their ids whatever a share has. Refunds and stock records, which are otherwise never changed
+or deleted, are replaced with the phone's in the share's own transaction only.
 
-The copy is the practice's to compile in: whoever opens it compiles and approves the statements
-there (approving records it, and nothing else: the year ends and closed months are the owner's,
-from the phone), and the copy's own books aren't written in. Adjustments the practice finds go to
+The copy is the practice's to compile in: whoever opens it compiles the statements there and
+records the directors' approval (recording it, and nothing else: the year ends and closed months
+are the owner's, from the phone), and the copy's own books aren't written in. Adjustments the practice finds go to
 the owner, to make in Pocket and share again. The figures are the client's, as the share has them:
 Shap doesn't check them against the client's records (`POCKET_SHARE_NOTE`).
 
@@ -174,7 +184,9 @@ clients they're given** ticked (Settings → People who sign in) and the client 
 
 - **Writes up the books, as their owner in Shap**: they can do everything the client's owner could,
   reopening closed periods included, and they record the client's approval of the financial
-  statements (below). They can also open the books to compile.
+  statements (below). They can also open the books to compile. In a Shap Pocket client's copy, they
+  bring in the shares, compile, and record the approval: the books themselves change only in Shap
+  Pocket (above).
 - **Reads them and compiles the statements, as their accountant in Shap (read only)**: the
   financial statements, docs/STATEMENTS.md.
 

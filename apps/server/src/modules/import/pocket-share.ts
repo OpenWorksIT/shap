@@ -7,13 +7,16 @@
  * Pocket's tables are Shap's (the same accounting code), so each share replaces the copy's records
  * with the phone's: the copy then works out its VAT201s, payroll, statements and checks from what
  * Pocket does. Shap checks it reads the records into the same entries Pocket did (every entry's
- * hash), and that nothing moves in a year the practice compiled or approved here. One share at a
- * time; a share of other books is refused.
+ * hash, whatever its date), and that nothing moves in a year the practice compiled or approved here:
+ * neither its entries nor what its statements show. One share at a time; a share of other books is
+ * refused. Shap's own accounts keep their ids in the copy whatever a share has.
  */
-import { BUSINESS_TYPES, entity, entryHash, figuresHash, formatDate, MAX_SHARE_ROWS, POCKET_SHARE_FORMAT, pocketShareSchema, sha256Hex, SHARE_TABLES, SHARE_USER_COLUMNS, shareDiff, shareEntries, VAT_CATEGORIES, type PocketShare, type ShareEntry } from '@shap/shared';
+import { BUSINESS_TYPES, entity, entriesOff, entryHash, figuresHash, formatDate, MAX_SHARE_ROWS, POCKET_SHARE_FORMAT, pocketShareSchema, sha256Hex, SHARE_TABLES, SHARE_USER_COLUMNS, shareDiff, shareEntries, shareProblem, VAT_CATEGORIES, type PocketShare, type ShareEntry } from '@shap/shared';
 import type { Db } from '../../db/index.js';
 import { badRequest } from '../../lib/errors.js';
 import { freshTotals } from '../../lib/books.js';
+import { stillSigned } from '../financial-statements.js';
+import { buildStatements, type Statements } from '../../statements/build.js';
 
 export { POCKET_SHARE_FORMAT, pocketShareSchema, type PocketShare } from '@shap/shared';
 
@@ -21,9 +24,6 @@ export { POCKET_SHARE_FORMAT, pocketShareSchema, type PocketShare } from '@shap/
 export const looksLikePocketShare = (bytes: Buffer) => bytes.subarray(0, 200).toString('utf8').includes(POCKET_SHARE_FORMAT);
 
 const FAULT = 'If a new share says the same, please let us know: tap Feedback, then Bug found.';
-/** Any one value in a record: no real one is longer or bigger. */
-const MAX_TEXT = 50_000;
-const MAX_NUMBER = 1e13;
 
 /** The file, read and checked: a share in the format, within its limits. */
 export function readPocketShare(name: string, bytes: Buffer): PocketShare & { fileHash: string } {
@@ -37,24 +37,13 @@ export function readPocketShare(name: string, bytes: Buffer): PocketShare & { fi
   if (!r.success)
     throw badRequest(`“${name}” isn’t a share this Shap can read. If they’ve updated Shap Pocket, this Shap may need updating too (whoever runs the server); otherwise ask them to share their books again.`);
   const s = r.data;
-  let rows = 0;
-  for (const [table, list] of Object.entries(s.records)) {
-    if (!list) continue;
-    rows += list.length;
-    for (const row of list)
-      for (const [col, v] of Object.entries(row)) {
-        if (!/^[a-z_][a-z0-9_]*$/.test(col)) throw badRequest(`“${name}” has a column Shap doesn’t know in ${table}. ${FAULT}`);
-        if ((typeof v === 'string' && v.length > MAX_TEXT) || (typeof v === 'number' && (!Number.isFinite(v) || Math.abs(v) > MAX_NUMBER)))
-          throw badRequest(`“${name}” has a figure or text in ${table} bigger than any Shap keeps. ${FAULT}`);
-      }
-  }
-  if (rows > MAX_SHARE_ROWS) throw badRequest(`“${name}” has more records than Shap brings in at once (${MAX_SHARE_ROWS.toLocaleString('en-ZA')}).`);
-  if ((s.records.settings ?? []).length !== 1) throw badRequest(`“${name}” has no business details in it. ${FAULT}`);
-  const keys = new Set<string>();
-  for (const e of s.entries) {
-    if (keys.has(e.key)) throw badRequest(`“${name}” has the same entry twice. ${FAULT}`);
-    keys.add(e.key);
-  }
+  // The limits Pocket checks before it offers a file (packages/shared pocket-share.ts).
+  const p = shareProblem(s);
+  if (p?.kind === 'column') throw badRequest(`“${name}” has a column Shap doesn’t know in ${p.table}. ${FAULT}`);
+  if (p?.kind === 'too_big') throw badRequest(`“${name}” has a figure or text in ${p.table} bigger than any Shap keeps. ${FAULT}`);
+  if (p?.kind === 'rows') throw badRequest(`“${name}” has more records than Shap brings in at once (${MAX_SHARE_ROWS.toLocaleString('en-ZA')}).`);
+  if (p?.kind === 'settings') throw badRequest(`“${name}” has no business details in it. ${FAULT}`);
+  if (p?.kind === 'twice') throw badRequest(`“${name}” has the same entry twice. ${FAULT}`);
   return { ...s, fileHash: sha256Hex(bytes.toString('latin1')) };
 }
 
@@ -136,12 +125,21 @@ export async function applyPocketShare(tx: Db, share: PocketShare & { fileHash: 
 
   // The copy's entries before: what changed, and what a compiled year had.
   await freshTotals(tx);
-  const before = await shareEntries(query(tx), '2100-12-31');
+  const before = await shareEntries(query(tx));
   const beforeBy = new Map(before.map((e) => [e.key, e]));
 
   // Out with the copy's records (theirs from the last share), then in with the share's, in order.
+  // Stock records and refunds are otherwise never changed or deleted (migration 049): here they're
+  // the phone's, replaced as a whole, in this transaction only.
+  await tx.unsafe(`set local shap.pocket_share = 'on'`);
   const cols = await columnsOf(tx);
   await tx`update settings set default_receipt_source_id = null, default_wage_source_id = null, default_cost_source_id = null, default_brand_id = null where id`;
+  // What points forward (a counter sale at its receipt, a credit note at its invoice) is let go
+  // first, as it's set last when they go back in.
+  for (const t of SHARE_TABLES) {
+    const forward = (t.later ?? []).filter((c) => cols.get(t.table)?.has(c));
+    if (forward.length) await tx.unsafe(`update ${t.table} set ${forward.map((c) => `${c} = null`).join(', ')} where ${forward.map((c) => `${c} is not null`).join(' or ')}`);
+  }
   for (const t of [...SHARE_TABLES].reverse()) {
     if (t.table === 'settings' || t.table === 'statement_details' || t.table === 'accounts' || !cols.has(t.table)) continue;
     await tx.unsafe(`delete from ${t.table}`);
@@ -210,15 +208,13 @@ export async function applyPocketShare(tx: Db, share: PocketShare & { fileHash: 
     features = coalesce(features, '{}'::jsonb) || '{"statements": true}'::jsonb where id`;
   await freshTotals(tx);
 
-  // The same entries Pocket had, to the day it was shared: every one, hash for hash.
-  const after = await shareEntries(query(tx), st.through);
-  const theirs = new Map(share.entries.map((e) => [e.key, e.hash]));
-  const off = after.filter((e) => theirs.get(e.key) !== entryHash(e)).length + share.entries.filter((e) => !after.some((a) => a.key === e.key)).length;
+  // The same entries Pocket had, whatever their dates: every one, hash for hash.
+  const afterAll = await shareEntries(query(tx));
+  const off = entriesOff(share.entries, afterAll);
   if (off)
     throw badRequest(
       `Shap reads share ${st.number} into ${off} ${off === 1 ? 'entry' : 'entries'} other than the Shap Pocket that made it${st.version ? ` (${st.version})` : ''} did, so nothing came in. If they’ve updated Shap Pocket, this Shap may need updating too (whoever runs the server). ${FAULT}`,
     );
-  const afterAll = await shareEntries(query(tx), '2100-12-31');
   const afterBy = new Map(afterAll.map((e) => [e.key, e]));
 
   // Nothing moves on or before a year the practice compiled or approved here (by its figures).
@@ -243,6 +239,17 @@ export async function applyPocketShare(tx: Db, share: PocketShare & { fileHash: 
       );
     }
   }
+
+  // And every year compiled or approved here still gives the figures signed: its accounts' kinds
+  // and statement lines too (a share brings the phone's chart), not only its entries.
+  const signed = await tx<{ fyEnd: string; snapshot: Statements; snapshotHash: string | null }[]>`
+    select fy_end::text as fy_end, snapshot, snapshot_hash from financial_statements where status in ('compiled', 'approved') and snapshot is not null order by fy_end`;
+  const unsigned: string[] = [];
+  for (const r of signed) if (!stillSigned(r, await buildStatements(tx, r.fyEnd, r.snapshot.details))) unsigned.push(r.fyEnd);
+  if (unsigned.length)
+    throw badRequest(
+      `Share ${st.number} changes what the statements to ${unsigned.map((d) => formatDate(d)).join(' and ')} show, where they were compiled here: an account’s kind or the line it’s shown on, or what the statements are drawn from. Ask the client what they changed in their accounts; reopen those statements first (Accounts → Financial statements) if it should come in.`,
+    );
 
   const d = shareDiff(Object.fromEntries(before.map((e) => [e.key, entryHash(e)])), Object.fromEntries(afterAll.map((e) => [e.key, entryHash(e)])));
   const first = !last;
@@ -271,13 +278,17 @@ async function referencesTo(tx: Db, table: string): Promise<Map<string, string[]
 /**
  * The phone's chart into the copy's, keeping the copy's ids: each of the phone's accounts matched to
  * one here by its system key (Shap's own accounts), else by its code; the rest added as they are;
- * the copy's accounts the phone no longer has taken out (nothing refers to them by now). Returns the
- * phone's id → the copy's.
+ * the copy's other accounts the phone no longer has taken out (nothing refers to them by now).
+ * Shap's own accounts are never taken out, nor their ids changed (sys_account()'s answer is kept in
+ * the database's plans): one the share hasn't got stays as it is. A share with one of Pocket's own
+ * that this Shap doesn't know is refused. Returns the phone's id → the copy's.
  */
 async function replaceAccounts(tx: Db, theirs: Record<string, unknown>[], here: Map<string, string>): Promise<Map<string, string>> {
   const ours = await tx<{ id: string; code: string; systemKey: string | null }[]>`select id, code, system_key from accounts`;
   const bySystem = new Map(ours.filter((a) => a.systemKey).map((a) => [a.systemKey!, a.id]));
   const byCode = new Map(ours.filter((a) => !a.systemKey).map((a) => [a.code, a.id]));
+  if (theirs.some((a) => a.system_key && !bySystem.has(String(a.system_key))))
+    throw badRequest(`The share has an account Shap Pocket keeps itself that this Shap doesn’t know. If they’ve updated Shap Pocket, this Shap may need updating too (whoever runs the server). ${FAULT}`);
   const idOf = new Map<string, string>();
   const taken = new Set<string>();
   for (const a of theirs) {
@@ -290,7 +301,7 @@ async function replaceAccounts(tx: Db, theirs: Record<string, unknown>[], here: 
   }
   // Codes out of the way first, so two accounts can swap theirs.
   await tx`update accounts set code = 'was-' || id::text`;
-  await tx`delete from accounts where not (id = any(${[...taken]}::uuid[]))`;
+  await tx`delete from accounts where system_key is null and not (id = any(${[...taken]}::uuid[]))`;
   const fields = (a: Record<string, unknown>) => Object.fromEntries(Object.entries(a).filter(([k]) => here.has(k) && k !== 'id').map(([k, v]) => [k, v]));
   for (const a of theirs) {
     const mine = idOf.get(String(a.id));
@@ -300,6 +311,12 @@ async function replaceAccounts(tx: Db, theirs: Record<string, unknown>[], here: 
     } catch (err) {
       throw badRequest(`Shap couldn’t take in the share’s accounts (${String((err as Error).message).slice(0, 160)}). ${FAULT}`);
     }
+  }
+  // Shap's own accounts the share hasn't got: their codes back, unless the phone uses one for another.
+  for (const a of ours.filter((x) => x.systemKey && !taken.has(x.id))) {
+    const [clash] = await tx`select 1 from accounts where code = ${a.code}`;
+    if (clash) throw badRequest(`Shap couldn’t take in the share’s accounts (account ${a.code} is one Shap keeps itself). ${FAULT}`);
+    await tx`update accounts set code = ${a.code} where id = ${a.id}`;
   }
   return idOf;
 }

@@ -278,8 +278,8 @@ export default function PracticePage() {
                     )}
                     {h.pocket && (
                       <p className="small">
-                        <strong>Their last share:</strong> share {h.pocket.number}, their books to {formatDate(h.pocket.through)}, brought in {formatDate(dayOf(h.pocket.importedAt))}
-                        {h.pocket.restored ? ' (from books restored on their phone)' : h.pocket.added + h.pocket.changed + h.pocket.removed > 0 ? `: ${h.pocket.added} new, ${h.pocket.changed} changed and ${h.pocket.removed} gone since the share before` : ''}.
+                        <strong>Their last share:</strong> share {h.pocket.number}, their books as at {formatDate(h.pocket.through)}, brought in {formatDate(dayOf(h.pocket.importedAt))}
+                        {h.pocket.restored ? ` (${POCKET_RESTORED_SHORT})` : h.pocket.added + h.pocket.changed + h.pocket.removed > 0 ? `: ${h.pocket.added} new, ${h.pocket.changed} changed and ${h.pocket.removed} gone since the share before` : ''}.
                       </p>
                     )}
                     <p className="small">
@@ -336,6 +336,16 @@ export default function PracticePage() {
   );
 }
 
+/** Who opens it: what writing up a client's books lets someone do (docs/ACCOUNTANT.md, "Who opens which"). */
+const WHO_OPENS_KEPT =
+  'As their owner in Shap, someone who writes up the books can do everything the client’s owner could, reopening closed periods included, and records the client’s approval of the financial statements (with the page they signed). Approving the statements is the client’s own decision.';
+const WHO_OPENS_POCKET =
+  'Their books change only in Shap Pocket, on their phone. Someone who writes them up here brings in their shares, compiles the statements and records the directors’ approval (with the page they signed): approving the statements is the client’s own decision.';
+/** A share numbered lower than the last, made later: what Shap takes it to mean, not what it knows. */
+const POCKET_RESTORED =
+  'It numbers lower than the share before but was made later, which usually means their books were restored from a backup or begun again on their phone: check with them that this is the share they meant to send.';
+const POCKET_RESTORED_SHORT = 'numbered lower than the share before: their books restored on their phone, it seems';
+
 function AccessDrawer({ client, people, onClose, onSaved }: { client: PracticeClient; people: Practice['people']; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
   const [levels, setLevels] = useState<Record<string, Level | ''>>(Object.fromEntries(client.access.map((a) => [a.userId, a.level])));
@@ -383,9 +393,7 @@ function AccessDrawer({ client, people, onClose, onSaved }: { client: PracticeCl
               </Field>
             </div>
           ))}
-          <p className="xs muted">
-            As their owner in Shap, someone who writes up the books can do everything the client’s owner could, reopening closed periods included, and records the client’s approval of the financial statements (with the page they signed). Approving the statements is the client’s own decision.
-          </p>
+          <p className="xs muted">{client.kind === 'pocket' ? WHO_OPENS_POCKET : WHO_OPENS_KEPT}</p>
         </div>
       )}
     </Drawer>
@@ -464,7 +472,9 @@ function ShareDrawer({ client, result, onClose }: { client: string; result: Shar
   return (
     <Drawer title={<span data-private>{client}: share {result.number}</span>} sub={result.first ? 'The first share: the whole of their books, brought in' : 'Brought in: what changed since the share before'} onClose={onClose}>
       <div className="stack">
-        <p className="small">Their books are here as the share has them, to {formatDate(result.through)}.{result.restored ? ' The share is from books restored or begun again on their phone, so it numbers lower than the last one.' : ''}</p>
+        <p className="small">
+          Their books are here as the share has them, as at {formatDate(result.through)}.{result.restored ? ` ${POCKET_RESTORED}` : ''}
+        </p>
         {result.first ? (
           <p className="small">Each share after this one says what’s new, what changed and what’s gone.</p>
         ) : added + changed + removed === 0 ? (
