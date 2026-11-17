@@ -10,7 +10,7 @@
 import PDFDocument from 'pdfkit';
 import { formatAmount, formatDate } from '@shap/shared';
 import { usePdfFonts } from '../modules/pdf.js';
-import { lawFor } from './details.js';
+import { addresseeIsntManagement, lawFor, reportAddressee, specialPurposeFor } from './details.js';
 import type { Amounts, Line, Statements } from './build.js';
 
 const INK = '#1d262c';
@@ -242,22 +242,34 @@ export function renderStatementsPdf(s: Statements, sig: Signatures = {}): Promis
   // ---------------------------------------------------------------- compiler's report
   if (s.details.assurance === 'compiled') {
     newPage();
-    // To those who own it: a company's shareholders, a CC's or co-op's members; an NPC's directors.
-    const to = ({ company: 'shareholders', inc: 'shareholders', npc: 'directors', cc: 'members', coop: 'members' } as Partial<Record<string, string>>)[s.company.businessType] ?? many;
+    // To those who own it: a company's shareholders, a CC's or co-op's members; an NPC's directors
+    // (as the engagement letter Shap drafts says). Where they aren't who prepares the statements
+    // (a company's shareholders, a co-op's members), the report names the directors, as ISRS 4410
+    // (Revised) para 40(c)-(d) put it on management.
+    const bt = s.company.businessType;
+    const to = reportAddressee(bt);
     heading('Practitioner’s compilation report', `To the ${to} of ${s.company.name}`);
     const c = sig.compiler ?? null;
     const comp = c ?? { ...s.details.compiler, date: '' };
+    const them = addresseeIsntManagement(bt) ? { by: `provided by the ${many}`, gave: `the ${many} provided`, assist: `the ${many}`, theirs: `the ${g.poss ?? `${many}’`} responsibility` } : { by: 'you have provided', gave: 'you provided', assist: 'you', theirs: 'your responsibility' };
+    // The framework as the statements' basis names it: the edition and the Act, or note 1's.
+    const basis = companyish ? `${standard} and the requirements of ${law?.full ?? 'the Companies Act 71 of 2008'}` : 'the basis of accounting described in note 1';
     para(
-      `We have compiled the accompanying financial statements of ${s.company.name} based on information you have provided. These financial statements comprise the statement of financial position as at ${formatDate(s.fyEnd, 'long')}, and the statement of comprehensive income, the statement of changes in equity and the statement of cash flows for the year then ended, and the notes, including the material accounting policy information.`,
+      `We have compiled the accompanying financial statements of ${s.company.name} based on information ${them.by}. These financial statements comprise the statement of financial position as at ${formatDate(s.fyEnd, 'long')}, and the statement of comprehensive income, the statement of changes in equity and the statement of cash flows for the year then ended, and the notes, including the material accounting policy information.`,
     );
     para('We performed this compilation engagement in accordance with the International Standard on Related Services 4410 (Revised), Compilation Engagements.');
     para(
-      `We have applied our expertise in accounting and financial reporting to assist you in the preparation and presentation of these financial statements in accordance with ${companyish ? `${standard} and the requirements of ${law?.full ?? 'the Companies Act 71 of 2008'}` : 'the basis of accounting described in note 1'}. We have complied with relevant ethical requirements, including principles of integrity, objectivity, professional competence and due care.`,
+      `We have applied our expertise in accounting and financial reporting to assist ${them.assist} in the preparation and presentation of these financial statements in accordance with ${basis}. We have complied with relevant ethical requirements, including principles of integrity, objectivity, professional competence and due care.`,
     );
-    para('These financial statements and the accuracy and completeness of the information used to compile them are your responsibility.');
+    para(`These financial statements and the accuracy and completeness of the information used to compile them are ${them.theirs}.`);
     para(
-      `Since a compilation engagement is not an assurance engagement, we are not required to verify the accuracy or completeness of the information you provided to us to compile these financial statements. Accordingly, we do not express an audit opinion or a review conclusion on whether these financial statements are prepared in accordance with ${companyish ? 'the IFRS for SMEs Accounting Standard' : 'the basis of accounting described in note 1'}.`,
+      `Since a compilation engagement is not an assurance engagement, we are not required to verify the accuracy or completeness of the information ${them.gave} to us to compile these financial statements. Accordingly, we do not express an audit opinion or a review conclusion on whether these financial statements are prepared in accordance with ${basis}.`,
     );
+    // A special purpose framework (a sole proprietor's, a partnership's, a trust's): its purpose,
+    // and that they may not suit other purposes (para 40(j); Appendix 2, Illustration 2).
+    const purpose = specialPurposeFor(bt);
+    if (purpose)
+      para(`As noted in note 1, the financial statements are prepared and presented on the basis described in note 1, for ${purpose}. Accordingly, these financial statements may not be suitable for other purposes.`);
     pdf.moveDown(1.5);
     if (c?.how === 'uploaded') para(`Signed by ${c.name} on ${formatDate(c.date, 'long')}: the signed report is kept with these statements in Shap.`, { font: bold });
     else if (c) para(`Signed in Shap by ${c.name} on ${formatDate(c.date, 'long')}.`, { font: bold });

@@ -6,19 +6,36 @@ entries newer than the version you're running before you update.
 ## 1.31.0 (17 November 2026)
 
 - **Shap Accountant: engagement letters** (Practice → a client → Working papers and letters). Draft
-  one from the client's details, choosing what your practice will do for them: for compiling the
-  statements it says what ISRS 4410 (Revised) asks the agreed terms to say. Change any of it, download
-  it as a PDF to send, record their acceptance (with the signed copy, or without), and each later
-  year record that its terms still fit. A starting point: the letter, and the engagement, are your
-  practice's own.
+  one from the client's details, choosing what your practice will do for them. For compiling the
+  statements it's drafted to cover what ISRS 4410 (Revised) para 24 asks the agreed terms to say;
+  whether it does for an engagement is the practitioner's to check. Its tax paragraphs follow how
+  the client is taxed (an approved public benefit organisation's IT12EI, turnover tax's TT02 and
+  TT03, a partnership's partners), and a close corporation's accounting officer's duties are as the
+  Act has them. A starting point, not complete and not checked against the law or your professional
+  body's rules: the letter, and the engagement, are your practice's own. Read the draft and change
+  any of it (its words, and the parties it names); mark it as sent, which keeps its words and
+  parties as they are; then download its PDF and send it yourself (Shap doesn't send it). Record
+  their acceptance (with the signed copy, or without), each later year record that its terms still
+  fit, and when a letter ends, the last year it covers.
 - **Shap Accountant: working papers** for each of a client's ended years: review notes, raised,
-  answered and cleared; the trial balance at the year end, each account ticked as prepared and
-  reviewed (clients on their own Shap keep theirs there: notes and sign-offs only); and the year
-  signed off as prepared, reviewed and by the engagement partner. Each says when the books have
-  changed since. The year's file downloads as a PDF. The practice's list, and the compile form in a
+  answered and cleared; the trial balance at the year end, with its debit and credit totals, each
+  account ticked as prepared and reviewed (clients on their own Shap keep theirs there: notes and
+  sign-offs only); and the year signed off as prepared, reviewed and by the engagement partner. A
+  note raised or opened again takes back the review and the partner's sign-off. Each says when the
+  books have changed since, and a year stays open after the client's year-end month changes. The
+  year's file downloads as a PDF: an aid towards the practice's record of the engagement, kept with
+  a copy of the final statements and report. The practice's list, and the compile form in a
   client's books, say what isn't recorded yet: checks, never locks.
 - The compiler's report on the financial statements is titled **Practitioner's compilation report**,
-  as ISRS 4410 (Revised) titles it (it said "Independent compiler's report").
+  as ISRS 4410 (Revised)'s example reports title it (it said "Independent compiler's report"), and
+  the screens call it the compilation report. For a sole proprietor, a partnership or a trust it
+  says the statements are prepared for them and SARS, and may not be suitable for other purposes;
+  addressed to a company's shareholders or a co-op's members, it says the directors provided the
+  information and are responsible for it.
+- The Shap Accountant terms of use (version 2026-11-17.3) name the drafted engagement letters and
+  the working papers among Shap's aids, and correct who approves a close corporation's statements
+  (members holding at least 51 per cent of the members' interest). Practices accept them again;
+  Shap's own terms don't change.
 - Updating a practice's server (`migrate-cli`) brings its clients' books up to date too, as starting
   the server does.
 

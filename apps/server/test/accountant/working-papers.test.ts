@@ -3,10 +3,11 @@
  * agrees its terms with each client in an engagement letter it drafts, sends and records as accepted,
  * looks at again each later year; and keeps working papers for each client's ended year: review notes,
  * each account ticked as prepared and reviewed, the year signed off. All in the practice's own
- * database; checks on its list and the compile form, never locks. All data made up.
+ * database; checks on its list and the compile form, never locks. All data made up. The clock is
+ * fixed (17 November 2026), so the years it works with are the same whenever it runs.
  */
 import type { InjectOptions } from 'fastify';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ACCOUNTANT_TERMS_VERSION, LETTER_NOTE } from '@shap/shared';
 import type { Sql } from '../../src/db/index.js';
 import { expectCleanAudit, login, ref } from '../helpers.js';
@@ -44,6 +45,7 @@ describe('engagement letters and working papers', () => {
   };
 
   beforeAll(async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-11-17T08:00:00Z'), shouldAdvanceTime: true });
     p = await linkPair('wp');
     await dropClients();
     // A client kept in the practice: a company with a February year end, a year and a bit of books.
@@ -87,6 +89,7 @@ describe('engagement letters and working papers', () => {
     await p.practice.ctx.clients.end();
     await dropClients();
     await p.close();
+    vi.useRealTimers();
   });
 
   it('drafts a letter from the client’s details, covering what ISRS 4410 asks the terms to say, for whoever manages the clients', async () => {
@@ -109,11 +112,11 @@ describe('engagement letters and working papers', () => {
       /A compilation is not an assurance engagement: we won’t audit or review them/,
       /comply with the relevant ethical requirements \(SAIPA’s code of professional conduct\)/,
       /The directors are responsible for the financial statements/,
-      /approving them \(its board of directors \(Companies Act, section 30\(3\)\(c\)\), signed by a director it authorises\)/,
+      /approving them \(by its board of directors, and signed by a director it authorises \(Companies Act, section 30\(3\)\(c\)\)\)/,
       /As you approve them, you acknowledge that you’ve taken responsibility for the final version/,
       /Our practitioner’s compilation report goes with them/,
       /We keep your books in Shap, on our practice’s server/,
-      /as the Protection of Personal Information Act asks \(sections 19 to 22\)/,
+      /secure as the Protection of Personal Information Act asks/,
       /R1 500 a month, made up\./,
       /for the year ending 28 February 2025 and every year after it/,
     ])
@@ -124,15 +127,16 @@ describe('engagement letters and working papers', () => {
     const { letters } = await p.owner.get(`/api/practice/clients/${kept}/letters`);
     const l = letters[0];
     const body = [...l.body, { heading: 'Made-up extra', paragraphs: ['A paragraph of the practice’s own.'] }];
-    await p.owner.post(`/api/practice/clients/${kept}/letters/${l.id}`, { body }, 'PUT');
+    const parties = { practiceName: l.practiceName, practiceReg: l.practiceReg, practiceTrading: l.practiceTrading, practiceAddress: l.practiceAddress, clientName: l.clientName };
+    await p.owner.post(`/api/practice/clients/${kept}/letters/${l.id}`, { body, parties }, 'PUT');
     const draft = await p.owner.call({ method: 'GET', url: `/api/practice/clients/${kept}/letters/${l.id}/pdf` });
     expect(draft.statusCode).toBe(200);
     const draftText = await pdfText(draft.rawPayload);
-    expect(draftText).toMatch(/Draft: not sent yet/);
+    expect(draftText).toMatch(/Draft, to read: not for sending/);
     expect(draftText).toMatch(/A paragraph of the practice’s own\./);
     expect((await p.owner.call({ method: 'POST', url: `/api/practice/clients/${kept}/letters/${l.id}/accept`, payload: { on: '2026-03-01', name: 'Made-up Director', how: 'recorded' } })).statusCode).toBe(400);
     await p.owner.post(`/api/practice/clients/${kept}/letters/${l.id}/sent`, {});
-    expect((await p.owner.call({ method: 'PUT', url: `/api/practice/clients/${kept}/letters/${l.id}`, payload: { body } })).statusCode).toBe(400);
+    expect((await p.owner.call({ method: 'PUT', url: `/api/practice/clients/${kept}/letters/${l.id}`, payload: { body, parties } })).statusCode).toBe(400);
     expect((await p.owner.call({ method: 'DELETE', url: `/api/practice/clients/${kept}/letters/${l.id}` })).statusCode).toBe(400);
     // Accepted on a day before it was sent, or after today, isn't.
     for (const on of ['2020-01-01', '2999-01-01']) expect((await p.owner.call({ method: 'POST', url: `/api/practice/clients/${kept}/letters/${l.id}/accept`, payload: { on, name: 'Made-up Director', how: 'recorded' } })).statusCode).toBe(400);
@@ -170,25 +174,25 @@ describe('engagement letters and working papers', () => {
     const [bankAcc] = await keptDb<{ code: string }[]>`select code from accounts where system_key = 'bank'`;
     const bank = file.lines.find((l: { code: string }) => l.code === bankAcc!.code);
     expect(bank.balanceCents).toBe(380_000);
-    await site.post(`/api/practice/clients/${kept}/file/ticks`, { fyEnd: FY, code: bank.code, which: 'prepared', on: true });
+    await site.post(`/api/practice/clients/${kept}/file/ticks`, { fyEnd: FY, accountId: bank.accountId, which: 'prepared', on: true });
     // Reviewing by the same person is said, not refused (a sole practitioner reviews their own).
-    await site.post(`/api/practice/clients/${kept}/file/ticks`, { fyEnd: FY, code: bank.code, which: 'reviewed', on: true });
+    await site.post(`/api/practice/clients/${kept}/file/ticks`, { fyEnd: FY, accountId: bank.accountId, which: 'reviewed', on: true });
     let now = await site.get(`/api/practice/clients/${kept}/file`);
     expect(now.lines.find((l: { code: string }) => l.code === bank.code).reviewed).toMatchObject({ by: 'Site', samePerson: true, changed: false });
-    await p.owner.post(`/api/practice/clients/${kept}/file/ticks`, { fyEnd: FY, code: bank.code, which: 'reviewed', on: true });
+    await p.owner.post(`/api/practice/clients/${kept}/file/ticks`, { fyEnd: FY, accountId: bank.accountId, which: 'reviewed', on: true });
     // Someone given the client to compile reviews, but doesn't tick as prepared.
     await p.owner.post(`/api/practice/clients/${kept}/access`, { access: [{ userId: siteId, level: 'compile' }] }, 'PUT');
-    expect((await site.call({ method: 'POST', url: `/api/practice/clients/${kept}/file/ticks`, payload: { fyEnd: FY, code: bank.code, which: 'prepared', on: true } })).statusCode).toBe(403);
+    expect((await site.call({ method: 'POST', url: `/api/practice/clients/${kept}/file/ticks`, payload: { fyEnd: FY, accountId: bank.accountId, which: 'prepared', on: true } })).statusCode).toBe(403);
     // A tick is taken off by whoever made it, or an owner.
-    expect((await site.call({ method: 'POST', url: `/api/practice/clients/${kept}/file/ticks`, payload: { fyEnd: FY, code: bank.code, which: 'reviewed', on: false } })).statusCode).toBe(403);
+    expect((await site.call({ method: 'POST', url: `/api/practice/clients/${kept}/file/ticks`, payload: { fyEnd: FY, accountId: bank.accountId, which: 'reviewed', on: false } })).statusCode).toBe(403);
     await p.owner.post(`/api/practice/clients/${kept}/access`, { access: [{ userId: siteId, level: 'books' }] }, 'PUT');
     // The books move after the ticks: the ticks say so.
     const r = await ref(keptDb);
     await books.post('/api/journals', { date: '2026-02-01', description: 'Made-up late rent', lines: [{ accountId: await r.acc('rent'), debitCents: 5_000 }, { accountId: await r.acc('bank'), creditCents: 5_000 }] });
     now = await site.get(`/api/practice/clients/${kept}/file`);
     expect(now.lines.find((l: { code: string }) => l.code === bank.code)).toMatchObject({ balanceCents: 375_000, prepared: { changed: true }, reviewed: { by: 'Owner', changed: true } });
-    expect((await p.owner.call({ method: 'POST', url: `/api/practice/clients/${kept}/file/ticks`, payload: { fyEnd: FY, code: '9999', which: 'prepared', on: true } })).statusCode).toBe(400);
-    expect((await p.owner.call({ method: 'POST', url: `/api/practice/clients/${kept}/file/ticks`, payload: { fyEnd: '2027-02-28', code: bank.code, which: 'prepared', on: true } })).statusCode).toBe(400);
+    expect((await p.owner.call({ method: 'POST', url: `/api/practice/clients/${kept}/file/ticks`, payload: { fyEnd: FY, accountId: '00000000-0000-4000-8000-000000000999', which: 'prepared', on: true } })).statusCode).toBe(400);
+    expect((await p.owner.call({ method: 'POST', url: `/api/practice/clients/${kept}/file/ticks`, payload: { fyEnd: '2027-02-28', accountId: bank.accountId, which: 'prepared', on: true } })).statusCode).toBe(400);
   });
 
   it('review notes: raised, answered, cleared by whoever raised them; the year isn’t signed off as reviewed over one still open', async () => {
@@ -214,7 +218,8 @@ describe('engagement letters and working papers', () => {
     await books.post('/api/journals', { date: '2026-02-02', description: 'Made-up correction', lines: [{ accountId: await r.acc('rent'), debitCents: 1_000 }, { accountId: await r.acc('bank'), creditCents: 1_000 }] });
     file = await site.get(`/api/practice/clients/${kept}/file`);
     expect(file.signoffs.partner.changed).toBe(true);
-    await p.owner.post(`/api/practice/clients/${kept}/file/notes/${id}/clear`, { cleared: false });
+    const reopened = await p.owner.post<{ removed: string[] }>(`/api/practice/clients/${kept}/file/notes/${id}/clear`, { cleared: false });
+    expect(reopened.removed.sort()).toEqual(['partner', 'reviewed']);
     file = await site.get(`/api/practice/clients/${kept}/file`);
     expect([file.signoffs.prepared?.by, file.signoffs.reviewed, file.signoffs.partner]).toEqual(['Site', null, null]);
     // The year's file, as the practice keeps it.
@@ -229,7 +234,7 @@ describe('engagement letters and working papers', () => {
     const file = await p.owner.get(`/api/practice/clients/${linked}/file`);
     expect([file.ticksHere, file.lines]).toEqual([false, null]);
     expect(file.years).toHaveLength(4);
-    expect((await p.owner.call({ method: 'POST', url: `/api/practice/clients/${linked}/file/ticks`, payload: { fyEnd: file.fyEnd, code: '1000', which: 'prepared', on: true } })).statusCode).toBe(400);
+    expect((await p.owner.call({ method: 'POST', url: `/api/practice/clients/${linked}/file/ticks`, payload: { fyEnd: file.fyEnd, accountId: '00000000-0000-4000-8000-000000000001', which: 'prepared', on: true } })).statusCode).toBe(400);
     await p.owner.post(`/api/practice/clients/${linked}/file/notes`, { fyEnd: file.fyEnd, text: 'Made-up: ask them for the loan agreement.' });
     const { id } = await p.owner.post<{ id: string }>(`/api/practice/clients/${linked}/letters`, { services: ['compile'], fromYearEnd: file.fyEnd });
     const l = (await p.owner.get(`/api/practice/clients/${linked}/letters`)).letters.find((x: { id: string }) => x.id === id);
@@ -248,10 +253,16 @@ describe('engagement letters and working papers', () => {
     // Inside a client's books, the practice's own records aren't reached.
     const inside = await books.call({ method: 'GET', url: `/api/practice/clients/${kept}/file` });
     expect(inside.statusCode, inside.body).toBe(403);
+    const draft = await p.owner.post<{ id: string }>(`/api/practice/clients/${kept}/letters`, { services: ['payroll'], fromYearEnd: FY });
+    const accepted = (await p.owner.get(`/api/practice/clients/${kept}/letters`)).letters.find((x: { status: string }) => x.status === 'accepted');
     await p.owner.post(`/api/practice/clients/${kept}/archive`, { archived: true });
     expect((await p.owner.call({ method: 'GET', url: `/api/practice/clients/${kept}/file` })).statusCode).toBe(200);
     expect((await p.owner.call({ method: 'POST', url: `/api/practice/clients/${kept}/file/notes`, payload: { fyEnd: FY, text: 'x' } })).statusCode).toBe(400);
+    // Its letters are kept as they are: a draft isn't deleted, an accepted letter isn't ended.
+    expect((await p.owner.call({ method: 'DELETE', url: `/api/practice/clients/${kept}/letters/${draft.id}` })).statusCode).toBe(400);
+    expect((await p.owner.call({ method: 'POST', url: `/api/practice/clients/${kept}/letters/${accepted.id}/end`, payload: {} })).statusCode).toBe(400);
     await p.owner.post(`/api/practice/clients/${kept}/archive`, { archived: false });
+    await p.owner.post(`/api/practice/clients/${kept}/letters/${draft.id}`, {}, 'DELETE');
 
   });
 

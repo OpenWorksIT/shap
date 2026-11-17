@@ -49,7 +49,7 @@ export const IMPORT_NOTE =
  * Shap's terms change, the Shap Accountant terms' Part A changes with them, and both versions go up
  * (ACCOUNTANT_TERMS_VERSION is never older than TERMS_VERSION: accountant-terms.test.ts).
  */
-export const ACCOUNTANT_TERMS_VERSION = '2026-11-17.2';
+export const ACCOUNTANT_TERMS_VERSION = '2026-11-17.3';
 export const ACCOUNTANT_TERMS_URL = 'https://www.openworks.co.za/shap/accountant-terms/';
 /** The practice's owner, accepting the Shap Accountant terms for the practice. */
 export const ACCOUNTANT_TERMS_TICK = 'I accept the Shap Accountant terms of use for my practice, and I’m authorised to agree to them on its behalf.';
@@ -57,7 +57,7 @@ export const ACCOUNTANT_TERMS_TICK = 'I accept the Shap Accountant terms of use 
 export const PRACTICE_TERMS_TICK = 'I accept the Shap Accountant terms of use, which my practice’s owner has accepted for the practice, for my practice’s use of Shap on these books.';
 /** Under the tick: what accepting the Shap Accountant terms means, with the indemnity as clause 13 has it. */
 export const ACCOUNTANT_TERMS_MEANS =
-  'Including that my practice’s work for its clients is its own; that Shap’s checks, returns, statements and tax figures are aids and estimates, not advice; that my practice looks after its clients’ books and personal information; and that it indemnifies OpenWorks against claims by its clients or anyone else over that work, its use of Shap on their books, the personal information it keeps or opens there, or a breach of the terms.';
+  'Including that my practice’s work for its clients is its own; that Shap’s checks, returns, statements, tax figures, drafted engagement letters and working papers are aids and estimates, not advice; that my practice looks after its clients’ books and personal information; and that it indemnifies OpenWorks against claims by its clients or anyone else over that work, its use of Shap on their books, the personal information it keeps or opens there, or a breach of the terms.';
 
 /** What the Shap Accountant terms add to Shap's, in plain words (shown before the practice agrees). */
 export function accountantTermsPoints(): { title: string; body: string }[] {
@@ -68,7 +68,11 @@ export function accountantTermsPoints(): { title: string; body: string }[] {
     },
     {
       title: 'Shap’s checks and returns are aids',
-      body: 'What Shap’s checks find, the returns and due dates it lists and the statements and reports it drafts are aids for your practitioners to check: not complete, and not advice. Its tax figures (income tax, provisional tax, turnover tax, the tax pack) and the public interest score, with the audit or independent review it points to, are estimates only. Shap files nothing with SARS, the Department of Employment and Labour or CIPC. Approving a client’s financial statements is the client’s own decision, taken by those the law and its own rules give it to (for a company, its board; for a close corporation, members holding at least half of the members’ interest; for a trust, its trustees; for a partnership, its partners; for a sole proprietor, its owner): Shap records it as your practice enters it, and on a client’s own Shap the client approves them there.',
+      body: 'What Shap’s checks find, the returns and due dates it lists and the statements and reports it drafts are aids for your practitioners to check: not complete, and not advice. Its tax figures (income tax, provisional tax, turnover tax, the tax pack) and the public interest score, with the audit or independent review it points to, are estimates only. Shap files nothing with SARS, the Department of Employment and Labour or CIPC. Approving a client’s financial statements is the client’s own decision, taken by those the law and its own rules give it to (for a company, its board; for a close corporation, members holding at least 51 per cent of the members’ interest; for a trust, its trustees; for a partnership, its partners; for a sole proprietor, its owner): Shap records it as your practice enters it, and on a client’s own Shap the client approves them there.',
+    },
+    {
+      title: 'Engagement letters and working papers are aids too',
+      body: 'An engagement letter Shap drafts is a starting point for your practice’s own letter: not complete, not legal advice, and not checked against the law or your professional body’s rules for the client. What it says, and the engagement it records, are between your practice and the client. The working papers’ ticks, review notes and sign-offs are what your people record: Shap doesn’t check the work behind them, and nothing there stops anyone compiling or filing.',
     },
     {
       title: 'Your clients’ books and information are in your care',

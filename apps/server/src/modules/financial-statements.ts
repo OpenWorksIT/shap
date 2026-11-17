@@ -39,7 +39,7 @@ import { auditBooks } from '../audit/books.js';
 import { buildStatements, yearStartOf, type Statements } from '../statements/build.js';
 import { loadDetails, saveDetails, type StatementDetails } from '../statements/details.js';
 import { renderStatementsPdf, type Signatures } from '../statements/pdf.js';
-import { papersFor } from '../lib/papers.js';
+import { papersFor, tbHash, yearTb } from '../lib/papers.js';
 import { agreeYear } from './yearend.js';
 import { requireFeature } from './sales.js';
 
@@ -201,7 +201,9 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
     // In a practice's client's books: what the practice has recorded for this year (its letters and
     // working papers, in its own database), for the compile form to say. A check, never a lock.
     const here = dbScope.getStore()?.client;
-    const practice = here ? (await papersFor(ctx.dbs.real, [here.id], () => fyEnd)).get(here.id) ?? null : null;
+    // Each sign-off says if the books have moved since it was given (the trial balance's fingerprint now).
+    const hash = here ? tbHash((await yearTb(sql, fyEnd)).rows) : null;
+    const practice = here ? (await papersFor(ctx.dbs.real, [here.id], () => fyEnd, () => hash)).get(here.id) ?? null : null;
     return { statements, status: r?.status ?? 'draft', row: r ? { ...r, snapshot: undefined } : null, changedSince, audit, yearAgreed: Boolean(agreed), yearClosed, versions, practice };
   });
 
@@ -253,7 +255,7 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
       subject: `Financial statements ${s.period}: ${settings.companyName}`,
       text:
         input.message ||
-        `Good day,\n\nPlease find the draft financial statements of ${settings.companyName} ${s.period} attached, prepared in Shap from our books. Once you've compiled them, please send back your signed compiler's report so we can approve the statements and close the year.\n\nKind regards,\n${user.name}`,
+        `Good day,\n\nPlease find the draft financial statements of ${settings.companyName} ${s.period} attached, prepared in Shap from our books. Once you've compiled them, please send back your signed compilation report so we can approve the statements and close the year.\n\nKind regards,\n${user.name}`,
       attachments: [{ filename: `${settings.companyName} DRAFT financial statements ${fyEnd.slice(0, 4)}.pdf`.replace(/[^\w.\- ]/g, ''), content: pdf, contentType: 'application/pdf' }],
     });
     await sql`insert into financial_statements (fy_end, status, sent_to, sent_at) values (${fyEnd}::date, 'sent', ${input.to}, now())
@@ -270,7 +272,7 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
   /** The accountant compiles and signs, signed in to Shap as themselves. */
   app.post('/api/statements/:fyEnd/compile', readers, async (req) => {
     const user = userOrThrow(req);
-    if (user.role !== 'accountant') throw forbidden('The compiler’s report is signed by the accountant, signed in as themselves');
+    if (user.role !== 'accountant') throw forbidden('The compilation report is signed by the accountant, signed in as themselves');
     const { fyEnd } = parse(fyParam, req.params);
     const input = parse(compileInput, req.body);
     await on();

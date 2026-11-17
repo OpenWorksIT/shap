@@ -230,7 +230,8 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
     }
     const status = (err as { statusCode?: number }).statusCode;
     if (status === 429) return reply.code(429).send({ error: 'Too many requests. Please wait a moment and try again.', code: 'rate_limited' });
-    if (status === 413) return reply.code(413).send({ error: `That file is too big (${config.UPLOAD_MB} MB at most).`, code: 'too_large' });
+    // A route that takes less than the general upload limit says its own (an engagement letter's signed copy, 6 MB).
+    if (status === 413) return reply.code(413).send({ error: `That file is too big (${req.routeOptions?.config?.uploadMb ?? config.UPLOAD_MB} MB at most).`, code: 'too_large' });
     if (status && status >= 400 && status < 500) {
       return reply.code(status).send({ error: err.message, code: (err as { code?: string }).code ?? 'bad_request' });
     }

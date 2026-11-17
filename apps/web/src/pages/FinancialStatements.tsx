@@ -92,7 +92,7 @@ interface StatementsView {
   /** Sets signed before and reopened since, kept as they were signed. */
   versions?: { id: string; reopenedAt: string; reason: string; reopenedByName: string | null; status: string; approvedOn: string | null; approvedName: string | null; compiledOn: string | null; hasPdf: boolean }[];
   /** In a practice's client's books: what the practice has recorded for the year (its letters and working papers). */
-  practice?: { letter: string; compiling: boolean; termsLooked: boolean; openNotes: number; signed: { prepared: boolean; reviewed: boolean; partner: boolean } } | null;
+  practice?: { letter: string; compiling: boolean; termsLooked: boolean; openNotes: number; signed: { prepared: boolean; reviewed: boolean; partner: boolean }; changed?: { prepared: boolean; reviewed: boolean; partner: boolean } } | null;
 }
 
 export function FinancialStatements() {
@@ -128,7 +128,7 @@ export function FinancialStatements() {
   const looks = (s?.checks ?? []).filter((c) => c.level === 'look');
   const ready = Boolean(s && stops.every((c) => c.ok) && !v?.audit.some((a) => a.level === 'fail'));
   const cc = s?.company?.businessType === 'cc';
-  const report = cc ? 'accounting officer’s report' : 'compiler’s report';
+  const report = cc ? 'accounting officer’s report' : 'compilation report';
   const accountId = (key: string) => (ref.accounts as { id: string; systemKey: string | null }[]).find((a) => a.systemKey === key)?.id;
   const bookTax = async () => {
     if (!s?.taxEstimate) return;
@@ -255,7 +255,7 @@ export function FinancialStatements() {
               Share or save the PDF
             </button>
             {v.row?.compilerReportId && (
-              <button className="btn quiet" onClick={() => void share(`/api/statements/${s.fyEnd}/compiler-report`, cc ? 'Accounting officer’s report' : 'Compiler’s report')}>
+              <button className="btn quiet" onClick={() => void share(`/api/statements/${s.fyEnd}/compiler-report`, cc ? 'Accounting officer’s report' : 'Compilation report')}>
                 The signed {report}
               </button>
             )}
@@ -610,7 +610,7 @@ function SendForm({ fyEnd, to: initial, onClose, onDone }: { fyEnd: string; to: 
     <Drawer title="Send to the accountant" sub="The draft set as a PDF, by email, for them to compile" onClose={onClose}>
       <form className="stack" onSubmit={submit}>
         <Field label="Accountant’s email">{(p) => <input {...p} className="input" type="email" value={to} onChange={(e) => setTo(e.target.value)} required autoFocus />}</Field>
-        <Field label="Message (optional)" hint="Blank: Shap’s short note asking for the signed compiler’s report back">
+        <Field label="Message (optional)" hint="Blank: Shap’s short note asking for the signed compilation report back">
           {(p) => <textarea {...p} className="textarea" rows={4} value={message} onChange={(e) => setMessage(e.target.value)} />}
         </Field>
         <p className="xs muted">Rather send it yourself? Download the PDF and send that: then upload the signed report when it comes back. If they work in Shap, they can sign it here, signed in as themselves.</p>
@@ -645,7 +645,7 @@ function UploadForm({ fyEnd, compiler, cc, onClose, onDone }: { fyEnd: string; c
     }
   };
   return (
-    <Drawer title={cc ? 'The signed accounting officer’s report' : 'The signed compiler’s report'} sub="From your accountant: the report, or the whole signed set" onClose={onClose}>
+    <Drawer title={cc ? 'The signed accounting officer’s report' : 'The signed compilation report'} sub="From your accountant: the report, or the whole signed set" onClose={onClose}>
       <form className="stack" onSubmit={submit}>
         <p className="small muted">Uploading it freezes the statements at their figures as they stand now. Make sure it’s the report for this draft: if the books have changed since you sent it, send it again first.</p>
         <div className="row wrap">
@@ -679,7 +679,14 @@ function PracticeChecks({ p }: { p: NonNullable<StatementsView['practice']> }) {
   const missing = [
     !p.compiling ? 'no accepted engagement letter covering compiling them is recorded (ISRS 4410 (Revised) asks for agreed terms first)' : !p.termsLooked ? 'the letter’s terms aren’t recorded as looked at again for this year' : '',
     p.openNotes > 0 ? `${p.openNotes === 1 ? 'one review note is' : `${p.openNotes} review notes are`} still open` : '',
-    !p.signed.partner ? 'the year’s working papers aren’t signed off by the engagement partner' : '',
+    !p.signed.partner
+      ? 'the year’s working papers aren’t signed off by the engagement partner'
+      : p.changed?.partner
+        ? 'the books have changed since the engagement partner signed off the year’s working papers'
+        : !p.signed.reviewed
+          ? 'the engagement partner signed off with no review recorded'
+          : '',
+    p.signed.reviewed && p.changed?.reviewed && !p.changed?.partner ? 'the books have changed since the year was signed off as reviewed' : '',
   ].filter(Boolean);
   if (!missing.length) return null;
   return <p className="small warn-text" style={{ flexBasis: '100%' }}>In your practice’s records for this year: {missing.join('; ')}. Practice → Working papers and letters.</p>;
@@ -694,11 +701,11 @@ function CompileForm({ fyEnd, compiler, cc, onClose, onDone }: { fyEnd: string; 
   const { submit, error, busy } = useSubmit(() => api(`/api/statements/${fyEnd}/compile`, { body: { date, compiler: c } }), onDone, 'Signed');
   const set = (k: keyof typeof c, v: string) => setC((x) => ({ ...x, [k]: v }));
   return (
-    <Drawer title={cc ? 'Sign as the accounting officer' : 'Compile and sign'} sub={cc ? 'Your report as accounting officer (Close Corporations Act s62), and your compiler’s report if you compiled them' : 'Your compiler’s report (ISRS 4410 (Revised)) on these statements'} onClose={onClose}>
+    <Drawer title={cc ? 'Sign as the accounting officer' : 'Compile and sign'} sub={cc ? 'Your report as accounting officer (Close Corporations Act s62), and your compilation report if you compiled them' : 'Your compilation report (ISRS 4410 (Revised)) on these statements'} onClose={onClose}>
       <form className="stack" onSubmit={submit}>
         <p className="small muted">
           {cc
-            ? 'Your report as accounting officer says the statements agree with the accounting records and the accounting policies are appropriate to the business (s62(1)), with no audit or review. If the compiler’s report is on them too, it says you compiled them from the information the business gave you. They go on the statements with your name and designation, and the figures are frozen as they are now.'
+            ? 'Your report as accounting officer says the statements agree with the accounting records and the accounting policies are appropriate to the business (s62(1)), with no audit or review. If the compilation report is on them too, it says you compiled them from the information the business gave you. They go on the statements with your name and designation, and the figures are frozen as they are now.'
             : 'The report says you compiled the statements from the information the business gave you, applying your expertise in accounting and financial reporting, and that you didn’t audit or review them. It goes on the statements with your name and designation, and the figures are frozen as they are now.'}
         </p>
         <div className="form-grid">
@@ -712,7 +719,7 @@ function CompileForm({ fyEnd, compiler, cc, onClose, onDone }: { fyEnd: string; 
         <Field label="Practice address">{(p) => <textarea {...p} className="textarea" rows={2} value={c.address} onChange={(e) => set('address', e.target.value)} />}</Field>
         <label className="check">
           <input type="checkbox" checked={sure} onChange={(e) => setSure(e.target.checked)} />
-          <span>{cc ? 'I performed the duties of accounting officer and sign the report' : 'I compiled these statements and sign the compiler’s report'}</span>
+          <span>{cc ? 'I performed the duties of accounting officer and sign the report' : 'I compiled these statements and sign the compilation report'}</span>
         </label>
         {error && <div className="banner alert small">{error}</div>}
         <button className="btn primary big block" disabled={busy || !sure}>

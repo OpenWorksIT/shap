@@ -147,7 +147,7 @@ describe('the Shap Accountant terms of use', () => {
     expect(all).toMatch(/Shap files nothing with SARS, the Department of Employment and Labour or CIPC/);
     expect(all).toMatch(/OpenWorks IT are not accountants, tax practitioners or auditors/);
     // Who approves a client's statements, as the law has it.
-    expect(points[1]!.body).toMatch(/for a company, its board; for a close corporation, members holding at least half of the members’ interest; for a trust, its trustees; for a partnership, its partners; for a sole proprietor, its owner/);
+    expect(points[1]!.body).toMatch(/for a company, its board; for a close corporation, members holding at least 51 per cent of the members’ interest; for a trust, its trustees; for a partnership, its partners; for a sole proprietor, its owner/);
     expect(ACCOUNTANT_TERMS_TICK).toBe('I accept the Shap Accountant terms of use for my practice, and I’m authorised to agree to them on its behalf.');
     expect(PRACTICE_TERMS_TICK).toBe('I accept the Shap Accountant terms of use, which my practice’s owner has accepted for the practice, for my practice’s use of Shap on these books.');
     // Part A follows Shap's terms: never an older version than them.

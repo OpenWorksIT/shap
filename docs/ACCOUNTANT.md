@@ -288,51 +288,84 @@ its clients.
 **New letter** (for whoever manages the practice's clients) drafts one from the client's details in
 Shap (`lib/engagement.ts`): what the practice will do (write up the books, the payroll, VAT, income
 tax, compiling the annual financial statements, a close corporation's accounting officer, anything
-else), from which year end, the fees as the practice words them, and its professional body. It's a
-starting point (`LETTER_NOTE`): the practice reads all of it and changes any of it while it's a
-draft. Compiling the statements covers what ISRS 4410 (Revised) para 24 asks the agreed terms to
-say: their intended use and distribution, the framework (the IFRS for SMEs Accounting Standard and
-the business's Act, or the basis note 1 describes), the engagement's objective and scope (not an
-assurance engagement), the practitioner's responsibilities (its body's ethical code), management's
-(who approves the statements, for each kind of business, and their acknowledgement of the final
-version, para 37), and the report's expected form (the practitioner's compilation report). It also
-says where the client's books are (kept here, Shap Pocket shares, or their own Shap), the records the
-law asks each side to keep, and the personal information the practice processes for the client
-(POPIA, sections 19 to 22).
+else), from which year end, the fees as the practice words them, and its professional body. A
+client in Shap Pocket writes up their own books, so that isn't offered for them; a company's
+accounting officer isn't either. It's a starting point (`LETTER_NOTE`): not complete, and not
+checked against the law or the practice's professional body's rules for the client. The practice
+reads all of it, checks it against its body's guidance (and an attorney, for anything legal), and
+changes any of it while it's a draft: its words, and the parties it names (the practice's legal
+name, registration number, trading name and address, from Settings; the client's legal name, from
+its books).
 
-Then: **PDF** (with lines to sign), **Mark as sent** (its words are kept as they were from then: a new
-letter changes the terms), **Record their acceptance** (who, in what capacity, and when; with the
-signed copy uploaded, kept with the letter, or recorded without one), **End** (kept, as it was).
-Shap sends nothing to the client: the practice sends the PDF itself.
+For compiling the statements it's drafted to cover what ISRS 4410 (Revised) para 24 asks the agreed
+terms to say; whether it does for an engagement is the practitioner's to check: their intended use
+and distribution (a sole proprietor's, a partnership's or a trust's are special purpose, for them
+and SARS, and the report says they may not be suitable for other purposes); the framework (the IFRS
+for SMEs Accounting Standard and the business's Act, or the basis note 1 describes); the
+engagement's objective and scope (not an assurance engagement, and an audit or review, where the
+business needs one, is a separate engagement); the practitioner's responsibilities (its body's
+ethical code); management's (who approves the statements, for each kind of business: a close
+corporation's members holding at least 51 per cent of the members' interest, Close Corporations
+Act s58(3); and their acknowledgement of the final version, para 37); and the report's addressee and
+expected form (the practitioner's compilation report). Its tax paragraphs follow how the client is
+taxed (an approved public benefit organisation's IT12EI and no provisional tax; turnover tax's TT02
+and TT03; each partner's own returns; a trust's IT3(t)), with a part on dealing with SARS whenever a
+tax service is ticked (registered tax practitioners, TAA s240; eFiling authority; SARS's letters;
+penalties). A close corporation's accounting officer's duties are as sections 59 to 62 have them.
+It also says where the client's books are (kept here, Shap Pocket shares, or their own Shap), the
+records the law asks each side to keep (TAA s29 and s32; a company's Companies Act s24), and the
+personal information the practice processes, kept confidential and secure as POPIA asks (it
+promises no deletion: Shap keeps an archived client's books and papers).
+
+Then: **Draft PDF** (to read: headed "Draft, to read: not for sending", with `LETTER_NOTE` on it),
+**Mark as sent** (it asks first: its words and parties are kept as they are from then, by the
+database itself, and a new letter changes the terms), then its **PDF** (with lines to sign, and
+nothing of OpenWorks on it) to send: Shap sends nothing to the client, the practice does.
+**Record their acceptance** (who, in what capacity, and when, not before the day it was sent; with
+the signed copy uploaded, a photo made smaller first, kept with the letter; or recorded without
+one). **End** records the last year it covered (or none): it's kept, as it was, and still covers
+those years; ending it in Shap doesn't end the engagement with the client, which the letter says is
+done in writing. Downloading a letter or its signed copy is in the practice's audit log.
 
 A recurring engagement (para 26): an accepted letter runs on to every later year, and for each the
 practice records that its terms were looked at again and still fit (**Terms still fit for the year
-to …**), or makes a new letter. Until then, the list says so.
+to …**), or makes a new letter, which then governs the years from its first (that year needs no
+second look). Until then, the list says so. A letter that isn't for compiling covers its years
+without a warning on the list ("not for compiling"); the compile form says it, if the practice does
+compile them.
 
 ### Working papers
 
-For each of the client's years that has ended (from the books' first; on their own Shap, the last
-four):
+For each of the client's years that has ended: from the books' first (on their own Shap, the last
+four), and any year the books have closed or have statements for, or that has papers already. Those
+stay open when the client's year-end month changes, each worked out over its own twelve months.
 
 - **Review notes**: on the year, or on one of its accounts; answered by anyone given the client;
-  cleared (or opened again) by whoever raised them, or an owner.
+  cleared (or opened again) by whoever raised them, or an owner. A year takes 200 notes at most, a
+  note 30 replies.
 - **The trial balance at the year end** (books on the practice's server: kept, brought in, Shap
-  Pocket), each account ticked as **prepared** (whoever writes up the books) and **reviewed** (anyone
-  given the client), with who and when. A tick keeps the balance it was given at: if the books move,
-  it says the balance has changed since. A review by whoever prepared it is said, not refused (a
-  sole practitioner reviews their own). A client on its own Shap keeps its trial balance there:
-  nothing new comes over the link, so its papers have notes and sign-offs, not ticks.
+  Pocket), with its debit and credit totals, each account ticked as **prepared** (whoever writes up
+  the books) and **reviewed** (anyone given the client), with who and when. A tick is the account's
+  own (a new code doesn't move it) and keeps the balance it was given at: if the books move, it says
+  the balance has changed since. A review by whoever prepared it is said, not refused (a sole
+  practitioner reviews their own). A client on its own Shap keeps its trial balance there: nothing
+  new comes over the link, so its papers have notes and sign-offs, not ticks.
 - **Sign-offs** for the year: **prepared** (whoever writes up the books), **reviewed** (anyone given
   the client) and **engagement partner** (an owner: the practice's partners are its owners in Shap).
-  Reviewed and the partner's wait for every review note to be cleared; a note opened again takes
-  them back. Each keeps the trial balance as it was, and says when the books have changed since.
-- **Download the year's file (PDF)**: the sign-offs, the letter's standing, every review note with its
-  replies, and the trial balance's ticks: the practice's record of the engagement (para 38: the
-  significant matters and how they were addressed; the compiled set itself, with its report, is kept
-  with the statements in the client's books).
+  Reviewed and the partner's wait for every review note to be cleared; a note raised or opened again
+  takes them back (it asks first, and each is in the audit log). A partner's sign-off without a
+  review is said so. Each keeps the trial balance as it was (its rows, by account, and their
+  fingerprint), and says when the books have changed since: in the papers, and on the compile form.
+- **Download the year's file (PDF)**: the sign-offs, the letter's standing, the statements' compile
+  and approval dates, every review note with its replies, and the trial balance's ticks and totals.
+  It's an aid towards the practice's record of the engagement (para 38), not the whole of it: keep a
+  copy of the final set and the compilation report with it (para 38(c)), since the client's books
+  go back to them when the engagement ends. For a client on its own Shap, download the signed set
+  there: it isn't reachable once they unlink you.
 
-Shap records what the practice's people tick, note and sign (each in the practice's audit log); it
-doesn't check the work behind them (`FILE_NOTE`).
+Shap records what the practice's people tick, note and sign (each in the practice's audit log,
+without an account or a balance: people not given the client read that log); it doesn't check the
+work behind them (`FILE_NOTE`).
 
 ## Who opens which
 
@@ -361,7 +394,7 @@ the giving, themselves included, and see every client.
 The practice compiles them in Shap, as itself (**Open to compile**): a compiler's report isn't
 uploaded in a client's books. Approving them is the client's own decision, taken by those the law
 and its own rules give it to (a company's board, with a director it authorises signing; a close
-corporation's members holding at least half of the members' interest; a trust's trustees; the
+corporation's members holding at least 51 per cent of the members' interest; a trust's trustees; the
 partners; the owner), and the practice records it, uploading the page signed and the name of one of
 those named in the statements' details (**Record the directors' approval**). Shap checks only that
 the name is one of those, not the signature, the decision or anyone's authority to give it. Shap won't compile until

@@ -127,8 +127,8 @@ export const ACCESS_GROUPS = [
     label: 'Shap Accountant',
     feature: 'practice',
     tasks: [
-      { key: 'practice.clients', label: 'Open the clients they’re given', hint: 'Each client’s books, as they’re given them: to write up, as its owner in Shap, or to read and compile the statements' },
-      { key: 'practice.manage', label: 'Add clients and choose who opens each', hint: 'Add clients, and give anyone (themselves included) a client to write up, as its owner in Shap, or to read and compile; and make the practice’s engagement letters with them', needs: ['practice.clients'] },
+      { key: 'practice.clients', label: 'Open the clients they’re given', hint: 'Each client’s books, as they’re given them: to write up, as its owner in Shap, or to read and compile the statements; and the working papers of those clients (review notes, ticks and sign-offs)' },
+      { key: 'practice.manage', label: 'Add clients and choose who opens each', hint: 'Add clients, and give anyone (themselves included) a client to write up, as its owner in Shap, or to read and compile; and make the practice’s engagement letters with its clients', needs: ['practice.clients'] },
     ],
   },
 ] as const satisfies readonly AccessGroup[];

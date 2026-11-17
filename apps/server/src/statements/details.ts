@@ -41,6 +41,25 @@ export const lawFor = (t: BusinessType): { full: string; short: string } | null 
         ? { full: 'the Co-operatives Act 14 of 2005', short: 'the Co-operatives Act' }
         : null;
 
+/**
+ * Whom the compilation report is addressed to (ISRS 4410 (Revised) para 40(b): as the engagement's
+ * terms say, and the letter Shap drafts says this): a company's shareholders, a CC's or co-op's
+ * members, an NPC's directors; anyone else's owner, partners or trustees.
+ */
+export const reportAddressee = (t: BusinessType): string =>
+  ({ company: 'shareholders', inc: 'shareholders', npc: 'directors', cc: 'members', coop: 'members' } as Partial<Record<BusinessType, string>>)[t] ?? governingFor(t).many;
+
+/** The addressee isn't who prepares the statements (a company's shareholders, a co-op's members): the report then names the directors. */
+export const addresseeIsntManagement = (t: BusinessType): boolean => t === 'company' || t === 'inc' || t === 'coop';
+
+/**
+ * Whom a non-company's statements are prepared for: a special purpose framework (note 1; the
+ * report's paragraph from ISRS 4410 (Revised) para 40(j) and its Illustration 2). Null for a
+ * company, a CC or a co-op, whose framework is general purpose.
+ */
+export const specialPurposeFor = (t: BusinessType): string | null =>
+  COMPANYISH.includes(t) ? null : `the ${t === 'sole_prop' ? 'owner' : entity(t).owner.many} and the South African Revenue Service`;
+
 /** Who governs the business, as the statements name them (and whether that's one person). */
 export const governingFor = (t: BusinessType) =>
   ({
@@ -65,7 +84,7 @@ export function defaultPolicies(bt: BusinessType, ctx: PolicyContext = { lives: 
   return {
     basis: company
       ? `The annual financial statements have been prepared in accordance with ${standard} and the requirements of ${lawFor(bt)?.full ?? 'the Companies Act 71 of 2008'} of South Africa. They are prepared on the historical cost basis and presented in South African Rand. The accounting policies are consistent with those of the previous year.`
-      : `The financial statements have been prepared using the recognition and measurement principles of ${standard}, for the ${kind.owner.many} and the South African Revenue Service. They are prepared on the historical cost basis and presented in South African Rand. The accounting policies are consistent with those of the previous year.`,
+      : `The financial statements have been prepared using the recognition and measurement principles of ${standard}, for ${specialPurposeFor(bt)}. They are prepared on the historical cost basis and presented in South African Rand. The accounting policies are consistent with those of the previous year.`,
     going_concern: `The financial statements are prepared on the going concern basis: ${who.toLowerCase()} is expected to continue operating for the foreseeable future.`,
     revenue:
       `Revenue is what is received or receivable for goods sold and services rendered in the ordinary course of business, excluding value-added tax, after discounts and returns. Revenue from selling goods is recognised when the goods are delivered to the buyer (at the counter, when they are sold). Revenue from services is recognised as the work is performed, which is when it is invoiced: the business invoices its work as it is done.${ctx.wip ? ' The costs of jobs not yet invoiced at the year end are carried as work in progress, at cost.' : ''}`,

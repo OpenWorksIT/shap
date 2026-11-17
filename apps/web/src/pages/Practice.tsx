@@ -40,7 +40,7 @@ interface PracticeClient {
   /** On their own Shap: where, what they let the practice do, and whether it's still linked. */
   linked: { host: string; level: Level | null; unlinked: boolean } | null;
   /** Its engagement letters, and its latest ended year's working papers (PracticeFile). */
-  papers: { fyEnd: string | null; letter: 'none' | 'draft' | 'sent' | 'accepted'; compiling: boolean; termsLooked: boolean; openNotes: number; signed: Record<'prepared' | 'reviewed' | 'partner', boolean> } | null;
+  papers: { fyEnd: string | null; letter: 'none' | 'draft' | 'sent' | 'accepted'; compiling: boolean; termsLooked: boolean; openNotes: number; signed: Record<'prepared' | 'reviewed' | 'partner', boolean>; changed?: Record<'prepared' | 'reviewed' | 'partner', boolean> } | null;
 }
 interface ShareChange {
   key: string;
@@ -460,6 +460,7 @@ export default function PracticePage() {
 
 /** What the practice has recorded of its letters and the latest ended year's working papers: checks, not locks. */
 function PapersLine({ p }: { p: NonNullable<PracticeClient['papers']> }) {
+  // A letter that isn't for compiling is no warning on the list: ISRS 4410 is a compilation's (the compile form says it, if they do compile).
   const letter =
     p.letter === 'none'
       ? 'no engagement letter yet'
@@ -467,17 +468,17 @@ function PapersLine({ p }: { p: NonNullable<PracticeClient['papers']> }) {
         ? 'an engagement letter drafted, not sent'
         : p.letter === 'sent'
           ? 'an engagement letter sent, not accepted yet'
-          : !p.compiling
-            ? 'no accepted letter covers compiling this year'
-            : !p.termsLooked
-              ? 'its letter’s terms not looked at again for this year'
+          : !p.termsLooked
+            ? 'its letter’s terms not looked at again for this year'
+            : !p.compiling
+              ? 'letter accepted (not for compiling)'
               : 'letter accepted';
-  const warn = p.letter !== 'accepted' || !p.compiling || !p.termsLooked || p.openNotes > 0;
+  const warn = p.letter !== 'accepted' || !p.termsLooked || p.openNotes > 0 || (p.signed.partner && !p.signed.reviewed);
   return (
     <p className={warn ? 'small warn-text' : 'small'}>
       <strong>{p.fyEnd ? `The year to ${formatDate(p.fyEnd)}:` : 'Working papers:'}</strong> {letter}
       {p.openNotes > 0 ? `; ${p.openNotes === 1 ? 'one review note' : `${p.openNotes} review notes`} open` : ''}
-      {`; ${p.signed.partner ? 'signed off by the engagement partner' : p.signed.reviewed ? 'reviewed, not yet signed off by the engagement partner' : p.signed.prepared ? 'prepared, not yet reviewed' : 'not signed off'}`}.
+      {`; ${p.signed.partner ? (p.signed.reviewed ? 'signed off by the engagement partner' : 'signed off by the engagement partner, not reviewed') : p.signed.reviewed ? 'reviewed, not yet signed off by the engagement partner' : p.signed.prepared ? 'prepared, not yet reviewed' : 'not signed off'}`}.
     </p>
   );
 }

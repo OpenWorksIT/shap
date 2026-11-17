@@ -1062,6 +1062,112 @@ the other way round. Shap Accountant switched off leaves its people in a linked 
 their sign-in ends (8 hours at most). Tests: in `test/review-1.30/` (`security`, `data`, `words`),
 each failing without its fix.
 
+### The five reviews of 1.31 and Shap Pocket 1.11.2 (Shap Accountant, phase 5: engagement letters and working papers; before release)
+
+A practice drafts each client's engagement letter from the client's details, sends it itself and
+records its acceptance, and keeps working papers for each of the client's ended years (review
+notes, the trial balance ticked as prepared and reviewed, the year's sign-offs): its own records, in
+its own database, checks and never locks. Five separate agents reviewed `da50f5f..7d0769b` and
+Pocket's `4b647ef..a9e66f6`, each drafting every letter (each kind of business, each service, kept,
+Pocket and linked) and reading them. None said it was ready.
+
+- Security and privacy, with the penetration test (0 to fix, 49 OK, against the server with the
+  demo company): a tick put the account's code and balance in the practice's audit log, which its
+  owner and accountant read whether or not they were given the client: the log keeps the year and
+  which tick, nothing of the account. A letter's words weren't safe from two people at once (in 4
+  of 9 tries a sent letter's words changed, or a sent letter was deleted): each change asks for the
+  status it expects, and a trigger (`practice_letter_kept`, raising `SH001`) refuses a change to a
+  sent letter's words, parties or acceptance, a step back, or deleting it but with its client. A
+  4.8 MB letter took 20 seconds to make its PDF, the server doing nothing else: 60,000 characters at
+  most, a year 200 review notes and a note 30 replies. An archived client's letters could be
+  deleted and ended. A photo of a signed copy went up as taken (where, and on what): made smaller
+  and re-encoded first, and the "too big" answer gives the route's own 6 MB. The penetration test's
+  rubbish ran with Shap Accountant off, and never tried one client's letter or note under another
+  client's address: it does both now (`paperWalls`). Downloading a letter or its signed copy is
+  logged.
+- IFRS for SMEs and company law: the letter (and terms 9.3, the points, the docs and a test from
+  1.30) had a close corporation's statements approved by members holding "at least half" of the
+  members' interest: s58(3) says at least 51 per cent. A sole proprietor's, partnership's or trust's
+  statements are special purpose (note 1: for them and SARS), but neither the letter nor the report
+  said so: the letter does, and the report has Illustration 2's paragraph (para 40(j)), in Shap and
+  Pocket. Addressed to a company's shareholders or a co-op's members, the report said "you" for what
+  the directors provided (para 40(c)-(d)): it names the directors, and the letter names the
+  addressee (para 40(b)). The audit or review sentence said "instead" for a company (an audit or
+  review is in addition, a separate engagement), nothing for an NPC (always needs one), a CC (s58(2A),
+  Regulation 28) or a co-op (s47, by category). The accounting officer's paragraph is sections 59 to
+  62 as they are (checked against the Act). A replaced or ended letter gave a year the wrong
+  record: a letter covers the years from its first, accepted, until the last year it covers when
+  it's ended (`last_year_end`, chosen when ending it); the latest covering a year governs it, and
+  only it needs that year's second look (`letterStanding`). The file is an aid towards para 38, not
+  the whole of it: it shows the statements' compile and approval dates and says to keep the final
+  set and report with it (38(c)). The list warned about compiling for a client the practice doesn't
+  compile for: "not for compiling", no warning. A partner's sign-off without a review is said. "We'll
+  tell you of any we come across" gives way where the law asks (FICA s29(3)). Grammar for one owner.
+- SARS and tax: an approved PBO's letter had the ITR14 and provisional tax (it's the IT12EI, and no
+  provisional tax), a turnover tax client's the ITR14 or ITR12 and IRP6 (it's the TT02 and TT03):
+  the letter reads the client's own settings, or what its linked Shap sends. Section 240 was said
+  only with income tax, and only for filing: a "Dealing with SARS" part comes with every tax
+  service (who completes, helps complete or advises; eFiling authority for the tax types chosen,
+  withdrawable; SARS's letters straight away, an objection within 80 business days; penalties and
+  interest). Payroll: UIF and SDL where they apply, UIF to the Fund where not registered with SARS,
+  the Department of Employment and Labour's declarations, the IRP5 and IT3(a) certificates, and
+  labour law the client's. A partnership's each partner's own; a trust's IT3(t); a company's DTR01
+  only if listed. Records: five years from each return, longer during an audit (s29, s32), seven
+  under the Companies Act for companies only (it said so for a CC and a co-op too). Confidentiality
+  gives way where the law asks (TAA s46).
+- Accounting and arithmetic: a change of year-end month made every older year's papers refuse
+  (400), and in reverse the whole page; a year that has papers, is closed or has statements stays
+  open, its trial balance over its own twelve months (`trialBalance`'s `from`, `yearStartOf`), and
+  the page opens on the latest year that does. The compile form said "signed off" when the books
+  had moved since: the statements route hashes the trial balance and each sign-off says if it's
+  changed (`changed`). Ticks and the hash went by the account's code: a new code dropped the ticks
+  and said "changed", a code taken by another account carried them over, and an expense moved to
+  assets wasn't a change: ticks are the account's own (`account_id`), the hash is each account, its
+  type and its balance, and each sign-off keeps the rows it was given against (`tb`). The test
+  depended on the real date (three tests red from 1 March 2027): its clock is fixed. A client whose
+  books hadn't reached a year end was offered four years before them: none, and a new letter starts
+  from this year's end or the next. The trial balance has its debit and credit totals, on screen
+  and in the PDF. A note opened again took back sign-offs unlogged, and a note raised after them
+  took nothing: both take back the review and the partner's, each logged, said in a confirm.
+- Words on screen and liability: a sent letter wasn't kept as it is, as the screen said: its PDF
+  read the practice's and client's names afresh, and the client's two names didn't agree. The
+  parties are kept on the letter (the practice's legal name, registration number, trading name and
+  address; the client's legal name), changed with the draft, kept once sent; the letter's words name
+  no party ("the practice named above"). Practices were led to send the draft: it's headed "Draft,
+  to read: not for sending" with `LETTER_NOTE` on it (the sent one brings in nothing of OpenWorks),
+  marking it as sent asks first and says Shap doesn't send it, and the changelog and docs say so in
+  that order. The letter promised to delete what Shap can't, and picked the practice's POPIA role:
+  confidential and secure, and when it ends their books go back, keeping only what the law and the
+  practice's body ask. `LETTER_NOTE` says the draft is not complete and not checked against the law
+  or the practice's body's rules, to check it (and an attorney, for anything legal), and is in the
+  drawer where the words change. A Pocket client's letter offered to write up the books they write
+  up themselves. "Compiler's report" on the screens is the compilation report (Shap and Pocket);
+  the changelog and docs say the letter is drafted to cover para 24, not that it does, and "as its
+  example reports title it". Smaller: one name for the page, the hints, the messages (before the
+  day it was sent; "or an owner"; a company's accounting officer), "Recorded as accepted", End's
+  confirm. The accountant terms: 9.3 at least 51 per cent; 9.2 names the drafted letters and the
+  working papers among the aids (not complete, not legal advice, not checked against the law or
+  the body's rules, their terms between the practice and the client); 11.1 the practice's own
+  records about its clients; 13.1(b) Shap Accountant with its letters and papers. So
+  `ACCOUNTANT_TERMS_VERSION` is 2026-11-17.3: practices accept once more; Shap's own terms don't
+  change, and the disclaimer's practices section says it in a sentence. (Section 7's record of 1.30
+  above says "at least half": it was wrong; 1.31 corrects it everywhere it's said.) For an attorney,
+  with 1.30's questions: the letter's wording as a starting point, the POPIA role of a practice
+  keeping a client's books, and whether drafting the letter for free raises the Legal Practice Act
+  (section 33 reserves court work, not contracts).
+
+Tests: `test/review-1.31/` (`letter`: the law and wording of every kind of business and service;
+`report`: the report for a sole proprietor, a trust, a partnership, a company, a co-op and a CC;
+`papers`: the parties kept, the trigger, two at once, the caps, the coverage, the year-end month,
+ticks by account, the compile form, sign-offs taken back, the audit log, books not yet at a year
+end; `words`: the screens, the changelog and docs), `accountant/working-papers.test.ts` (its clock
+fixed, ticks by account, the archived client's letters), `accountant/accountant-terms.test.ts` (51
+per cent), and in Pocket `shap-1.31-report.test.ts`. Each fails on the code as reviewed (run on a
+worktree of `7d0769b`, and of Pocket's `a9e66f6`, with only the new tests copied in), but for one
+whose fix is on the screen (the list's "not for compiling", which `words` checks). The penetration
+test with its new checks, against a production-mode server with the demo company: 0 to fix, 52 OK,
+nothing in the server's log at error level.
+
 ### Code scanning (CodeQL), first run
 
 - The Accounts screen's download links carried the period's dates unencoded (flagged as text

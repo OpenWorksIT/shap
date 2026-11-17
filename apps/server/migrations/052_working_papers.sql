@@ -5,7 +5,7 @@
 
 -- An engagement letter: drafted from the client's details (lib/engagement.ts), changed as the
 -- practice likes while it's a draft, then sent, accepted by the client, and in time ended (or
--- replaced by a newer one). Its text is kept as it was sent.
+-- replaced by a newer one). Its text, and its parties, are kept as they were sent.
 create table if not exists practice_letters (
   id uuid primary key default gen_random_uuid(),
   client_id uuid not null references practice_clients(id) on delete cascade,
@@ -14,6 +14,14 @@ create table if not exists practice_letters (
   -- The first year it's for (the year end), and every later one until it ends.
   from_year_end date not null,
   body jsonb not null,
+  -- The parties, as the letter names them: the practice's legal name, registration number, trading
+  -- name and address, and the client's name. From Settings and the client's books when it's drafted;
+  -- changed with the draft; kept as they are once it's sent (whatever is renamed later).
+  practice_name text not null check (length(practice_name) between 1 and 200),
+  practice_reg text not null default '' check (length(practice_reg) <= 60),
+  practice_trading text not null default '' check (length(practice_trading) <= 200),
+  practice_address text not null default '' check (length(practice_address) <= 500),
+  client_name text not null check (length(client_name) between 1 and 200),
   status text not null default 'draft' check (status in ('draft', 'sent', 'accepted', 'ended')),
   created_by uuid references users(id),
   created_at timestamptz not null default now(),
@@ -31,10 +39,49 @@ create table if not exists practice_letters (
   accepted_by uuid references users(id),
   ended_at timestamptz,
   ended_by uuid references users(id),
+  -- Ended: the last year end it covers (none, if it ended before its first).
+  last_year_end date,
   check (status <> 'accepted' or (accepted_on is not null and accepted_name is not null and accepted_how is not null)),
-  check (accepted_how is distinct from 'signed' or (signed_bytes is not null and signed_mime is not null and signed_name is not null))
+  check (accepted_how is distinct from 'signed' or (signed_bytes is not null and signed_mime is not null and signed_name is not null)),
+  check (last_year_end is null or (status = 'ended' and last_year_end >= from_year_end))
 );
 create index if not exists practice_letters_client on practice_letters (client_id, created_at);
+
+-- What's sent is kept: once a letter isn't a draft its words, its parties and what it's for don't
+-- change, an acceptance once recorded doesn't, it only moves on (sent, accepted, ended), and it isn't
+-- deleted (but with its client, which a practice only does to a client it has just failed to add).
+-- The routes ask for the status they expect too; this holds whatever runs alongside them.
+create or replace function practice_letter_kept() returns trigger language plpgsql as $$
+begin
+  if tg_op = 'DELETE' then
+    if old.status <> 'draft' and pg_trigger_depth() <= 1 then
+      raise exception 'A letter that has been sent is kept: end it instead' using errcode = 'SH001';
+    end if;
+    return old;
+  end if;
+  if old.status <> 'draft' and (new.body is distinct from old.body or new.services is distinct from old.services or new.other is distinct from old.other
+      or new.from_year_end is distinct from old.from_year_end or new.client_id is distinct from old.client_id
+      or new.practice_name is distinct from old.practice_name or new.practice_reg is distinct from old.practice_reg
+      or new.practice_trading is distinct from old.practice_trading or new.practice_address is distinct from old.practice_address
+      or new.client_name is distinct from old.client_name or new.sent_at is distinct from old.sent_at or new.sent_by is distinct from old.sent_by) then
+    raise exception 'A sent letter''s words are kept as they are: make a new letter to change them' using errcode = 'SH001';
+  end if;
+  if old.status in ('accepted', 'ended') and (new.accepted_on is distinct from old.accepted_on or new.accepted_name is distinct from old.accepted_name
+      or new.accepted_capacity is distinct from old.accepted_capacity or new.accepted_how is distinct from old.accepted_how
+      or new.accepted_by is distinct from old.accepted_by or new.signed_name is distinct from old.signed_name
+      or new.signed_mime is distinct from old.signed_mime or new.signed_bytes is distinct from old.signed_bytes) then
+    raise exception 'A letter''s acceptance is kept as it was recorded' using errcode = 'SH001';
+  end if;
+  if old.status = 'ended' and (new.status <> 'ended' or new.last_year_end is distinct from old.last_year_end or new.ended_at is distinct from old.ended_at or new.ended_by is distinct from old.ended_by) then
+    raise exception 'An ended letter is kept as it ended' using errcode = 'SH001';
+  end if;
+  if not (new.status = old.status or (old.status, new.status) in (('draft', 'sent'), ('sent', 'accepted'), ('sent', 'ended'), ('accepted', 'ended'))) then
+    raise exception 'A letter only moves on: drafted, sent, accepted, ended' using errcode = 'SH001';
+  end if;
+  return new;
+end $$;
+drop trigger if exists practice_letters_kept on practice_letters;
+create trigger practice_letters_kept before update or delete on practice_letters for each row execute function practice_letter_kept();
 
 -- A recurring engagement: the terms looked at again for a later year, and still fitting (ISRS 4410
 -- (Revised) para 26). Who did, and when.
@@ -47,7 +94,8 @@ create table if not exists practice_letter_years (
 );
 
 -- The year's working papers: who prepared, reviewed and, as engagement partner, signed off the
--- year, and the books' trial balance as it was then (to say when it has changed since).
+-- year, and the books' trial balance as it was then (its rows, and their fingerprint, to say when it
+-- has changed since). A client on its own Shap has no trial balance here: neither is kept.
 create table if not exists practice_signoffs (
   client_id uuid not null references practice_clients(id) on delete cascade,
   fy_end date not null,
@@ -55,14 +103,18 @@ create table if not exists practice_signoffs (
   user_id uuid not null references users(id),
   at timestamptz not null default now(),
   tb_hash text,
+  tb jsonb,
   primary key (client_id, fy_end, role)
 );
 
 -- An account's balance at the year end ticked as prepared or reviewed (a client whose books are on
--- this server), with the balance it had then.
+-- this server), with the balance it had then. By the account itself (its id in the client's books),
+-- so a new code, or a code another account takes later, doesn't move a tick; the code and name are
+-- kept to show it by.
 create table if not exists practice_ticks (
   client_id uuid not null references practice_clients(id) on delete cascade,
   fy_end date not null,
+  account_id uuid not null,
   account_code text not null check (length(account_code) between 1 and 40),
   account_name text not null check (length(account_name) between 1 and 200),
   prepared_by uuid references users(id),
@@ -71,7 +123,7 @@ create table if not exists practice_ticks (
   reviewed_by uuid references users(id),
   reviewed_at timestamptz,
   reviewed_cents bigint,
-  primary key (client_id, fy_end, account_code)
+  primary key (client_id, fy_end, account_id)
 );
 
 -- A review note on the year (or one of its accounts), its replies, and who cleared it.

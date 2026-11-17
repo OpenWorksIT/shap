@@ -32,9 +32,14 @@ export async function accountBalances(db: Db, opts: { from?: string | null; to: 
 }
 
 /** Trial balance at a date: balance-sheet accounts to date, P&L accounts for the financial year to date. */
-export async function trialBalance(db: Db, date: string) {
+/**
+ * The trial balance on a day. Profit and loss runs from the start of the year the day is in, as the
+ * business's year-end month has it; or from `from`, for a year end of an earlier month (the working
+ * papers of a year before the month changed: its twelve months, as the statements take them).
+ */
+export async function trialBalance(db: Db, date: string, opts: { from?: string } = {}) {
   const settings = await getSettings(db);
-  const fy = financialYear(date, settings.fyEndMonth);
+  const fy = opts.from ? { ...financialYear(date, settings.fyEndMonth), start: opts.from, end: date } : financialYear(date, settings.fyEndMonth);
   // Up to date before the three run side by side (on separate connections on a server).
   await freshTotals(db);
   const [all, pl, prior] = await Promise.all([
