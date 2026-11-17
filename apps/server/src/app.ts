@@ -61,6 +61,7 @@ import { dbScope, DemoUnavailable, inClient, inDemo, routedDb } from './db/routi
 import { ClientDbs } from './lib/practice.js';
 import { CLIENT_COOKIE, registerPracticeRoutes, registerPracticeScope } from './modules/practice.js';
 import { registerLinkRoutes } from './modules/links.js';
+import { registerWorkingPaperRoutes } from './modules/working-papers.js';
 import { registerStatementRoutes } from './modules/statements.js';
 import { registerCompanyFileRoutes } from './modules/company-file.js';
 import { LINK_PATHS, UNEXPECTED, UNEXPECTED_IN_A_CLIENT } from '@shap/shared';
@@ -262,6 +263,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   registerDemoRoutes(app, ctx);
   registerPracticeRoutes(app, ctx);
   registerLinkRoutes(app, ctx);
+  registerWorkingPaperRoutes(app, ctx);
   registerTestServerRoutes(app, ctx, bus);
   registerSettingsRoutes(app, ctx);
   registerDashboardRoutes(app, ctx);

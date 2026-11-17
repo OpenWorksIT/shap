@@ -39,6 +39,7 @@ import { auditBooks } from '../audit/books.js';
 import { buildStatements, yearStartOf, type Statements } from '../statements/build.js';
 import { loadDetails, saveDetails, type StatementDetails } from '../statements/details.js';
 import { renderStatementsPdf, type Signatures } from '../statements/pdf.js';
+import { papersFor } from '../lib/papers.js';
 import { agreeYear } from './yearend.js';
 import { requireFeature } from './sales.js';
 
@@ -197,7 +198,11 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
       select v.id, v.reopened_at, v.reason, u.name as reopened_by_name, v.signed->>'status' as status, v.signed->>'approved_on' as approved_on,
         v.signed->>'approved_name' as approved_name, v.signed->>'compiled_on' as compiled_on, v.final_pdf_id is not null as has_pdf
       from financial_statement_versions v left join users u on u.id = v.reopened_by where v.fy_end = ${fyEnd}::date order by v.reopened_at desc`;
-    return { statements, status: r?.status ?? 'draft', row: r ? { ...r, snapshot: undefined } : null, changedSince, audit, yearAgreed: Boolean(agreed), yearClosed, versions };
+    // In a practice's client's books: what the practice has recorded for this year (its letters and
+    // working papers, in its own database), for the compile form to say. A check, never a lock.
+    const here = dbScope.getStore()?.client;
+    const practice = here ? (await papersFor(ctx.dbs.real, [here.id], () => fyEnd)).get(here.id) ?? null : null;
+    return { statements, status: r?.status ?? 'draft', row: r ? { ...r, snapshot: undefined } : null, changedSince, audit, yearAgreed: Boolean(agreed), yearClosed, versions, practice };
   });
 
   app.get('/api/statements/:fyEnd/pdf', { preHandler: requireAccess('reports.view') }, async (req, reply) => {

@@ -33,6 +33,7 @@ const MoveInPage = lazy(() => import('./pages/MoveIn'));
 const SalesPage = lazy(() => import('./pages/Sales'));
 const InventoryPage = lazy(() => import('./pages/Inventory'));
 const PracticePage = lazy(() => import('./pages/Practice'));
+const PracticeFilePage = lazy(() => import('./pages/PracticeFile'));
 
 export function App() {
   return (
@@ -98,6 +99,7 @@ function Authed() {
           {may['/settings'] && <Route path="/settings" element={<SettingsPage />} />}
           {may['/move-in'] && <Route path="/move-in" element={<MoveInPage />} />}
           {may['/practice'] && <Route path="/practice" element={<PracticePage />} />}
+          {may['/practice'] && <Route path="/practice/:id" element={<PracticeFilePage />} />}
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

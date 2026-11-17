@@ -32,6 +32,7 @@ import { SERVER_ONLY, under } from '../lib/server-only.js';
 import { applyPocketShare, readPocketShare } from './import/pocket-share.js';
 import { appVersion, BACKUP_NAME } from './system.js';
 import { linkCall, LinkError } from '../lib/link-call.js';
+import { lastEnded, papersFor } from '../lib/papers.js';
 import { newToken, sha256 } from '../lib/tokens.js';
 import { parse } from '../lib/validate.js';
 
@@ -59,7 +60,7 @@ export const POCKET_COPY = 'These books are a Shap Pocket client’s, from their
 const CLOSED = 'Those books are no longer open here: go back to the practice (Practice, in the menu) and open them again.';
 const NOT_GIVEN = 'You haven’t been given this client: ask whoever runs the practice’s Shap.';
 
-interface ClientRow {
+export interface ClientRow {
   id: string;
   name: string;
   kind: string;
@@ -124,13 +125,13 @@ const linkedHealth = z.object({
 });
 
 /** The practice's owner has accepted the Shap Accountant terms as they are now (terms.ts). */
-const accountantTermsAccepted = async (real: Sql) => {
+export const accountantTermsAccepted = async (real: Sql) => {
   const [s] = await real<{ accountantTermsVersion: string }[]>`select accountant_terms_version from settings where id`;
   return s?.accountantTermsVersion === ACCOUNTANT_TERMS_VERSION;
 };
 export const ACCOUNTANT_TERMS_NEEDED = 'The Shap Accountant terms of use have changed, or haven’t been accepted for this practice yet: its owner accepts them on the Practice page before any client’s books are opened. Nothing in the clients’ books changes meanwhile, except monthly invoices set up there, which are still made on their day; their backups can still be downloaded from the Practice page.';
 
-const practiceOn = async (real: Sql) => {
+export const practiceOn = async (real: Sql) => {
   const [s] = await real<{ features: Record<string, boolean> | null }[]>`select features from settings where id`;
   return featureOn(s?.features, 'practice');
 };
@@ -215,7 +216,7 @@ export async function takeOutOfLinked(ctx: Ctx, real: Sql, before: Map<string, M
 }
 
 /** May they open this client, and how? The practice's owner opens all of them, either way. */
-async function levelFor(real: Sql, user: AuthUser, clientId: string): Promise<Level | null> {
+export async function levelFor(real: Sql, user: AuthUser, clientId: string): Promise<Level | null> {
   if (user.role === 'owner') return 'books';
   if (!can(user, 'practice.clients')) return null;
   const [a] = await real<{ level: Level }[]>`select level from practice_access where client_id = ${clientId} and user_id = ${user.id}`;
@@ -336,6 +337,11 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const people = manages ? await real<{ id: string; name: string; email: string; role: string }[]>`select id, name, email, role from users where active and role = 'staff' order by lower(name)` : [];
     const access = manages ? await real<{ clientId: string; userId: string; level: Level }[]>`select client_id, user_id, level from practice_access` : [];
     const now = today();
+    // Each client's engagement letters and its latest ended year's working papers (working-papers.ts).
+    const papers = await papersFor(real, mine.map((r) => r.id), (id) => {
+      const m = mine.find((r) => r.id === id)?.health?.deadlineInputs?.fyEndMonth;
+      return m ? lastEnded(m, now) : null;
+    });
     return {
       clients: mine.map((r) => ({
         id: r.id,
@@ -350,6 +356,7 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
         health: r.health ? { ...r.health, deadlines: r.health.deadlineInputs ? deadlinesFor(r.health.deadlineInputs, now) : [] } : null,
         healthAt: r.healthAt,
         access: access.filter((a) => a.clientId === r.id).map((a) => ({ userId: a.userId, level: a.level })),
+        papers: papers.get(r.id) ?? null,
       })),
       people,
     };

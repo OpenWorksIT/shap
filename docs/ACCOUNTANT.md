@@ -54,6 +54,8 @@ them, don't change.
 | A Shap Pocket share | A read-only copy of the owner's phone books, stamped, the next share marking what changed | Now (1.29) |
 | Linked from the client's own Shap | On the client's own server; Open signs the practice's person in to it, in a new tab | Now (1.30) |
 
+Each client's engagement letters and working papers (1.31) are the practice's own: below, "Engagement letters and working papers".
+
 **Add client** (for whoever may add clients) makes a new set of books named for the business.
 **Open their books** puts this browser into them, with Shap's screens; the first time, Shap asks
 its first questions about the business (the Welcome), as for any new Shap, but not the two about
@@ -269,6 +271,68 @@ redirects followed, ten seconds in all, a small answer: `lib/link-call.ts`); on 
 network, `LINK_PRIVATE=true` lets it reach private addresses, over http too, but never link-local
 ones (a cloud server's metadata). Only the link's own routes (`LINK_PATHS`) are answered without a
 session there, each reading a small body. Both Shaps need 1.30 or later.
+
+## Engagement letters and working papers
+
+**Working papers and letters**, on each client's card in Practice, is the practice's own record of its
+work for that client: kept in the practice's database (`modules/working-papers.ts`), never in the
+client's books, and reached only from the practice (not from inside a client's books). Anyone given
+the client sees it; who may do what is below. Nothing here stops anyone compiling or filing: what's
+missing is shown on the practice's list (each client's latest ended year), in the year's papers, and,
+in a client's books kept here or brought in from Shap Pocket, before **Compile and sign**. A check,
+never a lock (the practitioner's call). A wipe of the practice's own books keeps them, as it keeps
+its clients.
+
+### Engagement letters
+
+**New letter** (for whoever manages the practice's clients) drafts one from the client's details in
+Shap (`lib/engagement.ts`): what the practice will do (write up the books, the payroll, VAT, income
+tax, compiling the annual financial statements, a close corporation's accounting officer, anything
+else), from which year end, the fees as the practice words them, and its professional body. It's a
+starting point (`LETTER_NOTE`): the practice reads all of it and changes any of it while it's a
+draft. Compiling the statements covers what ISRS 4410 (Revised) para 24 asks the agreed terms to
+say: their intended use and distribution, the framework (the IFRS for SMEs Accounting Standard and
+the business's Act, or the basis note 1 describes), the engagement's objective and scope (not an
+assurance engagement), the practitioner's responsibilities (its body's ethical code), management's
+(who approves the statements, for each kind of business, and their acknowledgement of the final
+version, para 37), and the report's expected form (the practitioner's compilation report). It also
+says where the client's books are (kept here, Shap Pocket shares, or their own Shap), the records the
+law asks each side to keep, and the personal information the practice processes for the client
+(POPIA, sections 19 to 22).
+
+Then: **PDF** (with lines to sign), **Mark as sent** (its words are kept as they were from then: a new
+letter changes the terms), **Record their acceptance** (who, in what capacity, and when; with the
+signed copy uploaded, kept with the letter, or recorded without one), **End** (kept, as it was).
+Shap sends nothing to the client: the practice sends the PDF itself.
+
+A recurring engagement (para 26): an accepted letter runs on to every later year, and for each the
+practice records that its terms were looked at again and still fit (**Terms still fit for the year
+to …**), or makes a new letter. Until then, the list says so.
+
+### Working papers
+
+For each of the client's years that has ended (from the books' first; on their own Shap, the last
+four):
+
+- **Review notes**: on the year, or on one of its accounts; answered by anyone given the client;
+  cleared (or opened again) by whoever raised them, or an owner.
+- **The trial balance at the year end** (books on the practice's server: kept, brought in, Shap
+  Pocket), each account ticked as **prepared** (whoever writes up the books) and **reviewed** (anyone
+  given the client), with who and when. A tick keeps the balance it was given at: if the books move,
+  it says the balance has changed since. A review by whoever prepared it is said, not refused (a
+  sole practitioner reviews their own). A client on its own Shap keeps its trial balance there:
+  nothing new comes over the link, so its papers have notes and sign-offs, not ticks.
+- **Sign-offs** for the year: **prepared** (whoever writes up the books), **reviewed** (anyone given
+  the client) and **engagement partner** (an owner: the practice's partners are its owners in Shap).
+  Reviewed and the partner's wait for every review note to be cleared; a note opened again takes
+  them back. Each keeps the trial balance as it was, and says when the books have changed since.
+- **Download the year's file (PDF)**: the sign-offs, the letter's standing, every review note with its
+  replies, and the trial balance's ticks: the practice's record of the engagement (para 38: the
+  significant matters and how they were addressed; the compiled set itself, with its report, is kept
+  with the statements in the client's books).
+
+Shap records what the practice's people tick, note and sign (each in the practice's audit log); it
+doesn't check the work behind them (`FILE_NOTE`).
 
 ## Who opens which
 

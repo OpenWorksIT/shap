@@ -31,7 +31,8 @@ export async function wipeNames(db: Sql): Promise<string[]> {
 // Accountant): the clients' books are databases of their own, which a wipe of these never touches,
 // so the practice must still find them after it. And the links to the business's accountant, with
 // the people from the practice who came by them (a wipe doesn't unlink: Your accountant does).
-const KEEP = ['profiles', 'users', 'accountant_links', 'link_entries', 'sessions', 'recovery_codes', 'audit_log', 'practice_clients', 'practice_access'] as const;
+// The practice's engagement letters and working papers about its clients go with them.
+const KEEP = ['profiles', 'users', 'accountant_links', 'link_entries', 'sessions', 'recovery_codes', 'audit_log', 'practice_clients', 'practice_access', 'practice_letters', 'practice_letter_years', 'practice_signoffs', 'practice_ticks', 'practice_notes', 'practice_note_replies'] as const;
 
 export async function wipeBooks(db: Sql): Promise<void> {
   const migrations = await migrationFiles();

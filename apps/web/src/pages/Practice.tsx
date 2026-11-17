@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { ACCOUNTANT_TERMS_MEANS, ACCOUNTANT_TERMS_URL, ACCOUNTANT_TERMS_VERSION, dayOf, formatDate, LEVEL_WORDS, LINK_SESSION_HOURS, LINKED_LEVEL_WORDS, POCKET_SHARE_NOTE, PRACTICE_NOTE, PRACTICE_TERMS_TICK, STATEMENT_STATUS_LABELS, todayIso, WHO_OPENS_LINKED, type Level, type StatementStatus } from '@shap/shared';
 import { AccountantPoints, AccountantTermsAccept } from '../components/AccountantTerms';
 import { PageHead } from '../components/Shell';
@@ -38,6 +39,8 @@ interface PracticeClient {
   access: { userId: string; level: Level }[];
   /** On their own Shap: where, what they let the practice do, and whether it's still linked. */
   linked: { host: string; level: Level | null; unlinked: boolean } | null;
+  /** Its engagement letters, and its latest ended year's working papers (PracticeFile). */
+  papers: { fyEnd: string | null; letter: 'none' | 'draft' | 'sent' | 'accepted'; compiling: boolean; termsLooked: boolean; openNotes: number; signed: Record<'prepared' | 'reviewed' | 'partner', boolean> } | null;
 }
 interface ShareChange {
   key: string;
@@ -323,9 +326,12 @@ export default function PracticePage() {
                         <p className="small">
                           <strong>Books check:</strong> {h.audit.fail === 0 && h.audit.warn === 0 ? 'nothing to fix' : [h.audit.fail ? `${h.audit.fail} to fix` : '', h.audit.warn ? `${h.audit.warn} to look at` : ''].filter(Boolean).join(', ')}
                           {h.audit.items.length > 0 && (
-                            <button className="link-btn small" onClick={() => setOpenFindings(openFindings === c.id ? null : c.id)}>
-                              {openFindings === c.id ? ' Hide' : ' Show'}
-                            </button>
+                            <>
+                              {' '}
+                              <button className="link-btn small" onClick={() => setOpenFindings(openFindings === c.id ? null : c.id)}>
+                                {openFindings === c.id ? 'Hide' : 'Show'}
+                              </button>
+                            </>
                           )}
                         </p>
                         {openFindings === c.id && (
@@ -400,6 +406,14 @@ export default function PracticePage() {
                     </p>
                   </div>
                 )}
+                {c.papers && <PapersLine p={c.papers} />}
+                {(c.level || isOwner) && (
+                  <div>
+                    <Link className="btn small quiet" to={`/practice/${c.id}`}>
+                      Working papers and letters
+                    </Link>
+                  </div>
+                )}
                 {(manage || isOwner) && (
                   <div className="row wrap" style={{ gap: 8 }}>
                     <span className="xs muted grow" data-private>
@@ -441,6 +455,30 @@ export default function PracticePage() {
       {backupsFor && <BackupsDrawer client={backupsFor} onClose={() => setBackupsFor(null)} />}
       {shareResult && <ShareDrawer client={shareResult.client} result={shareResult.result} onClose={() => setShareResult(null)} />}
     </div>
+  );
+}
+
+/** What the practice has recorded of its letters and the latest ended year's working papers: checks, not locks. */
+function PapersLine({ p }: { p: NonNullable<PracticeClient['papers']> }) {
+  const letter =
+    p.letter === 'none'
+      ? 'no engagement letter yet'
+      : p.letter === 'draft'
+        ? 'an engagement letter drafted, not sent'
+        : p.letter === 'sent'
+          ? 'an engagement letter sent, not accepted yet'
+          : !p.compiling
+            ? 'no accepted letter covers compiling this year'
+            : !p.termsLooked
+              ? 'its letter’s terms not looked at again for this year'
+              : 'letter accepted';
+  const warn = p.letter !== 'accepted' || !p.compiling || !p.termsLooked || p.openNotes > 0;
+  return (
+    <p className={warn ? 'small warn-text' : 'small'}>
+      <strong>{p.fyEnd ? `The year to ${formatDate(p.fyEnd)}:` : 'Working papers:'}</strong> {letter}
+      {p.openNotes > 0 ? `; ${p.openNotes === 1 ? 'one review note' : `${p.openNotes} review notes`} open` : ''}
+      {`; ${p.signed.partner ? 'signed off by the engagement partner' : p.signed.reviewed ? 'reviewed, not yet signed off by the engagement partner' : p.signed.prepared ? 'prepared, not yet reviewed' : 'not signed off'}`}.
+    </p>
   );
 }
 

@@ -3,6 +3,25 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.31.0 (17 November 2026)
+
+- **Shap Accountant: engagement letters** (Practice → a client → Working papers and letters). Draft
+  one from the client's details, choosing what your practice will do for them: for compiling the
+  statements it says what ISRS 4410 (Revised) asks the agreed terms to say. Change any of it, download
+  it as a PDF to send, record their acceptance (with the signed copy, or without), and each later
+  year record that its terms still fit. A starting point: the letter, and the engagement, are your
+  practice's own.
+- **Shap Accountant: working papers** for each of a client's ended years: review notes, raised,
+  answered and cleared; the trial balance at the year end, each account ticked as prepared and
+  reviewed (clients on their own Shap keep theirs there: notes and sign-offs only); and the year
+  signed off as prepared, reviewed and by the engagement partner. Each says when the books have
+  changed since. The year's file downloads as a PDF. The practice's list, and the compile form in a
+  client's books, say what isn't recorded yet: checks, never locks.
+- The compiler's report on the financial statements is titled **Practitioner's compilation report**,
+  as ISRS 4410 (Revised) titles it (it said "Independent compiler's report").
+- Updating a practice's server (`migrate-cli`) brings its clients' books up to date too, as starting
+  the server does.
+
 ## 1.30.0 (17 November 2026)
 
 - **Link your accountant** (Settings → People who sign in → Your accountant). If your accountant's

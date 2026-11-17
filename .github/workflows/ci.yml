@@ -168,6 +168,11 @@ jobs:
           cd ../prev && npm ci --no-audit --no-fund && npm -w @shap/server run build
           node apps/server/dist/db/seed.js --i-know-this-is-demo-data
           psql -h localhost -U postgres -d shap_upgrade -Atc "select a.code || ' ' || a.name, coalesce(sum(l.amount_cents), 0) from accounts a left join ledger l on l.account_id = a.id group by 1 order by 1" > "$RUNNER_TEMP/before.txt"
+          # Shap Accountant: a client's books, kept in this practice (the demo company's, copied as a
+          # client's database), brought up to date with the practice's.
+          psql -h localhost -U postgres -c 'create database shap_upgrade__c_000000000001 template shap_upgrade'
+          psql -h localhost -U postgres -d shap_upgrade -c "insert into practice_clients (name, kind, db_name) values ('A made-up client', 'kept', 'shap_upgrade__c_000000000001')"
+          psql -h localhost -U postgres -d shap_upgrade__c_000000000001 -Atc "select a.code || ' ' || a.name, coalesce(sum(l.amount_cents), 0) from accounts a left join ledger l on l.account_id = a.id group by 1 order by 1" > "$RUNNER_TEMP/client-before.txt"
       - name: brought up to this version
         if: steps.prev.outputs.sha != ''
         run: |
@@ -175,11 +180,19 @@ jobs:
           node apps/server/dist/db/migrate-cli.js
           psql -h localhost -U postgres -d shap_upgrade -Atc "select a.code || ' ' || a.name, coalesce(sum(l.amount_cents), 0) from accounts a left join ledger l on l.account_id = a.id group by 1 order by 1" > "$RUNNER_TEMP/after.txt"
           node apps/server/dist/audit/cli.js | tee audit.txt
+          # The client's books: every migration ran, nothing moved, and the books audit finds nothing to fix.
+          test -z "$(psql -h localhost -U postgres -d shap_upgrade -Atc 'select migrate_error from practice_clients where migrate_error is not null')" || { echo "::error::a client's books didn't come up to date"; exit 1; }
+          test "$(psql -h localhost -U postgres -d shap_upgrade__c_000000000001 -Atc 'select count(*) from schema_migrations')" = "$(psql -h localhost -U postgres -d shap_upgrade -Atc 'select count(*) from schema_migrations')" || { echo "::error::a client's books are on fewer migrations than the practice's"; exit 1; }
+          psql -h localhost -U postgres -d shap_upgrade__c_000000000001 -Atc "select a.code || ' ' || a.name, coalesce(sum(l.amount_cents), 0) from accounts a left join ledger l on l.account_id = a.id group by 1 order by 1" > "$RUNNER_TEMP/client-after.txt"
+          diff "$RUNNER_TEMP/client-before.txt" "$RUNNER_TEMP/client-after.txt" || { echo "::error::a client's balances moved on upgrade"; exit 1; }
+          DATABASE_URL=postgres://postgres:postgres@localhost:5432/shap_upgrade__c_000000000001 node apps/server/dist/audit/cli.js | tee client-audit.txt
           {
             echo "### Upgrade from ${{ steps.prev.outputs.version }}"
             if diff -q "$RUNNER_TEMP/before.txt" "$RUNNER_TEMP/after.txt" >/dev/null; then echo 'No account balance changed.'
             else echo 'Balances that changed (check the changelog says why):'; echo '```'; diff "$RUNNER_TEMP/before.txt" "$RUNNER_TEMP/after.txt" | head -60 || true; echo '```'; fi
             echo '```'; tail -3 audit.txt; echo '```'
+            echo "A client's books, kept in the practice: brought up to date, no balance moved."
+            echo '```'; tail -3 client-audit.txt; echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
   dependencies:

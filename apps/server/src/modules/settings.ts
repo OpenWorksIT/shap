@@ -66,11 +66,17 @@ export function cleanLogo(input: z.infer<typeof attachmentInput>): z.infer<typeo
   return { ...input, mime: clean[0] === 0xff ? 'image/jpeg' : 'image/png', dataBase64: clean.toString('base64') };
 }
 
-export async function saveAttachment(db: Db, input: z.infer<typeof attachmentInput>, createdBy: string): Promise<string> {
+/** An uploaded file's bytes, if it's what it says it is (a photo or a PDF) and not too big. */
+export function fileBytes(input: z.infer<typeof attachmentInput>): Buffer {
   const bytes = Buffer.from(input.dataBase64, 'base64');
   if (bytes.length === 0) throw badRequest('That file is empty');
   if (!SIGNATURES[input.mime]?.(bytes)) throw badRequest('That file isn’t a photo (JPEG, PNG, WebP) or a PDF');
   if (bytes.length > 6 * 1024 * 1024) throw badRequest('That file is too big (6 MB at most). Photos are shrunk on the phone before upload.');
+  return bytes;
+}
+
+export async function saveAttachment(db: Db, input: z.infer<typeof attachmentInput>, createdBy: string): Promise<string> {
+  const bytes = fileBytes(input);
   const [row] = await db<{ id: string }[]>`
     insert into attachments (filename, mime, size, bytes, created_by) values (${input.filename}, ${input.mime}, ${bytes.length}, ${bytes}, ${createdBy}) returning id
   `;

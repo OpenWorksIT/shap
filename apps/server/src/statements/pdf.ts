@@ -244,7 +244,7 @@ export function renderStatementsPdf(s: Statements, sig: Signatures = {}): Promis
     newPage();
     // To those who own it: a company's shareholders, a CC's or co-op's members; an NPC's directors.
     const to = ({ company: 'shareholders', inc: 'shareholders', npc: 'directors', cc: 'members', coop: 'members' } as Partial<Record<string, string>>)[s.company.businessType] ?? many;
-    heading('Independent compiler’s report', `To the ${to} of ${s.company.name}`);
+    heading('Practitioner’s compilation report', `To the ${to} of ${s.company.name}`);
     const c = sig.compiler ?? null;
     const comp = c ?? { ...s.details.compiler, date: '' };
     para(

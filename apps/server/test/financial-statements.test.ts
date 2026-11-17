@@ -263,6 +263,10 @@ describe('the statements’ words and lines (from the accountant bot’s run)', 
     expect(text).not.toMatch(/owner are|Owner. responsibilities|Registered office|Country of incorporation/);
     expect(text).toMatch(/basis of accounting described in note 1/);
     expect(text).toMatch(/FOR APPROVAL/);
+    // Compiled: the report is titled as ISRS 4410 (Revised) titles it, whatever the compiler's independence.
+    const compiled = await pdfText(await renderStatementsPdf({ ...s, details: { ...s.details, assurance: 'compiled' } }, { compiler: { name: 'Fictional Accountant', date: '2026-04-01', how: 'uploaded' } }));
+    expect(compiled).toMatch(/Practitioner.s compilation report/);
+    expect(compiled).not.toMatch(/Independent compiler/);
   });
 
   it('nets a bank overdraft off cash in the cash note, as the cash flows do', async () => {

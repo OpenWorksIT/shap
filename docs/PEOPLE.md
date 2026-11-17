@@ -102,6 +102,16 @@ practice asks this Shap to take them out when it takes their access away (and is
 couldn't). **Unlink** takes them all out at once; to
 change what the practice may do, unlink and make a new link.
 
+## Engagement letters and working papers (Shap Accountant)
+
+In a practice, anyone given a client (Who opens it) sees its engagement letters and working papers,
+raises and answers review notes, and ticks accounts and signs the year off as reviewed. Ticking an
+account as prepared, and the year's prepared sign-off, are for whoever writes up the client's books.
+Letters are made, sent, recorded as accepted and ended by whoever manages the practice's clients
+(**Add clients and choose who opens each**). A review note is cleared by whoever raised it, a tick
+or a sign-off taken back by whoever gave it; an owner does any of these, and only an owner signs off
+as the engagement partner (docs/ACCOUNTANT.md, "Engagement letters and working papers").
+
 ## How it's checked
 
 `apps/server/test/access.test.ts` tries every route for every job: each job (with what it needs)

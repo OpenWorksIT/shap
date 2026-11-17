@@ -91,6 +91,8 @@ interface StatementsView {
   yearClosed?: boolean;
   /** Sets signed before and reopened since, kept as they were signed. */
   versions?: { id: string; reopenedAt: string; reason: string; reopenedByName: string | null; status: string; approvedOn: string | null; approvedName: string | null; compiledOn: string | null; hasPdf: boolean }[];
+  /** In a practice's client's books: what the practice has recorded for the year (its letters and working papers). */
+  practice?: { letter: string; compiling: boolean; termsLooked: boolean; openNotes: number; signed: { prepared: boolean; reviewed: boolean; partner: boolean } } | null;
 }
 
 export function FinancialStatements() {
@@ -383,6 +385,7 @@ export function FinancialStatements() {
                 </button>
               </>
             )}
+            {accountant && (status === 'draft' || status === 'sent') && v.practice && <PracticeChecks p={v.practice} />}
             {accountant && (status === 'draft' || status === 'sent') && (
               <button className="btn primary" onClick={() => setForm('compile')} disabled={!ready}>
                 <Icon name="check" size={18} />
@@ -666,6 +669,20 @@ function UploadForm({ fyEnd, compiler, cc, onClose, onDone }: { fyEnd: string; c
       </form>
     </Drawer>
   );
+}
+
+/**
+ * Before compiling in a practice's client's books: what the practice hasn't recorded for the year
+ * (Practice → Working papers and letters). Said, never a lock: compiling is the practitioner's call.
+ */
+function PracticeChecks({ p }: { p: NonNullable<StatementsView['practice']> }) {
+  const missing = [
+    !p.compiling ? 'no accepted engagement letter covering compiling them is recorded (ISRS 4410 (Revised) asks for agreed terms first)' : !p.termsLooked ? 'the letter’s terms aren’t recorded as looked at again for this year' : '',
+    p.openNotes > 0 ? `${p.openNotes === 1 ? 'one review note is' : `${p.openNotes} review notes are`} still open` : '',
+    !p.signed.partner ? 'the year’s working papers aren’t signed off by the engagement partner' : '',
+  ].filter(Boolean);
+  if (!missing.length) return null;
+  return <p className="small warn-text" style={{ flexBasis: '100%' }}>In your practice’s records for this year: {missing.join('; ')}. Practice → Working papers and letters.</p>;
 }
 
 function CompileForm({ fyEnd, compiler, cc, onClose, onDone }: { fyEnd: string; compiler: StatementDetailsInput['compiler']; cc: boolean; onClose: () => void; onDone: () => Promise<void> }) {
