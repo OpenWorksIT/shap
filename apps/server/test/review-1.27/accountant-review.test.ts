@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { deadlinesFor, todayIso } from '@shap/shared';
+import { ACCOUNTANT_TERMS_VERSION, deadlinesFor, todayIso } from '@shap/shared';
 import { buildApp } from '../../src/app.js';
 import { loadConfig } from '../../src/config.js';
 import { createDb, type Sql } from '../../src/db/index.js';
@@ -80,6 +80,7 @@ describe('Shap Accountant 1.27.0: the reviews’ findings', () => {
     siteId = (await env.sql<{ id: string }[]>`select id from users where email = 'site@example.co.za'`)[0]!.id;
     await env.sql`update users set access_add = '{practice.clients}' where id = ${siteId}`;
     const { settings } = await owner.get('/api/reference');
+    await owner.post('/api/practice/terms', { version: ACCOUNTANT_TERMS_VERSION });
     await owner.post('/api/settings', { ...settings, features: { ...settings.features, practice: true } }, 'PUT');
   }, 120_000);
   afterAll(async () => {
@@ -238,6 +239,7 @@ describe('Shap Accountant 1.27.0: the reviews’ findings', () => {
       await owner.post('/api/wipe', { password: 'test-password-1', name: names[0] });
       // Switched on again, the client is there and opens.
       const { settings } = await owner.get('/api/reference');
+      await owner.post('/api/practice/terms', { version: ACCOUNTANT_TERMS_VERSION });
       await owner.post('/api/settings', { ...settings, features: { ...settings.features, practice: true } }, 'PUT');
       const [row] = await env.sql<{ dbName: string }[]>`select db_name from practice_clients where id = ${id}`;
       expect(row?.dbName).toBe(name);
@@ -426,6 +428,7 @@ describe('the demo company and the practice’s clients (security 2)', () => {
   it('never reaches the real practice’s list, its people or its clients from the demo', async () => {
     const owner = await login(app, 'owner@example.co.za');
     const { settings } = await owner.get('/api/reference');
+    await owner.post('/api/practice/terms', { version: ACCOUNTANT_TERMS_VERSION });
     await owner.post('/api/settings', { ...settings, features: { ...settings.features, practice: true } }, 'PUT');
     // A client row only (no database needed for the walls).
     const [c] = await env.sql<{ id: string }[]>`insert into practice_clients (name, kind) values ('Made-up Real Client CC', 'kept') returning id`;

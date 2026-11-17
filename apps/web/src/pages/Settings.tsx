@@ -49,7 +49,8 @@ import { ClipsSetting } from '../components/HowItWorks';
 import { TermPicks } from '../components/TermPicks';
 import { LogoPlacer } from '../components/LogoPlacer';
 import { LogoField } from '../components/BusinessForm';
-import { FEATURES, FEATURE_GROUPS, FEATURE_KEYS, featureOn, INDUSTRIES, PRACTICE_CAUTION, TURNOVER_TAX_LIMIT_CENTS } from '@shap/shared';
+import { ACCOUNTANT_TERMS_VERSION, FEATURES, FEATURE_GROUPS, FEATURE_KEYS, featureOn, INDUSTRIES, PRACTICE_CAUTION, TURNOVER_TAX_LIMIT_CENTS } from '@shap/shared';
+import { AccountantTermsAccept } from '../components/AccountantTerms';
 import { useClientHere } from '../components/ClientBanner';
 import { WipeData } from '../components/WipeData';
 import { setTone, type Tone } from '../lib/words';
@@ -1253,9 +1254,15 @@ function Sections() {
       return false;
     }
   };
+  // Shap Accountant goes on once the owner has accepted its terms for the practice.
+  const [accountantTerms, setAccountantTerms] = useState(false);
   const toggle = async (k: (typeof FEATURE_KEYS)[number], value: boolean) => {
-    // What the practice answers for, said back before Shap Accountant goes on.
+    // What the practice answers for, said back before Shap Accountant goes on, with its terms.
+    if (k === 'practice' && value && settings.accountantTermsVersion !== ACCOUNTANT_TERMS_VERSION) return setAccountantTerms(true);
     if (k === 'practice' && value && !confirm(PRACTICE_CAUTION)) return;
+    await switchTo(k, value);
+  };
+  const switchTo = async (k: (typeof FEATURE_KEYS)[number], value: boolean) => {
     const next = { ...on, [k]: value };
     setOn(next);
     if (!(await save({ features: next }, `${FEATURES[k].label} ${value ? 'on' : 'off'}`))) setOn(on);
@@ -1273,6 +1280,17 @@ function Sections() {
   };
   return (
     <div className="stack-lg narrow-wide">
+      {accountantTerms && (
+        <Drawer title="Shap Accountant: its terms for your practice" sub="Accept them for your practice to switch it on." onClose={() => setAccountantTerms(false)} wide>
+          <AccountantTermsAccept
+            cautions={[PRACTICE_CAUTION]}
+            onAccepted={async () => {
+              setAccountantTerms(false);
+              await switchTo('practice', true);
+            }}
+          />
+        </Drawer>
+      )}
       <section className="panel">
         <div className="panel-head">
           <strong>What you use</strong>

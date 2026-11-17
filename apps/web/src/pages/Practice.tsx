@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
-import { dayOf, formatDate, LEVEL_WORDS, POCKET_SHARE_NOTE, PRACTICE_NOTE, PRACTICE_TERMS_TICK, STATEMENT_STATUS_LABELS, TERMS_URL, todayIso, type Level, type StatementStatus } from '@shap/shared';
+import { ACCOUNTANT_TERMS_URL, ACCOUNTANT_TERMS_VERSION, dayOf, formatDate, LEVEL_WORDS, POCKET_SHARE_NOTE, PRACTICE_NOTE, PRACTICE_TERMS_TICK, STATEMENT_STATUS_LABELS, todayIso, type Level, type StatementStatus } from '@shap/shared';
+import { AccountantPoints, AccountantTermsAccept } from '../components/AccountantTerms';
 import { PageHead } from '../components/Shell';
 import { Drawer, Empty, ErrorBox, Field, Loading, Money, useToast } from '../components/ui';
 import { api, ApiError } from '../lib/api';
@@ -60,7 +61,7 @@ const counted = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
  * and people's names are marked private, so a feedback screenshot never shows them.
  */
 export default function PracticePage() {
-  const { can, user } = useAuthed();
+  const { can, user, settings } = useAuthed();
   const manage = can('practice.manage');
   const isOwner = user.role === 'owner';
   const toast = useToast();
@@ -110,7 +111,7 @@ export default function PracticePage() {
         r.readAsDataURL(file);
       });
       const send = (acceptTerms: boolean) => api<ShareResult>(`/api/practice/clients/${c.id}/pocket-share`, { body: { name: file.name, dataBase64, acceptTerms } });
-      const terms = `${PRACTICE_TERMS_TICK}\n\nThe terms of use: ${TERMS_URL}`;
+      const terms = `${PRACTICE_TERMS_TICK}\n\nThe Shap Accountant terms of use: ${ACCOUNTANT_TERMS_URL}`;
       // The first share records the practice's acceptance of the terms for these books.
       const first = !c.health?.pocket;
       if (first && !confirm(terms)) return;
@@ -137,6 +138,16 @@ export default function PracticePage() {
       await reload();
     });
 
+  // The Shap Accountant terms changed, or were never accepted for this practice: its owner accepts
+  // them before any client's books open (the server refuses until then).
+  if (settings.accountantTermsVersion !== ACCOUNTANT_TERMS_VERSION)
+    return (
+      <div className="stack-lg narrow-wide">
+        <PageHead title="Practice" sub={settings.accountantTermsVersion ? 'The Shap Accountant terms of use have changed' : 'Before you carry on: the Shap Accountant terms of use'} />
+        <p className="small muted">Your clients’ books are untouched. {isOwner ? 'Read the terms, accept them for your practice, and carry on where you were.' : 'The practice’s owner accepts them for the practice before anyone opens a client’s books: ask them to open Practice.'}</p>
+        {isOwner ? <AccountantTermsAccept onAccepted={reload} /> : <AccountantPoints />}
+      </div>
+    );
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   if (!data) return <Loading />;
   const shown = data.clients.filter((c) => showArchived || !c.archived);

@@ -15,6 +15,27 @@ them. Shap files nothing with SARS or CIPC, and signs nothing.
 Switching it on says back what the practice answers for: its clients' backups, who in the practice
 opens them, their personal information (POPIA), and checking what Shap shows.
 
+## The Shap Accountant terms
+
+A practice uses Shap Accountant on the [Shap Accountant terms of
+use](https://www.openworks.co.za/shap/accountant-terms/): Shap's terms (Part A), with what a
+practice takes on (Part B): its work for its clients is its own, Shap's checks and returns are
+aids, its clients' books and personal information (POPIA) are in its care, and it indemnifies
+OpenWorks against claims over that work (clause 13). Only practices accept them, so Shap's own
+terms, and everyone else's acceptance of them, don't change.
+
+- **The practice's owner accepts them for the practice** (`POST /api/practice/terms`, the owner's
+  only, in the practice's own books): before Shap Accountant is switched on (Settings → What you
+  use shows them, with what the practice answers for), and again whenever
+  `ACCOUNTANT_TERMS_VERSION` changes (Practice shows them). Until then the practice's routes
+  refuse, and no client's books open: someone already in one is taken back to the practice. The
+  books are untouched. The version and when are kept in the practice's settings, and the audit
+  log has `accept_accountant_terms`.
+- **In each client's books**, the practice accepts them for its use of Shap on those books
+  (`PRACTICE_TERMS_TICK`, at setup, on the first Pocket share, and when Shap's terms change):
+  that books' audit log records both versions.
+- When Shap's terms change, Part A changes with them, and both versions.
+
 ## The clients
 
 **Practice** (in the menu) lists the clients. Each has its own books:
@@ -29,7 +50,7 @@ opens them, their personal information (POPIA), and checking what Shap shows.
 **Add client** (for whoever may add clients) makes a new set of books named for the business.
 **Open their books** puts this browser into them, with Shap's screens; the first time, Shap asks
 its first questions about the business (the Welcome), as for any new Shap, but not the two about
-sharing with OpenWorks, and the terms are accepted for the practice's use of Shap on these books.
+sharing with OpenWorks, and the Shap Accountant terms are accepted for the practice's use of Shap on these books.
 The bar across the top says whose books they are, and **Back to the practice** comes back to the
 list.
 
@@ -154,7 +175,7 @@ no harm.
 
 In the practice, a client added as **On Shap Pocket** gets **Bring in a share**, for the practice's
 owner or whoever is given the client's books to write up. The first share records the practice's
-acceptance of the terms for these books (and the first after the terms change). Each share
+acceptance of the Shap Accountant terms for these books (and the first after Shap's terms change). Each share
 replaces the copy's records with the phone's: Pocket's tables are Shap's (the same accounting
 code), so the copy works out its VAT201s, payroll, statements and checks from what Pocket does.
 Shap checks it reads the records into the same entries the phone did, every one by its hash, and

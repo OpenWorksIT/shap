@@ -17,7 +17,7 @@ import { createReadStream, existsSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { deadlinesFor, featureOn, LEVELS, PRACTICE_TERMS_TICK, TERMS_URL, TERMS_VERSION, type Level } from '@shap/shared';
+import { ACCOUNTANT_TERMS_URL, ACCOUNTANT_TERMS_VERSION, deadlinesFor, featureOn, LEVELS, PRACTICE_TERMS_TICK, TERMS_URL, TERMS_VERSION, type Level } from '@shap/shared';
 import { z } from 'zod';
 import { browserName, can, CLIENT_COOKIE, confirmPassword, CLIENT_SESSION_COOKIE, loadUser, requireAccess, requireRole, SESSION_COOKIE, userOrThrow, type AuthUser } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -68,6 +68,13 @@ interface ClientRow {
   healthAt: Date | null;
   migrateError: string | null;
 }
+
+/** The practice's owner has accepted the Shap Accountant terms as they are now (terms.ts). */
+const accountantTermsAccepted = async (real: Sql) => {
+  const [s] = await real<{ accountantTermsVersion: string }[]>`select accountant_terms_version from settings where id`;
+  return s?.accountantTermsVersion === ACCOUNTANT_TERMS_VERSION;
+};
+export const ACCOUNTANT_TERMS_NEEDED = 'The Shap Accountant terms of use have changed, or haven’t been accepted for this practice yet: its owner accepts them on the Practice page before any client’s books are opened. The books are untouched.';
 
 const practiceOn = async (real: Sql) => {
   const [s] = await real<{ features: Record<string, boolean> | null }[]>`select features from settings where id`;
@@ -125,7 +132,7 @@ export function registerPracticeScope(app: FastifyInstance, ctx: Ctx): void {
     const user = await practiceUser(dbs.real, req);
     // Not signed in to the practice at all: the cookies go, and it's an ordinary signed-out request.
     if (!user) return clear(reply);
-    if (!(await practiceOn(dbs.real))) return fail();
+    if (!(await practiceOn(dbs.real)) || !(await accountantTermsAccepted(dbs.real))) return fail();
     const [c] = await dbs.real<ClientRow[]>`select * from practice_clients where id = ${id} and archived_at is null and db_name is not null and migrate_error is null`;
     const level = c ? await levelFor(dbs.real, user, c.id) : null;
     if (!c || !level) return fail();
@@ -154,6 +161,7 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   const assertOn = async () => {
     if (!(await practiceOn(real))) throw badRequest('Shap Accountant is off. The owner switches it on under Settings → Features.');
+    if (!(await accountantTermsAccepted(real))) throw badRequest(ACCOUNTANT_TERMS_NEEDED, { needsAccountantTerms: true });
   };
   const clientOr404 = async (id: string) => {
     if (!isUuid(id)) throw notFound('Client');
@@ -170,6 +178,23 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   /** Where this browser is: the practice's own books, or a client's. Works in both. */
   app.get('/api/practice/here', { preHandler: requireRole() }, async () => ({ client: inClient() }));
+
+  /**
+   * The Shap Accountant terms, accepted for the practice by its owner: before Shap Accountant is
+   * switched on (Settings), and when they change (Practice). In the practice's own books only.
+   */
+  app.post('/api/practice/terms', { preHandler: requireRole('owner'), config: limit(10) }, async (req) => {
+    const user = userOrThrow(req);
+    if (inClient()) throw forbidden('That’s the practice’s own, so it isn’t done in a client’s books: tap Back to the practice, at the top, first.');
+    const { version } = parse(z.object({ version: z.string().max(20) }), req.body);
+    if (version !== ACCOUNTANT_TERMS_VERSION) throw badRequest('Those aren’t the Shap Accountant terms as they are now: reload the page and read them again.');
+    const [s] = await real<{ accountantTermsVersion: string }[]>`select accountant_terms_version from settings where id`;
+    if (s?.accountantTermsVersion !== version) {
+      await real`update settings set accountant_terms_version = ${version}, accountant_terms_accepted_at = now() where id`;
+      await audit(real, { userId: user.id, action: 'accept_accountant_terms', entity: 'settings', ip: req.ip, details: { version, url: ACCOUNTANT_TERMS_URL } });
+    }
+    return { version };
+  });
 
   app.get('/api/practice', view, async (req) => {
     const user = userOrThrow(req);
@@ -364,14 +389,14 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const sql = clients.get(dbName);
     const [terms] = await sql<{ termsVersion: string }[]>`select terms_version from settings where id`;
     const accepting = (terms?.termsVersion ?? '') !== TERMS_VERSION;
-    if (accepting && !acceptTerms) throw badRequest(`Tick that you accept the terms of use for your practice’s use of Shap on these books first (${PRACTICE_TERMS_TICK}).`, { needsTerms: true });
+    if (accepting && !acceptTerms) throw badRequest(`Tick that you accept the Shap Accountant terms of use for your practice’s use of Shap on these books first (${PRACTICE_TERMS_TICK}).`, { needsTerms: true });
     // The practice person is there by name, as the copy's reader.
     await mirrorUser(sql, user, 'compile');
     const result = await sql.begin(async (tx) => {
       const r = await applyPocketShare(tx, share, name, user.id);
       if (accepting) {
         await tx`update settings set terms_version = ${TERMS_VERSION}, terms_accepted_at = now() where id`;
-        await audit(tx, { userId: user.id, action: 'accept_terms', entity: 'settings', ip: req.ip, details: { version: TERMS_VERSION, url: TERMS_URL, for: 'the practice’s use of Shap on these books' } });
+        await audit(tx, { userId: user.id, action: 'accept_terms', entity: 'settings', ip: req.ip, details: { version: TERMS_VERSION, url: TERMS_URL, accountantVersion: ACCOUNTANT_TERMS_VERSION, accountantUrl: ACCOUNTANT_TERMS_URL, for: 'the practice’s use of Shap on these books' } });
       }
       await audit(tx, { userId: user.id, action: 'pocket_share_in', entity: 'pocket_share', entityId: String(r.number), ip: req.ip, details: { through: r.through, added: r.changes.added, changed: r.changes.changed, removed: r.changes.removed, restored: r.restored, file: name.slice(0, 200), hash: share.fileHash } });
       return r;

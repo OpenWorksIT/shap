@@ -3,6 +3,7 @@
  * trial balance and general ledger exports Xero, QuickBooks and Sage write. Made-up files laid out
  * the way each package exports them; every figure made up.
  */
+import { ACCOUNTANT_TERMS_VERSION } from '@shap/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import ExcelJS from 'exceljs';
 import { readLedger, sheetRows, splitAccount, transactionsOf, unpackedSize } from '../../src/modules/import/ledger.js';
@@ -275,6 +276,7 @@ describe('another package’s books in a practice’s client', () => {
   it('adds a client whose books are in another package, and brings them into its own books only', async () => {
     const owner = await login(env.app, 'owner@example.co.za');
     const { settings } = await owner.get('/api/reference');
+    await owner.post('/api/practice/terms', { version: ACCOUNTANT_TERMS_VERSION });
     await owner.post('/api/settings', { ...settings, features: { ...settings.features, practice: true } }, 'PUT');
     const { id } = await owner.post('/api/practice/clients', { name: 'Made-up Imported Electrical (Pty) Ltd', kind: 'imported' });
     const list = await owner.get('/api/practice');

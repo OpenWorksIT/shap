@@ -5,6 +5,7 @@
  */
 import { useState } from 'react';
 import { PRACTICE_TERMS_TICK, TERMS_URL, TERMS_VERSION, termsPoints } from '@shap/shared';
+import { AccountantPoints } from './AccountantTerms';
 import { useClientHere } from './ClientBanner';
 import { api, ApiError } from '../lib/api';
 import { useAuthed } from '../lib/session';
@@ -45,6 +46,8 @@ export function TermsReview({ cautions, accepted, onAccepted, tick }: { cautions
           . They apply as published there.
         </p>
       </div>
+      {/* A practice's client's books: the practice accepts the Shap Accountant terms for its use of Shap on them. */}
+      {tick && <AccountantPoints />}
       <label className="check panel panel-pad terms-accept">
         <input type="checkbox" checked={accepted} onChange={(e) => onAccepted(e.target.checked)} />
         <span>

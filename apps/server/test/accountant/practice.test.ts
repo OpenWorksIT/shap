@@ -6,7 +6,7 @@
  * books means nothing in another's. All data made up.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { deadlinesFor } from '@shap/shared';
+import { ACCOUNTANT_TERMS_VERSION, deadlinesFor } from '@shap/shared';
 import { dbScope } from '../../src/db/routing.js';
 import { appVersion } from '../../src/modules/system.js';
 import { expectCleanAudit, login, setup, type TestEnv } from '../helpers.js';
@@ -71,6 +71,7 @@ describe('Shap Accountant: a practice and the clients it keeps', () => {
     expect(r.statusCode).toBe(400);
     expect(r.json().error).toMatch(/Shap Accountant is off/);
     const { settings } = await owner.get('/api/reference');
+    await owner.post('/api/practice/terms', { version: ACCOUNTANT_TERMS_VERSION });
     await owner.post('/api/settings', { ...settings, features: { ...settings.features, practice: true } }, 'PUT');
     expect((await owner.get('/api/practice')).clients).toEqual([]);
   });

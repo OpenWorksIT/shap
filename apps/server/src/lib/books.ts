@@ -51,6 +51,9 @@ export interface SettingsRow {
   /** The terms of use accepted (terms.ts TERMS_VERSION), and when. */
   termsVersion: string;
   termsAcceptedAt: string | null;
+  /** A practice's: the Shap Accountant terms accepted (terms.ts ACCOUNTANT_TERMS_VERSION), and when. */
+  accountantTermsVersion: string;
+  accountantTermsAcceptedAt: string | null;
   payLink: string;
   vatRegistered: boolean;
   vatRateBp: number;

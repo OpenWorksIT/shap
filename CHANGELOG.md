@@ -3,6 +3,17 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.29.1 (17 November 2026)
+
+- **The Shap Accountant terms of use** ([openworks.co.za/shap/accountant-terms](https://www.openworks.co.za/shap/accountant-terms/)).
+  A practice now uses Shap Accountant on terms of its own: Shap's terms, with what a practice takes
+  on when it keeps its clients' books in Shap. Its work for its clients is its own, Shap's checks
+  and returns are aids, its clients' books and personal information are in its care, and it
+  indemnifies OpenWorks against claims over that work. The practice's owner accepts them before
+  Shap Accountant is switched on, and a practice already using it is asked once, on the Practice
+  page, before any client's books open again. The books are untouched. Shap's own terms haven't
+  changed: nobody else is asked to accept anything again.
+
 ## 1.29.0 (17 November 2026)
 
 - **Shap Pocket clients** (Shap Accountant; docs/ACCOUNTANT.md, "A Shap Pocket share"). A

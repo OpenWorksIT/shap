@@ -8,7 +8,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { entriesOff, entryHash, POCKET_SHARE_FORMAT, SHARE_TABLES, TERMS_VERSION, type PocketShare, type ShareEntry } from '@shap/shared';
+import { ACCOUNTANT_TERMS_VERSION, entriesOff, entryHash, POCKET_SHARE_FORMAT, SHARE_TABLES, TERMS_VERSION, type PocketShare, type ShareEntry } from '@shap/shared';
 import { auditBooks } from '../../src/audit/books.js';
 import { healthOf } from '../../src/lib/practice.js';
 import { sdlLine } from '../../src/modules/payroll.js';
@@ -142,6 +142,7 @@ describe('a Shap Pocket client in the practice', () => {
 
     owner = await login(env.app, 'owner@example.co.za');
     const s2 = (await owner.get('/api/reference')).settings;
+    await owner.post('/api/practice/terms', { version: ACCOUNTANT_TERMS_VERSION });
     await owner.post('/api/settings', { ...s2, features: { ...s2.features, practice: true } }, 'PUT');
     ({ id } = await owner.post('/api/practice/clients', { name: 'Made-up Spark (Pty) Ltd', kind: 'pocket' }));
   });
@@ -157,7 +158,7 @@ describe('a Shap Pocket client in the practice', () => {
     const one = await makeShare(phone.sql, { number: 1, madeAt: '2026-11-10T08:00:00.000Z', through: '2026-11-10' });
     const no = await bringIn(one);
     expect(no.statusCode).toBe(400);
-    expect(no.json().error).toMatch(/Tick that you accept the terms of use/);
+    expect(no.json().error).toMatch(/Tick that you accept the Shap Accountant terms of use for your practice’s use of Shap on these books first/);
     const res = await bringIn(one, { terms: true });
     expect(res.statusCode, res.body).toBe(200);
     expect(res.json()).toMatchObject({ number: 1, first: true, restored: false, changes: { added: 0, changed: 0, removed: 0 } });

@@ -36,8 +36,48 @@ export const POCKET_SHARE_NOTE =
  */
 export const IMPORT_NOTE =
   'Shap reads these files as it finds them and suggests where each account goes. It doesn’t check them against the package or the client’s records, and the figures stay the package’s. After bringing them in, compare these books’ trial balance with the package’s before you rely on them. Shap is free software from OpenWorks IT, who are not accountants, tax practitioners or auditors, and this is not advice.';
+/**
+ * The Shap Accountant terms of use: Shap's terms, with what applies to a practice keeping its
+ * clients' books in Shap (its own work, its clients' books and information, an indemnity). Published
+ * on the website (ACCOUNTANT_TERMS_URL). Only a practice accepts them: its owner, before Shap
+ * Accountant is switched on and again whenever ACCOUNTANT_TERMS_VERSION changes (Practice asks;
+ * until then no client's books open), and the practice again for each client's books it keeps.
+ * Recorded in the practice's settings and audit log. Shap's own terms (TERMS_VERSION) don't change
+ * with them, so nobody else is asked again. When Shap's terms change, the Shap Accountant terms'
+ * Part A changes with them, and both versions.
+ */
+export const ACCOUNTANT_TERMS_VERSION = '2026-11-17';
+export const ACCOUNTANT_TERMS_URL = 'https://www.openworks.co.za/shap/accountant-terms/';
+/** The practice's owner, accepting the Shap Accountant terms for the practice. */
+export const ACCOUNTANT_TERMS_TICK = 'I accept the Shap Accountant terms of use for my practice, and I may agree to them on its behalf';
 /** In a client's books, the terms are accepted for the practice's use of Shap on them. */
-export const PRACTICE_TERMS_TICK = 'I accept the terms of use for my practice’s use of Shap on these books.';
+export const PRACTICE_TERMS_TICK = 'I accept the Shap Accountant terms of use for my practice’s use of Shap on these books.';
+
+/** What the Shap Accountant terms add to Shap's, in plain words (shown before the practice agrees). */
+export function accountantTermsPoints(): { title: string; body: string }[] {
+  return [
+    {
+      title: 'Your work for your clients is your own',
+      body: 'The accounting, bookkeeping, payroll, tax and compilation work your practice does for its clients, and everything it signs, issues or files, is its own, under its engagement with each client and its professional body’s rules. OpenWorks IT isn’t a party to that work and doesn’t review it.',
+    },
+    {
+      title: 'Shap’s checks and returns are aids',
+      body: 'What Shap’s checks find, the returns and due dates it lists and the statements it drafts are aids for your practitioners to check: not complete, and not advice. Approving a client’s financial statements is the client’s own decision: Shap records it as your practice enters it.',
+    },
+    {
+      title: 'Your clients’ books and information are in your care',
+      body: 'Your clients’ books are kept on your practice’s server. Its security, the books’ backups, who in your practice opens which books, and your clients’ personal information (POPIA) are your practice’s responsibility. Books brought in from another package, or from a client’s Shap Pocket share, are for your practice to check against where they came from.',
+    },
+    {
+      title: 'Your practice indemnifies OpenWorks',
+      body: 'If a client, or anyone else, claims against OpenWorks IT over your practice’s work for its clients or its use of Shap on their books, your practice covers OpenWorks for that claim and its costs, except where OpenWorks’ own fraud, gross negligence or wilful misconduct caused it.',
+    },
+    {
+      title: 'Shap’s terms of use apply too',
+      body: 'Everything in Shap’s terms applies to your practice’s use of Shap: it’s free, as is, with no warranty; OpenWorks isn’t an accountant and isn’t liable for what is filed or paid; and keeping it up to date is yours.',
+    },
+  ];
+}
 /** The short form, where there's no room for the whole note. */
 export const ESTIMATE_SHORT = 'An estimate only, not advice: check it with your accountant before you rely on it.';
 

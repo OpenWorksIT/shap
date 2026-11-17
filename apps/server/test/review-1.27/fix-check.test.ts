@@ -4,7 +4,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { FILING_SEASON_DATES, SARS_CHECKED_TO, financialYear } from '@shap/shared';
+import { ACCOUNTANT_TERMS_VERSION, FILING_SEASON_DATES, SARS_CHECKED_TO, financialYear } from '@shap/shared';
 import { createDb } from '../../src/db/index.js';
 import { ClientDbs, clientDbName, healthOf, MAX_CLIENT_POOLS, migrateClients, saveHealth } from '../../src/lib/practice.js';
 import { buildStatements } from '../../src/statements/build.js';
@@ -57,6 +57,7 @@ describe('the check of the 1.27.0 fixes', () => {
     siteId = (await env.sql<{ id: string }[]>`select id from users where email = 'site@example.co.za'`)[0]!.id;
     await env.sql`update users set access_add = '{practice.clients}' where id = ${siteId}`;
     const { settings } = await owner.get('/api/reference');
+    await owner.post('/api/practice/terms', { version: ACCOUNTANT_TERMS_VERSION });
     await owner.post('/api/settings', { ...settings, features: { ...settings.features, practice: true } }, 'PUT');
   }, 120_000);
   afterAll(async () => {

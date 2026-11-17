@@ -3,7 +3,7 @@
  * app, as Pocket's are: the same accounting code and tables), and its shares are made with the same
  * shared code Pocket's engine uses (modules/share.ts there: records, entries, hashes). All made up.
  */
-import { entryHash, figuresHash, POCKET_SHARE_FORMAT, SHARE_TABLES, SHARE_USER_COLUMNS, shareEntries, type PocketShare } from '@shap/shared';
+import { ACCOUNTANT_TERMS_VERSION, entryHash, figuresHash, POCKET_SHARE_FORMAT, SHARE_TABLES, SHARE_USER_COLUMNS, shareEntries, type PocketShare } from '@shap/shared';
 import { freshTotals } from '../../src/lib/books.js';
 import { trialBalance } from '../../src/modules/reports.js';
 import type { Sql } from '../../src/db/index.js';
@@ -52,6 +52,7 @@ export async function practiceAndPhone(phoneDb: string) {
   const r = await ref(phone.sql);
   const owner = await login(env.app, 'owner@example.co.za');
   const s = (await owner.get('/api/reference')).settings;
+  await owner.post('/api/practice/terms', { version: ACCOUNTANT_TERMS_VERSION });
   await owner.post('/api/settings', { ...s, features: { ...s.features, practice: true } }, 'PUT');
   let n = 0;
   const client = async (name: string) => (await owner.post('/api/practice/clients', { name, kind: 'pocket' })).id as string;

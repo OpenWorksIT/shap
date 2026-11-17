@@ -1,9 +1,10 @@
 import type { FastifyInstance } from 'fastify';
-import { accountInput, attachmentInput, brandInput, categoryInput, entity, industryProfile, isTask, profileInput, settingsInput, settingsNumberProblem, sourceInput, TERMS_URL, tidyNumbers, tweaksFor, userInput, vatRateOn, withNeeds, workTypeInput, type Role } from '@shap/shared';
+import { ACCOUNTANT_TERMS_URL, ACCOUNTANT_TERMS_VERSION, accountInput, attachmentInput, brandInput, categoryInput, entity, featureOn, industryProfile, isTask, profileInput, settingsInput, settingsNumberProblem, sourceInput, TERMS_URL, tidyNumbers, tweaksFor, userInput, vatRateOn, withNeeds, workTypeInput, type Role } from '@shap/shared';
 import { z } from 'zod';
 import { accessOf, canAny, checkNewPassword, confirmPassword, createUser, endOtherSessions, hashPassword, requireAccess, requireRole, seesBooks, sessionToken, userOrThrow, type AuthUser } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { pgCode, PG, type Db } from '../db/index.js';
+import { dbScope } from '../db/routing.js';
 import { audit } from '../lib/audit.js';
 import { applyBusinessType, getSettings, lockAfterSettings, lockSettingsNow, today } from '../lib/books.js';
 import { checkInUsage } from './feedback.js';
@@ -159,6 +160,10 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     delete (input as { lockDate?: unknown }).lockDate;
     // Accepting the terms: when, and in the audit log (below).
     const accepted = input.termsVersion && input.termsVersion !== before.termsVersion ? input.termsVersion : null;
+    // Shap Accountant goes on once the practice's owner has accepted its terms (Practice, terms.ts).
+    const practiceNow = (input.features as Record<string, boolean> | undefined)?.practice;
+    if (practiceNow && !featureOn(before.features, 'practice') && before.accountantTermsVersion !== ACCOUNTANT_TERMS_VERSION)
+      throw badRequest(`Accept the Shap Accountant terms of use for your practice first (${ACCOUNTANT_TERMS_URL}).`, { needsAccountantTerms: true });
     let lockChange: Record<string, unknown> | null = null;
     await sql.begin(async (tx) => {
       // How the books close, before: a change to it mustn't lock anything at once (lib/books.ts).
@@ -184,7 +189,9 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     }
     if (lockChange) changed.lock = lockChange;
     await audit(sql, { userId: user.id, action: 'update', entity: 'settings', ip: req.ip, ...(Object.keys(changed).length ? { details: changed } : {}) });
-    if (accepted) await audit(sql, { userId: user.id, action: 'accept_terms', entity: 'settings', ip: req.ip, details: { version: accepted, url: TERMS_URL } });
+    // In a practice's client's books, accepted for the practice's use of Shap on them: the Shap Accountant terms.
+    const forPractice = dbScope.getStore()?.client ? { accountantVersion: ACCOUNTANT_TERMS_VERSION, accountantUrl: ACCOUNTANT_TERMS_URL, for: 'the practice’s use of Shap on these books' } : {};
+    if (accepted) await audit(sql, { userId: user.id, action: 'accept_terms', entity: 'settings', ip: req.ip, details: { version: accepted, url: TERMS_URL, ...forPractice } });
     const saved = await getSettings(sql);
     // The usage note goes out if the answers changed (it remembers what it last sent).
     if (saved.usageConsent) void checkInUsage(ctx, sql, req.log).catch(() => undefined);

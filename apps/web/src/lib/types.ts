@@ -50,6 +50,9 @@ export interface Settings {
   uifRef: string;
   termsVersion: string;
   termsAcceptedAt: string | null;
+  /** A practice's: the Shap Accountant terms accepted (terms.ts), and when. */
+  accountantTermsVersion: string;
+  accountantTermsAcceptedAt: string | null;
   payLink: string;
   setupDone: boolean;
   logoLayout: { zoom?: number; x?: number; y?: number };
