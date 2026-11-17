@@ -3,7 +3,7 @@ import { ScreenClip } from './HowItWorks';
 import { TestServerBanner } from './TestServer';
 import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { ROLE_LABELS } from '@shap/shared';
+import { LINK_SESSION_HOURS, ROLE_LABELS } from '@shap/shared';
 import { screensFor } from '../lib/screens';
 import { entityWords, useAuthed } from '../lib/session';
 import { AccountDrawer } from './AccountDrawer';
@@ -24,6 +24,8 @@ export function Shell({ children }: { children: ReactNode }) {
   const [more, setMore] = useState(false);
   const location = useLocation();
   useEffect(() => setMore(false), [location.pathname]);
+  // Sent back from a sign-in from Shap Accountant that wasn't used: someone else is signed in here (server links.ts).
+  const [signedInAlready] = useState(() => new URLSearchParams(window.location.search).get('link') === 'signed-in');
 
   const all: (Item & { show: boolean })[] = [
     { to: '/', label: 'Home', icon: 'home', end: true, show: true },
@@ -91,7 +93,12 @@ export function Shell({ children }: { children: ReactNode }) {
         <TestServerBanner />
         {user.fromPractice && (
           <div className="banner small" role="status">
-            You’re in <strong data-private>{settings.tradingName || settings.companyName}</strong>’s own Shap, from <strong data-private>{user.fromPractice}</strong>, as they let your practice. Sign out here when you’re done.
+            You’re in <strong data-private>{settings.tradingName || settings.companyName}</strong>’s own Shap, from <strong data-private>{user.fromPractice}</strong>, doing what they let your practice do here, for {LINK_SESSION_HOURS} hours at most. Sign out here when you’re done.
+          </div>
+        )}
+        {signedInAlready && (
+          <div className="banner small" role="status">
+            Someone is already signed in to this Shap in this browser, so the sign-in from Shap Accountant wasn’t used. To open these books from your practice, sign out here first, then open them again from Shap Accountant.
           </div>
         )}
         <Notices />

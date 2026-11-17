@@ -1,7 +1,7 @@
 import { hash, verify } from '@node-rs/argon2';
 import { inClient, inDemo } from './db/routing.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { ACCOUNTANT_TASKS, loginInput, passwordProblem, personAccess, TASK_KEYS, type Role, type Task } from '@shap/shared';
+import { ACCOUNTANT_TASKS, LINK_PATHS, loginInput, passwordProblem, personAccess, TASK_KEYS, type Role, type Task } from '@shap/shared';
 import { z } from 'zod';
 import type { Ctx } from './context.js';
 import type { Db, Sql } from './db/index.js';
@@ -9,6 +9,7 @@ import { audit } from './lib/audit.js';
 import { badRequest, forbidden, HttpError, unauthorized } from './lib/errors.js';
 import { newToken, sha256 } from './lib/tokens.js';
 import { newRecoveryCodes, newTotpSecret, normaliseRecoveryCode, otpauthUrl, verifyTotp } from './lib/totp.js';
+import { routePath } from './lib/http.js';
 import { parse } from './lib/validate.js';
 
 /**
@@ -145,8 +146,9 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
     // UPLOAD_MB of it): only signing in itself, leaving the demo and the collector take one.
     if (!req.user && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
       const path = req.url.split('?')[0]!;
-      // (A linked practice's server shows its link's credential, or the link's code, instead: links.ts.)
-      if (path.startsWith('/api/') && !path.startsWith('/api/auth/') && !path.startsWith('/api/link/') && path !== '/api/demo/leave' && path !== '/api/practice/leave') throw unauthorized();
+      // (A linked practice's server shows its link's credential, or the link's code, instead: links.ts,
+      // on those routes alone, as Fastify matched them.)
+      if (path.startsWith('/api/') && !path.startsWith('/api/auth/') && !LINK_PATHS.includes(routePath(req)) && path !== '/api/demo/leave' && path !== '/api/practice/leave') throw unauthorized();
     }
   });
 
@@ -155,21 +157,22 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx): void {
     if (!token) return;
 
     // What they may do is read afresh each time: a change to their profile or their ticks counts at once.
-    const rows = await sql<(UserRow & { lastSeenAt: Date })[]>`
-      select u.id, u.name, u.email, u.role, p.name as profile, p.access as profile_access, u.access_add, u.access_remove, s.last_seen_at
+    const rows = await sql<(UserRow & { lastSeenAt: Date; fromLink: boolean })[]>`
+      select u.id, u.name, u.email, u.role, p.name as profile, p.access as profile_access, u.access_add, u.access_remove, s.last_seen_at,
+        u.link_id is not null as from_link
       from sessions s join users u on u.id = s.user_id left join profiles p on p.id = u.profile_id
       where s.token_hash = ${sha256(token)} and s.expires_at > now() and u.active
     `;
     const row = rows[0];
     if (!row) return;
-    const { lastSeenAt, ...user } = row;
+    const { lastSeenAt, fromLink, ...user } = row;
     req.user = toAuthUser(user);
-    // Sliding expiry, but only touch the row once a minute. (The test server's filling keeps the
-    // few hours it was given.)
+    // Sliding expiry, but only touch the row once a minute. (The test server's filling, and someone
+    // from a linked practice, keep the few hours they were given: links.ts.)
     if (Date.now() - lastSeenAt.getTime() > 60_000) {
       await sql`
         update sessions set last_seen_at = now(),
-          expires_at = case when user_agent = ${FILLING_SESSION} then expires_at else now() + make_interval(hours => ${config.SESSION_TTL_HOURS}) end
+          expires_at = case when user_agent = ${FILLING_SESSION} or ${fromLink} then expires_at else now() + make_interval(hours => ${config.SESSION_TTL_HOURS}) end
         where token_hash = ${sha256(token)}
       `;
     }

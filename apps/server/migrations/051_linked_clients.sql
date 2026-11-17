@@ -1,5 +1,5 @@
 -- Shap Accountant, a client on its own Shap (docs/ACCOUNTANT.md): its owner links their accountant's
--- practice (Settings → People → Your accountant), and the practice's people open the books here,
+-- practice (Settings → People who sign in → Your accountant), and the practice's people open the books here,
 -- each time with a sign-in that works once. Every database gets these tables; a business's own Shap
 -- uses the first three, a practice's the last columns.
 

@@ -210,45 +210,64 @@ Shap doesn't check them against the client's records (`POCKET_SHARE_NOTE`).
 
 ## A client on its own Shap
 
-A business that runs its own Shap links its accountant itself: in its Shap, **Settings → People →
-Your accountant**, its owner chooses what the practice may do there and makes a link (it takes
-their password). The two ways are the practice's own:
+A business that runs its own Shap links its accountant itself: in its Shap, **Settings → People who
+sign in → Your accountant**, its owner chooses what the practice may do there and makes a link (it
+takes their password). The two ways are the practice's own:
 
 | What the client lets the practice do | Who they are in the client's Shap |
 |---|---|
-| Read the books and compile the statements | Its accountant (read only), as for any accountant |
-| Write up the books, and compile the statements | Staff, with every task but closing and reopening months (`LINKED_BOOKS_TASKS`); or its accountant, to compile |
+| Read the books and compile the statements | Its accountant (read only, but for the statements' details and the small business corporation answer, as for any accountant); they can download and print what's in the books |
+| Write up the books, and compile the statements | Staff, with every task but closing and reopening months (`LINKED_BOOKS_TASKS`), so they also issue and email invoices and quotes in the business's name; or its accountant, to compile |
 
-What stays the client owner's either way: their settings, the people who sign in, the year end,
-tax estimates, dividends and profit shares, approving the statements, backups and the system.
+What stays the client owner's either way (`LINK_STAYS_OWNERS`): their settings (VAT, PAYE and
+turnover tax among them) and the chart of accounts, the people who sign in, closing and reopening
+months and VAT periods, the year end, tax estimates and provisional tax paid, dividends and profit
+shares, approving the statements, and backups. (A dividend or provisional tax journalled by hand
+isn't recorded as one: a dividend journalled by hand is still taken as paid on its day for the
+returns on the practice's list.) Compiling in Shap needs the client's financial statements switched
+on.
 
 The link is the client's Shap's address and a code (`https://their-shap/link#…`). It works once,
-for a week, and only its hash is kept. In the practice, someone who adds clients chooses **On their
-own Shap** and pastes it in: Shap Accountant shows the code to the client's Shap once, and gets a
-credential for this link (sealed with the server's secret here; only its hash there). From then
-on the two servers talk only for this:
+for a week, and only its hash is kept: whoever uses it first is linked, so the owner gives it only
+to their accountant and checks the practice's name once linked. In the practice, someone who adds
+clients chooses **On their own Shap** and pastes it in: Shap Accountant shows the code to the
+client's Shap once, and gets a credential for this link (sealed with the server's secret here;
+only its hash there). From then on the two servers talk only for this:
 
 - **Open their books** (as given in the practice, never more than the client allows): the
   practice's server asks the client's for a sign-in for that person, and their browser opens it
-  in a new tab. It works once, within a minute. In the client's Shap they're someone of their own
-  (their name and the practice's), never signing in with a password, and kept out of the owner's
-  people list; what they do is in the client's audit log by name. The bar at the top says whose
-  Shap it is, and from which practice. They sign out there when done.
-- **Run the checks**: the client's Shap runs its own checks and sends what they found (the books
-  audit's first findings, the statements' standing and the returns' inputs, read here only as
-  that list has them). Nothing else of the client's books comes to the practice's server.
-- **Who opens it** changed or taken away: the client's Shap takes that person out at once.
+  in a new tab. It works once, within a minute; they're then in for `LINK_SESSION_HOURS` (8) hours
+  at most, however busy (use doesn't make it longer). In the client's Shap they're someone of their
+  own (their name and the practice's), never signing in with a password, and kept out of the
+  owner's people list; what they do is in the client's audit log by name. Where the client's Shap
+  requires two-factor sign-in of everyone, it requires them to have it on at their practice. A
+  browser where someone else is signed in to the client's Shap isn't signed out by it: they sign
+  out there first. The bar at the top says whose Shap it is, and from which practice. They sign
+  out there when done.
+- **Run the checks** (and once when linking): the client's Shap runs its own checks and sends what
+  they found (`healthForLink`: the books audit's first findings, cut to length, which can name its
+  customers and suppliers; the statements' standing; how far the books are closed; and what the
+  returns are worked out from). The practice's list shows them as the client's Shap sent them;
+  one it can't read is said, and what was shown before stays, marked as from before.
+- **Who opens it** changed or taken away, or the person's own access in the practice (their
+  sign-in switched off, their tasks changed): the practice's server asks the client's Shap to take
+  them out, at once. If it doesn't answer, the practice is told who may still be in, until their
+  sign-in there ends.
 - **Unlink**, from either side: the credential goes, and the practice's people are taken out of
   the client's books. To link again, the client makes a new link (**Link again** keeps the
-  practice's choices of who opens it).
+  practice's choices of who opens it). What the practice's server was sent stays there: it's the
+  practice's to keep or delete.
 
 What goes between the servers, and nothing else: to the client's, the code and the practice's name
-once, then who opens the books (an id and their name) and at what level; back, the client's name,
-what it allows, sign-ins and the checks' findings. OpenWorks gets none of it. A practice's server
-reaches only public https addresses (a name that resolves to a private one is refused when
-connecting, no redirects followed, ten seconds, a small answer: `lib/link-call.ts`); on a
-practice's own network, `LINK_PRIVATE=true` lets it reach private addresses, over http too.
-Both Shaps need 1.30 or later.
+once, then who opens the books (an id, their name and whether they use two-factor) and at what
+level; back, the client's name, what it allows, sign-ins and the checks' findings. Nothing goes to
+OpenWorks IT because of it. What the client's Shap says in words when it refuses isn't shown in the
+practice: only what its code means, in the practice's own words. A practice's server reaches only
+public https addresses (a name that resolves to a private one is refused when connecting, no
+redirects followed, ten seconds in all, a small answer: `lib/link-call.ts`); on a practice's own
+network, `LINK_PRIVATE=true` lets it reach private addresses, over http too, but never link-local
+ones (a cloud server's metadata). Only the link's own routes (`LINK_PATHS`) are answered without a
+session there, each reading a small body. Both Shaps need 1.30 or later.
 
 ## Who opens which
 
@@ -260,8 +279,8 @@ clients they're given** ticked (Settings → People who sign in) and the client 
   reopening closed periods included, and they record the client's approval of the financial
   statements (below). They can also open the books to compile. In a Shap Pocket client's copy, they
   bring in the shares, compile, and record the approval: the books themselves change only in Shap
-  Pocket (above). On a client's own Shap, they do what the client lets the practice do there
-  (above): never more.
+  Pocket (above). On a client's own Shap, they're staff there, doing what the client lets the
+  practice do (above): never more, and never as its owner.
 - **Reads them and compiles the statements, as their accountant in Shap (read only)**: the
   financial statements, docs/STATEMENTS.md.
 

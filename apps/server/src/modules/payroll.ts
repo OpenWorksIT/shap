@@ -461,7 +461,7 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (input.kind === 'irp6') {
       // Provisional tax is the company's income tax: the owner's (as the tax estimates are), and
       // only for a business taxed on its own profit (a sole proprietor's is the owner's own: drawings).
-      if (user.role !== 'owner') throw forbidden('Provisional tax is the owner’s to record');
+      if (user.role !== 'owner') throw forbidden('Provisional tax paid is the owner’s to record, as the tax estimates are: ask them to record it. (A journal for it isn’t counted as provisional tax paid.)');
       const settings = await getSettings(sql);
       const taxedAs = entity(settings.businessType).taxedAs;
       if (!(taxedAs === 'company' || taxedAs === 'trust' || (taxedAs === 'npc' && !settings.approvedPbo)) || settings.turnoverTax)

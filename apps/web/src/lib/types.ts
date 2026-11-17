@@ -10,7 +10,7 @@ export interface User {
   access: Task[];
   /** Staff: the profile they're on, if any. */
   profile: string | null;
-  /** Someone from a linked accountant's practice (Settings → People → Your accountant): which practice. */
+  /** Someone from a linked accountant's practice (Settings → People who sign in → Your accountant): which practice. */
   fromPractice?: string | null;
 }
 

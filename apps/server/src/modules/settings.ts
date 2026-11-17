@@ -8,6 +8,7 @@ import { dbScope } from '../db/routing.js';
 import { audit } from '../lib/audit.js';
 import { applyBusinessType, getSettings, lockAfterSettings, lockSettingsNow, today } from '../lib/books.js';
 import { checkInUsage } from './feedback.js';
+import { linkedLevels, takeOutOfLinked } from './practice.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 import { cleanImage } from '../lib/images.js';
@@ -110,6 +111,12 @@ async function accessFields(db: Db, role: Role, profileId: string | null | undef
 
 export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
+  // What people of a practice may open among its clients on their own Shap (Shap Accountant), so
+  // whoever may open less after a change is taken out there at once (practice.ts).
+  const linkedOf = (ids: string[]) => {
+    const scope = dbScope.getStore();
+    return scope?.demo || scope?.client ? Promise.resolve(new Map()) : linkedLevels(ctx.dbs.real, ids);
+  };
 
   app.get('/api/reference', { preHandler: requireRole() }, async (req) => {
     const user = userOrThrow(req);
@@ -409,6 +416,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (stepUp) await confirmPassword(sql, me.id, input.currentPassword, req.ip);
     if (input.password) checkNewPassword(input.password, input);
     const access = await accessFields(sql, input.role, input.profileId, input.access);
+    const linkedBefore = await linkedOf([id]);
     await sql.begin(async (tx) => {
       // An omitted `active` leaves it unchanged (so a PUT that doesn't resend active:false can't
       // silently re-enable a disabled sign-in).
@@ -422,7 +430,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (input.active === false) await tx`delete from sessions where user_id = ${id}`;
       await audit(tx, { userId: me.id, action: 'update', entity: 'user', entityId: id, ip: req.ip, details: { role: input.role, profileId: access.profileId, add: access.accessAdd, remove: access.accessRemove, passwordReset: Boolean(input.password) } });
     });
-    return { ok: true };
+    return { ok: true, linkedStillIn: await takeOutOfLinked(ctx, ctx.dbs.real, linkedBefore, req.log) };
   });
 
   // ---- profiles: the jobs a kind of staff does, given to each person on it
@@ -445,11 +453,12 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = parse(idParam, req.params);
     const input = parse(profileInput, req.body);
     try {
+      const linkedBefore = await linkedOf((await sql<{ id: string }[]>`select id from users where profile_id = ${id}`).map((u) => u.id));
       // Everyone on it gets the change at once (their own changes stay as they were).
       const [row] = await sql<{ id: string }[]>`update profiles set name = ${input.name}, access = ${cleanAccess(input.access)}, updated_at = now() where id = ${id} returning id, name, access`;
       if (!row) throw notFound('Profile');
       await audit(sql, { userId: me.id, action: 'update', entity: 'profile', entityId: id, ip: req.ip, details: { name: input.name, access: cleanAccess(input.access) } });
-      return row;
+      return { ...row, linkedStillIn: await takeOutOfLinked(ctx, ctx.dbs.real, linkedBefore, req.log) };
     } catch (err) {
       if (pgCode(err) === PG.uniqueViolation) throw conflict('There’s already a profile with that name');
       throw err;

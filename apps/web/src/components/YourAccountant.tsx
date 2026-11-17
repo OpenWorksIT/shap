@@ -1,5 +1,5 @@
 /**
- * Settings → People → Your accountant: link your accountant's practice to these books, from its own
+ * Settings → People who sign in → Your accountant: link your accountant's practice to these books, from its own
  * Shap Accountant (packages/shared link.ts, docs/ACCOUNTANT.md "A client on its own Shap"). The
  * owner chooses what the practice may do here and makes a link that works once, for a week; the
  * practice pastes it in. Who from the practice opened the books, and when, is shown here (and in
@@ -13,6 +13,7 @@ import { useClientHere } from './ClientBanner';
 import { useDemoStatus } from './Demo';
 import { api, ApiError } from '../lib/api';
 import { useApi } from '../lib/hooks';
+import { useAuthed } from '../lib/session';
 
 interface Link {
   id: string;
@@ -31,6 +32,7 @@ const day = (at: string | null) => (at ? formatDate(at.slice(0, 10)) : '');
 
 export function YourAccountant() {
   const client = useClientHere();
+  const { has } = useAuthed();
   const demo = useDemoStatus();
   const toast = useToast();
   const links = useApi<Link[]>(client || demo?.active ? null : '/api/accountant-links');
@@ -55,7 +57,7 @@ export function YourAccountant() {
     }
   };
   const unlink = async (l: Link) => {
-    if (!confirm(`Unlink ${l.practiceName ?? 'this link'}? Nobody from the practice opens your books after this, and anyone from it in them now is taken out. To link again, make a new link.`)) return;
+    if (!confirm(l.practiceName ? `Unlink ${l.practiceName}? Nobody from the practice opens your books after this, and anyone from it in them now is taken out. To link again, make a new link.` : 'Stop this link working? Nobody can link with it after this. To link your accountant, make a new link.')) return;
     setBusy(l.id);
     try {
       await api(`/api/accountant-links/${l.id}/unlink`, { body: {} });
@@ -84,7 +86,7 @@ export function YourAccountant() {
         <h2 className="strong" style={{ fontSize: 'var(--fs-md)', margin: 0 }}>
           Your accountant
         </h2>
-        <p className="small muted">If your accountant’s practice uses Shap Accountant, link it here: they open your books from their Shap, as you choose, without a password of their own here.</p>
+        <p className="small muted">If your accountant’s practice uses Shap Accountant, link it here: they open your books from their Shap, as you choose, without a password of their own here. To change what they may do, unlink and make a new link.</p>
       </div>
       <div className="panel panel-pad stack">
         <div className="stack-sm">
@@ -98,7 +100,12 @@ export function YourAccountant() {
             </label>
           ))}
         </div>
-        <p className="xs muted">{LINK_WHAT_GOES}</p>
+        {!has('statements') && <p className="xs muted">Financial statements are switched off (Settings → What you use): switch them on for your accountant to compile them here.</p>}
+        <ul className="xs muted stack-sm" style={{ margin: 0, paddingLeft: 18 }}>
+          {LINK_WHAT_GOES.map((w) => (
+            <li key={w}>{w}</li>
+          ))}
+        </ul>
         <div>
           <button type="button" className="btn primary" disabled={busy !== null} onClick={() => void make()}>
             <Icon name="plus" size={18} />
@@ -143,7 +150,7 @@ export function YourAccountant() {
                   </div>
                   {l.people.length > 0 && (
                     <div className="xs muted" data-private>
-                      From the practice: {l.people.map((p) => `${p.name}${p.lastLoginAt ? `, last in your books ${day(p.lastLoginAt)}` : ''}`).join('; ')}
+                      From the practice: {l.people.map((p) => `${p.name}${p.active ? '' : ' (taken out)'}${p.lastLoginAt ? `, last signed in ${day(p.lastLoginAt)}` : ''}`).join('; ')}
                     </div>
                   )}
                 </span>

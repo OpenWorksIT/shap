@@ -140,6 +140,9 @@ describe('the financial statements', () => {
     expect((await me.call({ method: 'POST', url: `/api/statements/${Y2}/compile`, payload: { date: '2026-05-10', compiler: { name: 'Owner', qualification: 'none' } } })).statusCode).toBe(403);
     expect((await me.call({ method: 'POST', url: `/api/statements/${Y2}/approve`, payload: { name: 'Fictional Director', date: '2026-05-12' } })).statusCode).toBe(400);
     await acc.post(`/api/statements/${Y2}/compile`, { date: '2026-05-10', compiler: { name: 'Fictional Accountant', qualification: 'Professional Accountant (SA)', body: 'SAIPA', number: '12345', practice: 'Fictional Accounting CC' } });
+    // Compiled, it isn't compiled over (the five reviews of 1.30): it's reopened first, so the signed set is kept.
+    const again = await acc.call({ method: 'POST', url: `/api/statements/${Y2}/compile`, payload: { date: '2026-05-11', compiler: { name: 'Fictional Accountant', qualification: 'Professional Accountant (SA)' } } });
+    expect([again.statusCode, again.json().error]).toEqual([400, 'These statements are compiled already: reopen them to compile them again (the signed set is kept).']);
     const compiled = await me.get(`/api/statements/${Y2}`);
     expect(compiled.status).toBe('compiled');
     expect(compiled.changedSince).toBe(false);
@@ -170,6 +173,9 @@ describe('the financial statements', () => {
     // The year before: compiled on paper, the signed report uploaded, then approved.
     const file = await me.post('/api/attachments', { filename: 'compiler report.pdf', mime: 'application/pdf', dataBase64: Buffer.from('%PDF-1.4\n% made-up signed report\n').toString('base64') });
     await me.post(`/api/statements/${Y1}/compiler-report`, { attachmentId: file.id, compilerName: 'Fictional Accountant', date: '2025-06-01' });
+    // Nor is an uploaded one replaced without reopening it.
+    const again = await me.call({ method: 'POST', url: `/api/statements/${Y1}/compiler-report`, payload: { attachmentId: file.id, compilerName: 'Another Accountant', date: '2025-06-02' } });
+    expect(again.statusCode).toBe(400);
     await me.post(`/api/statements/${Y1}/approve`, { name: 'Fictional Director', date: '2025-06-02' });
     expect((await me.get(`/api/statements/${Y1}`)).status).toBe('approved');
     const report = await me.call({ method: 'GET', url: `/api/statements/${Y1}/compiler-report` });

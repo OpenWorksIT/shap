@@ -6,7 +6,7 @@
  * the change at once, except what was changed for them.
  */
 import { useMemo, useState, type FormEvent } from 'react';
-import { formatDate, neededBy, passwordProblem, ROLE_HINTS, ROLE_LABELS, shownGroups, TASKS, withNeeds, type Role, type Task } from '@shap/shared';
+import { formatDate, LINK_SESSION_HOURS, neededBy, passwordProblem, ROLE_HINTS, ROLE_LABELS, shownGroups, TASKS, withNeeds, type Role, type Task } from '@shap/shared';
 import { Drawer, ErrorBox, Field, Icon, Loading, useToast } from './ui';
 import { usePasswordPrompt } from './PasswordPrompt';
 import { YourAccountant } from './YourAccountant';
@@ -43,6 +43,14 @@ function accessSummary(u: UserRow): string {
   const changed = u.accessAdd.length + u.accessRemove.length;
   if (u.profileName) return changed ? `${u.profileName}, changed for them` : u.profileName;
   return u.access.length ? `${u.access.length} job${u.access.length === 1 ? '' : 's'} ticked` : 'Nothing yet';
+}
+
+/**
+ * In a practice (Shap Accountant): whoever may now open a client on its own Shap less than before is
+ * taken out of it there at once; those whose client's Shap didn't answer are said.
+ */
+function stillInLinked(toast: ReturnType<typeof useToast>, who: string[] | undefined) {
+  if (who?.length) toast(`A client’s own Shap didn’t answer, so ${who.join(', ')} may still be in its books until their sign-in there ends (${LINK_SESSION_HOURS} hours at most).`, 'error');
 }
 
 export function People() {
@@ -213,9 +221,9 @@ function ProfileDrawer({ profile, onClose, onSaved }: { profile: Profile | null;
   const save = async (e: FormEvent) => {
     e.preventDefault();
     try {
-      if (profile) await api(`/api/profiles/${profile.id}`, { method: 'PUT', body: { name, access } });
-      else await api('/api/profiles', { body: { name, access } });
+      const r = profile ? await api<{ linkedStillIn?: string[] }>(`/api/profiles/${profile.id}`, { method: 'PUT', body: { name, access } }) : await api('/api/profiles', { body: { name, access } });
       toast(profile?.people ? `Saved: the ${profile.people === 1 ? 'person' : `${profile.people} people`} on it have it now` : 'Saved');
+      stillInLinked(toast, (r as { linkedStillIn?: string[] }).linkedStillIn);
       onSaved();
       onClose();
     } catch (err) {
@@ -317,9 +325,9 @@ function UserDrawer({ user, profiles, onClose, onSaved }: { user: UserRow | null
         password: f.password || undefined,
         currentPassword: needsCurrent ? f.currentPassword : undefined,
       };
-      if (user) await api(`/api/users/${user.id}`, { method: 'PUT', body });
-      else await api('/api/users', { body });
+      const r = user ? await api<{ linkedStillIn?: string[] }>(`/api/users/${user.id}`, { method: 'PUT', body }) : await api('/api/users', { body });
       toast('Saved');
+      stillInLinked(toast, (r as { linkedStillIn?: string[] }).linkedStillIn);
       onSaved();
       onClose();
     } catch (err) {

@@ -50,6 +50,10 @@ describe('the bank and what’s already in the books', () => {
     expect(await balance(env.sql, 'bank')).toBe(-345000);
     expect(await balance(env.sql, 'payables')).toBe(0);
     expect(await ledgerTotal(env.sql)).toBe(0);
+    // The line is matched, to the payment, from then on (not open again on the next look).
+    expect(await lineOf(bank, 'FICTIONAL ROOFING RF-9')).toMatchObject({ state: 'matched' });
+    const rec = await me.get(`/api/bank/recon?sourceId=${bank}`);
+    expect(rec.lines.find((l: { id: string }) => l.id === line.id).matches).toEqual([expect.objectContaining({ kind: 'bill_payment', label: 'Paid bill: Roof sheets – Fictional Roofing', amountCents: 345000 })]);
   });
 
   it('ticks off the second side of a transfer against the journal already there', async () => {

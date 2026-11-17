@@ -149,8 +149,8 @@ export async function migrateClients(practice: Sql, clients: ClientDbs, log: { i
   const ok: string[] = [];
   const failed: string[] = [];
   // A client whose database was never finished (the server stopped while it was made): its
-  // database and its row both go.
-  for (const c of await practice<{ id: string }[]>`select id from practice_clients where db_name is null and created_at < now() - interval '1 hour'`) {
+  // database and its row both go. (A client on its own Shap has no database here, ever: it stays.)
+  for (const c of await practice<{ id: string }[]>`select id from practice_clients where db_name is null and kind <> 'linked' and created_at < now() - interval '1 hour'`) {
     await clients.drop(practice, clientDbName(clients.practiceDb, c.id)).catch((err) => log.warn({ err }, 'a client’s unfinished database couldn’t be dropped'));
     await practice`delete from practice_clients where id = ${c.id}`;
   }
@@ -244,6 +244,8 @@ export interface ClientHealth {
   pocket?: { number: number; through: string; importedAt: string; added: number; changed: number; removed: number; restored?: boolean } | null;
   /** What the returns are worked out from (deadlinesFor, again each time the list is shown). */
   deadlineInputs: DeadlineInputs | null;
+  /** A linked client's Shap's last answer couldn't be read: what's here is from before it. */
+  stale?: true;
 }
 
 const ASSURANCE = 'The assurance fits the public interest score';
@@ -263,6 +265,31 @@ export async function healthOf(db: Sql, now = today(), log?: { warn: (o: object,
     if ((err as { code?: string }).code === '40001') return healthNow(db, now, log, deps);
     throw err;
   }
+}
+
+/** Long words cut to length, as the practice's list shows them (each check's text, a name). */
+export const cutWords = (s: string, n = 500): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+/**
+ * What a business's own Shap sends its linked practice from its checks (modules/links.ts), and
+ * nothing else: the same as a kept client's, each text cut to what the practice's list reads, and
+ * without anything from Shap Pocket. (Everything named here is in LINK_WHAT_GOES, link.ts.)
+ */
+export function healthForLink(h: ClientHealth): ClientHealth {
+  const st = h.statements;
+  return {
+    at: h.at,
+    company: cutWords(h.company, 200),
+    setupDone: h.setupDone,
+    vatRegistered: h.vatRegistered,
+    audit: { fail: h.audit.fail, warn: h.audit.warn, items: h.audit.items.slice(0, 12).map((i) => ({ level: i.level, section: cutWords(i.section), text: cutWords(i.text) })) },
+    statements:
+      !st || st.error || st.yearEnd === null
+        ? st
+        : { yearEnd: st.yearEnd, status: st.status, changedSince: st.changedSince, failing: st.failing.slice(0, 50).map((w) => cutWords(w)), look: st.look.slice(0, 50).map((w) => cutWords(w)), assurance: st.assurance === null ? null : cutWords(st.assurance), unapprovedEarlier: st.unapprovedEarlier },
+    lockedThrough: h.lockedThrough,
+    deadlineInputs: h.deadlineInputs && { ...h.deadlineInputs, dividendsPaid: [...new Set(h.deadlineInputs.dividendsPaid ?? [])].sort().slice(-100) },
+  };
 }
 
 /** The books audit's findings for the list: what to fix first, then what to look at, the first 12. */
@@ -318,14 +345,16 @@ async function healthNow(db: Sql, now: string, log: { warn: (o: object, m: strin
     const [emp] = await tx<{ n: number }[]>`select count(*)::int as n from employees where active`;
     const [runs] = await tx<{ n: number }[]>`select count(*)::int as n from pay_runs where pay_date >= ${addDays(now, -100)}::date`;
     const employer = Boolean(s.payeRef?.trim()) || (featureOn(s.features, 'payroll') && (emp?.n ?? 0) > 0) || (runs?.n ?? 0) > 0;
-    // Dividends paid: Shap's own records, and dividends in ledgers brought in from another package
-    // (the day each was declared there: a trial balance's own journal has no such day).
+    // Dividends paid: Shap's own records, dividends in ledgers brought in from another package
+    // (the day each was declared there: a trial balance's own journal has no such day), and a
+    // journal by hand to Dividends (taken as paid on its day: the return is listed, not missed).
     const paid = await tx<{ d: string }[]>`
       select distinct paid_on::text as d from dividends where paid_on >= ${addDays(now, -100)}::date
       union
-      select distinct j.date::text from journals j join ledger_imports i on i.id = j.ledger_import_id and i.kind = 'ledger'
+      select distinct j.date::text from journals j left join ledger_imports i on i.id = j.ledger_import_id
         join journal_lines jl on jl.journal_id = j.id join accounts a on a.id = jl.account_id
         where a.system_key = 'dividends' and jl.debit_cents > 0 and j.date >= ${addDays(now, -100)}::date
+          and (i.kind = 'ledger' or (j.kind = 'manual' and j.ledger_import_id is null))
       order by 1`;
     return {
       at: new Date().toISOString(),

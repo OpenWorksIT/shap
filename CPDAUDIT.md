@@ -938,6 +938,98 @@ Tests: `test/accountant/accountant-terms.test.ts` (the backups and monthly invoi
 wait, the staff view, the words and the indemnity's scope, the pentest accepting first), each
 failing without its fix.
 
+### The five reviews of 1.30 and Shap Pocket 1.11.1 (Shap Accountant, phase 4: clients on their own Shap; before release)
+
+A business on its own Shap links its accountant's practice: the owner chooses what the practice
+may do there and makes a link that works once; the practice's server redeems it for a credential,
+then asks the client's Shap for one-time sign-ins for its people and for what its checks find.
+Five separate agents reviewed `bf3c6e5..74b7a13` and the website's `a909307..6ab57a7`, each with a
+real second Shap listening on a port and a made-up one that says what it shouldn't.
+
+- Security and privacy, with the penetration test (0 to fix, 49 OK, run against the server with
+  the demo company; this machine has no Docker): every update would have deleted a practice's
+  linked clients, as `migrateClients` took any client with no database for an unfinished one: a
+  linked client has none, ever, so it stays. A practice's person got an ordinary 30-day session on
+  the client's Shap, renewed with use, and nothing took them out when the practice switched their
+  sign-in off or took their task away: they're in for `LINK_SESSION_HOURS` (8) at most, never
+  extended (auth.ts), and the practice's server asks each linked client's Shap to take out whoever
+  may open it less after a change to their sign-in, their tasks or their profile
+  (`takeOutOfLinked`), saying who wasn't taken out when it didn't answer. Where the client's Shap
+  requires two-factor of everyone, a practice person without it at their practice is refused
+  (`person.mfa`). The ten seconds were only for silence: now for all of it. What a client's Shap
+  said when refusing reached the practice's screen word for word (any length, anything): only its
+  code goes, put in the practice's words (`linkWords`). A credential is 20 to 200 URL-safe
+  characters; the link routes read 16 KB at most; a name another server sends is one plain line
+  (`plainName`: no control, hidden or reordering characters). More IPv6 forms of private addresses
+  are refused (IPv4-compatible and translated, NAT64's local prefix, 6to4, Teredo, site-local), and
+  link-local ones (a cloud server's metadata) even with `LINK_PRIVATE`. A sign-in opened where
+  someone else is signed in to the client's Shap no longer signs them out (they sign out first),
+  and it clears the demo company's and a practice client's cookies. The guards let by only the
+  link's own routes, as Fastify matched them (`LINK_PATHS`), not the whole `/api/link/` prefix;
+  taking someone out is in the client's audit log. A canary test checks both ways. What held: the
+  codes, credentials and sign-ins (256 bits, hashed, single use under eight at once), 51 path
+  tricks, DNS rebinding, redirects, the 2 MB cap, and every owner-only route refused to a practice
+  person.
+- IFRS for SMEs and company law: one finding longer than 500 characters (five long item names in
+  one warning) made the practice refuse the whole answer, so its list never showed that client's
+  statements or returns: long words are cut to length on both sides (`healthForLink`, the
+  practice's schema), not refused. The drawer said "as their owner in Shap" for a linked client:
+  `LINKED_LEVEL_WORDS` (staff or its accountant there), and writing up shown as unavailable on a
+  compile-only link. A practice's person in the client's Shap read "then you approve them": they're
+  told the business approves them there, through its owner; the compiler's report defaults to their
+  own name, the practice in its field (`ownName`). Clause 9.3 says the client approves there, and
+  the practice neither approves nor records it. Also, from before: an already compiled set could be
+  compiled (or a report uploaded) over without keeping the signed one: refused until it's reopened,
+  in Shap and Pocket. Approving stays the client owner's (s30(3)(c), CC Act s58); nothing lets a
+  linked person reopen a locked period or change a signed year.
+- SARS and tax: the returns for a set of books kept and linked are the same in 13 settings. The
+  long finding lost the returns too: what they're worked out from is read on its own when the rest
+  can't be, and the summary is marked as from before (`stale`); days are real days, the time a
+  real time, the dividend days the last 100 distinct. A dividend journalled by hand put no DTR01 on
+  the list: it's taken as paid on its day. What stays the owner's is one list
+  (`LINK_STAYS_OWNERS`, used by both screens and the docs), with provisional tax paid, profit shares,
+  closing VAT periods and the chart of accounts; the refusal of a provisional tax payment says to
+  ask the owner, and that a journal isn't counted. The compile level's statements' details and
+  small business corporation answer are said. Linking gives the practice nothing with SARS, the
+  Department of Employment and Labour or CIPC (the panel, the disclaimer); 10.2 has the practice
+  keep its own records of its work and the returns it files (TAA s29); 3.5's backups are of the
+  books the practice keeps; docs/SARS.md says where a linked client's returns come from.
+- Accounting and arithmetic: a made-up month written up by the practice's person on the client's
+  own Shap and the same month kept in the practice agree to the cent (trial balance, statements,
+  VAT201, payroll, bills, the bank), every entry in that person's name, the books audit clean, and
+  the checks the practice shows equal what the same books give. Wipe all data failed once anyone
+  from the practice had signed in (a person's link restored before the link): the links are kept
+  with the people, put back after them. The long finding left the practice showing an out-of-date
+  summary: marked as from before. Also, from before, in Shap and Pocket: a bank line matched to a
+  bill's payment showed as open for good (no label for it in `matchesFor`), and matches accepted
+  from the suggestions weren't in the audit log. `security.test.ts` now ends with the books audit.
+- Words on screen and liability: "they sign in for that time only" and "Your books stay here:
+  nothing else goes" weren't true (8 hours; they can download, print and send in the business's
+  name): `LINK_WHAT_GOES` is now points that say what they can do, every field that goes (the keys
+  `healthForLink` sends, held by a test), that it goes at linking too, that what was sent stays
+  with the practice, that two-factor is required where the client's Shap requires it, and to give
+  the link as one would a password and check the practice's name. "Settings → People → Your
+  accountant" named a tab that isn't there: "People who sign in", everywhere. An access change the
+  client's Shap didn't take was toasted "Saved": who may still be in is said, on Practice and People.
+  The panel shows who's been taken out, "last signed in", how to change the level; the bar at the
+  top says for how long; an expired sign-in covers unlinking and changed access; errors no longer
+  blame the client for what a restore would do too, or show "ENOTFOUND". The accountant terms: 10.2's
+  duty, its limit and 12.1's "between your practice and the client" in bold; 10.3 reads a linked
+  client's checks as Shap finds them, shown as sent; 11.2 covers a linked client's server; the
+  points carry 10.2 and "keeps or opens" as 13.1 does. The version stays 2026-11-17.2 (not yet
+  released): practices accept it once. Shap's own terms need no new version (3.1, 3.7, 3.8 and 6.1
+  cover it); the disclaimer refers to 3.1 and 3.8 as its Pocket section does. For an attorney: is
+  a non-bold "between you and them" in a disclaimer enough; does the CPA reach a free service; is a
+  linked practice the business's operator (POPIA s21) or a responsible party of its own.
+
+Tests: `test/review-1.30/` (`data`: a restart, a wipe, the long finding, a stale answer, strict
+days, a dividend journalled by hand; `security`: the session's length, taking people out, two-factor,
+someone else signed in, the guards' routes, the body limit, plain names, the canary, the client's
+words, the deadline, the credential, the addresses; `words`; `accounting`: the month both ways),
+`financial-statements.test.ts` (not compiled over), `accounting.test.ts` and `bank.test.ts` (the
+bill's payment matched, the suggestions in the log), and in Pocket `accounting`, `bank` and `sales`;
+each fails without its fix.
+
 ### Code scanning (CodeQL), first run
 
 - The Accounts screen's download links carried the period's dates unencoded (flagged as text

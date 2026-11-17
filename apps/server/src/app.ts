@@ -63,7 +63,7 @@ import { CLIENT_COOKIE, registerPracticeRoutes, registerPracticeScope } from './
 import { registerLinkRoutes } from './modules/links.js';
 import { registerStatementRoutes } from './modules/statements.js';
 import { registerCompanyFileRoutes } from './modules/company-file.js';
-import { UNEXPECTED, UNEXPECTED_IN_A_CLIENT } from '@shap/shared';
+import { LINK_PATHS, UNEXPECTED, UNEXPECTED_IN_A_CLIENT } from '@shap/shared';
 
 const CSP = [
   "default-src 'self'",
@@ -186,7 +186,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
     if (!routePath(req).startsWith('/api/') || req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return;
     // A linked practice's server (links.ts): it shows its link's credential or code, never a cookie,
     // so another site can't act with anyone's session there, and it runs its own version.
-    if (routePath(req).startsWith('/api/link/')) return;
+    if (LINK_PATHS.includes(routePath(req))) return;
     const theirs = req.headers['x-shap-version'];
     // Shap's own pages always send their version; a form or script on another site can't add that
     // header (browsers only allow it from Shap's own address), so a change without it is refused.

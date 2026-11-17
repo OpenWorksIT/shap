@@ -137,9 +137,9 @@ describe('the Shap Accountant terms of use', () => {
     const all = points.map((p) => p.body).join(' ');
     // The indemnity as clause 13 has it: its whole scope, its people, ordinary negligence, and the carve-out for theirs too.
     expect(points[3]!.body).toMatch(
-      /over your practice’s work for its clients, its use of Shap on their books, the personal information it keeps there, or a breach of these terms by your practice or anyone it lets in, your practice covers them for that claim and its costs, even where the claim says Shap or OpenWorks’ negligence caused it, but not where the fraud, gross negligence or wilful misconduct of OpenWorks or its people did/,
+      /over your practice’s work for its clients, its use of Shap on their books, the personal information it keeps or opens there, or a breach of these terms by your practice or anyone it lets in, your practice covers them for that claim and its costs, even where the claim says Shap or OpenWorks’ negligence caused it, but not where the fraud, gross negligence or wilful misconduct of OpenWorks or its people did/,
     );
-    expect(ACCOUNTANT_TERMS_MEANS).toMatch(/indemnifies OpenWorks against claims by its clients or anyone else over that work, its use of Shap on their books, the personal information it keeps there, or a breach of the terms/);
+    expect(ACCOUNTANT_TERMS_MEANS).toMatch(/indemnifies OpenWorks against claims by its clients or anyone else over that work, its use of Shap on their books, the personal information it keeps or opens there, or a breach of the terms/);
     expect(all).toMatch(/personal information \(POPIA\)/);
     expect(all).toMatch(/not complete, and not advice/);
     // Estimates, as the owner's rule says, and what Shap doesn't do.

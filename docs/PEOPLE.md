@@ -90,12 +90,15 @@ names and pay out.
 ## Your accountant
 
 If the business's accountant uses Shap Accountant, the owner links their practice under **Settings
-→ People → Your accountant** (docs/ACCOUNTANT.md, "A client on its own Shap"): they choose whether
-the practice reads the books and compiles the statements (as an accountant here) or writes them up
-too (as staff with every task but closing and reopening months), and make a link that works once,
-for a week. The practice's people open the books from their own Shap, each time with a sign-in
-that works once; they're never in the people list here, never sign in with a password, and are
-named in the audit log with their practice. **Unlink** takes them all out at once.
+→ People who sign in → Your accountant** (docs/ACCOUNTANT.md, "A client on its own Shap"): they
+choose whether the practice reads the books and compiles the statements (as an accountant here,
+who also fills in the statements' details and the small business corporation answer) or writes
+them up too (as staff with every task but closing and reopening months), and make a link that
+works once, for a week. The practice's people open the books from their own Shap, each time with a
+sign-in that works once, and are then in for 8 hours at most; they're never in the people list
+here, never sign in with a password, and are named in the audit log with their practice. Their
+practice takes them out when it takes their access away. **Unlink** takes them all out at once; to
+change what the practice may do, unlink and make a new link.
 
 ## How it's checked
 

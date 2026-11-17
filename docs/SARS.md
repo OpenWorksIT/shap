@@ -52,6 +52,11 @@ promulgated, check the figures against them (the standard update). The 2025/26 t
 
 The practice's list of clients (docs/ACCOUNTANT.md) shows some of the returns coming up for each,
 worked out again each time it's shown: `practice.ts` `deadlinesFor`, from the client's settings.
+For a client on its own Shap, they're worked out on the practice's own server, with its tables,
+from what the client's Shap sent at the last **Run the checks** (`deadlineInputs`: the kind of
+business, VAT registration and category, the year-end month, turnover tax, whether it employs
+people, PBO approval and the days dividends were paid lately, a dividend journalled by hand
+among them); there's no refresh on leaving the books, as there is for a kept client.
 The dates the law fixes are in code there; the filing season's, which SARS sets each year, are in
 `tax.ts` `FILING_SEASON_DATES`; a public holiday the President declares for one year is in
 `dates.ts` `DECLARED_HOLIDAYS`. Each standard update checks all three.

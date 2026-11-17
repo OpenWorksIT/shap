@@ -10,7 +10,7 @@ import { buildApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { appVersion } from '../src/modules/system.js';
 import { base32Decode, hotp, timeStep } from '../src/lib/totp.js';
-import { login, ref, setup, type TestEnv } from './helpers.js';
+import { expectCleanAudit, login, ref, setup, type TestEnv } from './helpers.js';
 
 const V = { 'x-shap-version': appVersion() };
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
@@ -32,6 +32,8 @@ describe('breaking in', () => {
     await owner.post('/api/users', { name: 'Pieter Botha', email: 'pieter@example.co.za', role: 'owner', password: 'stone-orchid-kettle-4', currentPassword: 'test-password-1' });
   });
   afterAll(async () => {
+    // What it captured on the way (costs among it) leaves nothing for the books audit to fix.
+    await expectCleanAudit(env.sql);
     await app.close();
     await env.close();
   });

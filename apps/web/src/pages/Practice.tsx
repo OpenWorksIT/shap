@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { ACCOUNTANT_TERMS_MEANS, ACCOUNTANT_TERMS_URL, ACCOUNTANT_TERMS_VERSION, dayOf, formatDate, LEVEL_WORDS, POCKET_SHARE_NOTE, PRACTICE_NOTE, PRACTICE_TERMS_TICK, STATEMENT_STATUS_LABELS, todayIso, type Level, type StatementStatus } from '@shap/shared';
+import { ACCOUNTANT_TERMS_MEANS, ACCOUNTANT_TERMS_URL, ACCOUNTANT_TERMS_VERSION, dayOf, formatDate, LEVEL_WORDS, LINK_SESSION_HOURS, LINKED_LEVEL_WORDS, POCKET_SHARE_NOTE, PRACTICE_NOTE, PRACTICE_TERMS_TICK, STATEMENT_STATUS_LABELS, todayIso, WHO_OPENS_LINKED, type Level, type StatementStatus } from '@shap/shared';
 import { AccountantPoints, AccountantTermsAccept } from '../components/AccountantTerms';
 import { PageHead } from '../components/Shell';
 import { Drawer, Empty, ErrorBox, Field, Loading, Money, useToast } from '../components/ui';
@@ -20,6 +20,8 @@ interface Health {
   statements: Statements | null;
   lockedThrough: string | null;
   pocket?: { number: number; through: string; importedAt: string; added: number; changed: number; removed: number; restored?: boolean } | null;
+  /** A linked client's Shap's last answer couldn't be read: this is from before it. */
+  stale?: true;
   deadlines: { key: string; label: string; due: string; past: boolean }[];
 }
 interface PracticeClient {
@@ -92,7 +94,7 @@ export default function PracticePage() {
   const add = (e: FormEvent) => {
     e.preventDefault();
     void act('add', async () => {
-      // A client on their own Shap: the link they made there (Settings → People → Your accountant).
+      // A client on their own Shap: the link they made there (Settings → People who sign in → Your accountant).
       if (kind === 'linked') {
         const r = await api<{ name: string }>('/api/practice/clients/link', { body: { link: name } });
         toast(`${r.name} linked`);
@@ -115,7 +117,7 @@ export default function PracticePage() {
     act(`unlink-${c.id}`, async () => {
       if (!confirm(`Unlink ${c.name}? Your practice no longer opens their books, and their Shap takes your people out of them. Their books stay theirs, on their Shap; to link again, they make you a new link.`)) return;
       const r = await api<{ told: boolean }>(`/api/practice/clients/${c.id}/unlink`, { body: {} });
-      toast(r.told ? `${c.name} unlinked` : `${c.name} unlinked here: their Shap didn’t answer, so they may want to unlink it there too`);
+      toast(r.told ? `${c.name} unlinked` : `${c.name} unlinked here. Their Shap didn’t answer, so your people may still be signed in there until their sign-in ends (${LINK_SESSION_HOURS} hours at most): ask them to unlink your practice there too.`, r.told ? undefined : 'error');
       await reload();
     });
   const open = (c: PracticeClient, as?: Level) => {
@@ -232,7 +234,7 @@ export default function PracticePage() {
           </button>
           {kind === 'linked' && (
             <p className="xs muted" style={{ flexBasis: '100%', margin: 0 }}>
-              In their own Shap, the client makes the link under Settings → People → Your accountant, choosing what your practice may do there. Their books stay on their Shap: your people open them there, in a new tab.
+              In their own Shap, the client makes the link under Settings → People who sign in → Your accountant, choosing what your practice may do there. Their books stay on their Shap: your people open them there, in a new tab.
             </p>
           )}
         </form>
@@ -292,7 +294,7 @@ export default function PracticePage() {
                 {c.linked?.unlinked && manage && (
                   <div className="row wrap" style={{ gap: 8, alignItems: 'flex-end' }}>
                     <p className="small grow" style={{ margin: 0 }}>
-                      They’ve unlinked your practice in their Shap (or it was unlinked here). To link again, paste the new link they make you:
+                      This link no longer works: it was unlinked in their Shap or here (or their books there were put back from before it). To link again, paste the new link they make you:
                     </p>
                     <input className="input" style={{ minWidth: 260 }} value={relink[c.id] ?? ''} placeholder="https://their-shap…/link#…" onChange={(e) => setRelink({ ...relink, [c.id]: e.target.value })} data-private aria-label="Their new link" />
                     <button className="btn small" disabled={busy !== null || !(relink[c.id] ?? '').trim()} onClick={() => void linkAgain(c)}>
@@ -303,12 +305,12 @@ export default function PracticePage() {
                 {c.notUpToDate ? (
                   <p className="small warn-text">Shap couldn’t bring these books up to date when it last started, so they aren’t opened until it can. Whoever runs the server can see why in its log.</p>
                 ) : !h ? (
-                  <p className="small muted">Shap’s checks haven’t run on these books yet: open them, or run the checks.</p>
+                  <p className="small muted">{c.linked ? 'Their Shap’s checks haven’t come in yet: run the checks.' : 'Shap’s checks haven’t run on these books yet: open them, or run the checks.'}</p>
                 ) : !h.setupDone && c.kind === 'pocket' ? (
                   <p className="small muted">No share brought in yet: bring in their first share from Shap Pocket (they make it under Accounts → Export).</p>
                 ) : !h.setupDone ? (
                   <p className="small muted">
-                    {level === 'books' ? 'Not set up yet: open their books to answer Shap’s first questions about the business.' : 'Not set up yet: whoever writes up their books answers Shap’s first questions when they first open them.'}
+                    {c.linked ? 'Not set up yet: the client answers Shap’s first questions about the business in their own Shap.' : level === 'books' ? 'Not set up yet: open their books to answer Shap’s first questions about the business.' : 'Not set up yet: whoever writes up their books answers Shap’s first questions when they first open them.'}
                   </p>
                 ) : (
                   <div className="stack-sm">
@@ -384,7 +386,10 @@ export default function PracticePage() {
                         ].join(' · ')}
                       </p>
                     )}
-                    <p className="xs muted">Shap’s checks ran {formatDate(h.at.slice(0, 10))}.</p>
+                    <p className={h.stale ? 'xs warn-text' : 'xs muted'}>
+                      {c.linked ? `Their Shap’s checks ran ${formatDate(dayOf(h.at))}, and are shown as their Shap sent them.` : `Shap’s checks ran ${formatDate(dayOf(h.at))}.`}
+                      {h.stale ? ' Their Shap’s answer since couldn’t be read, so this is from before: one of the two may need updating.' : ''}
+                    </p>
                   </div>
                 )}
                 {(manage || isOwner) && (
@@ -436,8 +441,6 @@ const WHO_OPENS_KEPT =
   'As their owner in Shap, someone who writes up the books can do everything the client’s owner could, reopening closed periods included, and records the client’s approval of the financial statements (with the page they signed). Approving the statements is the client’s own decision.';
 const WHO_OPENS_POCKET =
   'Their books change only in Shap Pocket (on their phone or computer). Someone who writes them up here brings in their shares, compiles the statements and records the approval of whoever signs them for the business (with the page they signed): approving the statements is the client’s own decision.';
-const WHO_OPENS_LINKED =
-  'Their books are on their own Shap, and they choose what your practice may do there. Someone who writes them up does that, as staff with every task but closing and reopening months (never their settings, the people who sign in, the year end or approving the statements); someone given them to compile reads them and compiles the statements. Each opens them there, in a new tab, in the client’s own audit log by name. Approving the statements is the client’s own decision.';
 /** A share numbered lower than the last, made later: what Shap takes it to mean, not what it knows. */
 const POCKET_RESTORED =
   'It numbers lower than the share before but was made later, which usually means their books were restored from a backup or begun again in Shap Pocket: check with them that this is the share they meant to send.';
@@ -453,8 +456,9 @@ function AccessDrawer({ client, people, onClose, onSaved }: { client: PracticeCl
       const access = Object.entries(levels)
         .filter((e): e is [string, Level] => e[1] === 'books' || e[1] === 'compile')
         .map(([userId, level]) => ({ userId, level }));
-      await api(`/api/practice/clients/${client.id}/access`, { method: 'PUT', body: { access } });
-      toast('Saved');
+      const r = await api<{ stillIn?: string[] }>(`/api/practice/clients/${client.id}/access`, { method: 'PUT', body: { access } });
+      if (r.stillIn?.length) toast(`Saved, but their Shap didn’t answer: ${r.stillIn.join(', ')} may still be in their books until their sign-in there ends (${LINK_SESSION_HOURS} hours at most).`, 'error');
+      else toast('Saved');
       onSaved();
     } catch (err) {
       if (!(err instanceof ApiError)) console.error(err);
@@ -483,13 +487,16 @@ function AccessDrawer({ client, people, onClose, onSaved }: { client: PracticeCl
                 {(f) => (
                   <select {...f} className="select" value={levels[p.id] ?? ''} onChange={(e) => setLevels({ ...levels, [p.id]: e.target.value as Level | '' })}>
                     <option value="">Doesn’t open it</option>
-                    <option value="books">{LEVEL_WORDS.books}</option>
-                    <option value="compile">{LEVEL_WORDS.compile}</option>
+                    <option value="books" disabled={client.linked?.level === 'compile'}>
+                      {(client.linked ? LINKED_LEVEL_WORDS : LEVEL_WORDS).books}
+                    </option>
+                    <option value="compile">{(client.linked ? LINKED_LEVEL_WORDS : LEVEL_WORDS).compile}</option>
                   </select>
                 )}
               </Field>
             </div>
           ))}
+          {client.linked?.level === 'compile' && <p className="xs muted">The client lets your practice read their books and compile the statements there, not write them up: whoever opens them does that.</p>}
           <p className="xs muted">{client.kind === 'pocket' ? WHO_OPENS_POCKET : client.kind === 'linked' ? WHO_OPENS_LINKED : WHO_OPENS_KEPT}</p>
         </div>
       )}

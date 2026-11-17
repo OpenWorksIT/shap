@@ -259,6 +259,9 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
     return { ok: true };
   });
 
+  // A compiled set is reopened before it's compiled again, so the signed one is kept (financial_statement_versions).
+  const COMPILED_ALREADY = 'These statements are compiled already: reopen them to compile them again (the signed set is kept).';
+
   /** The accountant compiles and signs, signed in to Shap as themselves. */
   app.post('/api/statements/:fyEnd/compile', readers, async (req) => {
     const user = userOrThrow(req);
@@ -270,6 +273,7 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
     if (input.date <= fyEnd) throw badRequest('The report is signed after the year end');
     const r = await row(sql, fyEnd);
     if (r?.status === 'approved') throw badRequest('These statements are approved already');
+    if (r?.status === 'compiled') throw badRequest(COMPILED_ALREADY);
     const d = await loadDetails(sql);
     await saveDetails(sql, { ...d, compiler: input.compiler, assurance: 'compiled' });
     const ready = await readyToSign(sql, fyEnd);
@@ -295,6 +299,7 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
     if (!(file.mime === 'application/pdf' || file.mime.startsWith('image/'))) throw badRequest('The signed report as a PDF or a photo');
     const r = await row(sql, fyEnd);
     if (r?.status === 'approved') throw badRequest('These statements are approved already');
+    if (r?.status === 'compiled') throw badRequest(COMPILED_ALREADY);
     const d = await loadDetails(sql);
     const ready = await readyToSign(sql, fyEnd);
     await sql.begin(async (tx) => {

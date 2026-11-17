@@ -12,6 +12,7 @@ import {
   ESTIMATE_NOTE,
   ESTIMATE_SHORT,
   formatDate,
+  ownName,
   POLICY_KEYS,
   POLICY_LABELS,
   STATEMENT_STATUS_LABELS,
@@ -185,7 +186,9 @@ export function FinancialStatements() {
           ? ' Check them, word the notes, then compile and sign.'
           : client
             ? ` The practice compiles them here (Practice → Open to compile); then one of the ${s?.governing.many ?? 'directors'} signs their approval, and you record it with the page they signed.`
-            : ' Your accountant compiles and signs them; then you approve them and the year is finished.'}
+            : user.fromPractice
+              ? ` Your practice compiles them here (in Shap Accountant, open these books to compile); then the business approves them in this Shap, through its owner, and the year is finished.`
+              : ' Your accountant compiles and signs them; then you approve them and the year is finished.'}
       </p>
       <div className="row wrap">
         {years.data.map((y) => (
@@ -564,7 +567,7 @@ function DetailsFields({ initial, defaults, governing, onSaved }: { initial: Sta
         {text('preparedBy' as keyof StatementDetailsInput, 'Prepared by (optional)', 'Who prepared them, if not the accountant: on the general information page', 1)}
       </fieldset>
       {text('shareCapital', 'Share capital note (optional)', 'e.g. the authorised and issued shares; blank for Shap’s line from the figures')}
-      {text('loanTerms', 'Loans from the owners: terms', 'With no fixed terms of repayment they’re current liabilities (IFRS for SMEs 4.7). If the lenders agreed in writing not to call them within twelve months, move the account to non-current (Settings → Chart of accounts) and say so here.')}
+      {text('loanTerms', 'Loans from the owners: terms', 'With no fixed terms of repayment they’re current liabilities (IFRS for SMEs 4.7). If the lenders agreed in writing not to call them within twelve months, move the account to non-current (Settings → Chart of accounts, which is the owner’s) and say so here.')}
       {text('goingConcern', 'Going concern', undefined, 3)}
       {text('eventsAfter', 'Events after the reporting period', undefined, 3)}
       {text('taxNote', 'Tax note (optional)', 'Anything to add to the tax note: assessed losses, a dispute')}
@@ -667,7 +670,8 @@ function UploadForm({ fyEnd, compiler, cc, onClose, onDone }: { fyEnd: string; c
 
 function CompileForm({ fyEnd, compiler, cc, onClose, onDone }: { fyEnd: string; compiler: StatementDetailsInput['compiler']; cc: boolean; onClose: () => void; onDone: () => Promise<void> }) {
   const { user } = useAuthed();
-  const [c, setC] = useState({ ...compiler, name: compiler.name || user.name });
+  // Their own name, and their practice in its own field (a linked client's Shap names them "Name (Practice)").
+  const [c, setC] = useState({ ...compiler, name: compiler.name || ownName(user), practice: compiler.practice || user.fromPractice || '' });
   const [date, setDate] = useState(todayIso());
   const [sure, setSure] = useState(false);
   const { submit, error, busy } = useSubmit(() => api(`/api/statements/${fyEnd}/compile`, { body: { date, compiler: c } }), onDone, 'Signed');

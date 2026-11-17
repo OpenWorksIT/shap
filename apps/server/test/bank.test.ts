@@ -199,6 +199,9 @@ describe('reconciling a statement', () => {
     const rec = await owner.get(`/api/bank/recon?sourceId=${bank}`);
     const id = (d: string) => rec.lines.find((l: { description: string }) => l.description.startsWith(d)).id;
     expect((await owner.post('/api/bank/accept', { sourceId: bank, lineIds: [id('ACME')] })).matched).toBe(1);
+    // Accepting a suggestion is in the audit log, by name, as matching by hand is.
+    const [accepted] = await env.sql<{ details: { matched: number }; userId: string | null }[]>`select details, user_id from audit_log where action = 'accept_matches'`;
+    expect(accepted).toMatchObject({ details: { matched: 1 }, userId: expect.any(String) });
     const created = await owner.post('/api/bank/lines/create-costs', {
       items: [
         { lineId: id('MONTHLY'), categoryId: cats.bank },

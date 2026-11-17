@@ -29,8 +29,9 @@ export async function wipeNames(db: Sql): Promise<string[]> {
 /** Kept, in this order: the profiles before the people on them. */
 // The people and who did what, and a practice's list of its clients and who opens each (Shap
 // Accountant): the clients' books are databases of their own, which a wipe of these never touches,
-// so the practice must still find them after it.
-const KEEP = ['profiles', 'users', 'sessions', 'recovery_codes', 'audit_log', 'practice_clients', 'practice_access'] as const;
+// so the practice must still find them after it. And the links to the business's accountant, with
+// the people from the practice who came by them (a wipe doesn't unlink: Your accountant does).
+const KEEP = ['profiles', 'users', 'accountant_links', 'link_entries', 'sessions', 'recovery_codes', 'audit_log', 'practice_clients', 'practice_access'] as const;
 
 export async function wipeBooks(db: Sql): Promise<void> {
   const migrations = await migrationFiles();
@@ -43,8 +44,14 @@ export async function wipeBooks(db: Sql): Promise<void> {
       await tx.unsafe(m.body);
       await tx`insert into schema_migrations (name) values (${m.name})`;
     }
-    // (The migrations start the profiles again: the business's own replace them.)
-    for (const t of KEEP) await tx.unsafe(`delete from public.${t}; insert into public.${t} select * from wipe_keep.${t}`);
+    // (The migrations start the profiles again: the business's own replace them.) The people from
+    // a linked practice name their link, and a link who made it: the people go back first, their
+    // links put back once the links are.
+    await tx.unsafe('create table wipe_keep.user_links as select id, link_id from wipe_keep.users where link_id is not null; update wipe_keep.users set link_id = null');
+    for (const t of KEEP) {
+      await tx.unsafe(`delete from public.${t}; insert into public.${t} select * from wipe_keep.${t}`);
+      if (t === 'accountant_links') await tx.unsafe('update public.users u set link_id = k.link_id from wipe_keep.user_links k where k.id = u.id');
+    }
     await tx.unsafe(`select setval(pg_get_serial_sequence('audit_log', 'id'), coalesce((select max(id) from audit_log), 1))`);
     await tx.unsafe('drop schema wipe_keep cascade');
   });

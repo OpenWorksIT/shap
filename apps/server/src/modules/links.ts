@@ -2,7 +2,7 @@
  * A business's own Shap, linked to its accountant's Shap Accountant (packages/shared link.ts,
  * docs/ACCOUNTANT.md "A client on its own Shap"). Two halves:
  *
- * - **The owner's** (Settings → People → Your accountant): make a link for the practice, choosing
+ * - **The owner's** (Settings → People who sign in → Your accountant): make a link for the practice, choosing
  *   what it may do here; see who from it has opened the books; unlink. A link is a code that works
  *   once, for a week, kept only as its hash.
  * - **The practice's server's** (/api/link/…): it shows the link's code once, and gets a
@@ -12,27 +12,29 @@
  *   checks find here, to take one of its people out, or to unlink. Nothing else is answered.
  *
  * The sign-in itself is a token that works once, within a minute, opened in the practice person's
- * browser (GET /api/link/enter), which makes them a session here like anyone's. Everything is in
- * this Shap's audit log, by name.
+ * browser (GET /api/link/enter), which makes them a session here for LINK_SESSION_HOURS, no longer
+ * however busy they are (auth.ts doesn't extend it). Everything is in this Shap's audit log, by name.
+ * Each of these routes reads a small body only, and is in LINK_PATHS (the guards let only those by).
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { LINK_API, LINK_DAYS, LINK_SIGN_IN_SECONDS, LINKED_BOOKS_TASKS, LEVELS, linkText, type Level } from '@shap/shared';
+import { LINK_API, LINK_DAYS, LINK_SESSION_HOURS, LINK_SIGN_IN_SECONDS, LINKED_BOOKS_TASKS, LEVELS, linkText, plainName, type Level } from '@shap/shared';
 import { z } from 'zod';
-import { browserName, confirmPassword, requireRole, SESSION_COOKIE, userOrThrow } from '../auth.js';
+import { browserName, CLIENT_COOKIE, CLIENT_SESSION_COOKIE, confirmPassword, requireRole, SESSION_COOKIE, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Db, Sql } from '../db/index.js';
 import { dbScope } from '../db/routing.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, forbidden, HttpError, notFound } from '../lib/errors.js';
-import { healthOf } from '../lib/practice.js';
+import { healthForLink, healthOf } from '../lib/practice.js';
 import { newToken, sha256 } from '../lib/tokens.js';
 import { parse } from '../lib/validate.js';
+import { DEMO_COOKIE } from './demo.js';
 import { appVersion } from './system.js';
 
 /** What the practice's server puts before its credential, so it's never taken for a session. */
 export const LINK_BEARER = 'link.';
 const NOT_HERE = 'Your accountant is linked in your own Shap, not in a practice’s copy of your books or the demo company.';
-const GONE = 'This link to the client’s Shap no longer works: they unlinked it, or it was never used. Ask them for a new one.';
+const GONE = 'This link to the client’s Shap no longer works: it was unlinked there. Ask them for a new one.';
 
 interface LinkRow {
   id: string;
@@ -59,6 +61,9 @@ export function registerLinkRoutes(app: FastifyInstance, ctx: Ctx): void {
   // cookies a request here could carry).
   const real: Sql = ctx.dbs.real;
   const limit = (max: number) => ({ rateLimit: { max, timeWindow: '1 minute' } });
+  // What another server sends here is small: no more of it is read.
+  const small = { bodyLimit: 16 * 1024 };
+  const named = (max: number) => z.string().max(2000).transform(plainName).pipe(z.string().min(1).max(max));
   const owner = { preHandler: requireRole('owner') };
   const notHere = () => {
     const s = dbScope.getStore();
@@ -124,23 +129,25 @@ export function registerLinkRoutes(app: FastifyInstance, ctx: Ctx): void {
   const answer = (body: Record<string, unknown>) => ({ ...body, api: LINK_API, version: appVersion() });
 
   /** The practice's server shows the code once, and gets this link's credential. */
-  app.post('/api/link/redeem', { config: limit(10) }, async (req) => {
-    const { code, practice } = parse(z.object({ code: z.string().min(20).max(100), practice: z.object({ name: z.string().trim().min(1).max(200) }) }), req.body);
+  app.post('/api/link/redeem', { ...small, config: limit(10) }, async (req) => {
+    const { code, practice } = parse(z.object({ code: z.string().min(20).max(100), practice: z.object({ name: named(200) }) }), req.body);
     const credential = newToken();
     const [l] = await real<{ id: string; level: Level; createdBy: string | null }[]>`
       update accountant_links set code_hash = null, code_expires_at = null, credential_hash = ${sha256(credential)}, practice_name = ${practice.name}, linked_at = now(), last_used_at = now()
       where code_hash = ${sha256(code)} and code_expires_at > now() and revoked_at is null
       returning id, level, created_by`;
-    if (!l) throw badRequest('That link doesn’t work: it was used already, it’s more than a week old, or it was unlinked. Ask the client for a new one (Settings → People → Your accountant, in their Shap).', { code: 'link_unknown' });
+    if (!l) throw new HttpError(400, 'That link doesn’t work: it was used already, it’s more than a week old, or it was unlinked. Ask the client for a new one (Settings → People who sign in → Your accountant, in their Shap).', 'link_unknown');
     await audit(real, { actor: 'system', action: 'accountant_linked', entity: 'accountant_link', entityId: l.id, ip: req.ip, details: { practice: practice.name, level: l.level } });
     return answer({ credential, company: await company(), level: l.level });
   });
 
   /** A sign-in for one of the practice's people, at no more than the owner allowed. */
-  app.post('/api/link/sign-in', { config: limit(30) }, async (req) => {
+  app.post('/api/link/sign-in', { ...small, config: limit(30) }, async (req) => {
     const l = await linkOf(req);
-    const { person, level } = parse(z.object({ person: z.object({ id: z.string().uuid(), name: z.string().trim().min(1).max(120) }), level: z.enum(LEVELS) }), req.body);
-    if (level === 'books' && l.level !== 'books') throw forbidden('The client lets your practice read their books and compile the statements, not write them up.');
+    const { person, level } = parse(z.object({ person: z.object({ id: z.string().uuid(), name: named(120), mfa: z.boolean() }), level: z.enum(LEVELS) }), req.body);
+    if (level === 'books' && l.level !== 'books') throw new HttpError(403, 'The client lets your practice read their books and compile the statements, not write them up.', 'link_level');
+    // Two-factor sign-in, where this Shap requires it of everyone: of them too (at their practice).
+    if (config.mfaRequired && !person.mfa) throw new HttpError(403, 'This Shap requires two-factor sign-in, and they haven’t turned it on at their practice.', 'link_mfa');
     const name = `${person.name} (${l.practiceName})`.slice(0, 200);
     const role = level === 'books' ? 'staff' : 'accountant';
     const access = level === 'books' ? [...LINKED_BOOKS_TASKS] : [];
@@ -162,6 +169,16 @@ export function registerLinkRoutes(app: FastifyInstance, ctx: Ctx): void {
   /** In the practice person's browser: the sign-in, once, and into the books. */
   app.get('/api/link/enter', { config: limit(30) }, async (req, reply: FastifyReply) => {
     const { t } = parse(z.object({ t: z.string().max(200).default('') }), req.query);
+    reply.header('cache-control', 'no-store');
+    reply.header('referrer-policy', 'no-referrer');
+    // Someone else signed in to this Shap in this browser (its owner, say) isn't signed out by it:
+    // they sign out first, and the sign-in stays unused meanwhile.
+    const here = req.cookies?.[SESSION_COOKIE];
+    if (here) {
+      const [other] = await real<{ id: string }[]>`
+        select u.id from sessions s join users u on u.id = s.user_id where s.token_hash = ${sha256(here)} and s.expires_at > now() and u.active and u.link_id is null`;
+      if (other) return reply.redirect('/?link=signed-in', 303);
+    }
     const session = newToken();
     const entered = await real.begin(async (tx) => {
       const [e] = await tx<{ userId: string; linkId: string }[]>`
@@ -173,39 +190,41 @@ export function registerLinkRoutes(app: FastifyInstance, ctx: Ctx): void {
       const [u] = await tx<{ id: string }[]>`select id from users where id = ${e.userId} and link_id = ${e.linkId} and active`;
       if (!u) return null;
       await tx`insert into sessions (token_hash, user_id, expires_at, user_agent, ip)
-        values (${sha256(session)}, ${u.id}, now() + make_interval(hours => ${config.SESSION_TTL_HOURS}), ${browserName(req)}, ${req.ip})`;
+        values (${sha256(session)}, ${u.id}, now() + make_interval(hours => ${LINK_SESSION_HOURS}), ${browserName(req)}, ${req.ip})`;
       await tx`update users set last_login_at = now() where id = ${u.id}`;
       await audit(tx, { userId: u.id, action: 'login', entity: 'user', entityId: u.id, ip: req.ip, details: { method: 'accountant_link' } });
       return u.id;
     });
-    reply.header('cache-control', 'no-store');
-    reply.header('referrer-policy', 'no-referrer');
     if (!entered) return reply.redirect('/?link=expired', 303);
-    reply.setCookie(SESSION_COOKIE, session, { httpOnly: true, sameSite: 'lax', secure: config.COOKIE_SECURE, path: '/', maxAge: config.SESSION_TTL_HOURS * 3600 });
+    reply.setCookie(SESSION_COOKIE, session, { httpOnly: true, sameSite: 'lax', secure: config.COOKIE_SECURE, path: '/', maxAge: LINK_SESSION_HOURS * 3600 });
+    // Into these books, not the demo company or a practice's client (whose cookies a browser may keep).
+    for (const c of [DEMO_COOKIE, CLIENT_COOKIE, CLIENT_SESSION_COOKIE]) if (req.cookies?.[c] !== undefined) reply.clearCookie(c, { path: '/' });
     return reply.redirect('/', 303);
   });
 
   /** What Shap's checks find here, for the practice's list (the books audit, the statements, the returns). */
-  app.get('/api/link/health', { config: limit(10) }, async (req) => {
+  app.get('/api/link/health', { ...small, config: limit(10) }, async (req) => {
     const l = await linkOf(req);
     await audit(real, { actor: 'system', action: 'link_checks', entity: 'accountant_link', entityId: l.id, ip: req.ip, details: { practice: l.practiceName } });
-    return answer({ health: await healthOf(real, undefined, req.log), level: l.level });
+    return answer({ health: healthForLink(await healthOf(real, undefined, req.log)), level: l.level });
   });
 
   /** One of the practice's people no longer opens these books (their access went or changed). */
-  app.post('/api/link/person-off', { config: limit(30) }, async (req) => {
+  app.post('/api/link/person-off', { ...small, config: limit(60) }, async (req) => {
     const l = await linkOf(req);
     const { personId } = parse(z.object({ personId: z.string().uuid() }), req.body);
-    const [u] = await real<{ id: string }[]>`update users set active = false where link_id = ${l.id} and link_person = ${personId} returning id`;
+    const [u] = await real<{ id: string; active: boolean }[]>`
+      update users n set active = false from users o where n.id = o.id and n.link_id = ${l.id} and n.link_person = ${personId} returning n.id, o.active`;
     if (u) {
       await real`delete from sessions where user_id = ${u.id}`;
       await real`delete from link_entries where user_id = ${u.id}`;
+      if (u.active) await audit(real, { actor: 'system', action: 'link_person_off', entity: 'user', entityId: u.id, ip: req.ip, details: { practice: l.practiceName } });
     }
     return answer({ ok: true });
   });
 
   /** The practice unlinks: as if the owner had. */
-  app.post('/api/link/unlink', { config: limit(10) }, async (req) => {
+  app.post('/api/link/unlink', { ...small, config: limit(10) }, async (req) => {
     const l = await linkOf(req);
     await real.begin((tx) => revokeLink(tx, l.id, null));
     await audit(real, { actor: 'system', action: 'accountant_unlinked', entity: 'accountant_link', entityId: l.id, ip: req.ip, details: { practice: l.practiceName, by: 'the practice' } });

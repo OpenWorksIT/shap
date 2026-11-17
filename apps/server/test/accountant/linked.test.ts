@@ -79,8 +79,9 @@ describe('a client on its own Shap, linked to its accountant', () => {
     expect((await theirs.call({ method: 'POST', url: '/api/accountant-links', payload: { level: 'books' } })).statusCode).toBe(400);
     const staff = await login(own.app, 'site@example.co.za');
     expect((await staff.call({ method: 'POST', url: '/api/accountant-links', payload: { level: 'books', password: 'test-password-1' } })).statusCode).toBe(403);
-    expect(LINK_WHAT_GOES).toMatch(/Their Shap is sent your business’s name, what you let them do, and, when they run the checks, what Shap’s checks find in your books \(which can name your customers and suppliers\)/);
-    expect(LINK_WHAT_GOES).toMatch(/OpenWorks never gets any of it/);
+    const goes = LINK_WHAT_GOES.join(' ');
+    expect(goes).toMatch(/Their Shap is sent your business’s name and what you let them do; and, when your practice links and whenever it runs the checks, what Shap’s checks find in your books \(which can name your customers and suppliers\)/);
+    expect(goes).toMatch(/nothing goes to OpenWorks IT because of it/);
     // Writing up is everything staff can be given but the practice's own and closing months.
     expect(LINKED_BOOKS_TASKS).not.toContain('books.lock');
     expect(LINKED_BOOKS_TASKS.some((t) => t.startsWith('practice.'))).toBe(false);
@@ -162,7 +163,7 @@ describe('a client on its own Shap, linked to its accountant', () => {
     expect((await owner.post<{ level: string }>(`/api/practice/clients/${second.id}/open`, {})).level).toBe('compile');
     // Their Shap holds to it too, whatever a practice's server asks.
     const [cred] = await practice.sql<{ linkCredential: string }[]>`select link_credential from practice_clients where id = ${second.id}`;
-    const ask = await own.app.inject({ method: 'POST', url: '/api/link/sign-in', headers: { authorization: `Bearer link.${practice.ctx.secrets.open(cred!.linkCredential)}` }, payload: { person: { id: siteId, name: 'Site' }, level: 'books' } });
+    const ask = await own.app.inject({ method: 'POST', url: '/api/link/sign-in', headers: { authorization: `Bearer link.${practice.ctx.secrets.open(cred!.linkCredential)}` }, payload: { person: { id: siteId, name: 'Site', mfa: false }, level: 'books' } });
     expect(ask.statusCode).toBe(403);
   });
 
@@ -192,7 +193,7 @@ describe('a client on its own Shap, linked to its accountant', () => {
     expect((await asThem(opened.cookie!).get('/api/auth/me')).statusCode).toBe(401);
     const open = await owner.call({ method: 'POST', url: `/api/practice/clients/${linked}/open`, payload: {} });
     expect(open.statusCode).toBe(400);
-    expect(open.json().error).toMatch(/They’ve unlinked your practice in their Shap, so it no longer opens their books/);
+    expect(open.json().error).toMatch(/Their Shap no longer knows this link: they unlinked your practice there/);
     const c = (await owner.get('/api/practice')).clients.find((x: { id: string }) => x.id === linked);
     expect(c.linked.unlinked).toBe(true);
     // A new link from them links the same client again, its access kept.
@@ -263,7 +264,7 @@ describe('a client’s Shap that says what it shouldn’t, or isn’t where a cl
     const practiceName = (await practice.sql<{ companyName: string }[]>`select company_name from settings where id`)[0]!.companyName;
     expect(JSON.parse(heard.find((h) => h.url === '/api/link/redeem')!.body)).toEqual({ code: 'a'.repeat(43), practice: { name: practiceName } });
     expect(Object.keys(JSON.parse(heard.find((h) => h.url === '/api/link/sign-in')!.body)).sort()).toEqual(['level', 'person']);
-    expect(Object.keys(JSON.parse(heard.find((h) => h.url === '/api/link/sign-in')!.body).person).sort()).toEqual(['id', 'name']);
+    expect(Object.keys(JSON.parse(heard.find((h) => h.url === '/api/link/sign-in')!.body).person).sort()).toEqual(['id', 'mfa', 'name']);
     for (const h of heard) expect(h.body).not.toMatch(/Canarybird|canary@client/);
     expect(heard.filter((h) => h.url !== '/api/link/redeem').every((h) => h.auth === `Bearer link.${'c'.repeat(43)}`)).toBe(true);
     // Checks the list can read come in.

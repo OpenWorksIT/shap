@@ -164,12 +164,14 @@ async function matchesFor(db: Db, lineIds: string[]) {
         (select c.description || coalesce(' – ' || nullif(c.supplier, ''), '') from costs c where m.kind = 'cost' and c.id = m.record_id),
         (select 'Payment for invoice ' || d.number from receipts r join documents d on d.id = r.invoice_id where m.kind = 'receipt' and r.id = m.record_id),
         (select 'Wages: ' || w.name from wage_payments wp join workers w on w.id = wp.worker_id where m.kind = 'wage_payment' and wp.id = m.record_id),
-        (select j.description from journals j where m.kind = 'journal' and j.id = m.record_id)) as label,
+        (select j.description from journals j where m.kind = 'journal' and j.id = m.record_id),
+        (select 'Paid bill: ' || c.description || coalesce(' – ' || nullif(c.supplier, ''), '') from bill_payments bp join costs c on c.id = bp.cost_id where m.kind = 'bill_payment' and bp.id = m.record_id)) as label,
       coalesce(
         (select c.amount_cents from costs c where m.kind = 'cost' and c.id = m.record_id),
         (select r.amount_cents from receipts r where m.kind = 'receipt' and r.id = m.record_id),
         (select wp.amount_cents from wage_payments wp where m.kind = 'wage_payment' and wp.id = m.record_id),
-        (select sum(jl.debit_cents) from journal_lines jl where m.kind = 'journal' and jl.journal_id = m.record_id)) as amount_cents
+        (select sum(jl.debit_cents) from journal_lines jl where m.kind = 'journal' and jl.journal_id = m.record_id),
+        (select bp.amount_cents from bill_payments bp where m.kind = 'bill_payment' and bp.id = m.record_id)) as amount_cents
     from bank_matches m where m.bank_line_id = any(${lineIds}::uuid[])`;
   const out = new Map<string, { kind: Kind; id: string; label: string; amountCents: number }[]>();
   for (const r of rows) {
@@ -632,8 +634,12 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   app.post('/api/bank/accept', { preHandler: requireAccess('bank.reconcile') }, async (req) => {
+    const user = userOrThrow(req);
     const { sourceId, lineIds } = parse(z.object({ sourceId: uuid, lineIds: z.array(uuid).min(1).max(2000) }), req.body);
-    return { matched: await applySuggestions(sourceId, lineIds) };
+    const matched = await applySuggestions(sourceId, lineIds);
+    // Matches taken from the suggestions are someone's doing too, as a match by hand is.
+    if (matched) await audit(sql, { userId: user.id, action: 'accept_matches', entity: 'bank_line', ip: req.ip, details: { sourceId, lines: lineIds.length, matched } });
+    return { matched };
   });
 
   app.post('/api/bank/lines/ignore', { preHandler: requireAccess('bank.reconcile') }, async (req) => {
