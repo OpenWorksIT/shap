@@ -131,22 +131,40 @@ residents: section 25B is the accountant's to work out). Shap's figures are esti
 ## A Shap Pocket share
 
 A one-person business on Shap Pocket keeps its books on the owner's phone. **Accounts → Export →
-Share your books with your accountant**, in Pocket, makes one file of the whole of the books: every
-entry with its date, reference and description (which can name their customers and suppliers),
-their accounts, and the business's details Shap needs to read them. It goes only where the owner
-sends it, from the phone's share sheet. Each share is numbered and stamped, and Pocket counts it as
-sent only when the share sheet says it went.
+Share your books with your accountant**, in Pocket, makes one file of the books: Pocket's records
+themselves (the invoices, costs, assets, pay runs, journals and the rest, as captured), with their
+dates, references and descriptions, which can name the business's customers, suppliers, workers,
+employees and shareholders and what they were paid; the accounts; and the business's details.
+Left out: who signs in, photos of slips, people's ID, tax and bank numbers, and contact details
+(`SHARE_TABLES` in packages/shared pocket-share.ts). It goes only where the owner sends it, from the
+phone's share sheet. Each share is numbered, stamped with the day it was made and with these
+books' own id, and says what changed since the last one shared. Pocket counts it as shared once
+the owner picks where it goes on the share sheet (on a computer, once it's saved), whether or not
+it reaches you: Shap works out what changed from what it holds, so a share that never arrived does
+no harm.
 
-In the practice, a client added as **On Shap Pocket** gets **Bring in a share**: the first share
-brings in the whole of the books; each one after it replaces the last entry by entry (what's the
-same is left as it is), and Shap shows what's new, what changed and what's gone since the share
-before, worked out from what Shap holds, whatever the phone says. An older share than the last one
-brought in is refused, and so is one that would change anything in a closed period or a year whose
-statements were approved (ask the client what changed there). The list shows the last share
-brought in.
+In the practice, a client added as **On Shap Pocket** gets **Bring in a share**, for the practice's
+owner or whoever is given the client's books to write up. The first share records the practice's
+acceptance of the terms for these books (and the first after the terms change). Each share
+replaces the copy's records with the phone's: Pocket's tables are Shap's (the same accounting
+code), so the copy works out its VAT201s, payroll, statements and checks from what Pocket does.
+Shap checks it reads the records into the same entries the phone did, every one by its hash, and
+brings nothing in if it doesn't (one Shap or the other may need updating). Then it shows what's
+new, what changed (an entry moved to another day counts once) and what's gone since the share
+before, worked out from what it holds.
 
-Their books here are a copy to read and compile: everyone opens them that way, the practice's
-owner too. Adjustments the practice finds go to the owner, to make in Pocket and share again.
+What Shap refuses: a share of other books (each is tied to the first share's books id); the same
+share again, or an older one (a lower number made later is taken as books restored on the phone,
+and marked so); and, once the practice has compiled or approved a year's statements here, a share
+that moves that year's figures, or changes the kind of business, the year end or VAT registration
+they were drawn up on (renamed customers or changed memos come in). The refusal lists the entries.
+One share comes in at a time.
+
+The copy is the practice's to compile in: whoever opens it compiles and approves the statements
+there (approving records it, and nothing else: the year ends and closed months are the owner's,
+from the phone), and the copy's own books aren't written in. Adjustments the practice finds go to
+the owner, to make in Pocket and share again. The figures are the client's, as the share has them:
+Shap doesn't check them against the client's records (`POCKET_SHARE_NOTE`).
 
 ## Who opens which
 

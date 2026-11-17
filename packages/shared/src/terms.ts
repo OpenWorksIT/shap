@@ -25,6 +25,12 @@ export const PRACTICE_NOTE =
 export const PRACTICE_CAUTION =
   'Shap Accountant keeps your clients’ books on this server. Their backups, who in your practice opens them, and their personal information (POPIA) are your practice’s responsibility, what Shap’s checks find and the returns it shows are aids for your practitioners to check, not advice, and books brought in from another package are for you to check against it.';
 /**
+ * With each Shap Pocket share brought in (Practice): what Shap does and doesn't do with one. The
+ * disclaimer's "Sharing your books with your accountant (Shap Pocket)" says the same.
+ */
+export const POCKET_SHARE_NOTE =
+  'Shap reads a share as it finds it. It doesn’t check it against the client’s records, and the figures stay theirs, to change in Shap Pocket. Shap is free software from OpenWorks IT, who are not accountants, tax practitioners or auditors, and this is not advice.';
+/**
  * On Accounts → From another package (books-import.ts): what bringing books in does and doesn't do.
  * The disclaimer's "Books from another accounting package" says the same (openworks.co.za/shap/disclaimer).
  */

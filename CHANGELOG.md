@@ -3,6 +3,23 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.29.0 (17 November 2026)
+
+- **Shap Pocket clients** (Shap Accountant; docs/ACCOUNTANT.md, "A Shap Pocket share"). A
+  one-person business on Shap Pocket shares its books from their phone; in the practice, a client
+  added as **On Shap Pocket** gets **Bring in a share**. Each share carries Pocket's records
+  themselves (people's ID, tax and bank numbers, contact details and photos of slips stay on the
+  phone), so the practice's copy works out the VAT201s, payroll, statements and checks from what
+  Pocket does, and Shap checks it reads them into the same entries the phone did. Each share says
+  what's new, changed and gone since the one before. A share of other books, an older one, or one
+  that would move a year the practice compiled or approved here is refused, with the entries it
+  would move. The practice compiles and approves the statements in the copy; the books themselves
+  change only in Shap Pocket. Shap reads a share as it finds it and doesn't check it against the
+  client's records: the figures stay theirs.
+- A cost put right as an asset by journal shows as an asset bought in the statement of cash flows,
+  not as negative depreciation; books that begin with the opening balances moved in say the years
+  shown start from nil before them.
+
 ## 1.28.0 (17 November 2026)
 
 - **Books from another package** (Shap Accountant; docs/ACCOUNTANT.md). For a client who keeps their

@@ -777,6 +777,66 @@ after a take-out), and `test/accountant/books-import.test.ts`.
   `test/review-1.28/words.test.ts` (6, each failing on 984460a). The take-out error now goes to
   the console too (the unexpected-error test).
 
+### The five reviews of 1.29 and Shap Pocket 1.11 (Shap Accountant, phase 3: the Pocket share; before release)
+
+Each reviewer read both apps (Pocket makes the share, Shap brings it in). Between them they found
+one cause behind most of their findings: the share carried only postings, so the copy's VAT201s
+(the VAT came in as journals, boxes empty), PAYE and EMP201s, a partnership's turnover tax,
+provisional tax paid, half of an asset's proceeds as turnover, the dividends tax return's day,
+the statements' lines, cash flows, notes and checks, all came out other than Pocket's own from the
+same books. Pocket's tables are Shap's (62 identical, the rest Shap's with a few columns more), so
+the share now carries Pocket's records themselves (`SHARE_TABLES`, packages/shared
+pocket-share.ts, the same file in both apps), and Shap puts them into the copy: its screens then
+work from what Pocket's do. Tests: `test/accountant/pocket-share.test.ts` (a second database plays
+the phone; a share made by Pocket's own engine, `test/fixtures/pocket-share-1.11.json`, comes in
+entry for entry) and `test/review-1.29/statements.test.ts`; Pocket's `share.test.ts` and
+`shared-statements-1.28.test.ts`.
+
+- Security and privacy: a compiled year could change under the practice (nobody can close or
+  approve in a copy): the practice's compiled or approved statements now hold their year's
+  figures, and the business details they were drawn on, refused and listed. Nothing tied a share to
+  its books: each carries the books' own id (Pocket makes it once), pinned by the first share.
+  Two at once both applied: one at a time (an advisory lock). Doctored numbers, amounts, dates and
+  columns, and duplicate entries, are refused when read; the share number is capped; the body
+  limit is the server's upload size; who may bring one in is asked first; the record keeps counts
+  and the file's SHA-256, not descriptions. What leaves the phone is said in full (workers,
+  employees and shareholders by name, with what they were paid), and people's ID, tax and bank
+  numbers, contact details, photos and who signs in never do. Pocket's hosts list has the cited
+  holiday notice.
+- IFRS for SMEs and company law: the statements from a share differed from Pocket's (statement
+  lines, depreciation, disposals as negative purchases, non-cash purchases, notes, the public
+  interest score's employees, Pocket's checks): from the same records now, figure for figure (the
+  test compares both years' statements). A share changed the business's details under an approved
+  year: refused while a year is compiled or approved here. A cost put right as an asset by journal
+  was negative depreciation (both apps): an asset bought. Pocket's placeholder "Owner" passed the
+  approvers check: never named. Books beginning with a move-in's opening balances weren't flagged
+  (both apps): "The opening position is in the books". The record: the file's hash, the audit log
+  of each share and who brought it in.
+- SARS and tax: the VAT201 (its boxes from the documents' own VAT codes), the EMP201s and EMP501
+  (PAYE registration in the settings), turnover tax (the partners, asset disposals), provisional
+  tax paid (SARS payments), the DTR01 by the day paid, the day-labour reminders: all from Pocket's
+  records now, so nothing says "from another package" in a copy. Pocket's holiday comment put
+  back in order.
+- Accounting and arithmetic: account kinds and lines changed in Pocket now follow (the accounts
+  come with each share, keeping the copy's ids: `sys_account()` is fixed in the database's plans,
+  so a system account never changes id); Pocket's "what changed" read its marks through a layer
+  that renamed their keys (credit notes and the like counted as changed every time): kept as
+  text; a renamed worker or a line order refused a whole share in a closed year: figures only
+  (`figuresHash`), lines sorted; an entry moved to another day counted twice: once (`shareDiff`);
+  a share Shap couldn't read: Pocket checks its file against the schema before offering it, and
+  cuts descriptions to fit; the first share no longer lists everything as new; the same share
+  again says it's already here.
+- Words on screen and liability: the panel's `SHARE_WHAT_GOES` says everything that goes and what
+  doesn't, and that nothing goes until the owner chooses; "Last shared", dated in South Africa
+  (`dayOf`); the share sheet's message says each share is the whole of the books
+  (`pocketShareMessage`); the balance refusal says where to look and that it's a fault; Shap's
+  drawer says the books are "as the share has them" with `POCKET_SHARE_NOTE` (Shap doesn't check
+  them against the client's records); the first share records the practice's acceptance of the
+  terms; the refusals say what's true (already here; another books'; this Shap may need updating;
+  for the owner or whoever writes them up); a new Pocket client's card says to bring in its first
+  share; the docs. The website's privacy page and disclaimer say what a share carries (within terms
+  3.1, 3.8 and 4.1: no re-acceptance).
+
 ### Code scanning (CodeQL), first run
 
 - The Accounts screen's download links carried the period's dates unencoded (flagged as text

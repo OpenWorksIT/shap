@@ -39,6 +39,7 @@ export function readPocketShare(name: string, bytes: Buffer): PocketShare & { fi
   const s = r.data;
   let rows = 0;
   for (const [table, list] of Object.entries(s.records)) {
+    if (!list) continue;
     rows += list.length;
     for (const row of list)
       for (const [col, v] of Object.entries(row)) {
@@ -142,13 +143,20 @@ export async function applyPocketShare(tx: Db, share: PocketShare & { fileHash: 
   const cols = await columnsOf(tx);
   await tx`update settings set default_receipt_source_id = null, default_wage_source_id = null, default_cost_source_id = null, default_brand_id = null where id`;
   for (const t of [...SHARE_TABLES].reverse()) {
-    if (t.table === 'settings' || t.table === 'statement_details' || !cols.has(t.table)) continue;
+    if (t.table === 'settings' || t.table === 'statement_details' || t.table === 'accounts' || !cols.has(t.table)) continue;
     await tx.unsafe(`delete from ${t.table}`);
   }
+  // The accounts keep the copy's own ids (matched by their system key, or their code): the ledger
+  // finds Shap's own accounts through sys_account(), whose answer the database keeps in its plans,
+  // so a system account here never changes its id. Everything that names an account is pointed at
+  // the copy's. Their names, kinds and statement lines come from the phone.
+  const idOf = await replaceAccounts(tx, share.records.accounts ?? [], cols.get('accounts')!);
+  const accountRefs = await referencesTo(tx, 'accounts');
   const later: { table: string; id: unknown; values: Record<string, unknown> }[] = [];
   for (const t of SHARE_TABLES) {
     const here = cols.get(t.table);
-    if (!here || t.table === 'settings') continue;
+    if (!here || t.table === 'settings' || t.table === 'accounts') continue;
+    const refs = accountRefs.get(t.table) ?? [];
     const rows = share.records[t.table] ?? [];
     if (t.table === 'statement_details') {
       // The practice's own details here stay theirs once there are some.
@@ -162,7 +170,9 @@ export async function applyPocketShare(tx: Db, share: PocketShare & { fileHash: 
         if (!type || (t.leaveOut ?? []).includes(k)) continue;
         if (SHARE_USER_COLUMNS.includes(k)) out[k] = null;
         else if ((t.later ?? []).includes(k)) out[k] = null;
-        else out[k] = v !== null && (type === 'json' || type === 'jsonb') ? JSON.stringify(v) : v;
+        else if (refs.includes(k) && typeof v === 'string') out[k] = idOf.get(v) ?? v;
+        // (JSON columns take the value as it is: the database driver writes it as JSON.)
+        else out[k] = v;
       }
       return out;
     };
@@ -188,7 +198,7 @@ export async function applyPocketShare(tx: Db, share: PocketShare & { fileHash: 
   const set = Object.fromEntries(
     Object.entries(settingsIn)
       .filter(([k]) => settingsCols.has(k) && !leaveOut.has(k))
-      .map(([k, v]) => [k, v !== null && (settingsCols.get(k) === 'json' || settingsCols.get(k) === 'jsonb') ? JSON.stringify(v) : v]),
+      .map(([k, v]) => [k, v]),
   );
   try {
     await tx`update settings set ${tx(set)} where id`;
@@ -243,6 +253,55 @@ export async function applyPocketShare(tx: Db, share: PocketShare & { fileHash: 
   await tx`insert into pocket_shares (number, made_at, through, previous_number, books_id, file_hash, restored, changes, filename, imported_by)
     values (${st.number}, ${st.madeAt}, ${st.through}::date, ${st.previous?.number ?? null}, ${st.books}, ${share.fileHash}, ${restored}, ${tx.json(counts as never)}, ${filename.slice(0, 200)}, ${userId})`;
   return { number: st.number, through: st.through, first, restored, changes: { ...counts, list } };
+}
+
+/** Which columns of which tables point at `table`'s id, in this database. */
+async function referencesTo(tx: Db, table: string): Promise<Map<string, string[]>> {
+  const rows = await tx<{ t: string; c: string }[]>`
+    select kcu.table_name as t, kcu.column_name as c
+    from information_schema.referential_constraints rc
+    join information_schema.key_column_usage kcu on kcu.constraint_name = rc.constraint_name
+    join information_schema.constraint_column_usage ccu on ccu.constraint_name = rc.unique_constraint_name
+    where ccu.table_name = ${table} and ccu.column_name = 'id'`;
+  const out = new Map<string, string[]>();
+  for (const r of rows) out.set(r.t, [...(out.get(r.t) ?? []), r.c]);
+  return out;
+}
+
+/**
+ * The phone's chart into the copy's, keeping the copy's ids: each of the phone's accounts matched to
+ * one here by its system key (Shap's own accounts), else by its code; the rest added as they are;
+ * the copy's accounts the phone no longer has taken out (nothing refers to them by now). Returns the
+ * phone's id → the copy's.
+ */
+async function replaceAccounts(tx: Db, theirs: Record<string, unknown>[], here: Map<string, string>): Promise<Map<string, string>> {
+  const ours = await tx<{ id: string; code: string; systemKey: string | null }[]>`select id, code, system_key from accounts`;
+  const bySystem = new Map(ours.filter((a) => a.systemKey).map((a) => [a.systemKey!, a.id]));
+  const byCode = new Map(ours.filter((a) => !a.systemKey).map((a) => [a.code, a.id]));
+  const idOf = new Map<string, string>();
+  const taken = new Set<string>();
+  for (const a of theirs) {
+    const key = a.system_key ? String(a.system_key) : null;
+    const mine = key ? bySystem.get(key) : byCode.get(String(a.code));
+    if (mine && !taken.has(mine)) {
+      idOf.set(String(a.id), mine);
+      taken.add(mine);
+    }
+  }
+  // Codes out of the way first, so two accounts can swap theirs.
+  await tx`update accounts set code = 'was-' || id::text`;
+  await tx`delete from accounts where not (id = any(${[...taken]}::uuid[]))`;
+  const fields = (a: Record<string, unknown>) => Object.fromEntries(Object.entries(a).filter(([k]) => here.has(k) && k !== 'id').map(([k, v]) => [k, v]));
+  for (const a of theirs) {
+    const mine = idOf.get(String(a.id));
+    try {
+      if (mine) await tx`update accounts set ${tx(fields(a))} where id = ${mine}`;
+      else await tx`insert into accounts ${tx({ id: a.id, ...fields(a) } as never)}`;
+    } catch (err) {
+      throw badRequest(`Shap couldn’t take in the share’s accounts (${String((err as Error).message).slice(0, 160)}). ${FAULT}`);
+    }
+  }
+  return idOf;
 }
 
 const camel = (k: string) => k.replace(/_([a-z])/g, (_m, c: string) => c.toUpperCase());

@@ -99,7 +99,7 @@ export const pocketShareSchema = z.object({
     version: z.string().max(20),
   }),
   /** Each table's rows, as Pocket's database has them (SHARE_TABLES). */
-  records: z.record(z.enum(SHARE_TABLE_NAMES as [string, ...string[]]), z.array(z.record(z.string().max(63), z.unknown())).max(MAX_SHARE_ROWS)),
+  records: z.partialRecord(z.enum(SHARE_TABLE_NAMES as [string, ...string[]]), z.array(z.record(z.string().max(63), z.unknown())).max(MAX_SHARE_ROWS)),
   /** Every entry in the books to `through`: its key and hashes (shareEntries, entryHash, figuresHash). */
   entries: z.array(z.object({ key: z.string().min(1).max(200), hash, figures: hash })).max(MAX_SHARE_ROWS),
   /** Since the last share sent, as the phone counts it (Shap counts its own). */

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { formatDate, LEVEL_WORDS, PRACTICE_NOTE, STATEMENT_STATUS_LABELS, todayIso, type Level, type StatementStatus } from '@shap/shared';
+import { dayOf, formatDate, LEVEL_WORDS, POCKET_SHARE_NOTE, PRACTICE_NOTE, PRACTICE_TERMS_TICK, STATEMENT_STATUS_LABELS, TERMS_URL, todayIso, type Level, type StatementStatus } from '@shap/shared';
 import { PageHead } from '../components/Shell';
 import { Drawer, Empty, ErrorBox, Field, Loading, Money, useToast } from '../components/ui';
 import { api, ApiError } from '../lib/api';
@@ -18,7 +18,7 @@ interface Health {
   audit: { fail: number; warn: number; items: { level: 'fail' | 'warn'; section: string; text: string }[] };
   statements: Statements | null;
   lockedThrough: string | null;
-  pocket?: { number: number; through: string; importedAt: string; added: number; changed: number; removed: number } | null;
+  pocket?: { number: number; through: string; importedAt: string; added: number; changed: number; removed: number; restored?: boolean } | null;
   deadlines: { key: string; label: string; due: string; past: boolean }[];
 }
 interface PracticeClient {
@@ -40,8 +40,10 @@ interface ShareChange {
 }
 interface ShareResult {
   number: number;
+  through: string;
   first: boolean;
-  changes: { added: ShareChange[]; changed: ShareChange[]; removed: ShareChange[] };
+  restored: boolean;
+  changes: { added: number; changed: number; removed: number; list: { added: ShareChange[]; changed: ShareChange[]; removed: ShareChange[] } };
 }
 interface Practice {
   clients: PracticeClient[];
@@ -107,7 +109,19 @@ export default function PracticePage() {
         r.onerror = () => reject(r.error);
         r.readAsDataURL(file);
       });
-      const result = await api<ShareResult>(`/api/practice/clients/${c.id}/pocket-share`, { body: { name: file.name, dataBase64 } });
+      const send = (acceptTerms: boolean) => api<ShareResult>(`/api/practice/clients/${c.id}/pocket-share`, { body: { name: file.name, dataBase64, acceptTerms } });
+      const terms = `${PRACTICE_TERMS_TICK}\n\nThe terms of use: ${TERMS_URL}`;
+      // The first share records the practice's acceptance of the terms for these books.
+      const first = !c.health?.pocket;
+      if (first && !confirm(terms)) return;
+      let result: ShareResult;
+      try {
+        result = await send(first);
+      } catch (err) {
+        if (!(err instanceof ApiError && (err.details as { needsTerms?: boolean } | undefined)?.needsTerms)) throw err;
+        if (!confirm(terms)) return;
+        result = await send(true);
+      }
       setShareResult({ client: c.name, result });
       await reload();
     });
@@ -162,8 +176,8 @@ export default function PracticePage() {
             const past = h?.deadlines.filter((d) => d.past) ?? [];
             const st = h?.statements ?? null;
             const given = isOwner ? 'books' : c.level;
-            // A Shap Pocket client's books are opened to read and compile only.
-            const level = c.kind === 'pocket' && given ? 'compile' : given;
+            // (A Shap Pocket client's copy takes only the practice's work on it: the server holds to it.)
+            const level = given;
             return (
               <article key={c.id} className="panel panel-pad stack">
                 <div className="row wrap" style={{ gap: 8, alignItems: 'center' }}>
@@ -200,6 +214,8 @@ export default function PracticePage() {
                   <p className="small warn-text">Shap couldn’t bring these books up to date when it last started, so they aren’t opened until it can. Whoever runs the server can see why in its log.</p>
                 ) : !h ? (
                   <p className="small muted">Shap’s checks haven’t run on these books yet: open them, or run the checks.</p>
+                ) : !h.setupDone && c.kind === 'pocket' ? (
+                  <p className="small muted">No share brought in yet: bring in their first share from Shap Pocket (they make it under Accounts → Export).</p>
                 ) : !h.setupDone ? (
                   <p className="small muted">
                     {level === 'books' ? 'Not set up yet: open their books to answer Shap’s first questions about the business.' : 'Not set up yet: whoever writes up their books answers Shap’s first questions when they first open them.'}
@@ -262,8 +278,8 @@ export default function PracticePage() {
                     )}
                     {h.pocket && (
                       <p className="small">
-                        <strong>Their last share:</strong> share {h.pocket.number}, their books to {formatDate(h.pocket.through)}, brought in {formatDate(h.pocket.importedAt.slice(0, 10))}
-                        {h.pocket.number > 1 ? `: ${h.pocket.added} new, ${h.pocket.changed} changed and ${h.pocket.removed} gone since the share before` : ''}.
+                        <strong>Their last share:</strong> share {h.pocket.number}, their books to {formatDate(h.pocket.through)}, brought in {formatDate(dayOf(h.pocket.importedAt))}
+                        {h.pocket.restored ? ' (from books restored on their phone)' : h.pocket.added + h.pocket.changed + h.pocket.removed > 0 ? `: ${h.pocket.added} new, ${h.pocket.changed} changed and ${h.pocket.removed} gone since the share before` : ''}.
                       </p>
                     )}
                     <p className="small">
@@ -425,11 +441,11 @@ function BackupsDrawer({ client, onClose }: { client: PracticeClient; onClose: (
 
 /** What a Pocket share brought in: the whole of their books the first time; then what's new, changed and gone. */
 function ShareDrawer({ client, result, onClose }: { client: string; result: ShareResult; onClose: () => void }) {
-  const list = (title: string, items: ShareChange[]) =>
-    items.length > 0 && (
+  const list = (title: string, items: ShareChange[], count: number) =>
+    count > 0 && (
       <section className="stack-sm">
         <strong className="small">
-          {title} ({items.length})
+          {title} ({count})
         </strong>
         <ul className="list small" data-private>
           {items.slice(0, 200).map((x) => (
@@ -440,25 +456,27 @@ function ShareDrawer({ client, result, onClose }: { client: string; result: Shar
               <Money cents={x.cents} />
             </li>
           ))}
-          {items.length > 200 && <li className="list-row muted">and {items.length - 200} more</li>}
+          {count > items.length && <li className="list-row muted">and {count - items.length} more</li>}
         </ul>
       </section>
     );
-  const { added, changed, removed } = result.changes;
+  const { added, changed, removed, list: shown } = result.changes;
   return (
     <Drawer title={<span data-private>{client}: share {result.number}</span>} sub={result.first ? 'The first share: the whole of their books, brought in' : 'Brought in: what changed since the share before'} onClose={onClose}>
       <div className="stack">
+        <p className="small">Their books are here as the share has them, to {formatDate(result.through)}.{result.restored ? ' The share is from books restored or begun again on their phone, so it numbers lower than the last one.' : ''}</p>
         {result.first ? (
-          <p className="small">Their books are here as they had them on their phone. Each share after this one says what’s new, what changed and what’s gone.</p>
-        ) : added.length + changed.length + removed.length === 0 ? (
+          <p className="small">Each share after this one says what’s new, what changed and what’s gone.</p>
+        ) : added + changed + removed === 0 ? (
           <p className="small">Nothing changed since the share before.</p>
         ) : (
           <>
-            {list('New', added)}
-            {list('Changed', changed)}
-            {list('Gone', removed)}
+            {list('New', shown.added, added)}
+            {list('Changed', shown.changed, changed)}
+            {list('Gone', shown.removed, removed)}
           </>
         )}
+        <p className="xs muted">{POCKET_SHARE_NOTE}</p>
       </div>
     </Drawer>
   );
