@@ -101,12 +101,14 @@ export interface FileForPdf {
 }
 
 /** What the file says of the year's statements, and the copy of them the practice keeps with it (ISRS 4410 (Revised) para 38(c)). */
-export function statementsLine(f: Pick<FileForPdf, 'statements'>): string {
+export function statementsLine(f: Pick<FileForPdf, 'statements' | 'client'>): string {
   if (!f.statements)
     return 'Their books and statements are on their own Shap: download the signed set and the compilation report there, and keep them with this file (ISRS 4410 (Revised) para 38(c)). They aren’t here once they unlink you.';
   const s = f.statements;
   const dates = [s.compiledOn ? `compiled on ${day(s.compiledOn)}` : 'not compiled yet', s.approvedOn ? `approved on ${day(s.approvedOn)}` : 'not approved yet'].join(', ');
-  return `The statements: ${dates}. Keep a copy of the final set and the compilation report with this file (ISRS 4410 (Revised) para 38(c)): the client’s books, where they are now, go back to the client.`;
+  // A Shap Pocket client's books stay on their phone or computer (what's here is a copy of their share); anyone else's here go back to them.
+  const why = f.client.kind === 'pocket' ? 'what’s here is a copy of their Shap Pocket share' : 'their books go back to them when the engagement ends';
+  return `The statements: ${dates}. Keep a copy of the final set and the compilation report with this file (ISRS 4410 (Revised) para 38(c)): ${why}.`;
 }
 
 export function renderFilePdf(o: { practice: string; file: FileForPdf }): Promise<Buffer> {
@@ -179,7 +181,7 @@ export function renderFilePdf(o: { practice: string; file: FileForPdf }): Promis
       pdf.font(bold).fontSize(8).fillColor(INK).text('Total', cols.name, y, { width: 166 });
       pdf.text(formatAmount(f.totals.debitCents), cols.dr, y, { width: 62, align: 'right' }).text(formatAmount(f.totals.creditCents), cols.cr, y, { width: 62, align: 'right' });
       pdf.moveDown(0.4);
-      if (f.totals.differenceCents !== 0) p(`It doesn’t balance: debits and credits differ by ${formatAmount(f.totals.differenceCents)}.`);
+      if (f.totals.differenceCents !== 0) p(`It doesn’t balance: debits and credits differ by ${formatAmount(Math.abs(f.totals.differenceCents))}.`);
     }
     if (f.gone.length) p(`Ticked before, with no balance at the year end now: ${f.gone.map((g) => `${g.code} ${g.name}`).join(', ')}.`, { muted: true });
   } else p('Their books are on their own Shap: their trial balance isn’t kept here.', { muted: true });

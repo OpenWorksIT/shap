@@ -459,6 +459,9 @@ export default function PracticePage() {
 }
 
 /** What the practice has recorded of its letters and the latest ended year's working papers: checks, not locks. */
+/** The sign-offs, latest first: the one whose books have moved since is said. */
+const SIGNOFF_ORDER = ['partner', 'reviewed', 'prepared'] as const;
+
 function PapersLine({ p }: { p: NonNullable<PracticeClient['papers']> }) {
   // A letter that isn't for compiling is no warning on the list: ISRS 4410 is a compilation's (the compile form says it, if they do compile).
   const letter =
@@ -473,12 +476,14 @@ function PapersLine({ p }: { p: NonNullable<PracticeClient['papers']> }) {
             : !p.compiling
               ? 'letter accepted (not for compiling)'
               : 'letter accepted';
-  const warn = p.letter !== 'accepted' || !p.termsLooked || p.openNotes > 0 || (p.signed.partner && !p.signed.reviewed);
+  const moved = SIGNOFF_ORDER.find((r) => p.signed[r] && p.changed?.[r]);
+  const warn = p.letter !== 'accepted' || !p.termsLooked || p.openNotes > 0 || (p.signed.partner && !p.signed.reviewed) || Boolean(moved);
   return (
     <p className={warn ? 'small warn-text' : 'small'}>
       <strong>{p.fyEnd ? `The year to ${formatDate(p.fyEnd)}:` : 'Working papers:'}</strong> {letter}
       {p.openNotes > 0 ? `; ${p.openNotes === 1 ? 'one review note' : `${p.openNotes} review notes`} open` : ''}
-      {`; ${p.signed.partner ? (p.signed.reviewed ? 'signed off by the engagement partner' : 'signed off by the engagement partner, not reviewed') : p.signed.reviewed ? 'reviewed, not yet signed off by the engagement partner' : p.signed.prepared ? 'prepared, not yet reviewed' : 'not signed off'}`}.
+      {`; ${p.signed.partner ? (p.signed.reviewed ? 'signed off by the engagement partner' : 'signed off by the engagement partner, not reviewed') : p.signed.reviewed ? 'reviewed, not yet signed off by the engagement partner' : p.signed.prepared ? 'prepared, not yet reviewed' : 'not signed off'}`}
+      {moved ? '; the books had changed since, at their last checks' : ''}.
     </p>
   );
 }

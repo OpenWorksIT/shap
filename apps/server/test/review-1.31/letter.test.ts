@@ -9,9 +9,9 @@ import { describe, expect, it } from 'vitest';
 import { accountantTermsPoints, ACCOUNTANT_TERMS_MEANS, LETTER_NOTE, SERVICE_WORDS, type BusinessType, type Service } from '@shap/shared';
 import { letterSections, servicesFor, type LetterInput } from '../../src/lib/engagement.js';
 
-const letter = (o: { bt: BusinessType; services: Service[]; kind?: LetterInput['kind']; approvedPbo?: boolean; turnoverTax?: boolean }) =>
+const letter = (o: { bt: BusinessType; services: Service[]; kind?: LetterInput['kind']; approvedPbo?: boolean; turnoverTax?: boolean; registered?: boolean }) =>
   letterSections({
-    practice: { body: 'SAIPA' },
+    practice: { body: 'SAIPA', registered: o.registered ?? false },
     client: { businessType: o.bt, approvedPbo: o.approvedPbo ?? false, turnoverTax: o.turnoverTax ?? false },
     kind: o.kind ?? 'kept',
     services: o.services,
@@ -60,7 +60,7 @@ describe('the engagement letter states the law rightly', () => {
       expect(t).not.toMatch(/such as SARS, CIPC and the bank/);
     }
     expect(part({ bt: 'sole_prop', services: ['compile'] }, 'Compiling the annual financial statements')).toMatch(/prepared for the owner and the South African Revenue Service \(for the owner’s income tax\)/);
-    expect(part({ bt: 'trust', services: ['compile'] }, 'Compiling the annual financial statements')).toMatch(/\(for the trust’s income tax\)/);
+    expect(part({ bt: 'trust', services: ['compile'] }, 'Compiling the annual financial statements')).toMatch(/prepared for the trustees, the beneficiaries and the South African Revenue Service \(for the trust’s income tax\)/);
     // A company's are general purpose, under the IFRS for SMEs Accounting Standard and its Act.
     const co = part({ bt: 'company', services: ['compile'] }, 'Compiling the annual financial statements')!;
     expect(co).not.toMatch(/special purpose/);
@@ -90,7 +90,7 @@ describe('the engagement letter states the law rightly', () => {
   it('the accounting officer’s duties, as sections 59 to 62 of the Close Corporations Act have them', () => {
     const ao = part({ bt: 'cc', services: ['accounting_officer'] }, 'Accounting officer')!;
     for (const said of [
-      /registers our appointment with CIPC \(section 59\)/,
+      /registers our appointment with CIPC, in an amended founding statement \(sections 15 and 59\)/,
       /all its members consent to it in writing \(section 60\(3\)\)/,
       /access to the accounting records, and the information and explanations we need \(section 61\)/,
       /Within three months of the annual financial statements being completed/,
@@ -127,6 +127,16 @@ describe('the letter’s tax follows how the client is taxed', () => {
     expect(sp).not.toMatch(/IRP6/);
     const pt = text({ bt: 'partnership', services: ['income_tax'], turnoverTax: true });
     expect(pt).toMatch(/each partner registered for turnover tax files their own/);
+    // The list says the same as the paragraph (the checks of the fixes).
+    expect(pt).not.toMatch(/• Prepare the turnover tax returns/);
+    expect(pt).toMatch(/• Give each partner the partnership’s figures for their own turnover tax returns \(TT02 and TT03\)\./);
+    // A company, CC or co-op on turnover tax still pays dividends tax beyond what turnover tax exempts.
+    for (const bt of ['company', 'cc', 'coop'] as const) expect(text({ bt, services: ['income_tax'], turnoverTax: true })).toMatch(/Dividends tax returns \(DTR01\), for dividends beyond what turnover tax exempts, aren’t included unless they’re listed above/);
+    // The statements serve turnover tax, not income tax.
+    const compiled = part({ bt: 'sole_prop', services: ['compile'], turnoverTax: true }, 'Compiling the annual financial statements')!;
+    expect(compiled).toMatch(/\(for the owner’s turnover tax\)/);
+    expect(compiled).not.toMatch(/income tax/);
+    expect(part({ bt: 'partnership', services: ['compile'], turnoverTax: true }, 'Compiling the annual financial statements')).toMatch(/\(for the partners’ turnover tax\)/);
   });
 
   it('a partnership isn’t a taxpayer: each partner’s returns are their own, prepared only as agreed with them', () => {
@@ -143,7 +153,9 @@ describe('the letter’s tax follows how the client is taxed', () => {
 
   it('dealing with SARS, for every tax service: section 240 as it is, eFiling authority, SARS letters, penalties', () => {
     for (const services of [['vat'], ['payroll'], ['income_tax']] as Service[][]) {
-      const sars = part({ bt: 'company', services }, 'Dealing with SARS')!;
+      // That its people are registered is the practice's to say: only when it ticks that it's so.
+      expect(part({ bt: 'company', services }, 'Dealing with SARS')).not.toMatch(/are registered tax practitioners/);
+      const sars = part({ bt: 'company', services, registered: true }, 'Dealing with SARS')!;
       expect(sars).toMatch(/complete, or help complete, your returns, or advise you on tax, are registered tax practitioners or work under the direct supervision of one \(Tax Administration Act, section 240\)/);
       expect(sars).toMatch(/on SARS eFiling, for the tax types you choose; you can withdraw that/);
       expect(sars).toMatch(/80 business days/);
@@ -184,9 +196,10 @@ describe('what the letter promises', () => {
     for (const kind of ['kept', 'imported', 'pocket', 'linked'] as const) {
       const pi = part({ bt: 'company', services: ['compile'], kind }, 'Personal information')!;
       expect(pi).not.toMatch(/delete it|only for this engagement|for you, and only/);
-      expect(pi).toMatch(/keeping only what the law and our professional body ask us to keep|we keep only what the law and our professional body ask us to keep/);
+      expect(pi).not.toMatch(/keep(ing)? only/);
+      expect(pi).toMatch(/keep what the law and our professional body ask us to keep\./);
     }
-    expect(part({ bt: 'company', services: ['compile'], kind: 'kept' }, 'Personal information')).toMatch(/we give you your books, keeping only/);
+    expect(part({ bt: 'company', services: ['compile'], kind: 'kept' }, 'Personal information')).toMatch(/we give you your books, and keep what the law/);
   });
 
   it('a Shap Pocket client writes up their own books: the practice doesn’t offer to', () => {

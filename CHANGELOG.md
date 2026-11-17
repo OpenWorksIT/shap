@@ -10,8 +10,9 @@ entries newer than the version you're running before you update.
   statements it's drafted to cover what ISRS 4410 (Revised) para 24 asks the agreed terms to say;
   whether it does for an engagement is the practitioner's to check. Its tax paragraphs follow how
   the client is taxed (an approved public benefit organisation's IT12EI, turnover tax's TT02 and
-  TT03, a partnership's partners), and a close corporation's accounting officer's duties are as the
-  Act has them. A starting point, not complete and not checked against the law or your professional
+  TT03, a partnership's partners), and a close corporation's accounting officer's duties are drafted
+  from sections 59 to 62 of its Act. It says your people who prepare returns are registered tax
+  practitioners only if you tick that they are. A starting point, not complete and not checked against the law or your professional
   body's rules: the letter, and the engagement, are your practice's own. Read the draft and change
   any of it (its words, and the parties it names); mark it as sent, which keeps its words and
   parties as they are; then download its PDF and send it yourself (Shap doesn't send it). Record

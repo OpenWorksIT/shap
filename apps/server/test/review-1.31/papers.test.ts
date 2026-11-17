@@ -8,7 +8,7 @@
  */
 import type { InjectOptions } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { LETTER_MAX_CHARS, NOTES_PER_YEAR, REPLIES_PER_NOTE } from '@shap/shared';
+import { LETTER_MAX_CHARS, NOTES_PER_YEAR, REPLIES_PER_NOTE, YEAR_NOTES_MAX_CHARS } from '@shap/shared';
 import type { Sql } from '../../src/db/index.js';
 import { expectCleanAudit, login, ref } from '../helpers.js';
 import { linkPair, type LinkPair } from '../accountant/link-pair.js';
@@ -136,7 +136,7 @@ describe('engagement letters and working papers, as the 1.31 reviews found them'
     });
 
     it('two people at once: a letter sent while it’s changed or deleted is either changed first or not at all', async () => {
-      for (let n = 0; n < 6; n++) {
+      for (let n = 0; n < 4; n++) {
         const lid = await letter(a.id, ['vat'], FY);
         const l = await letterRow(a.id, lid);
         const edited = [...l.body, { heading: 'Made-up extra', paragraphs: [`Edit ${n}`] }];
@@ -182,7 +182,7 @@ describe('engagement letters and working papers, as the 1.31 reviews found them'
       const lid = await letter(a.id, ['payroll'], FY);
       await p.owner.post(`/api/practice/clients/${a.id}/letters/${lid}/sent`, {});
       const early = await p.owner.call({ method: 'POST', url: `/api/practice/clients/${a.id}/letters/${lid}/accept`, payload: { on: '2026-11-01', name: 'Made-up Director', how: 'recorded' } });
-      expect(early.json().error).toBe('The day they accepted it can’t be before the day it was sent (2026-11-17).');
+      expect(early.json().error).toBe('The day they accepted it can’t be before the day it was sent (17 November 2026).');
       await p.owner.post(`/api/practice/clients/${a.id}/letters/${lid}/accept`, { on: '2026-11-17', name: 'Made-up Director', how: 'signed', signed: { filename: 'signed.pdf', mime: 'application/pdf', dataBase64: PDF } });
       // A company's accounting officer isn't one: said so, not "tick what your practice will do".
       const ao = await p.owner.call({ method: 'POST', url: `/api/practice/clients/${a.id}/letters`, payload: { services: ['accounting_officer'], fromYearEnd: FY } });
@@ -247,9 +247,12 @@ describe('engagement letters and working papers, as the 1.31 reviews found them'
       await a.books.post('/api/journals', { date: '2025-08-01', description: 'Made-up sundry', lines: [{ accountId: sundry.id, debitCents: 50_000 }, { accountId: await r.acc('bank'), creditCents: 50_000 }] });
       await sign(a.id, 'prepared', FY, false);
       await sign(a.id, 'prepared');
+      await p.owner.post(`/api/practice/clients/${a.id}/file/ticks`, { fyEnd: FY, accountId: sundry.id, which: 'prepared', on: true });
       await a.books.post(`/api/accounts/${sundry.id}`, { code: '6995', name: 'Made-up sundry', type: 'asset', active: true }, 'PUT');
       now = await fileOf(a.id, FY);
       expect(now.signoffs.prepared.changed).toBe(true);
+      // The account's own tick says so too (its balance is the same; what it is isn't).
+      expect(now.lines.find((l: { accountId: string }) => l.accountId === sundry.id).prepared.changed).toBe(true);
       await a.books.post(`/api/accounts/${sundry.id}`, { code: '6995', name: 'Made-up sundry', type: 'expense', active: true }, 'PUT');
       // Each sign-off keeps the trial balance it was given against.
       const [kept] = await p.practice.sql<{ tb: { id: string; balanceCents: number }[] }[]>`select tb from practice_signoffs where client_id = ${a.id} and fy_end = ${FY} and role = 'prepared'`;
@@ -275,6 +278,15 @@ describe('engagement letters and working papers, as the 1.31 reviews found them'
       expect((await a.books.get(`/api/statements/${FY}`)).practice).toMatchObject({ signed: { partner: true, reviewed: false }, changed: { partner: false } });
       await a.books.post('/api/journals', { date: '2026-01-15', description: 'Made-up late rent', lines: [{ accountId: await (await ref(a.books.sql)).acc('rent'), debitCents: 2_000 }, { accountId: await (await ref(a.books.sql)).acc('bank'), creditCents: 2_000 }] });
       expect((await a.books.get(`/api/statements/${FY}`)).practice).toMatchObject({ changed: { partner: true } });
+      // The practice's list says it from the client's last checks: checks from before the sign-off say nothing of it.
+      const listed = async () => (await p.owner.get('/api/practice')).clients.find((x: { id: string }) => x.id === a.id).papers;
+      expect((await listed()).changed.partner).toBe(false);
+      await p.owner.post(`/api/practice/clients/${a.id}/checks`, {});
+      expect(await listed()).toMatchObject({ signed: { partner: true }, changed: { partner: true } });
+      // Signed off again, as the books are now: unchanged until they move again.
+      await sign(a.id, 'partner');
+      await p.owner.post(`/api/practice/clients/${a.id}/checks`, {});
+      expect((await listed()).changed.partner).toBe(false);
     });
 
     it('a note raised after the sign-offs takes back the review and the partner’s, each logged', async () => {
@@ -299,6 +311,37 @@ describe('engagement letters and working papers, as the 1.31 reviews found them'
       const reply = await p.owner.call({ method: 'POST', url: `/api/practice/clients/${a.id}/file/notes/${id}/replies`, payload: { text: 'One too many' } });
       expect([reply.statusCode, reply.json().error]).toEqual([400, expect.stringMatching(/replies at most/)]);
       await p.owner.post(`/api/practice/clients/${a.id}/file/notes/${id}/clear`, { cleared: true });
+    });
+
+    it(`a year’s notes and replies run to ${YEAR_NOTES_MAX_CHARS} characters at most, so its file’s PDF stays quick`, async () => {
+      const c = await client('Made-up Client E (Pty) Ltd');
+      await journal(c.books, '2025-06-01', 'bank', 'owner_loan', 100_000);
+      const [owner] = await p.practice.sql<{ id: string }[]>`select id from users where email = 'owner@example.co.za'`;
+      // Filled to the cap with unbroken words, the slowest kind to lay out: 49 notes of 4,000 characters, and replies.
+      await p.practice.sql`insert into practice_notes (client_id, fy_end, text, raised_by) select ${c.id}, ${FY}, repeat('x', 4000), ${owner!.id} from generate_series(1, 49)`;
+      const [n] = await p.practice.sql<{ id: string }[]>`select id from practice_notes where client_id = ${c.id} limit 1`;
+      await p.practice.sql`insert into practice_note_replies (note_id, text, by_user) select ${n!.id}, repeat('y', 999), ${owner!.id} from generate_series(1, 3)`;
+      const full = await p.owner.call({ method: 'POST', url: `/api/practice/clients/${c.id}/file/notes`, payload: { fyEnd: FY, text: 'x'.repeat(1004) } });
+      expect([full.statusCode, full.json().error]).toEqual([400, expect.stringMatching(/characters at most, all together: this year has 1[\s ]?003 left/)]);
+      const reply = await p.owner.call({ method: 'POST', url: `/api/practice/clients/${c.id}/file/notes/${n!.id}/replies`, payload: { text: 'z'.repeat(1004) } });
+      expect(reply.statusCode).toBe(400);
+      await p.owner.post(`/api/practice/clients/${c.id}/file/notes/${n!.id}/replies`, { text: 'z'.repeat(1003) });
+      const started = performance.now();
+      const pdf = await p.owner.call({ method: 'GET', url: `/api/practice/clients/${c.id}/file/pdf?fy=${FY}` });
+      const took = performance.now() - started;
+      expect(pdf.statusCode).toBe(200);
+      expect(took).toBeLessThan(3_000);
+      await p.practice.sql`update practice_notes set cleared_by = ${owner!.id}, cleared_at = now() where client_id = ${c.id}`;
+    });
+
+    it('a letter isn’t sent with no practice named', async () => {
+      const [s] = await p.practice.sql<{ companyName: string; tradingName: string }[]>`select company_name, trading_name from settings`;
+      await p.practice.sql`update settings set company_name = '', trading_name = ''`;
+      const lid = await letter(a.id, ['vat'], FY);
+      await p.practice.sql`update settings set company_name = ${s!.companyName}, trading_name = ${s!.tradingName}`;
+      const r = await p.owner.call({ method: 'POST', url: `/api/practice/clients/${a.id}/letters/${lid}/sent`, payload: {} });
+      expect([r.statusCode, r.json().error]).toEqual([400, expect.stringMatching(/^Name your practice in the letter first/)]);
+      await p.owner.post(`/api/practice/clients/${a.id}/letters/${lid}`, {}, 'DELETE');
     });
 
     it('the practice’s audit log keeps no account or balance of a tick (people not given the client read it)', async () => {

@@ -310,8 +310,10 @@ Act s58(3); and their acknowledgement of the final version, para 37); and the re
 expected form (the practitioner's compilation report). Its tax paragraphs follow how the client is
 taxed (an approved public benefit organisation's IT12EI and no provisional tax; turnover tax's TT02
 and TT03; each partner's own returns; a trust's IT3(t)), with a part on dealing with SARS whenever a
-tax service is ticked (registered tax practitioners, TAA s240; eFiling authority; SARS's letters;
-penalties). A close corporation's accounting officer's duties are as sections 59 to 62 have them.
+tax service is ticked (eFiling authority; SARS's letters; penalties; and, only when the practice
+ticks that it's so, that those who prepare returns are registered tax practitioners or supervised
+by one, TAA s240: Shap doesn't say it for the practice). A close corporation's accounting officer's
+duties are drafted from sections 59 to 62.
 It also says where the client's books are (kept here, Shap Pocket shares, or their own Shap), the
 records the law asks each side to keep (TAA s29 and s32; a company's Companies Act s24), and the
 personal information the practice processes, kept confidential and secure as POPIA asks (it
@@ -342,7 +344,8 @@ stay open when the client's year-end month changes, each worked out over its own
 
 - **Review notes**: on the year, or on one of its accounts; answered by anyone given the client;
   cleared (or opened again) by whoever raised them, or an owner. A year takes 200 notes at most, a
-  note 30 replies.
+  note 30 replies, and its notes and replies together 200,000 characters (its file is a PDF made on
+  the server).
 - **The trial balance at the year end** (books on the practice's server: kept, brought in, Shap
   Pocket), with its debit and credit totals, each account ticked as **prepared** (whoever writes up
   the books) and **reviewed** (anyone given the client), with who and when. A tick is the account's

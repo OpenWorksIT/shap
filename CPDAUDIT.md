@@ -1168,6 +1168,33 @@ whose fix is on the screen (the list's "not for compiling", which `words` checks
 test with its new checks, against a production-mode server with the demo company: 0 to fix, 52 OK,
 nothing in the server's log at error level.
 
+The fixes, checked by the same five agents (`7d0769b..9a2bb60`, Pocket's `a9e66f6..bf45da7`, the
+website's `a6365cf..c1eaf45`): every finding fixed. SARS, IFRS and accounting said ready; security
+and words not yet, for what the fixes brought:
+- Security: the year's file could still hold 25 million characters (200 notes of 4,000, each with 30
+  replies), its PDF freezing the server for 20 to 50 seconds: a year's notes and replies run to
+  200,000 characters all together (`YEAR_NOTES_MAX_CHARS`), and at that, in unbroken words, the PDF
+  takes well under the test's three seconds.
+- Words: the "Dealing with SARS" part said for every practice that its people are registered tax
+  practitioners: it says so only when the practice ticks that it's so (terms 9.4 leaves it to the
+  practice). The confirms said the sign-offs a note takes back come back by themselves: whoever gives
+  them signs again. "Duties as the Act has them": drafted from sections 59 to 62. "Keeping only what
+  the law asks" still sounded like deleting the rest: "and keep what the law … asks us to keep".
+  Smaller: the notes cap counts cleared ones, the day it was sent reads as a date, a Shap Pocket
+  client's books never went anywhere, a letter isn't sent with no practice named, and on the website
+  11.1's two brackets are one and the disclaimer's "its working papers" is the practice's.
+- Low, done too: a partnership on turnover tax listed returns of its own (each partner's); a turnover
+  tax client's statements were "for income tax"; a company on turnover tax lost the DTR01 sentence
+  (s64F's exemption has a limit); a trust's statements are for its trustees, its beneficiaries and
+  SARS (note 1, the letter, the report; Shap and Pocket); the accounting officer's appointment is
+  registered in an amended founding statement (s15, s59); a tick says when its account changed kind,
+  not only balance; the PDF's difference is shown as an amount; and the practice's list says when
+  the books had moved since a sign-off, from the trial balance's fingerprint the client's checks
+  keep (`tb`, by the database's clock as the sign-offs are, and never sent over a link). The
+  report's "As noted in note 1, … described in note 1" stays: it's Illustration 2's own words.
+Tests: in `test/review-1.31/` (`letter`, `papers`, `words`, `report`) and Pocket's
+`shap-1.31-report.test.ts`, each failing on `9a2bb60` (Pocket's on `bf45da7`).
+
 ### Code scanning (CodeQL), first run
 
 - The Accounts screen's download links carried the period's dates unencoded (flagged as text

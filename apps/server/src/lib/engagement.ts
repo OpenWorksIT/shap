@@ -39,7 +39,8 @@ export interface LetterSection {
 }
 
 export interface LetterInput {
-  practice: { body: string };
+  /** Its professional body; and whether those of it who prepare returns are registered tax practitioners (or supervised by one), as it says when it drafts the letter: Shap doesn't say it for the practice. */
+  practice: { body: string; registered?: boolean };
   client: { businessType: BusinessType; approvedPbo: boolean; turnoverTax: boolean };
   /** Where the client's books are: in the practice, from Shap Pocket shares, or on its own Shap. */
   kind: 'kept' | 'imported' | 'pocket' | 'linked';
@@ -83,13 +84,13 @@ function taxSituation(c: LetterInput['client']): TaxSituation {
 }
 
 /** The service as the letter's list names it: its returns follow how the client is taxed. */
-function serviceLine(s: Service, tax: TaxSituation): string {
+function serviceLine(s: Service, tax: TaxSituation, bt: BusinessType): string {
   if (s !== 'income_tax') return SERVICE_WORDS[s];
   switch (tax) {
     case 'pbo':
       return 'Prepare the income tax return of an approved public benefit organisation (IT12EI)';
     case 'turnover':
-      return 'Prepare the turnover tax returns (TT02 and TT03)';
+      return bt === 'partnership' ? 'Give each partner the partnership’s figures for their own turnover tax returns (TT02 and TT03)' : 'Prepare the turnover tax returns (TT02 and TT03)';
     case 'partners':
       return 'Give each partner the partnership’s figures for their own income tax and provisional tax returns';
     default:
@@ -112,7 +113,7 @@ function incomeTaxParagraphs(bt: BusinessType, tax: TaxSituation): string[] {
           'Each partner’s returns are their own: they give us everything they need, check them before they’re filed, and pay what’s due by its date.',
         ];
       return [
-        `We’ll prepare ${bt === 'sole_prop' ? 'your' : 'the business’s'} turnover tax returns from the books and what you tell us: the TT02 interim payments and the TT03 annual return. Turnover tax takes the place of ${bt === 'sole_prop' ? 'income tax and provisional tax on the business’s income' : 'the business’s income tax and provisional tax'}.${bt === 'sole_prop' ? ' Your own income tax return (the ITR12), for any income outside the business such as a salary or interest, is prepared only if it’s listed above.' : ''}`,
+        `We’ll prepare ${bt === 'sole_prop' ? 'your' : 'the business’s'} turnover tax returns from the books and what you tell us: the TT02 interim payments and the TT03 annual return. Turnover tax takes the place of ${bt === 'sole_prop' ? 'income tax and provisional tax on the business’s income' : 'the business’s income tax and provisional tax'}.${bt === 'sole_prop' ? ' Your own income tax return (the ITR12), for any income outside the business such as a salary or interest, is prepared only if it’s listed above.' : ''}${entity(bt).taxedAs === 'company' ? ' Dividends tax returns (DTR01), for dividends beyond what turnover tax exempts, aren’t included unless they’re listed above.' : ''}`,
         yours,
       ];
     case 'partners':
@@ -169,7 +170,7 @@ export function letterSections(i: LetterInput): LetterSection[] {
     heading: 'What we’ll do',
     paragraphs: [
       `This letter sets out what we, the practice named above, will do for you, the business named above, and on what terms, for the year ending ${year} and every year after it until it’s replaced or ended:`,
-      ...services.map((s) => `• ${serviceLine(s, tax)}.`),
+      ...services.map((s) => `• ${serviceLine(s, tax, bt)}.`),
       ...(i.other.trim() ? [`• ${i.other.trim()}`] : []),
       'Anything else you ask of us is agreed separately, in writing.',
     ],
@@ -202,7 +203,7 @@ export function letterSections(i: LetterInput): LetterSection[] {
     out.push({
       heading: 'Dealing with SARS',
       paragraphs: [
-        'Those of us who complete, or help complete, your returns, or advise you on tax, are registered tax practitioners or work under the direct supervision of one (Tax Administration Act, section 240).',
+        ...(i.practice.registered ? ['Those of us who complete, or help complete, your returns, or advise you on tax, are registered tax practitioners or work under the direct supervision of one (Tax Administration Act, section 240).'] : []),
         'Where we file your returns or deal with SARS for you, you authorise us to, on SARS eFiling, for the tax types you choose; you can withdraw that whenever you like. The returns remain your own.',
         'Send us every letter you get from SARS (a request for documents, a verification or audit, an assessment, a penalty) as soon as it comes: some have short deadlines, such as an objection to an assessment, due within 80 business days of it. Penalties and interest SARS charges are yours to pay, as the taxpayer’s, unless we agree otherwise in writing.',
       ],
@@ -214,7 +215,7 @@ export function letterSections(i: LetterInput): LetterSection[] {
       heading: 'Compiling the annual financial statements',
       paragraphs: [
         purpose
-          ? `Their use. The financial statements are special purpose financial statements, prepared for ${purpose} (for ${bt === 'trust' ? 'the trust’s' : `the ${g.poss}`} income tax). If you mean to give them to anyone else, such as a bank, tell us first: our report will say they may not be suitable for other purposes.`
+          ? `Their use. The financial statements are special purpose financial statements, prepared for ${purpose} (for ${bt === 'trust' ? 'the trust’s' : `the ${g.poss}`} ${tax === 'turnover' ? 'turnover tax' : 'income tax'}). If you mean to give them to anyone else, such as a bank, tell us first: our report will say they may not be suitable for other purposes.`
           : `Their use. The annual financial statements are for the ${g.many} to approve, for the business’s own use, and for those the ${g.many} give them to (such as SARS, CIPC and the bank).`,
         purpose
           ? `The framework. They’re prepared on a special purpose basis: the recognition and measurement principles of the IFRS for SMEs Accounting Standard, as note 1 to them describes.`
@@ -230,7 +231,7 @@ export function letterSections(i: LetterInput): LetterSection[] {
     out.push({
       heading: 'Accounting officer',
       paragraphs: [
-        'We’ll act as the close corporation’s accounting officer (Close Corporations Act, sections 59 to 62). The corporation registers our appointment with CIPC (section 59). If any of us acting is a member or employee of the corporation, all its members consent to it in writing (section 60(3)). You give us access to the accounting records, and the information and explanations we need (section 61).',
+        'We’ll act as the close corporation’s accounting officer (Close Corporations Act, sections 59 to 62). The corporation registers our appointment with CIPC, in an amended founding statement (sections 15 and 59). If any of us acting is a member or employee of the corporation, all its members consent to it in writing (section 60(3)). You give us access to the accounting records, and the information and explanations we need (section 61).',
         'Within three months of the annual financial statements being completed, we’ll work out whether they agree with the accounting records, and whether the accounting policies presented to us as applied are appropriate, and report on both to the corporation (section 62(1)). Our report describes any contravention of the Act we become aware of, and says so if any of us is a member or employee of the corporation (section 62(2)).',
         'If we come to know that the corporation isn’t carrying on business and doesn’t mean to soon, or find that a change to its founding statement wasn’t registered, or that its liabilities exceed its assets at the year end (or the statements wrongly show otherwise), we must report it to CIPC straight away by registered post (section 62(3)). An accounting officer’s report isn’t an audit or a review.',
       ],
@@ -255,7 +256,7 @@ export function letterSections(i: LetterInput): LetterSection[] {
   out.push({
     heading: 'Personal information',
     paragraphs: [
-      `Doing this work, we process personal information in your records (about your employees, customers, suppliers and others). We keep it confidential (unless the law asks us to give it to someone, such as SARS under the Tax Administration Act, section 46, or to report it, as the Financial Intelligence Centre Act asks) and secure as the Protection of Personal Information Act asks, and tell you of any compromise. When the engagement ends, ${i.kind === 'kept' || i.kind === 'imported' ? 'we give you your books, keeping' : 'we keep'} only what the law and our professional body ask us to keep.`,
+      `Doing this work, we process personal information in your records (about your employees, customers, suppliers and others). We keep it confidential (unless the law asks us to give it to someone, such as SARS under the Tax Administration Act, section 46, or to report it, as the Financial Intelligence Centre Act asks) and secure as the Protection of Personal Information Act asks, and tell you of any compromise. When the engagement ends, ${i.kind === 'kept' || i.kind === 'imported' ? 'we give you your books, and keep' : 'we keep'} what the law and our professional body ask us to keep.`,
     ],
   });
   out.push({ heading: 'Fees', paragraphs: [i.fees.trim() || 'As agreed with you separately, in writing.'] });

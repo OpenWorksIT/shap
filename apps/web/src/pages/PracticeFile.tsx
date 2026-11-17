@@ -321,7 +321,7 @@ function YearFile({
         {open > 0 && <li className="warn-text">{open === 1 ? 'One review note is' : `${open} review notes are`} still open.</li>}
         <li>
           {f.statements
-            ? `The statements: ${f.statements.compiledOn ? `compiled on ${day(f.statements.compiledOn)}` : 'not compiled yet'}, ${f.statements.approvedOn ? `approved on ${day(f.statements.approvedOn)}` : 'not approved yet'}. Keep a copy of the final set and the compilation report with this year’s file (ISRS 4410 (Revised) para 38(c)): their books go back to them when the engagement ends.`
+            ? `The statements: ${f.statements.compiledOn ? `compiled on ${day(f.statements.compiledOn)}` : 'not compiled yet'}, ${f.statements.approvedOn ? `approved on ${day(f.statements.approvedOn)}` : 'not approved yet'}. Keep a copy of the final set and the compilation report with this year’s file (ISRS 4410 (Revised) para 38(c)): ${f.client.kind === 'pocket' ? 'what’s here is a copy of their Shap Pocket share' : 'their books go back to them when the engagement ends'}.`
             : 'Their books and statements are on their own Shap: download the signed set and the compilation report there, and keep them with this year’s file (ISRS 4410 (Revised) para 38(c)). They aren’t here once they unlink you.'}
         </li>
       </ul>
@@ -399,7 +399,7 @@ function YearFile({
                   className="btn small quiet"
                   disabled={busy !== null}
                   onClick={() => {
-                    if (n.cleared && given && !confirm('Open this note again? The year’s Reviewed and Engagement partner sign-offs are taken back: they’re given again once it’s cleared.')) return;
+                    if (n.cleared && given && !confirm('Open this note again? The year’s Reviewed and Engagement partner sign-offs are taken back: whoever gives them signs again once it’s cleared.')) return;
                     void act(`clear-${n.id}`, () => api<{ removed?: Signoff[] }>(`${base}/file/notes/${n.id}/clear`, { body: { cleared: !n.cleared } }), (r) => (n.cleared ? `Opened again${removedWords(r.removed)}` : 'Cleared'));
                   }}
                 >
@@ -415,7 +415,7 @@ function YearFile({
             style={{ borderTop: '1px solid var(--line)', paddingTop: 8 }}
             onSubmit={(e: FormEvent) => {
               e.preventDefault();
-              if (given && !confirm('Raise this note? The year’s Reviewed and Engagement partner sign-offs are taken back: they’re given again once it’s cleared.')) return;
+              if (given && !confirm('Raise this note? The year’s Reviewed and Engagement partner sign-offs are taken back: whoever gives them signs again once it’s cleared.')) return;
               const line = f.lines?.find((l) => l.accountId === note.account);
               void act(
                 'note',
@@ -537,13 +537,14 @@ function NewLetter({ base, years, coming, pocket, onClose, onDone }: { base: str
   const [other, setOther] = useState('');
   const [fees, setFees] = useState('');
   const [body, setBody] = useState('');
+  const [registered, setRegistered] = useState(false);
   const [busy, setBusy] = useState(false);
   const offered = SERVICES.filter((s) => s !== 'books' || !pocket);
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
     try {
-      await api(`${base}/letters`, { body: { services, other, fromYearEnd: from, fees, body } });
+      await api(`${base}/letters`, { body: { services, other, fromYearEnd: from, fees, body, registered } });
       toast('Drafted: read it, and change the words as you like');
       onDone();
       onClose();
@@ -583,6 +584,12 @@ function NewLetter({ base, years, coming, pocket, onClose, onDone }: { base: str
         </Field>
         <Field label="Fees (as the letter says them)">{(p) => <textarea {...p} className="input" rows={2} maxLength={2000} value={fees} onChange={(e) => setFees(e.target.value)} />}</Field>
         <Field label="Your professional body (for its code of conduct)">{(p) => <input {...p} className="input" maxLength={200} placeholder="e.g. SAICA, SAIPA" value={body} onChange={(e) => setBody(e.target.value)} />}</Field>
+        {services.some((s) => s === 'payroll' || s === 'vat' || s === 'income_tax') && (
+          <label className="check">
+            <input type="checkbox" checked={registered} onChange={(e) => setRegistered(e.target.checked)} />
+            <span className="small">Those of us who prepare returns or advise on tax are registered tax practitioners, or work under one’s direct supervision (Tax Administration Act, section 240): the letter says so only if you tick this.</span>
+          </label>
+        )}
         <p className="xs muted">{LETTER_NOTE}</p>
         <div>
           <button className="btn primary" disabled={busy || (!services.length && !other.trim()) || !from}>

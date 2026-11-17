@@ -53,6 +53,20 @@ describe('the words on letters and working papers', () => {
     expect(page).toMatch(/Open this note again\? The year’s Reviewed and Engagement partner sign-offs are taken back/);
     expect(page).toMatch(/Raise this note\? The year’s Reviewed and Engagement partner sign-offs are taken back/);
     expect(page).toMatch(/a note raised or opened again takes them back/);
+    // Nothing gives them back by itself (the checks of the fixes).
+    expect(page).not.toMatch(/they’re given again once it’s cleared/);
+    expect(page.match(/whoever gives them signs again once it’s cleared/g)).toHaveLength(2);
+  });
+
+  it('the letter says the practice’s people are registered tax practitioners only when the practice ticks it', () => {
+    const draft = page.slice(page.indexOf('function NewLetter'), page.indexOf('function EditLetter'));
+    expect(draft).toMatch(/Those of us who prepare returns or advise on tax are registered tax practitioners, or work under one’s direct supervision \(Tax Administration Act, section 240\): the letter says so only if you tick this\./);
+    expect(draft).toMatch(/body: \{ services, other, fromYearEnd: from, fees, body, registered \}/);
+    expect(draft).toMatch(/useState\(false\)/);
+  });
+
+  it('where the books go, by kind of client: a Shap Pocket client’s never left them', () => {
+    expect(page).toMatch(/f\.client\.kind === 'pocket' \? 'what’s here is a copy of their Shap Pocket share' : 'their books go back to them when the engagement ends'/);
   });
 
   it('the list doesn’t warn for a letter that isn’t for compiling, and says a partner’s sign-off wasn’t reviewed', () => {
@@ -83,6 +97,11 @@ describe('the words on letters and working papers', () => {
     expect(docs).toMatch(/an aid towards the practice's record of the engagement \(para 38\), not the whole of it/);
     expect(docs).toMatch(/at least 51 per cent of the members' interest/);
     expect(docs).not.toMatch(/at least half of the members/);
+    // Drafted from the Act, not "as the Act has them" (the checks of the fixes).
+    for (const t of [v131, docs]) {
+      expect(t).not.toMatch(/duties are as (the\s+Act|sections 59 to 62) ha(s|ve) them/);
+      expect(t).toMatch(/drafted\s+from sections 59 to 62/);
+    }
   });
 
   it('the screens call it the compilation report, in Shap and in Shap Pocket', () => {

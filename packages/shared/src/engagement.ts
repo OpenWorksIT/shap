@@ -44,6 +44,8 @@ export const LETTER_MAX_CHARS = 60_000;
 /** The most review notes on one year, and replies to one note. */
 export const NOTES_PER_YEAR = 200;
 export const REPLIES_PER_NOTE = 30;
+/** The most a year's review notes and their replies may run to, all together (the year's file is a PDF made on the server). */
+export const YEAR_NOTES_MAX_CHARS = 200_000;
 
 /** The year's sign-offs in the working papers, in the order they're given. */
 export const SIGNOFFS = ['prepared', 'reviewed', 'partner'] as const;

@@ -22,7 +22,7 @@
  * missing is a check, not a lock (the owner's choice).
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { addDays, attachmentInput, dayOf, financialYear, LETTER_MAX_CHARS, LETTER_NOTE, NOTES_PER_YEAR, REPLIES_PER_NOTE, SERVICES, SIGNOFFS, type BusinessType, type Level, type Service, type Signoff } from '@shap/shared';
+import { addDays, attachmentInput, dayOf, financialYear, formatDate, LETTER_MAX_CHARS, LETTER_NOTE, NOTES_PER_YEAR, REPLIES_PER_NOTE, SERVICES, YEAR_NOTES_MAX_CHARS, SIGNOFFS, type BusinessType, type Level, type Service, type Signoff } from '@shap/shared';
 import { z } from 'zod';
 import { requireAccess, userOrThrow, type AuthUser } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -50,6 +50,8 @@ const yearEnd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const ARCHIVED = 'That client is archived: its letters and working papers are kept as they are.';
 const OPEN_NOTES = 'There are review notes still open on this year: they’re cleared (by whoever raised them, or an owner) before it’s signed off as reviewed or by the engagement partner.';
 const NO_YEAR = 'Choose a year of theirs that has ended.';
+/** A practice with no name in Settings: its letter isn't sent until it has one. */
+const NO_NAME = 'Our practice';
 
 /** What the client is, as the letter and the file need it: from its own books, or from what its linked Shap last sent. */
 interface ClientFacts {
@@ -167,6 +169,8 @@ export function registerWorkingPaperRoutes(app: FastifyInstance, ctx: Ctx): void
     fromYearEnd: yearEnd,
     fees: z.string().trim().max(2000).default(''),
     body: z.string().trim().max(200).default(''),
+    /** Those of the practice who prepare returns are registered tax practitioners (or supervised by one): the practice says so, Shap doesn't. */
+    registered: z.boolean().default(false),
   });
   const sections = z
     .array(z.object({ heading: z.string().trim().max(200), paragraphs: z.array(z.string().trim().max(4000)).max(40) }))
@@ -196,7 +200,7 @@ export function registerWorkingPaperRoutes(app: FastifyInstance, ctx: Ctx): void
   /** The practice as a letter names it: its legal name, registration number, trading name and address (Settings). */
   const practiceParty = async () => {
     const s = await getSettings(real);
-    const name = (s.companyName || s.tradingName || 'Our practice').slice(0, 200);
+    const name = (s.companyName || s.tradingName || NO_NAME).slice(0, 200);
     return { practiceName: name, practiceReg: (s.regNumber ?? '').slice(0, 60), practiceTrading: s.tradingName && s.tradingName !== name ? s.tradingName.slice(0, 200) : '', practiceAddress: (s.address ?? '').slice(0, 500) };
   };
 
@@ -236,7 +240,7 @@ export function registerWorkingPaperRoutes(app: FastifyInstance, ctx: Ctx): void
       throw badRequest('Tick what your practice will do for them (or say it under Anything else).');
     }
     const p = await practiceParty();
-    const body = letterSections({ practice: { body: input.body }, client: { businessType: f.businessType, approvedPbo: f.approvedPbo, turnoverTax: f.turnoverTax }, kind, services, other: input.other, fromYearEnd: input.fromYearEnd, fees: input.fees });
+    const body = letterSections({ practice: { body: input.body, registered: input.registered }, client: { businessType: f.businessType, approvedPbo: f.approvedPbo, turnoverTax: f.turnoverTax }, kind, services, other: input.other, fromYearEnd: input.fromYearEnd, fees: input.fees });
     const [l] = await real<{ id: string }[]>`
       insert into practice_letters (client_id, services, other, from_year_end, body, practice_name, practice_reg, practice_trading, practice_address, client_name, created_by)
       values (${c.id}, ${services}::text[], ${input.other}, ${input.fromYearEnd}, ${real.json(body as never)}, ${p.practiceName}, ${p.practiceReg}, ${p.practiceTrading}, ${p.practiceAddress}, ${f.name.slice(0, 200)}, ${user.id}) returning id`;
@@ -277,6 +281,7 @@ export function registerWorkingPaperRoutes(app: FastifyInstance, ctx: Ctx): void
     const { c } = await given(req, user);
     notArchived(c);
     const l = await letterOr404(c.id, (req.params as { lid: string }).lid);
+    if (l.status === 'draft' && l.practiceName === NO_NAME) throw badRequest('Name your practice in the letter first (Change the words: its legal name), or under Settings, then draft it again.');
     const [done] = await real`update practice_letters set status = 'sent', sent_at = ${new Date()}, sent_by = ${user.id} where id = ${l.id} and status = 'draft' returning id`;
     if (!done) await movedOn(l.id, 'This letter was sent already.');
     await audit(real, { userId: user.id, action: 'letter_sent', entity: 'practice_letter', entityId: l.id, ip: req.ip });
@@ -296,7 +301,7 @@ export function registerWorkingPaperRoutes(app: FastifyInstance, ctx: Ctx): void
     );
     if (input.on > today()) throw badRequest('The day they accepted it can’t be after today.');
     const sentDay = l.sentAt ? dayOf(l.sentAt) : null;
-    if (sentDay && input.on < sentDay) throw badRequest(`The day they accepted it can’t be before the day it was sent (${sentDay}).`);
+    if (sentDay && input.on < sentDay) throw badRequest(`The day they accepted it can’t be before the day it was sent (${formatDate(sentDay, 'long')}).`);
     if (input.how === 'signed' && !input.signed) throw badRequest('Upload the signed copy (a PDF or a photo), or record the acceptance instead.');
     const bytes = input.how === 'signed' && input.signed ? fileBytes(input.signed) : null;
     const [done] = await real`update practice_letters set status = 'accepted', accepted_on = ${input.on}, accepted_name = ${input.name}, accepted_capacity = ${input.capacity},
@@ -407,8 +412,9 @@ export function registerWorkingPaperRoutes(app: FastifyInstance, ctx: Ctx): void
         debitCents: r.debitCents,
         creditCents: r.creditCents,
         balanceCents: r.balanceCents,
-        prepared: t?.preparedBy ? { by: who.get(t.preparedBy) ?? 'Someone', at: t.preparedAt, changed: Number(t.preparedCents) !== r.balanceCents } : null,
-        reviewed: t?.reviewedBy ? { by: who.get(t.reviewedBy) ?? 'Someone', at: t.reviewedAt, changed: Number(t.reviewedCents) !== r.balanceCents, samePerson: t.reviewedBy === t.preparedBy } : null,
+        // Changed since: its balance, or the kind of account it is (an expense made an asset).
+        prepared: t?.preparedBy ? { by: who.get(t.preparedBy) ?? 'Someone', at: t.preparedAt, changed: Number(t.preparedCents) !== r.balanceCents || (t.preparedType !== null && t.preparedType !== r.type) } : null,
+        reviewed: t?.reviewedBy ? { by: who.get(t.reviewedBy) ?? 'Someone', at: t.reviewedAt, changed: Number(t.reviewedCents) !== r.balanceCents || (t.reviewedType !== null && t.reviewedType !== r.type), samePerson: t.reviewedBy === t.preparedBy } : null,
       };
     });
     // Accounts ticked that are no longer in the trial balance (their balance went to nothing since).
@@ -484,13 +490,13 @@ export function registerWorkingPaperRoutes(app: FastifyInstance, ctx: Ctx): void
     const code = line?.code ?? t!.accountCode;
     const name = line?.name ?? t!.accountName;
     if (which === 'prepared')
-      await real`insert into practice_ticks (client_id, fy_end, account_id, account_code, account_name, prepared_by, prepared_at, prepared_cents)
-        values (${c.id}, ${fyEnd}, ${accountId}, ${code}, ${name}, ${on ? user.id : null}, ${on ? new Date() : null}, ${on ? line!.balanceCents : null})
-        on conflict (client_id, fy_end, account_id) do update set account_code = excluded.account_code, account_name = excluded.account_name, prepared_by = excluded.prepared_by, prepared_at = excluded.prepared_at, prepared_cents = excluded.prepared_cents`;
+      await real`insert into practice_ticks (client_id, fy_end, account_id, account_code, account_name, prepared_by, prepared_at, prepared_cents, prepared_type)
+        values (${c.id}, ${fyEnd}, ${accountId}, ${code}, ${name}, ${on ? user.id : null}, ${on ? new Date() : null}, ${on ? line!.balanceCents : null}, ${on ? line!.type : null})
+        on conflict (client_id, fy_end, account_id) do update set account_code = excluded.account_code, account_name = excluded.account_name, prepared_by = excluded.prepared_by, prepared_at = excluded.prepared_at, prepared_cents = excluded.prepared_cents, prepared_type = excluded.prepared_type`;
     else
-      await real`insert into practice_ticks (client_id, fy_end, account_id, account_code, account_name, reviewed_by, reviewed_at, reviewed_cents)
-        values (${c.id}, ${fyEnd}, ${accountId}, ${code}, ${name}, ${on ? user.id : null}, ${on ? new Date() : null}, ${on ? line!.balanceCents : null})
-        on conflict (client_id, fy_end, account_id) do update set account_code = excluded.account_code, account_name = excluded.account_name, reviewed_by = excluded.reviewed_by, reviewed_at = excluded.reviewed_at, reviewed_cents = excluded.reviewed_cents`;
+      await real`insert into practice_ticks (client_id, fy_end, account_id, account_code, account_name, reviewed_by, reviewed_at, reviewed_cents, reviewed_type)
+        values (${c.id}, ${fyEnd}, ${accountId}, ${code}, ${name}, ${on ? user.id : null}, ${on ? new Date() : null}, ${on ? line!.balanceCents : null}, ${on ? line!.type : null})
+        on conflict (client_id, fy_end, account_id) do update set account_code = excluded.account_code, account_name = excluded.account_name, reviewed_by = excluded.reviewed_by, reviewed_at = excluded.reviewed_at, reviewed_cents = excluded.reviewed_cents, reviewed_type = excluded.reviewed_type`;
     await real`delete from practice_ticks where client_id = ${c.id} and fy_end = ${fyEnd} and account_id = ${accountId} and prepared_by is null and reviewed_by is null`;
     // No account or balance in the log: the practice's audit log is open to people not given this client.
     await audit(real, { userId: user.id, action: on ? 'file_tick' : 'file_untick', entity: 'practice_client', entityId: c.id, ip: req.ip, details: { fyEnd, which } });
@@ -505,7 +511,8 @@ export function registerWorkingPaperRoutes(app: FastifyInstance, ctx: Ctx): void
     const input = parse(z.object({ fyEnd: yearEnd, account: z.object({ code: z.string().trim().min(1).max(40), name: z.string().trim().min(1).max(200) }).nullable().default(null), text: z.string().trim().min(1).max(4000) }), req.body);
     await yearOf(c, input.fyEnd);
     const [{ n } = { n: 0 }] = await real<{ n: number }[]>`select count(*)::int as n from practice_notes where client_id = ${c.id} and fy_end = ${input.fyEnd}`;
-    if (n >= NOTES_PER_YEAR) throw badRequest(`A year takes ${NOTES_PER_YEAR} review notes at most: answer and clear the ones there, or add to one of them.`);
+    if (n >= NOTES_PER_YEAR) throw badRequest(`A year takes ${NOTES_PER_YEAR} review notes at most (cleared ones count): add to one of those there.`);
+    await roomFor(c.id, input.fyEnd, input.text.length);
     const [note] = await real<{ id: string }[]>`
       insert into practice_notes (client_id, fy_end, account_code, account_name, text, raised_by)
       values (${c.id}, ${input.fyEnd}, ${input.account?.code ?? null}, ${input.account?.name ?? null}, ${input.text}, ${user.id}) returning id`;
@@ -513,6 +520,15 @@ export function registerWorkingPaperRoutes(app: FastifyInstance, ctx: Ctx): void
     const removed = await takeBack(c.id, input.fyEnd, user.id, req.ip, note!.id);
     return { id: note!.id, removed };
   });
+
+  /** A year's notes and replies, all together, run to YEAR_NOTES_MAX_CHARS at most: its file is a PDF made on the server. */
+  const roomFor = async (clientId: string, fyEnd: string, adding: number) => {
+    const [{ used } = { used: 0 }] = await real<{ used: number }[]>`
+      select (coalesce((select sum(length(text)) from practice_notes where client_id = ${clientId} and fy_end = ${fyEnd}), 0)
+        + coalesce((select sum(length(r.text)) from practice_note_replies r join practice_notes n on n.id = r.note_id where n.client_id = ${clientId} and n.fy_end = ${fyEnd}), 0))::int as used`;
+    if (used + adding > YEAR_NOTES_MAX_CHARS)
+      throw badRequest(`A year’s review notes and replies run to ${YEAR_NOTES_MAX_CHARS.toLocaleString('en-ZA')} characters at most, all together: this year has ${(YEAR_NOTES_MAX_CHARS - used).toLocaleString('en-ZA')} left.`);
+  };
 
   const noteOr404 = async (clientId: string, nid: string) => {
     if (!uuid.safeParse(nid).success) throw notFound('Review note');
@@ -530,6 +546,7 @@ export function registerWorkingPaperRoutes(app: FastifyInstance, ctx: Ctx): void
     const { text } = parse(z.object({ text: z.string().trim().min(1).max(4000) }), req.body);
     const [{ k } = { k: 0 }] = await real<{ k: number }[]>`select count(*)::int as k from practice_note_replies where note_id = ${n.id}`;
     if (k >= REPLIES_PER_NOTE) throw badRequest(`A review note takes ${REPLIES_PER_NOTE} replies at most: clear it, and raise a new one if there’s more to say.`);
+    await roomFor(c.id, n.fyEnd, text.length);
     await real`insert into practice_note_replies (note_id, text, by_user) values (${n.id}, ${text}, ${user.id})`;
     await audit(real, { userId: user.id, action: 'file_note_reply', entity: 'practice_client', entityId: c.id, ip: req.ip, details: { note: n.id } });
     return { ok: true };
@@ -634,9 +651,11 @@ interface TickRow {
   preparedBy: string | null;
   preparedAt: Date | null;
   preparedCents: number | null;
+  preparedType: string | null;
   reviewedBy: string | null;
   reviewedAt: Date | null;
   reviewedCents: number | null;
+  reviewedType: string | null;
 }
 interface NoteRow {
   id: string;

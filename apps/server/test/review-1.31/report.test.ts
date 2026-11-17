@@ -60,7 +60,7 @@ describe('the practitioner’s compilation report', () => {
   });
 
   it('a trust’s and a partnership’s too', async () => {
-    expect(await reportOf('trust')).toMatch(/may not be suitable for other purposes/);
+    expect(await reportOf('trust')).toMatch(/for the trustees, the beneficiaries and the South African Revenue Service\. Accordingly, these financial statements may not be suitable for other purposes/);
     expect(await reportOf('partnership')).toMatch(/for the partners and the South African Revenue Service\. Accordingly, these financial statements may not be suitable for other purposes/);
   });
 

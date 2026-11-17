@@ -74,17 +74,19 @@ const coverCols = (sql: Sql) => sql`id, client_id, status, services, from_year_e
 
 /**
  * What the practice's list (and the compile form) says of a client's letters and a year's papers.
- * `hashOf` gives a client's trial balance fingerprint for the year now, where the books are here (the
- * compile form has them open): each sign-off then says if they've changed since.
+ * `hashOf` gives a client's trial balance fingerprint for the year, and when it was taken, where the
+ * books are here: now (`at` null: the compile form has them open), or at the client's last checks (the
+ * list, with when by the database's clock, as the sign-offs' are). Each sign-off given before then says
+ * if the books have changed since.
  */
-export async function papersFor(real: Sql, clientIds: string[], fyEndOf: (id: string) => string | null, hashOf?: (id: string) => string | null) {
+export async function papersFor(real: Sql, clientIds: string[], fyEndOf: (id: string) => string | null, hashOf?: (id: string) => { hash: string; at: Date | string | null } | null) {
   if (!clientIds.length) return new Map<string, Papers>();
   const letters = await real<(CoverLetter & { clientId: string })[]>`select ${coverCols(real)} from practice_letters where client_id = any(${clientIds}::uuid[])`;
   const years = await real<{ letterId: string; fyEnd: string }[]>`select letter_id, fy_end::text as fy_end from practice_letter_years where letter_id = any(${letters.map((l) => l.id)}::uuid[])`;
   const notes = await real<{ clientId: string; fyEnd: string; n: number }[]>`
     select client_id, fy_end::text as fy_end, count(*)::int as n from practice_notes where client_id = any(${clientIds}::uuid[]) and cleared_by is null group by 1, 2`;
-  const signs = await real<{ clientId: string; fyEnd: string; role: Signoff; tbHash: string | null }[]>`
-    select client_id, fy_end::text as fy_end, role, tb_hash from practice_signoffs where client_id = any(${clientIds}::uuid[])`;
+  const signs = await real<{ clientId: string; fyEnd: string; role: Signoff; tbHash: string | null; at: Date }[]>`
+    select client_id, fy_end::text as fy_end, role, tb_hash, at from practice_signoffs where client_id = any(${clientIds}::uuid[])`;
   const out = new Map<string, Papers>();
   for (const id of clientIds) {
     const fyEnd = fyEndOf(id);
@@ -100,7 +102,13 @@ export async function papersFor(real: Sql, clientIds: string[], fyEndOf: (id: st
       termsLooked: standing.termsLooked,
       openNotes: fyEnd ? (notes.find((n) => n.clientId === id && n.fyEnd === fyEnd)?.n ?? 0) : 0,
       signed: Object.fromEntries(SIGNOFFS.map((r) => [r, Boolean(signed(r))])) as Record<Signoff, boolean>,
-      changed: Object.fromEntries(SIGNOFFS.map((r) => [r, Boolean(hash && signed(r)?.tbHash && signed(r)!.tbHash !== hash)])) as Record<Signoff, boolean>,
+      // Only a fingerprint taken after the sign-off says anything of it (the list's is from the last checks).
+      changed: Object.fromEntries(
+        SIGNOFFS.map((r) => {
+          const s = signed(r);
+          return [r, Boolean(hash && s?.tbHash && s.tbHash !== hash.hash && (hash.at === null || new Date(s.at).getTime() <= new Date(hash.at).getTime()))];
+        }),
+      ) as Record<Signoff, boolean>,
     });
   }
   return out;
@@ -117,6 +125,6 @@ export interface Papers {
   termsLooked: boolean;
   openNotes: number;
   signed: Record<Signoff, boolean>;
-  /** Given, and the books' trial balance has changed since (where it was worked out: the compile form). */
+  /** Given, and the books' trial balance has changed since (the compile form: now; the list: at the client's last checks). */
   changed: Record<Signoff, boolean>;
 }

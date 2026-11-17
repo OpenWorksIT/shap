@@ -202,7 +202,7 @@ export function registerFinancialStatementRoutes(app: FastifyInstance, ctx: Ctx)
     // working papers, in its own database), for the compile form to say. A check, never a lock.
     const here = dbScope.getStore()?.client;
     // Each sign-off says if the books have moved since it was given (the trial balance's fingerprint now).
-    const hash = here ? tbHash((await yearTb(sql, fyEnd)).rows) : null;
+    const hash = here ? { hash: tbHash((await yearTb(sql, fyEnd)).rows), at: null } : null;
     const practice = here ? (await papersFor(ctx.dbs.real, [here.id], () => fyEnd, () => hash)).get(here.id) ?? null : null;
     return { statements, status: r?.status ?? 'draft', row: r ? { ...r, snapshot: undefined } : null, changedSince, audit, yearAgreed: Boolean(agreed), yearClosed, versions, practice };
   });

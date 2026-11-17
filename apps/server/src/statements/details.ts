@@ -58,7 +58,7 @@ export const addresseeIsntManagement = (t: BusinessType): boolean => t === 'comp
  * company, a CC or a co-op, whose framework is general purpose.
  */
 export const specialPurposeFor = (t: BusinessType): string | null =>
-  COMPANYISH.includes(t) ? null : `the ${t === 'sole_prop' ? 'owner' : entity(t).owner.many} and the South African Revenue Service`;
+  COMPANYISH.includes(t) ? null : `the ${t === 'sole_prop' ? 'owner' : t === 'trust' ? 'trustees, the beneficiaries' : entity(t).owner.many} and the South African Revenue Service`;
 
 /** Who governs the business, as the statements name them (and whether that's one person). */
 export const governingFor = (t: BusinessType) =>

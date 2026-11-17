@@ -338,9 +338,14 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const access = manages ? await real<{ clientId: string; userId: string; level: Level }[]>`select client_id, user_id, level from practice_access` : [];
     const now = today();
     // Each client's engagement letters and its latest ended year's working papers (working-papers.ts).
-    const papers = await papersFor(real, mine.map((r) => r.id), (id) => {
+    const yearOf = (id: string) => {
       const m = mine.find((r) => r.id === id)?.health?.deadlineInputs?.fyEndMonth;
       return m ? lastEnded(m, now) : null;
+    };
+    // A kept client's last checks keep that year's trial balance fingerprint: a sign-off given before them says if the books had changed by then.
+    const papers = await papersFor(real, mine.map((r) => r.id), yearOf, (id) => {
+      const h = mine.find((r) => r.id === id)?.health;
+      return h?.tb && h.tb.fyEnd === yearOf(id) ? { hash: h.tb.hash, at: h.tb.at } : null;
     });
     return {
       clients: mine.map((r) => ({

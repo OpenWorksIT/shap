@@ -108,7 +108,7 @@ create table if not exists practice_signoffs (
 );
 
 -- An account's balance at the year end ticked as prepared or reviewed (a client whose books are on
--- this server), with the balance it had then. By the account itself (its id in the client's books),
+-- this server), with the balance and kind of account it had then. By the account itself (its id in the client's books),
 -- so a new code, or a code another account takes later, doesn't move a tick; the code and name are
 -- kept to show it by.
 create table if not exists practice_ticks (
@@ -120,9 +120,11 @@ create table if not exists practice_ticks (
   prepared_by uuid references users(id),
   prepared_at timestamptz,
   prepared_cents bigint,
+  prepared_type text,
   reviewed_by uuid references users(id),
   reviewed_at timestamptz,
   reviewed_cents bigint,
+  reviewed_type text,
   primary key (client_id, fy_end, account_id)
 );
 

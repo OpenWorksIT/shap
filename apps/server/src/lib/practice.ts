@@ -18,6 +18,7 @@ import { buildStatements } from '../statements/build.js';
 import { currentStatements, stillSigned } from '../modules/financial-statements.js';
 import type { Statements } from '../statements/build.js';
 import { effectiveLock, freshTotals, getSettings, today } from './books.js';
+import { lastEnded, tbHash, yearTb } from './papers.js';
 
 export { LEVELS, type Level };
 /** Who they are in the client's own database: its owner, or its accountant (read only, compiles). */
@@ -244,6 +245,12 @@ export interface ClientHealth {
   pocket?: { number: number; through: string; importedAt: string; added: number; changed: number; removed: number; restored?: boolean } | null;
   /** What the returns are worked out from (deadlinesFor, again each time the list is shown). */
   deadlineInputs: DeadlineInputs | null;
+  /**
+   * The trial balance's fingerprint at the latest ended year end (lib/papers.ts tbHash), and when (the
+   * database's clock), for the list to say when the books have changed since a sign-off given before
+   * then. The practice's own: healthForLink never sends it.
+   */
+  tb?: { fyEnd: string; hash: string; at: string } | null;
   /** A linked client's Shap's last answer couldn't be read: what's here is from before it. */
   stale?: true;
   /** Nothing of a linked client's checks was ever read but what the returns are worked out from. */
@@ -373,6 +380,14 @@ async function healthNow(db: Sql, now: string, log: { warn: (o: object, m: strin
         where a.system_key = 'dividends' and j.kind = 'manual' and j.ledger_import_id is null and j.date >= ${since}::date
         group by date_trunc('month', j.date) having sum(jl.debit_cents - jl.credit_cents) > 0
       order by 1`;
+    // The latest ended year's trial balance fingerprint (lib/papers.ts), for the practice's list.
+    let tb: ClientHealth['tb'] = null;
+    if (s.setupDone) {
+      const fyEnd = lastEnded(s.fyEndMonth, now);
+      // When, by the database's clock (as the sign-offs' are): the books as they stood then.
+      const [{ at } = { at: new Date().toISOString() }] = await tx<{ at: string }[]>`select now()::text as at`;
+      tb = { fyEnd, hash: tbHash((await yearTb(tx, fyEnd)).rows), at };
+    }
     return {
       at: new Date().toISOString(),
       company: s.companyName,
@@ -385,6 +400,7 @@ async function healthNow(db: Sql, now: string, log: { warn: (o: object, m: strin
       deadlineInputs: s.setupDone
         ? { businessType: s.businessType, vatRegistered: s.vatRegistered, vatCategory: s.vatCategory, fyEndMonth: s.fyEndMonth, turnoverTax: s.turnoverTax, employer, approvedPbo: Boolean(s.approvedPbo), dividendsPaid: paid.map((p) => p.d) }
         : null,
+      tb,
     };
   }) as Promise<ClientHealth>;
 }
