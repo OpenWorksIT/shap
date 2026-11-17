@@ -347,9 +347,9 @@ describe('engagement letters and working papers, as the 1.31 reviews found them'
       ]);
       expect(sent.filter((r) => r.statusCode === 200)).toHaveLength(1);
       for (const r of sent.filter((x) => x.statusCode !== 200)) expect(r.json().error).toMatch(/this year has none left\.$/);
-      const [{ used }] = await p.practice.sql<{ used: number }[]>`
+      const [total] = await p.practice.sql<{ used: number }[]>`
         select (select sum(length(text)) from practice_notes where client_id = ${c.id})::int + coalesce((select sum(length(r.text)) from practice_note_replies r join practice_notes x on x.id = r.note_id where x.client_id = ${c.id}), 0)::int as used`;
-      expect(used).toBe(YEAR_NOTES_MAX_CHARS);
+      expect(total!.used).toBe(YEAR_NOTES_MAX_CHARS);
       await p.practice.sql`update practice_notes set cleared_by = ${owner!.id}, cleared_at = now() where client_id = ${c.id}`;
     });
 
