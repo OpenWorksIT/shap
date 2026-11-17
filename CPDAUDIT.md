@@ -50,7 +50,9 @@ each review's findings are written up in section 7.
    website's disclaimer (openworks.co.za/shap/disclaimer) still covers what the update adds: it
    forms part of the terms (terms 8.3), so it's only clarified where the terms already cover it; a
    new duty on the owner or a further limit on OpenWorks' liability is a terms change
-   (`TERMS_VERSION`, everyone accepts again). The terms (`terms.md`) aren't changed otherwise. The
+   (`TERMS_VERSION`, everyone accepts again). One that's only a practice's (Shap Accountant) goes
+   in the Shap Accountant terms instead (`accountant-terms.md`, `ACCOUNTANT_TERMS_VERSION`: only
+   practices accept again), whose Part A follows `terms.md`. The terms aren't changed otherwise. The
    rest is plain South African English: clear, kind, no jargon without its meaning, the same word
    for the same thing, money as the app shows it (`formatZar`).
 
