@@ -273,10 +273,10 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
                 </button>
               ))}
             </div>
-            {industry === 'accounting' && preset.turnoverTax && (
+            {industry === 'accounting' && preset.turnoverTax && !f.turnoverTax && (
               <p className="xs muted panel panel-pad">Turnover tax is switched off: an accounting practice can’t be on it, as more than 20% of its receipts are from professional services (the Sixth Schedule to the Income Tax Act, para 3(b)). Check with SARS if you think yours is different.</p>
             )}
-            {industry !== 'accounting' && PROFESSIONAL_SERVICE_INDUSTRIES.includes(industry) && f.turnoverTax && <p className="xs banner">{TURNOVER_TAX_PROFESSIONAL}</p>}
+            {PROFESSIONAL_SERVICE_INDUSTRIES.includes(industry) && f.turnoverTax && <p className="xs banner">{TURNOVER_TAX_PROFESSIONAL}</p>}
             {industry === 'accounting' && !client && (
               <YesNo
                 q="Will you keep your clients’ books in Shap too?"

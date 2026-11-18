@@ -84,7 +84,7 @@ export function registerWorkingPaperRoutes(app: FastifyInstance, ctx: Ctx): void
   const limit = (max: number) => ({ rateLimit: { max, timeWindow: '1 minute' } });
 
   const assertOn = async () => {
-    if (!(await practiceOn(real))) throw badRequest('Shap Accountant is off. The owner switches it on under Settings → Features.');
+    if (!(await practiceOn(real))) throw badRequest('Shap Accountant is off. The owner switches it on under Settings → What you use.');
     if (!(await accountantTermsAccepted(real))) throw badRequest(ACCOUNTANT_TERMS_NEEDED, { needsAccountantTerms: true });
   };
   /** The client, if this person may open it, and how. */

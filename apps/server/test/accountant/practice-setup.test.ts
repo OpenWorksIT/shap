@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ACCOUNTANT_TERMS_VERSION, PRACTICE_OWN_SERVER, PRACTICE_PROFILES, SERVER_NOT_MANAGED, STARTING_PROFILES, withNeeds } from '@shap/shared';
 import { createDb } from '../../src/db/index.js';
+import { ensureDatabase } from '../../src/db/routing.js';
 import { expectCleanAudit, login, sessionFor, setup, type TestEnv } from '../helpers.js';
 
 type Who = Awaited<ReturnType<typeof login>>;
@@ -126,13 +127,19 @@ describe('the server, for a practice: its database login, and asking shap-ctl (a
     }
   });
 
-  it('keeps a test server’s made-up clients few: 10 at most, archived ones too (the security review)', async () => {
+  it('keeps a test server’s made-up clients few: 10 at most, archived ones too, even when many are added at once (the security review)', async () => {
     const n = (await env.sql<{ n: number }[]>`select count(*)::int as n from practice_clients`)[0]!.n;
     const owner1 = (await env.sql<{ id: string }[]>`select id from users where email = 'owner@example.co.za'`)[0]!.id;
-    for (let i = n; i < 10; i++) await env.sql`insert into practice_clients (name, kind, created_by, archived_at) values (${`Made-up ${i}`}, 'kept', ${owner1}, now())`;
-    const r = await owner.call({ method: 'POST', url: '/api/practice/clients', payload: { name: 'One too many' }, ...from() });
-    expect(r.statusCode).toBe(400);
-    expect(r.json().error).toMatch(/A test server keeps at most 10 clients’ books/);
+    for (let i = n; i < 8; i++) await env.sql`insert into practice_clients (name, kind, created_by, archived_at) values (${`Made-up ${i}`}, 'kept', ${owner1}, now())`;
+    // Six at once, from different addresses: two get the room left.
+    const tries = await Promise.all([1, 2, 3, 4, 5, 6].map((i) => owner.call({ method: 'POST', url: '/api/practice/clients', payload: { name: `Made-up rush ${i}` }, ...from() })));
+    expect(tries.map((t) => t.statusCode).sort()).toEqual([200, 200, 400, 400, 400, 400]);
+    for (const t of tries.filter((x) => x.statusCode === 400)) expect(t.json().error).toMatch(/A test server keeps at most 10 clients’ books/);
+    expect((await env.sql<{ n: number }[]>`select count(*)::int as n from practice_clients`)[0]!.n).toBe(10);
+    for (const t of tries.filter((x) => x.statusCode === 200)) {
+      const [c] = await env.sql<{ dbName: string }[]>`select db_name from practice_clients where id = ${t.json().id}`;
+      await expectCleanAudit(env.ctx.clients.get(c!.dbName));
+    }
     await env.sql`delete from practice_clients where db_name is null`;
   });
 });
@@ -181,6 +188,16 @@ describe('the server, for a practice: a real company on a server other companies
     expect(r.json().error).toContain(PRACTICE_OWN_SERVER);
     expect(existsSync(join(ctl, 'request'))).toBe(false);
   });
+
+  it('goes by shap-ctl’s count of the companies added where it has one: a test server isn’t another company (the check of the fixes)', async () => {
+    writeFileSync(join(ctl, 'status.json'), JSON.stringify({ companies: { real: 0, test: 1 } }));
+    expect(await owner.get('/api/practice/server')).toMatchObject({ otherCompanies: false });
+    expect((await owner.call({ method: 'POST', url: '/api/practice/server', payload: {}, ...from() })).json()).toMatchObject({ pending: true });
+    expect(readFileSync(join(ctl, 'request'), 'utf8')).toBe('practice\n');
+    rmSync(join(ctl, 'request'));
+    writeFileSync(join(ctl, 'status.json'), JSON.stringify({ companies: { real: 1, test: 0 } }));
+    expect(await owner.get('/api/practice/server')).toMatchObject({ otherCompanies: true });
+  });
 });
 
 describe('the server, for a practice: on a superuser login, and other companies on it', () => {
@@ -194,6 +211,24 @@ describe('the server, for a practice: on a superuser login, and other companies 
     await env.sql.unsafe('drop database if exists shap_madeupco with (force)');
     await expectCleanAudit(env.sql);
     await env.close();
+  });
+
+  it('never uses a demo database another login made under its name (the security review)', async () => {
+    const admin = env.sql;
+    await admin.unsafe('drop database if exists shap_t_squatdemo with (force)');
+    await admin.unsafe('drop role if exists shap_t_squatter');
+    await admin.unsafe(`create role shap_t_squatter login password 'made-up-password-1'`);
+    await admin.unsafe('create database shap_t_squatdemo owner shap_t_squatter');
+    const url = new URL(process.env.DATABASE_URL!);
+    url.pathname = '/shap_t_squatdemo';
+    try {
+      await expect(ensureDatabase(admin, url.toString())).rejects.toThrow(/made by another login/);
+      await admin.unsafe('alter database shap_t_squatdemo owner to current_user');
+      await expect(ensureDatabase(admin, url.toString())).resolves.toBeUndefined();
+    } finally {
+      await admin.unsafe('drop database if exists shap_t_squatdemo with (force)');
+      await admin.unsafe('drop role if exists shap_t_squatter');
+    }
   });
 
   it('is ready on the default install’s login, and says when other companies’ books are on the server', async () => {

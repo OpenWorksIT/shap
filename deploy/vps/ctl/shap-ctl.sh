@@ -83,7 +83,22 @@ put() { # put KEY JSON
   chmod 644 "$tmp" && mv -f "$tmp" "$f"
 }
 
+# The companies added to this server (add-company.sh): real ones, and test servers (by the last
+# TEST_SERVER= line of each, as Docker reads it). For the app's Shap Accountant: a practice's Shap
+# runs on a server no real company shares.
+companies() {
+  local f last real=0 test=0
+  for f in "$VPS"/companies/*.env; do
+    [ -e "$f" ] || continue
+    last="$(grep -E '^TEST_SERVER=' "$f" 2>/dev/null | tail -n 1)"
+    if [ "$last" = TEST_SERVER=true ]; then test=$((test + 1)); else real=$((real + 1)); fi
+  done
+  put companies "$(jq -n --argjson real "$real" --argjson test "$test" '{real: $real, test: $test}')"
+  REAL_COMPANIES=$real
+}
+
 check() {
+  companies
   put checking "$(jq -n --arg at "$(now)" '{at: $at}')"
   local err=""
   timeout 120 git -C "$REPO" fetch -q origin "$TRACK" 2>"$CTL/.fetch.err" || err="Couldn't fetch $TRACK: $(tail -c 400 "$CTL/.fetch.err")"
@@ -186,18 +201,19 @@ update() {
 # add-company.sh shares it (a practice runs Shap on a server of its own: docs/ACCOUNTANT.md), and
 # never for an added company's login. Asked for by its owner, once Shap Accountant is switched on.
 practice() {
-  local url login can msg out ok=false f last
-  said() { put practice "$(jq -n --arg at "$(now)" --argjson ok "$ok" --arg login "$login" --arg message "$1" '{at: $at, ok: $ok, login: $login, message: $message}')"; echo "practice: $1"; }
+  local url login can msg out ok=false shared=false
+  said() {
+    put practice "$(jq -n --arg at "$(now)" --argjson ok "$ok" --argjson shared "$shared" --arg login "$login" --arg message "$1" '{at: $at, ok: $ok, shared: $shared, login: $login, message: $message}')"
+    echo "practice: $1"
+  }
   cd "$VPS" || return 1
   login=""
-  for f in companies/*.env; do
-    [ -e "$f" ] || continue
-    last="$(grep -E '^TEST_SERVER=' "$f" 2>/dev/null | tail -n 1)"
-    if [ "$last" != TEST_SERVER=true ]; then
-      said "Other companies' books are on this server, so Shap won't let this Shap make databases: Shap Accountant needs Shap on a server of its own (docs/ACCOUNTANT.md)."
-      return 1
-    fi
-  done
+  companies
+  if [ "$REAL_COMPANIES" -gt 0 ]; then
+    shared=true
+    said "Other companies’ books are on this server, so Shap doesn’t ask for this: Shap Accountant needs Shap on a server of its own (docs/ACCOUNTANT.md)."
+    return 1
+  fi
   # The login, from this server's compose files (root's), never from inside the app's container.
   url="$(docker compose config --format json 2>/dev/null | jq -r '.services.app.environment.DATABASE_URL // empty' 2>/dev/null)"
   login="${url#*://}"
@@ -205,20 +221,20 @@ practice() {
   login="${login%%:*}"
   if ! [[ "$login" =~ ^[a-z_][a-z0-9_]{0,62}$ ]]; then
     login=""
-    said "Couldn't read this Shap's database login from the compose files."
+    said "Shap couldn’t read this Shap’s database login from the server’s compose files."
     return 1
   fi
   can="$(docker compose exec -T db psql -U shap -d postgres -Atc "select rolsuper or rolcreatedb from pg_roles where rolname = '$login'" 2>&1 | tr -d '[:space:]')"
   case "$can" in
-    t) ok=true; msg="This Shap's database login ($login) may already make databases." ;;
+    t) ok=true; msg="This Shap’s database login ($login) may already make databases." ;;
     f)
       if out="$(docker compose exec -T db psql -U shap -d postgres -v ON_ERROR_STOP=1 -qc "alter role \"$login\" createdb" 2>&1)"; then
-        ok=true; msg="This Shap's database login ($login) may now make databases."
+        ok=true; msg="This Shap’s database login ($login) may now make databases."
       else
         echo "practice: Postgres said: $out"
-        msg="Postgres didn't let this Shap's database login ($login) make databases."
+        msg="Postgres didn’t let this Shap’s database login ($login) make databases."
       fi ;;
-    *) echo "practice: Postgres said: $can"; msg="Postgres doesn't know this Shap's database login ($login)." ;;
+    *) echo "practice: Postgres said: $can"; msg="Postgres doesn’t know this Shap’s database login ($login)." ;;
   esac
   said "$msg"
   $ok

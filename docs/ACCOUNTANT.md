@@ -1,6 +1,6 @@
 # Shap Accountant
 
-**Settings → Features → Shap Accountant.** For an accounting practice: the practice's own Shap keeps
+**Settings → What you use → Shap Accountant**, or the first-run questions (below, "Setting up a practice"). For an accounting practice: the practice's own Shap keeps
 its clients' books too, each client in a database of its own on the practice's server, and shows
 one list of the clients with what three of Shap's checks found in each and some of the returns
 coming up. It's a part of Shap, not another app: every fix, check and SARS update reaches it in
@@ -46,12 +46,14 @@ so choosing it switches that off and says why: docs/SARS.md.) Yes adds a step, *
   starting password (Shap suggests one; the owner passes it on). They're made when the terms are
   accepted at the end, all at once or none (`POST /api/practice/team`), and only while nobody but
   the owner signs in: after that, one at a time in Settings. Which clients each person opens, and
-  how, is chosen per client (Who opens which, below): whoever compiles signs the compilation report
-  in their own name.
+  how, is chosen per client (Who opens which, below). Given a client either way, they can open it to
+  compile, and whoever compiles signs the compilation report in their own name: the practice says
+  who compiles.
 - The practice's own books start as a practice's usually are: invoices only, the time tracker, no
-  counter sales; its line types and revenue accounts named Fees, Recharged costs and Other revenue
-  (while unused); cost types for costs recharged to clients, software, CPD and office rent. Every
-  later question can change that.
+  counter sales; its line types and revenue accounts named Fees, Recharged costs and Other revenue,
+  and the cost of what it recharges "Costs recharged to clients" (while unused: another kind of
+  business chosen before then puts Shap's own names back); cost types for costs recharged to
+  clients, software, CPD and office rent, with Parts hidden. Every later question can change that.
 - **The terms**: Shap's, and the Shap Accountant terms, accepted for the practice by its owner (both
   ticks). Then, with Shap Accountant on, and only on a server whose Settings → Updates & backups
   shap-ctl looks after and that no other company shares, Shap asks it once
@@ -63,11 +65,12 @@ so choosing it switches that off and says why: docs/SARS.md.) Yes adds a step, *
   it hasn't been asked), and adding a client says so too.
 
 **A practice's own invoices**: what it bought itself and charges on (a courier it booked) is a
-recharged cost, its own supply (with VAT if it's a vendor). An amount paid in the client's name as
-its agent and recovered at cost (a CIPC or SARS fee) is no supply by the practice (VAT Act s54(2)):
-the item *Paid for you as your agent, at cost* comes without VAT for a vendor. Shap still counts it in
-revenue (on Other revenue) and the payment in costs, so revenue is grossed up by it: whether to net
-it in the statements is the practice's own call (IFRS for SMEs 23.4).
+recharged cost, its own supply (with VAT if it's a vendor) and its revenue. An amount paid in the
+client's name as its agent and recovered at cost (a CIPC or SARS fee) is neither: it isn't the
+practice's revenue (IFRS for SMEs 23.4 leaves amounts collected for others out) or its supply (VAT
+Act s54(2)), and the slip's VAT isn't its to claim. Every line on a Shap invoice is revenue, so
+Shap has no item for it: recover it outside Shap's invoices, or with a journal through a balance
+sheet account, as the practice's own policy has it.
 
 ## The Shap Accountant terms
 

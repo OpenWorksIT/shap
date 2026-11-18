@@ -65,6 +65,9 @@ export function demoUrl(realUrl: string, explicit?: string): string {
 export async function ensureDatabase(real: Sql, url: string): Promise<void> {
   const name = new URL(url).pathname.replace(/^\//, '');
   if (!/^[a-z0-9_]+$/.test(name)) throw new Error(`Unusable demo database name: ${name}`);
-  const [has] = await real`select 1 from pg_database where datname = ${name}`;
+  const [has] = await real<{ mine: boolean }[]>`select datdba = (select oid from pg_roles where rolname = current_user) as mine from pg_database where datname = ${name}`;
   if (!has) await real.unsafe(`create database "${name}"`);
+  // One someone else made under this name (a login that may make databases, on a server companies
+  // share) isn't used: its owner could have set it up to run their own code in this Shap's sessions.
+  else if (!has.mine) throw new Error(`a database called ${name} is there already, made by another login`);
 }

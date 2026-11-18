@@ -374,7 +374,8 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
       date,
       description: mats.map((m) => `${m.qty} × ${m.description}`).join(', ').slice(0, 190),
       totalCents: withVat(mats.reduce((t, m) => t + m.costCents * m.qty, 0), date),
-      category: await cat('Parts'),
+      // A practice's are costs it recharges to its clients (Parts is hidden for it).
+      category: await cat(s.industry === 'accounting' ? 'Costs recharged to clients' : 'Parts'),
       supplier: r.pick(trade.suppliers),
       projectId,
       billDays: has('bills') && r.chance(0.6) ? 30 : undefined,

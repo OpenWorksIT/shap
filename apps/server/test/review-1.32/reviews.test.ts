@@ -20,9 +20,11 @@ describe('IFRS for SMEs and company law', () => {
     const [bookkeeper, manager] = PRACTICE_PROFILES;
     expect(bookkeeper!.hint).toMatch(/^Opens the clients they’re given, to write up their books\./);
     expect(bookkeeper!.hint).not.toMatch(/or reading them and compiling the statements/);
-    expect(bookkeeper!.hint).toMatch(/compiling signs the compilation report \(a close corporation’s accounting officer’s report\) in their own name/);
+    // Given either way, a client can be opened to compile (the check of the fixes): said, and who may sign left to the practice.
+    expect(bookkeeper!.hint).toMatch(/Given a client either way, they can also open it to compile, which signs the compilation report \(a close corporation’s accounting officer’s report\) in their own name: who may sign one is your practice’s to decide/);
     expect(manager!.hint).toMatch(/as a client’s owner in Shap/);
-    expect(COMPILE_SIGNS).toMatch(/signs the compilation report \(for a close corporation, the accounting officer’s report\) in their own name/);
+    expect(COMPILE_SIGNS).toMatch(/^Given a client either way, someone can open it to compile\. .*signs the compilation report \(for a close corporation, the accounting officer’s report\) in their own name\. Who in your practice may sign one is your practice’s to decide, under its professional body’s rules\.$/);
+    expect(COMPILE_SIGNS).not.toMatch(/give a client to compile only/);
     expect(read('apps/web/src/pages/Practice.tsx')).toMatch(/<p className="xs muted">\{COMPILE_SIGNS\}<\/p>/);
   });
 
@@ -34,7 +36,7 @@ describe('IFRS for SMEs and company law', () => {
   it('a practice’s own books: its revenue named for it, its recharged costs a cost type of their own, no Parts (3, 4)', () => {
     const p = industryProfile('accounting');
     expect(p.lines).toEqual({ labour: 'Fees', materials: 'Recharged costs', other: 'Other' });
-    expect(p.revenue).toEqual({ labour: 'Fees', materials: 'Recharged costs', other: 'Other revenue' });
+    expect(p.revenue).toEqual({ labour: 'Fees', materials: 'Recharged costs', other: 'Other revenue', costOfMaterials: 'Costs recharged to clients' });
     expect(p.categories[0]).toEqual({ name: 'Costs recharged to clients', kind: 'materials', account: '5010' });
     expect(p.hide).toContain('Parts');
   });
@@ -55,8 +57,9 @@ describe('a practice’s own books, set up as setup does (IFRS 2–4, accounting
   it('names the revenue accounts and lists the practice’s cost types first, Parts hidden', async () => {
     const { settings } = await me.get('/api/reference');
     await me.post('/api/settings', { ...settings, companyName: 'Fictional Ledger Practice', businessType: 'sole_prop', fyEndMonth: 2, industry: 'accounting', hourlyRateCents: 60_000, features: { ...settings.features, timeTracker: true, statements: true } }, 'PUT');
-    const names = await env.sql<{ systemKey: string; name: string }[]>`select system_key, name from accounts where system_key in ('revenue_labour', 'revenue_materials', 'revenue_other') order by system_key`;
-    expect(names).toEqual([
+    const named = () => env.sql<{ systemKey: string; name: string }[]>`select system_key, name from accounts where system_key in ('revenue_labour', 'revenue_materials', 'revenue_other', 'cos_materials') order by system_key`;
+    expect(await named()).toEqual([
+      { systemKey: 'cos_materials', name: 'Costs recharged to clients' },
       { systemKey: 'revenue_labour', name: 'Fees' },
       { systemKey: 'revenue_materials', name: 'Recharged costs' },
       { systemKey: 'revenue_other', name: 'Other revenue' },
@@ -67,6 +70,8 @@ describe('a practice’s own books, set up as setup does (IFRS 2–4, accounting
     // Another kind of business later brings Parts back.
     await me.post('/api/settings', { ...(await me.get('/api/reference')).settings, industry: 'builder' }, 'PUT');
     expect((await env.sql<{ active: boolean }[]>`select active from cost_categories where name = 'Parts'`)[0]!.active).toBe(true);
+    // …and, while they're unused, Shap's own names for the accounts (the check of the fixes).
+    expect((await named()).map((n) => n.name)).toEqual(['Cost of sales – project materials', 'Project revenue – labour', 'Project revenue – materials', 'Other income']);
     await me.post('/api/settings', { ...(await me.get('/api/reference')).settings, industry: 'accounting' }, 'PUT');
   });
 
@@ -79,10 +84,42 @@ describe('a practice’s own books, set up as setup does (IFRS 2–4, accounting
     const s = await buildStatements(env.sql, FY);
     const item = s.checks.find((c) => /not invoiced by the year end/.test(c.label));
     expect(item).toMatchObject({ ok: false, level: 'look' });
-    expect(item!.detail).toMatch(/^2\.5 hours of time tracked up to the year end weren’t on an invoice issued by then \(R\s?1[\s,]?500\.00 at the hourly rates in Shap\)/);
+    expect(item!.detail).toMatch(/^2\.5 hours of time tracked in the year \(or before it and invoiced only after the year end\) weren’t on an invoice issued by the year end \(R\s?1[\s,]?500\.00 at the hourly rates in Shap\)/);
     const policies = s.notes.find((n) => n.key === 'policies')!.paragraphs.join(' ');
     expect(policies).toMatch(/Revenue from services is recognised as the work is performed\./);
     expect(policies).not.toMatch(/invoices its work as it is done/);
+  });
+
+  it('counts time on a quote an issued invoice was made from as invoiced, and earlier years’ time never invoiced as not this year’s (the check of the fixes)', async () => {
+    // Put the year-end time on an invoice dated after the year end: it was work in progress at it.
+    const [t] = await env.sql<{ id: string }[]>`select id from time_entries where note = 'Made-up year-end work'`;
+    const later = await me.post('/api/documents', { kind: 'invoice', issueDate: '2026-03-05', lines: [] });
+    await me.post('/api/time/bill', { documentId: later.id, ids: [t!.id] });
+    await me.post(`/api/documents/${later.id}/issue`, {});
+    expect((await buildStatements(env.sql, FY)).checks.find((c) => /not invoiced by the year end/.test(c.label))?.detail).toMatch(/^2\.5 hours/);
+    // The next year: that time was invoiced in it, so not listed.
+    expect((await buildStatements(env.sql, '2027-02-28')).checks.find((c) => /not invoiced by the year end/.test(c.label))).toBeUndefined();
+    // Time on a quote, the quote made into an invoice issued in the year: invoiced.
+    const q = await me.post('/api/time', { projectId: null, startedAt: '2026-06-02T08:00:00+02:00', endedAt: '2026-06-02T11:00:00+02:00', note: 'Made-up quoted work' });
+    const quote = await me.post('/api/documents', { kind: 'quote', issueDate: '2026-06-03', lines: [] });
+    await me.post('/api/time/bill', { documentId: quote.id, ids: [q.id] });
+    const inv = await me.post(`/api/documents/${quote.id}/convert`, {});
+    // Dated in the year (a draft is dated the day it's made).
+    await env.sql`update documents set issue_date = '2026-06-10' where id = ${inv.id}`;
+    await me.post(`/api/documents/${inv.id}/issue`, {});
+    // Time from long ago, never invoiced: not this year's.
+    await me.post('/api/time', { projectId: null, startedAt: '2024-06-02T08:00:00+02:00', endedAt: '2024-06-02T09:00:00+02:00', note: 'Made-up old admin' });
+    expect((await buildStatements(env.sql, '2027-02-28')).checks.find((c) => /not invoiced by the year end/.test(c.label))).toBeUndefined();
+  });
+
+  it('puts a practice’s materials brought in from another package under its own cost type (the check of the fixes)', async () => {
+    const bank = await (await ref(env.sql)).src('Business bank');
+    const bills = `ContactName,InvoiceNumber,InvoiceDate,DueDate,Total,TaxTotal,InvoiceAmountPaid,InvoiceAmountDue,Description,Quantity,UnitAmount,LineAmount,AccountCode,Type,Status
+Made-up Printers,B-901,10/03/2026,10/04/2026,500.00,0.00,500.00,0.00,Printing materials for clients,1,500.00,500.00,310,Bill,PAID
+`;
+    await me.post('/api/move-in', { files: [{ name: 'Bills.csv', text: bills }], options: { receiptSourceId: bank } });
+    const [c] = await env.sql<{ name: string }[]>`select k.name from costs c join cost_categories k on k.id = c.category_id where c.description like 'Printing materials%'`;
+    expect(c!.name).toBe('Costs recharged to clients');
   });
 
   it('leaves revenue accounts that have been used, and names the owner gave them, as they are', async () => {
@@ -114,16 +151,17 @@ describe('SARS and tax', () => {
     expect(read('docs/SARS.md')).toMatch(/Not a micro business, so no turnover tax: more than 20% of receipts from a professional service/);
   });
 
-  it('an amount paid as the client’s agent comes without VAT, and the exempt option says when (2)', () => {
-    const agent = industryProfile('accounting').items.find((i) => /agent/.test(i.d));
-    expect(agent).toEqual({ d: 'Paid for you as your agent, at cost (CIPC, SARS)', cat: 'other', unit: 'item', vat: 'exempt' });
+  it('an amount paid as the client’s agent: no invoice item makes it revenue, and the exempt option says it’s no supply (2, and the check of the fixes)', () => {
+    expect(industryProfile('accounting').items.find((i) => /agent/i.test(i.d))).toBeUndefined();
     expect(SALE_VAT.exempt.hint).toMatch(/a fee you paid in your client’s name as their agent and recover at cost \(a courier you booked yourself and charge on is your own supply, with VAT\)/);
-    expect(read('apps/web/src/pages/Document.tsx')).toMatch(/\.\.\.\(it\.vatCode && vendor \? \{ vatCode: it\.vatCode \} : \{\}\)/);
+    expect(read('docs/ACCOUNTANT.md')).toMatch(/IFRS for SMEs 23\.4 leaves amounts collected for others out\) or its supply \(VAT\s+Act s54\(2\)\)/);
   });
 
   it('the personal-service caution for a practice’s own company, registration as a tax practitioner, and the industry hint’s aids (3–5)', () => {
-    expect(read('apps/web/src/pages/YearEnd.tsx')).toMatch(/settings\.industry === 'accounting' && 'Accounting is a personal service/);
-    expect(PRACTICE_CAUTION).toMatch(/registration as a tax practitioner \(Tax Administration Act s240\): Shap doesn’t check it/);
+    expect(read('apps/web/src/pages/YearEnd.tsx')).toMatch(/settings\.industry === 'accounting' && 'Accounting is a personal service: a practice with fewer than three full-time employees who aren’t connected to its owners usually can’t use it/);
+    expect(PRACTICE_CAUTION).toMatch(/generally needs registration with SARS and a recognised controlling body \(Tax Administration Act s240, which has exceptions, such as work under a registered tax practitioner’s supervision\): that’s your practice’s own, and Shap doesn’t check it\./);
+    expect(TURNOVER_TAX_PROFESSIONAL).toMatch(/for a company, its investment income counts too/);
+    expect(read('apps/web/src/pages/Welcome.tsx')).toMatch(/industry === 'accounting' && preset\.turnoverTax && !f\.turnoverTax &&/);
     expect(read('apps/web/src/pages/Welcome.tsx')).toMatch(/some of the returns coming up, as aids to check; and draft engagement letters and working papers/);
   });
 });
@@ -141,11 +179,16 @@ describe('words on screen and liability', () => {
   it('the server panel says what’s so in each state, asks only with a button or after the terms, never tells an added company’s server to break the wall (1–4, 8, 9, 11)', () => {
     expect(panel).not.toMatch(/Setting this server up|This server can keep your clients’ books|it takes a few seconds\./);
     expect(panel).toMatch(/'Ask the server'/);
-    expect(panel).toMatch(/The server is busy with an update or a backup: Shap asks once it’s done\./);
+    expect(panel).toMatch(/The server is busy with another request \(a check, an update or a backup\): Shap asks once it’s done\./);
+    // Busy: asked again only every so often, never in a loop (the check of the fixes).
+    expect(panel).toMatch(/const ASK_EVERY_MS = 15_000;/);
+    expect(panel).toMatch(/if \(busyRef\.current && mayAsk\(s\) && Date\.now\(\) - lastAsk\.current >= ASK_EVERY_MS\)/);
+    // In setup, a failed answer has no button: Shap asks again at the end.
+    expect(panel).toMatch(/if \(where === 'setup'\) body = `The server said: \$\{state\.asked!\.message\} When you accept the terms at the end, Shap asks the server again\./);
     expect(panel).toMatch(/When you accept the terms at the end, Shap asks the server/);
     expect(panel).toMatch(/Whoever runs the server can allow it by hand/);
     // Other companies on the server (not a test server): the own-server words, no command.
-    expect(panel).toMatch(/if \(shared\) \{\n\s+head = 'Other companies’ books are on this server too';\n\s+body = `\$\{PRACTICE_OWN_SERVER\}/);
+    expect(panel).toMatch(/if \(shared\) \{\n\s+head = 'Other companies’ books are on this server too';\n\s+body = state\.ready\n\s+\? `Shap can still make clients’ databases here\. \$\{PRACTICE_OWN_SERVER\}`\n\s+: `\$\{PRACTICE_OWN_SERVER\} Here, this Shap’s database login can’t make databases, so your clients’ books can’t be kept on this server\.`;/);
     expect(panel.slice(panel.indexOf('if (shared) {'), panel.indexOf('} else if (state.ready) {'))).not.toMatch(/command = true/);
     expect(read('apps/web/src/pages/Practice.tsx')).toMatch(/<PracticeServer where="practice" \/>/);
     const welcome = read('apps/web/src/pages/Welcome.tsx');
@@ -159,6 +202,7 @@ describe('words on screen and liability', () => {
     expect(PRACTICE_OWN_SERVER).not.toMatch(/your own PC|are your practice’s alone/);
     expect(PRACTICE_OWN_SERVER).toMatch(/The server’s security, its backups, and who can reach your clients’ books are then your practice’s to look after/);
     expect(SERVER_NOT_MANAGED).toMatch(/Settings → Updates & backups/);
+    expect(SERVER_NOT_MANAGED).toMatch(/^This Shap’s database login isn’t allowed to make databases/);
     const log = read('CHANGELOG.md');
     const v132 = log.slice(log.indexOf('## 1.32.0'), log.indexOf('## 1.31.0'));
     for (const t of [SERVER_NOT_MANAGED, v132, read('docs/ACCOUNTANT.md')]) expect(t).not.toMatch(/Settings → System|got ready|gets the server ready|sets this up by itself/);
@@ -167,7 +211,7 @@ describe('words on screen and liability', () => {
 
   it('shap-ctl says whose login, and logs why; the team step says “their” and that payroll comes next (8, 16, 17)', () => {
     const ctl = read('deploy/vps/ctl/shap-ctl.sh');
-    expect(ctl).toMatch(/This Shap's database login \(\$login\) may now make databases\./);
+    expect(ctl).toMatch(/This Shap’s database login \(\$login\) may now make databases\./);
     expect(ctl).toMatch(/echo "practice: Postgres said: \$out"/);
     expect(panel).toMatch(/\.replace\('your name and email', 'their name and email'\)/);
     expect(read('apps/web/src/pages/Welcome.tsx')).toMatch(/These are sign-ins to Shap\. Payroll, for anyone on a salary, is the next question\./);

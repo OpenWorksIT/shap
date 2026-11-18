@@ -34,7 +34,8 @@ Whoever is going to fill and wipe the books needs an **Owner** sign-in on the te
 
 **Shap Accountant** can be tried on a test server, with made-up clients (10 at most: each client's
 books are a database on a server real companies share). `--test-server` lets the test server's
-database login make databases. A test server added before 1.32 is let with one command:
+database login (`shap_<its name>`) make databases. A test server added before 1.32 is let with one
+command (for one called `test`):
 
 ```bash
 cd /opt/shap/deploy/vps

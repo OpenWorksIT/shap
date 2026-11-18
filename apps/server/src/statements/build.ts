@@ -548,14 +548,20 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
   const dayWages = Number(dayLabour!.wages);
   const dayEmployees = dayWages > 0;
   const dayMonths = dayLabour!.months;
-  // Time tracked up to the year end and not on an invoice issued by then: work done that the books
-  // haven't recognised as revenue yet (IFRS for SMEs 23.14), valued at the hourly rates in Shap.
+  // Time not on an invoice issued by the year end (directly, or on a quote an issued invoice was made
+  // from): work done that the books haven't recognised as revenue yet (IFRS for SMEs 23.14), valued
+  // at the hourly rates in Shap. The year's own time, and earlier time invoiced only after the year
+  // end (work in progress then too); earlier time never invoiced is left out (it isn't this year's).
   const [unbilledTime] = await db<{ minutes: number; valueCents: string }[]>`
-    select coalesce(sum(t.minutes), 0)::int as minutes,
-           coalesce(sum(round(t.minutes * coalesce(nullif(p.hourly_rate_cents, 0), (select hourly_rate_cents from settings where id), 0) / 60.0)), 0)::bigint as value_cents
-    from time_entries t left join projects p on p.id = t.project_id left join documents d on d.id = t.billed_document_id
-    where t.minutes > 0 and (t.started_at at time zone 'Africa/Johannesburg')::date <= ${fyEnd}::date
-      and (d.id is null or d.status <> 'issued' or d.issue_date > ${fyEnd}::date)`;
+    with t as (
+      select t.minutes, coalesce(nullif(p.hourly_rate_cents, 0), (select hourly_rate_cents from settings where id), 0) as rate,
+             (t.started_at at time zone 'Africa/Johannesburg')::date as day,
+             (select min(i.issue_date) from documents i where i.kind = 'invoice' and i.status = 'issued'
+                and (i.id = t.billed_document_id or (i.source_quote_id is not null and i.source_quote_id = t.billed_document_id))) as invoiced
+      from time_entries t left join projects p on p.id = t.project_id
+      where t.minutes > 0)
+    select coalesce(sum(minutes), 0)::int as minutes, coalesce(sum(round(minutes * rate / 60.0)), 0)::bigint as value_cents
+    from t where day <= ${fyEnd}::date and (invoiced is null or invoiced > ${fyEnd}::date) and (day >= ${fyStart}::date or invoiced > ${fyEnd}::date)`;
   const unbilledMinutes = unbilledTime!.minutes;
   const policyDefaults = defaultPolicies(bt, {
     lives,
@@ -886,7 +892,7 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
     look(
       'Work done but not invoiced by the year end is considered (IFRS for SMEs 23.14)',
       false,
-      `${hours} hour${hours === 1 ? '' : 's'} of time tracked up to the year end ${hours === 1 ? 'wasn’t' : 'weren’t'} on an invoice issued by then${value > 0 ? ` (${formatZar(value)} at the hourly rates in Shap)` : ''}. If that work was for clients and will be billed, consider accruing the revenue at the year end (stage of completion); time that won’t be billed needs nothing.`,
+      `${hours < 0.1 ? 'Less than 0.1 hours' : `${hours} hour${hours === 1 ? '' : 's'}`} of time tracked in the year (or before it and invoiced only after the year end) ${hours === 1 ? 'wasn’t' : 'weren’t'} on an invoice issued by the year end${value > 0 ? ` (${formatZar(value)} at the hourly rates in Shap)` : ''}. If that work was for clients and will be billed, consider accruing the revenue at the year end (stage of completion); time that won’t be billed needs nothing.`,
     );
   }
   // Receivables long overdue (11.21): impaired if they won't be recovered.

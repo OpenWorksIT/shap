@@ -290,7 +290,7 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
   const manage = { preHandler: requireAccess('practice.manage') };
 
   const assertSwitchedOn = async () => {
-    if (!(await practiceOn(real))) throw badRequest('Shap Accountant is off. The owner switches it on under Settings → Features.');
+    if (!(await practiceOn(real))) throw badRequest('Shap Accountant is off. The owner switches it on under Settings → What you use.');
   };
   const assertOn = async () => {
     await assertSwitchedOn();
@@ -339,14 +339,18 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
   const serverState = async (me: string) => {
     const { may, login } = await databaseRights(real);
     const status = ctlStatus(config);
-    const asked = status && typeof status.practice === 'object' && status.practice ? (status.practice as { at?: string; ok?: boolean; message?: string }) : null;
+    const asked = status && typeof status.practice === 'object' && status.practice ? (status.practice as { at?: string; ok?: boolean; message?: string; shared?: boolean }) : null;
+    // Other companies on the server: as shap-ctl counts them where it looks after the server (a test
+    // server isn't one), otherwise from the databases' names (where a test server's can't be told apart).
+    const counted = status && typeof status.companies === 'object' && status.companies ? (status.companies as { real?: unknown }) : null;
+    const others = counted && typeof counted.real === 'number' ? counted.real > 0 || (await otherCompanies(real, { mainOnly: true })) : await otherCompanies(real);
     return {
       ready: may,
       login,
       managed: status != null,
       pending: ctlPending(config) === 'practice',
-      asked: asked ? { at: String(asked.at ?? ''), ok: asked.ok === true, message: String(asked.message ?? '').slice(0, 400) } : null,
-      otherCompanies: await otherCompanies(real),
+      asked: asked ? { at: String(asked.at ?? ''), ok: asked.ok === true, message: String(asked.message ?? '').slice(0, 400), shared: asked.shared === true } : null,
+      otherCompanies: others,
       testServer: config.TEST_SERVER,
       // Setup's team step makes the practice's people only while nobody else signs in (below).
       othersSignIn: await othersSignIn(me),
@@ -365,7 +369,7 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!state.managed) throw badRequest(SERVER_NOT_MANAGED);
     // One request at a time: an update or a backup asked for already goes first, and this is asked again after it.
     const waiting = ctlPending(config);
-    if (waiting) throw new HttpError(409, 'The server is busy with an update or a backup: Shap asks once it’s done.', 'ctl_busy');
+    if (waiting) throw new HttpError(409, 'The server is busy with another request (a check, an update or a backup): Shap asks once it’s done.', 'ctl_busy');
     if (!(await askCtl(config, 'practice'))) throw badRequest('Shap can’t leave the request for the server. Whoever runs the server can fix this by running deploy/vps/ctl/install.sh again.');
     await audit(real, { userId: user.id, action: 'system_practice', entity: 'system', ip: req.ip, details: { login: state.login } });
     return { ...state, pending: true };
@@ -474,12 +478,18 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     // kept: written up here; imported: brought in from the package the client keeps them in
     // (books-import.ts); pocket: a read-only copy of their Shap Pocket books, from their shares.
     const { name, kind } = parse(z.object({ name: z.string().trim().min(1).max(200), kind: z.enum(['kept', 'imported', 'pocket']).default('kept') }), req.body);
-    // A test server shares its server with real companies: its made-up clients' databases are kept few.
-    if (config.TEST_SERVER) {
-      const [n] = await real<{ n: number }[]>`select count(*)::int as n from practice_clients where kind <> 'linked'`;
-      if (n!.n >= TEST_SERVER_CLIENTS) throw badRequest(`A test server keeps at most ${TEST_SERVER_CLIENTS} clients’ books (archived ones count: they stay on the server).`);
-    }
-    const [c] = await real<{ id: string }[]>`insert into practice_clients (name, kind, created_by) values (${name}, ${kind}, ${user.id}) returning id`;
+    const [c] = await real.begin(async (tx) => {
+      // A test server shares its server with real companies: its made-up clients' databases are kept
+      // few, counted one request at a time (the row is in before the next counts), rows or databases.
+      if (config.TEST_SERVER) {
+        await tx`select pg_advisory_xact_lock(hashtext('shap:test_server_clients'))`;
+        const pattern = `${clients.practiceDb.replace(/_/g, '\\_')}\\_\\_c\\_%`;
+        const [n] = await tx<{ n: number }[]>`
+          select greatest((select count(*) from practice_clients where kind <> 'linked'), (select count(*) from pg_database where datname like ${pattern}))::int as n`;
+        if (n!.n >= TEST_SERVER_CLIENTS) throw badRequest(`A test server keeps at most ${TEST_SERVER_CLIENTS} clients’ books (archived ones count: they stay on the server).`);
+      }
+      return tx<{ id: string }[]>`insert into practice_clients (name, kind, created_by) values (${name}, ${kind}, ${user.id}) returning id`;
+    });
     const dbName = clientDbName(clients.practiceDb, c!.id);
     try {
       await clients.create(real, dbName, name);

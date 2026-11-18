@@ -11,8 +11,6 @@ export interface IndustryItem {
   d: string;
   cat: 'labour' | 'materials' | 'other';
   unit?: string;
-  /** Its VAT, where it isn't the standard rate (an amount paid as the client's agent is no supply). */
-  vat?: 'exempt';
 }
 
 export interface IndustryProfile {
@@ -38,8 +36,11 @@ export interface IndustryProfile {
    * Names for the revenue accounts the three line types post to, given when the kind is chosen on
    * books that haven't used them yet (otherwise Shap's own: "Project revenue – labour"…).
    */
-  revenue?: { labour: string; materials: string; other: string };
+  revenue?: { labour: string; materials: string; other: string; costOfMaterials: string };
 }
+
+/** The names Shap gives those accounts itself (migration 001), put back when another kind is chosen before they're used. */
+export const SHAP_REVENUE_NAMES = { labour: 'Project revenue – labour', materials: 'Project revenue – materials', other: 'Other income', costOfMaterials: 'Cost of sales – project materials' } as const;
 
 const TRADE_HIDE: string[] = [];
 const OFFICE_HIDE = ['Demo', 'PPE', 'Vehicle Transfer'];
@@ -400,8 +401,9 @@ const P: Record<string, Partial<IndustryProfile>> = {
       { d: 'Professional time', cat: 'labour', unit: 'hour' },
       { d: 'Courier', cat: 'materials', unit: 'item' },
       { d: 'Travel', cat: 'other', unit: 'km' },
-      // Paid in the client's name as its agent and recovered at cost: no supply by the practice (VAT Act s54(2)).
-      { d: 'Paid for you as your agent, at cost (CIPC, SARS)', cat: 'other', unit: 'item', vat: 'exempt' },
+      // Not here: an amount paid in the client's name as its agent. It's neither the practice's
+      // revenue (IFRS for SMEs 23.4) nor its supply (VAT Act s54(2)), and every invoice line is
+      // revenue (docs/ACCOUNTANT.md, "A practice's own invoices").
     ],
     heading: 'e.g. Bookkeeping for Bloom Café, March',
     costStock: 'e.g. Courier for a client’s documents',
@@ -415,7 +417,7 @@ const P: Record<string, Partial<IndustryProfile>> = {
       { name: 'Office rent', kind: 'overhead', account: '6200' },
     ],
     hide: [...OFFICE_HIDE, 'Tool', 'Parts'],
-    revenue: { labour: 'Fees', materials: 'Recharged costs', other: 'Other revenue' },
+    revenue: { labour: 'Fees', materials: 'Recharged costs', other: 'Other revenue', costOfMaterials: 'Costs recharged to clients' },
   },
   tutor: {
     lines: { labour: 'Lessons', materials: 'Books & materials', other: 'Other' },

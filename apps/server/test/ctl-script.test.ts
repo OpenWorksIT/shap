@@ -86,15 +86,15 @@ describe('shap-ctl: Shap Accountant’s databases', () => {
   });
 
   it('says so when Postgres refuses, or doesn’t know the login', () => {
-    expect(run('practice', { config: appUrl('postgres://shap_app:x@db/shap'), can: 'f', alterFails: true })).toMatchObject({ code: 1, status: { practice: { ok: false, message: expect.stringMatching(/didn't let/) } } });
-    expect(run('practice', { config: appUrl('postgres://shap_gone:x@db/shap'), can: '' })).toMatchObject({ code: 1, status: { practice: { ok: false, message: expect.stringMatching(/doesn't know/) } } });
+    expect(run('practice', { config: appUrl('postgres://shap_app:x@db/shap'), can: 'f', alterFails: true })).toMatchObject({ code: 1, status: { practice: { ok: false, message: expect.stringMatching(/didn’t let/) } } });
+    expect(run('practice', { config: appUrl('postgres://shap_gone:x@db/shap'), can: '' })).toMatchObject({ code: 1, status: { practice: { ok: false, message: expect.stringMatching(/doesn’t know/) } } });
   });
 
   it('never uses a login that isn’t a plain name, or one it couldn’t read', () => {
     for (const url of ["postgres://x';drop role shap;--:pw@db/shap", 'postgres://"shap" createdb superuser:pw@db/shap', 'postgres://SHAP:pw@db/shap']) {
       const r = run('practice', { config: appUrl(url), can: 'f' });
       expect(r.code).toBe(1);
-      expect(r.status.practice).toMatchObject({ ok: false, login: '', message: expect.stringMatching(/Couldn't read/) });
+      expect(r.status.practice).toMatchObject({ ok: false, login: '', message: expect.stringMatching(/couldn’t read/) });
       expect(r.calls.filter((c) => c.includes('psql'))).toEqual([]);
     }
     expect(run('practice', { config: {} })).toMatchObject({ code: 1, status: { practice: { ok: false, login: '' } } });
@@ -103,12 +103,15 @@ describe('shap-ctl: Shap Accountant’s databases', () => {
   it('never on a server a real company added with add-company.sh shares; a test server added here doesn’t count', () => {
     const shared = run('practice', { config: appUrl('postgres://shap_app:x@db/shap'), can: 'f', companies: { friend: 'SHAP_DOMAIN=shap.friend.example.co.za\n', test: 'TEST_SERVER=true\n' } });
     expect(shared.code).toBe(1);
-    expect(shared.status.practice).toMatchObject({ ok: false, message: expect.stringMatching(/Other companies' books are on this server/) });
+    expect(shared.status.practice).toMatchObject({ ok: false, shared: true, message: expect.stringMatching(/Other companies’ books are on this server, so Shap doesn’t ask for this/) });
+    expect(shared.status.companies).toEqual({ real: 1, test: 1 });
     expect(shared.calls).toEqual([]);
     // A line that says test server, then one that says otherwise: the last is the one Docker uses.
     expect(run('practice', { config: appUrl('postgres://shap_app:x@db/shap'), can: 'f', companies: { was: 'TEST_SERVER=true\nTEST_SERVER=false\n' } }).code).toBe(1);
     const tests = run('practice', { config: appUrl('postgres://shap_app:x@db/shap'), can: 'f', companies: { test: 'SHAP_DOMAIN=shaptest.example.co.za\nTEST_SERVER=true\nCOLLECTOR_URL=off\n' } });
     expect(tests.code).toBe(0);
+    expect(tests.status.companies).toEqual({ real: 0, test: 1 });
+    expect(tests.status.practice).toMatchObject({ ok: true, shared: false });
     expect(tests.calls.filter((c) => c.includes('alter role'))).toEqual([expect.stringMatching(/alter role "shap_app" createdb$/)]);
   });
 

@@ -7,8 +7,8 @@ For testing on a PC first, use [deploy/test](../deploy/test/README.md).
 
 An accounting practice keeping its clients' books in Shap (Shap Accountant) runs Shap on a server
 of its own, never as a company added to someone else's ([ACCOUNTANT.md](ACCOUNTANT.md), "A server of
-its own"). Setup checks the server, and with shap-ctl (below, "Updates") asks it for the one thing
-Shap Accountant needs.
+its own"). Setup checks the server and, with shap-ctl (below, "Updates"), asks it to let this Shap's
+database login make databases.
 
 ## Before you start
 

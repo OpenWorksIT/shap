@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { ACCOUNTANT_TERMS_URL, ACCOUNTANT_TERMS_VERSION, accountInput, attachmentInput, brandInput, categoryInput, entity, featureOn, industryProfile, isTask, profileInput, settingsInput, settingsNumberProblem, sourceInput, TERMS_URL, tidyNumbers, tweaksFor, userInput, vatRateOn, withNeeds, workTypeInput, type Role } from '@shap/shared';
+import { ACCOUNTANT_TERMS_URL, ACCOUNTANT_TERMS_VERSION, accountInput, INDUSTRIES, SHAP_REVENUE_NAMES, attachmentInput, brandInput, categoryInput, entity, featureOn, industryProfile, isTask, profileInput, settingsInput, settingsNumberProblem, sourceInput, TERMS_URL, tidyNumbers, tweaksFor, userInput, vatRateOn, withNeeds, workTypeInput, type Role } from '@shap/shared';
 import { z } from 'zod';
 import { accessOf, canAny, checkNewPassword, confirmPassword, createUser, endOtherSessions, hashPassword, requireAccess, requireRole, seesBooks, sessionToken, userOrThrow, type AuthUser } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -29,18 +29,15 @@ export async function applyIndustry(db: Db, industry: string) {
     // One Shap had already (Software & subscriptions, say) is listed first too.
     await db`update cost_categories set sort = ${i - 20} where lower(name) = lower(${c.name}) and sort > ${i - 20}`;
   }
-  // The revenue accounts the line types post to, named for this kind of business (a practice's
-  // "Fees"), while the books haven't used them and they still have Shap's own names.
-  if (p.revenue) {
-    for (const [key, name, was] of [
-      ['revenue_labour', p.revenue.labour, 'Project revenue – labour'],
-      ['revenue_materials', p.revenue.materials, 'Project revenue – materials'],
-      ['revenue_other', p.revenue.other, 'Other income'],
-    ] as const) {
-      await db`update accounts a set name = ${name} where a.system_key = ${key} and a.name = ${was}
-               and not exists (select 1 from ledger l where l.account_id = a.id)
-               and not exists (select 1 from accounts x where lower(x.name) = lower(${name}) and x.id <> a.id)`;
-    }
+  // The revenue accounts the line types post to (and the cost of what's recharged), named for this
+  // kind of business (a practice's "Fees"), while the books haven't used them; another kind chosen
+  // before then puts Shap's own names back. A name the owner gave them is never changed.
+  const names = p.revenue ?? SHAP_REVENUE_NAMES;
+  const ours = (k: keyof typeof SHAP_REVENUE_NAMES) => [SHAP_REVENUE_NAMES[k], ...INDUSTRIES.map((i) => industryProfile(i.key).revenue?.[k]).filter((x): x is string => Boolean(x))];
+  for (const [key, k] of [['revenue_labour', 'labour'], ['revenue_materials', 'materials'], ['revenue_other', 'other'], ['cos_materials', 'costOfMaterials']] as const) {
+    await db`update accounts a set name = ${names[k]} where a.system_key = ${key} and a.name in ${db(ours(k))} and a.name <> ${names[k]}
+             and not exists (select 1 from ledger l where l.account_id = a.id)
+             and not exists (select 1 from accounts x where lower(x.name) = lower(${names[k]}) and x.id <> a.id)`;
   }
   const back = ['Demo', 'PPE', 'Vehicle Transfer', 'Tool', 'Parts'].filter((n) => !p.hide.includes(n));
   if (back.length) await db`update cost_categories set active = true where name in ${db(back)}`;

@@ -193,11 +193,10 @@ function Editor({ detail, kind, proforma, projectFromUrl, reload }: { detail: Do
   const addLine = (category: LineCategory) =>
     set('lines', [...d.lines, { key: key(), category, description: category === 'labour' ? 'Labour' : '', qty: '1', unit: category === 'labour' ? 'days' : '', unitPriceCents: null }]);
   /** One tap: a usual item, with last time's price when there is one. */
-  const addItem = (it: { description: string; category: LineCategory; unit?: string; unitPriceCents?: number | null; vatCode?: SaleVatCode }) => {
+  const addItem = (it: { description: string; category: LineCategory; unit?: string; unitPriceCents?: number | null }) => {
     // An empty line waiting at the end is filled rather than left behind.
     const blank = d.lines.find((l) => !l.description.trim() && !l.unitPriceCents);
-    // An item that's no supply (paid as the client's agent) comes without VAT; anything else as usual.
-    const line = { category: it.category, description: it.description, qty: '1', unit: it.unit ?? '', unitPriceCents: it.unitPriceCents ?? null, ...(it.vatCode && vendor ? { vatCode: it.vatCode } : {}) };
+    const line = { category: it.category, description: it.description, qty: '1', unit: it.unit ?? '', unitPriceCents: it.unitPriceCents ?? null };
     set('lines', blank ? d.lines.map((l) => (l.key === blank.key ? { ...l, ...line } : l)) : [...d.lines, { key: key(), ...line }]);
   };
   const updLine = (k: string, patch: Partial<DraftLine>) => set('lines', d.lines.map((l) => (l.key === k ? { ...l, ...patch } : l)));
@@ -1289,16 +1288,14 @@ interface UsualLine {
  * The usual items, one tap each: what this business charged before (with last time's price),
  * then the common ones for its kind of work. Filtered as you type in the search box.
  */
-function QuickAdd({ usual, profile, onAdd, lines }: { usual: UsualLine[]; profile: ReturnType<typeof industryProfile>; onAdd: (it: { description: string; category: LineCategory; unit?: string; unitPriceCents?: number | null; vatCode?: SaleVatCode }) => void; lines: { description: string }[] }) {
+function QuickAdd({ usual, profile, onAdd, lines }: { usual: UsualLine[]; profile: ReturnType<typeof industryProfile>; onAdd: (it: { description: string; category: LineCategory; unit?: string; unitPriceCents?: number | null }) => void; lines: { description: string }[] }) {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(lines.length === 0);
   const seen = new Set(usual.map((u) => u.description.toLowerCase()));
-  // The kind of business's own item's VAT (an amount paid as the client's agent: none), used again with last time's price.
-  const vatOf = (d: string) => profile.items.find((i) => i.d.toLowerCase() === d.toLowerCase())?.vat;
   const onDoc = new Set(lines.map((l) => l.description.trim().toLowerCase()));
   const all = [
-    ...usual.map((u) => ({ description: u.description, category: u.category, unit: u.unit, unitPriceCents: u.unitPriceCents as number | null, vatCode: vatOf(u.description), mine: true })),
-    ...profile.items.filter((i) => !seen.has(i.d.toLowerCase())).map((i) => ({ description: i.d, category: i.cat as LineCategory, unit: i.unit ?? '', unitPriceCents: null, vatCode: i.vat, mine: false })),
+    ...usual.map((u) => ({ description: u.description, category: u.category, unit: u.unit, unitPriceCents: u.unitPriceCents as number | null, mine: true })),
+    ...profile.items.filter((i) => !seen.has(i.d.toLowerCase())).map((i) => ({ description: i.d, category: i.cat as LineCategory, unit: i.unit ?? '', unitPriceCents: null, mine: false })),
   ].filter((i) => !onDoc.has(i.description.toLowerCase()));
   const term = q.trim().toLowerCase();
   const shown = (term ? all.filter((i) => i.description.toLowerCase().includes(term)) : all).slice(0, term ? 24 : 12);

@@ -193,7 +193,7 @@ export const STARTING_PROFILES: readonly { name: string; access: readonly Task[]
  * (Shap's Admin). Which clients each person opens, and how, is chosen per client (Who opens it).
  */
 export const PRACTICE_PROFILES: readonly { name: string; access: readonly Task[]; hint: string }[] = [
-  { name: 'Bookkeeper', access: ['practice.clients'], hint: 'Opens the clients they’re given, to write up their books. Give someone a client to compile only if they sign for your practice: compiling signs the compilation report (a close corporation’s accounting officer’s report) in their own name' },
+  { name: 'Bookkeeper', access: ['practice.clients'], hint: 'Opens the clients they’re given, to write up their books. Given a client either way, they can also open it to compile, which signs the compilation report (a close corporation’s accounting officer’s report) in their own name: who may sign one is your practice’s to decide' },
   { name: 'Practice manager', access: ['practice.manage'], hint: 'Adds clients and chooses who opens each and how (themselves included, as a client’s owner in Shap), sees every client, and makes the engagement letters' },
   { name: 'Admin', access: STARTING_PROFILES.find((p) => p.name === 'Admin')!.access, hint: 'The practice’s own books (not its clients’ books): its invoices and what’s paid on them, its list of clients, its costs and bills, the reports and the bank' },
 ];

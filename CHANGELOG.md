@@ -10,7 +10,8 @@ entries newer than the version you're running before you update.
   Accountant terms come with Shap's at the end, and then Practice opens. The practice's own books
   start as a practice's usually are (invoices only, the time tracker, no counter sales; fees,
   recharged costs and other revenue; cost types for costs recharged to clients, software, CPD and
-  office rent), and any later question can change that. An accounting practice can't be on turnover
+  office rent), and any later question can change that. An amount you pay in a client's name as
+  their agent isn't your revenue or your supply: Shap has no invoice item for it (docs/ACCOUNTANT.md). An accounting practice can't be on turnover
   tax, so choosing it switches that off and says why.
 - **The server.** Each client's books are a database of their own, so the practice step checks that
   this Shap's database login may make databases, and says what it found. Once you've accepted the
@@ -21,24 +22,26 @@ entries newer than the version you're running before you update.
 - **Your practice's people, in setup.** Just you, or you and your staff: how many, and now or later.
   Now: the profiles (Bookkeeper, Practice manager and Admin, each changeable, and your own) and each
   person's name, email, profile and starting password (Shap suggests one), made all at once when you
-  accept the terms. Later: Settings → People who sign in, as before. Who opens it says that whoever
-  compiles a client's statements signs the compilation report in their own name.
+  accept the terms. Later: Settings → People who sign in, as before. Who opens it says that someone
+  given a client either way can open it to compile, and that whoever compiles signs the compilation
+  report in their own name.
 - **A server of its own.** Shap Accountant needs Shap on a server of its own: a VPS or a computer
   only your practice uses. A company added to someone else's Shap server can't keep clients' books
   (add-company.sh says so), and the practice step and Practice say when other companies' books are
   on the server. A test server can try Shap Accountant with up to 10 made-up clients:
   `--test-server` lets its login make databases (docs/TEST_SERVER.md has the command for one added
   before this).
-- **Backups**: shap-ctl backs up only the databases Shap names, whatever names a database login that
-  may make databases gives its own, and a name never decides where a backup is written.
-- **Time not invoiced by the year end**: the financial statements' checks list time tracked up to
-  the year end that wasn't on an invoice issued by then (with its value at your hourly rates), to
-  consider accruing the revenue, and the revenue policy no longer says all work is invoiced as it's
-  done when it isn't.
+- **Backups**: shap-ctl now backs up only databases with the names Shap gives them.
+- **Time not invoiced by the year end**: the financial statements' checks list time tracked in the
+  year (or before it and invoiced only after the year end) that wasn't on an invoice issued by the
+  year end, directly or through a quote (with its value at your hourly rates), to consider accruing
+  the revenue; and the revenue policy no longer says all work is invoiced as it's done when it isn't.
 - An amount paid in a client's name as their agent, and recovered at cost, is no supply by you: the
-  VAT option *Exempt or not a supply* says so, and an accounting practice's *Paid for you as your
-  agent, at cost* comes without VAT. Turnover tax's caution says a business with more than 20% of its
-  receipts from professional services can't be on it.
+  VAT option *Exempt or not a supply* says so. Turnover tax's caution says a business with more than
+  20% of its receipts from professional services (for a company, with its investment income) can't
+  be on it.
+- A demo company's database someone else made under its name is never used (the demo is off, and the
+  log says why).
 
 ## 1.31.0 (17 November 2026)
 

@@ -16,7 +16,8 @@ export interface ServerState {
   login: string;
   managed: boolean;
   pending: boolean;
-  asked: { at: string; ok: boolean; message: string } | null;
+  /** What shap-ctl said when last asked; `shared`: it found a real company added to the server. */
+  asked: { at: string; ok: boolean; message: string; shared: boolean } | null;
   otherCompanies: boolean;
   testServer: boolean;
   /** Someone besides the owner signs in already (a test server wiped and set up again): the team is added in Settings. */
@@ -30,6 +31,8 @@ export const mayAsk = (s: ServerState) => !s.ready && s.managed && !sharedServer
 
 /** How long before saying the server is taking long (it usually answers in seconds; behind an update, minutes). */
 const WAIT_MS = 2 * 60 * 1000;
+/** While the server is busy with another request, Shap asks again this often (the route allows 5 a minute). */
+const ASK_EVERY_MS = 15_000;
 
 /** The server's state, looked at again every few seconds while shap-ctl has the request (or is busy). */
 export function usePracticeServer() {
@@ -40,15 +43,17 @@ export function usePracticeServer() {
   const [tick, setTick] = useState(0);
   const since = useRef(0);
   const busyRef = useRef(false);
+  const lastAsk = useRef(0);
   const request = async () => {
     setError('');
     since.current = since.current || Date.now();
+    lastAsk.current = Date.now();
     try {
       setState(await api<ServerState>('/api/practice/server', { body: {} }));
       busyRef.current = false;
       setBusy(false);
     } catch (err) {
-      // Busy with an update or a backup: asked again once it's done (below).
+      // Busy with another request: asked again once it's done, at most every ASK_EVERY_MS (below).
       if (err instanceof ApiError && err.code === 'ctl_busy') {
         busyRef.current = true;
         setBusy(true);
@@ -64,7 +69,7 @@ export function usePracticeServer() {
         const s = await api<ServerState>('/api/practice/server');
         if (stop) return;
         setState(s);
-        if (busyRef.current && mayAsk(s)) await request();
+        if (busyRef.current && mayAsk(s) && Date.now() - lastAsk.current >= ASK_EVERY_MS) return void (await request());
         const waiting = !s.ready && (s.pending || busyRef.current);
         if (waiting && since.current && Date.now() - since.current > WAIT_MS) setSlow(true);
         if (waiting && !stop) timer = setTimeout(() => void look(), 3000);
@@ -103,10 +108,14 @@ export function PracticeServer({ where, onState }: { where: 'setup' | 'practice'
   let ask: string | null = null;
   if (shared) {
     head = 'Other companies’ books are on this server too';
-    body = `${PRACTICE_OWN_SERVER}${state.ready ? '' : ' Here, this Shap’s database login can’t make databases, and isn’t meant to, so your clients’ books can’t be kept on this server.'}`;
+    body = state.ready
+      ? `Shap can still make clients’ databases here. ${PRACTICE_OWN_SERVER}`
+      : `${PRACTICE_OWN_SERVER} Here, this Shap’s database login can’t make databases, so your clients’ books can’t be kept on this server.`;
   } else if (state.ready) {
     head = 'Shap can make your clients’ databases here';
-    body = `Each client you add gets a database of its own on this server. The server’s security, its backups, and who in your practice opens which books are your practice’s to look after.${state.testServer ? ' A test server: try Shap Accountant here with made-up clients only (10 at most).' : ''}`;
+    body = state.testServer
+      ? 'A test server: try Shap Accountant here with made-up clients only (10 at most). Each client you add gets a database of its own on this server.'
+      : 'Each client you add gets a database of its own on this server. The server’s security, its backups, and who in your practice opens which books are your practice’s to look after.';
   } else if (state.testServer) {
     head = 'This test server can’t make its clients’ databases yet';
     body = 'Whoever runs the server can let it make its made-up clients’ databases (docs/TEST_SERVER.md, on Shap’s GitHub):';
@@ -118,17 +127,23 @@ export function PracticeServer({ where, onState }: { where: 'setup' | 'practice'
   } else if (state.pending || busy) {
     head = 'Asking the server to let Shap make your clients’ databases…';
     body = busy
-      ? 'The server is busy with an update or a backup: Shap asks once it’s done.'
+      ? 'The server is busy with another request (a check, an update or a backup): Shap asks once it’s done.'
       : slow
         ? where === 'setup'
           ? 'The server hasn’t answered yet. Carry on: Practice shows this until it has.'
           : 'The server hasn’t answered yet: this goes once it has.'
         : 'It usually takes a few seconds.';
+  } else if (failed && state.asked!.shared) {
+    // shap-ctl found a real company added to the server: Shap Accountant doesn't belong there.
+    head = 'Other companies’ books are on this server too';
+    body = `The server said: ${state.asked!.message}`;
   } else if (failed) {
     head = 'The server didn’t let Shap make your clients’ databases';
     body = `The server said: ${state.asked!.message} Whoever runs the server can allow it by hand (docs/ACCOUNTANT.md, on Shap’s GitHub):`;
     command = true;
-    ask = 'Ask the server again';
+    // In setup Shap Accountant isn't on yet: it asks again at the end, once the terms are accepted.
+    if (where === 'setup') body = `The server said: ${state.asked!.message} When you accept the terms at the end, Shap asks the server again. Whoever runs the server can also allow it by hand (docs/ACCOUNTANT.md, on Shap’s GitHub):`;
+    else ask = 'Ask the server again';
   } else {
     head = 'Shap can’t make your clients’ databases here yet';
     body =

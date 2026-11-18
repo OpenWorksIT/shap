@@ -1269,6 +1269,27 @@ Tests: `accountant/practice-setup.test.ts`, `ctl-script.test.ts` (failing on the
 which wrote outside the backups), `review-1.32/reviews.test.ts`, `test-server.test.ts`, and Pocket's
 `shap-1.32.test.ts`, each failing without its fix.
 
+The check of the fixes (`7ea0657`): SARS ready. Still to fix, and fixed: a test server's 10-client
+cap could be got round by adding clients at once (22 of 24 got in): counted under an advisory lock,
+rows or databases; a test server could make another company's `shap_<name>_demo` first and set it up
+to run its own code in that company's sessions: a demo database another login made is never used.
+"Write up" also opens a client to compile, so compiling isn't only for those given it: said, and who
+may sign is the practice's to decide (the words review: not Shap's advice). Time put on a quote and
+invoiced from it counted as never invoiced, and earlier years' time never invoiced was listed every
+year: the quote's invoice counts, and only the year's time (and earlier time invoiced after the year
+end) is listed, in Shap and Pocket. The agent's amount still went into revenue, whatever the docs
+said: there's no invoice item for it (an invoice line is revenue), and the docs say IFRS for SMEs
+23.4 keeps it out. The cost of recharged costs is named for a practice too, and another kind chosen
+while unused puts Shap's names back; move-in puts a practice's materials under its own cost type.
+Words: the busy state asked the server in a loop (2,521 requests in 30 seconds) and then said "too
+many requests": it asks every 15 seconds at most; setup's failed state offered a button that Shap
+Accountant (not on yet) refused: none in setup, and Shap asks again at the end; a test server made
+the practice's own server look shared, unlike shap-ctl: shap-ctl counts the added companies (real
+and test) into its status, and the app goes by that where it has it; the s240 sentence has its
+exceptions; "Settings → Features" is "What you use". Smaller: curly apostrophes in shap-ctl's
+messages, "busy with another request", less than 0.1 hours, "usually" for the SBC caution, the
+investment income in the turnover tax rule, the turnover note only while it's off.
+
 ### Code scanning (CodeQL), first run
 
 - The Accounts screen's download links carried the period's dates unencoded (flagged as text

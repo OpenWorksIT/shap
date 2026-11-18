@@ -50,10 +50,11 @@ export async function databaseRights(sql: Sql): Promise<{ may: boolean; login: s
  * add-company.sh adds (shap_<name>), but not this one's own, its demo or its clients'. A practice's
  * Shap belongs on a server of its own (docs/ACCOUNTANT.md), so setup and Practice say so.
  */
-export async function otherCompanies(sql: Sql): Promise<boolean> {
+export async function otherCompanies(sql: Sql, o: { mainOnly?: boolean } = {}): Promise<boolean> {
+  // mainOnly: just the first company's (shap), when shap-ctl has counted the added ones itself.
   const [r] = await sql<{ n: number }[]>`
     select count(*)::int as n from pg_database
-    where datname ~ '^shap(_[a-z0-9]+)?$' and datname <> current_database() and datname !~ '_demo$' and not datistemplate`;
+    where ${o.mainOnly ? sql`datname = 'shap'` : sql`datname ~ '^shap(_[a-z0-9]+)?$'`} and datname <> current_database() and datname !~ '_demo$' and not datistemplate`;
   return (r?.n ?? 0) > 0;
 }
 

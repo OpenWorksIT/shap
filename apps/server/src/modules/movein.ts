@@ -861,7 +861,8 @@ export async function applyPlan(tx: Db, plan: Plan, o: ApplyOptions, userId: str
         continue;
       }
       const hint = CATEGORY_HINTS.find(([re]) => re.test(c.category.slice(0, 200)) || re.test(c.description.slice(0, 200)))?.[1];
-      const cat = (hint && cats.find((x) => x.name.toLowerCase() === hint.toLowerCase())) || cats.find((x) => x.name.toLowerCase() === c.category.toLowerCase()) || sundry;
+      // Materials go to Parts, or where Parts is hidden (an accounting practice), the kind of business's own cost type for them.
+      const cat = (hint && cats.find((x) => x.name.toLowerCase() === hint.toLowerCase())) || (hint === 'Parts' && cats.find((x) => x.kind === 'materials')) || cats.find((x) => x.name.toLowerCase() === c.category.toLowerCase()) || sundry;
       const unpaid = c.unpaidCents > 0 && billSrc;
       const [row] = await tx<{ id: string }[]>`
         insert into costs (date, description, supplier, amount_cents, vat_cents, category_id, source_id, bill_number, due_date, note, created_by)

@@ -44,7 +44,7 @@ export function activityOf(industry: string): string {
  */
 export const PROFESSIONAL_SERVICE_INDUSTRIES: readonly string[] = ['accounting', 'consulting', 'it', 'health', 'tutor'];
 export const TURNOVER_TAX_PROFESSIONAL =
-  'A business with more than 20% of its receipts from professional services (accounting, consulting, information technology, health, education, law, engineering and the others the Sixth Schedule lists) can’t be on turnover tax: it isn’t a micro business. Check with your accountant or SARS.';
+  'A business with more than 20% of its receipts from professional services (accounting, consulting, information technology, health, education, law, engineering and the others the Sixth Schedule lists; for a company, its investment income counts too) can’t be on turnover tax: it isn’t a micro business. Check with your accountant or SARS.';
 
 export type IndustryKey = (typeof INDUSTRIES)[number]['key'];
 

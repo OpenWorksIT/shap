@@ -36,7 +36,7 @@ export const LEVEL_WORDS: Record<Level, string> = {
 };
 /** Who opens it, beside the choice: compiling is signing, in that person's own name. */
 export const COMPILE_SIGNS =
-  'Whoever compiles a client’s statements signs the compilation report (for a close corporation, the accounting officer’s report) in their own name: give a client to compile only to someone who signs for your practice.';
+  'Given a client either way, someone can open it to compile. Whoever compiles a client’s statements in Shap does it signed in as themselves, and signs the compilation report (for a close corporation, the accounting officer’s report) in their own name. Who in your practice may sign one is your practice’s to decide, under its professional body’s rules.';
 
 export interface DeadlineInputs {
   businessType: BusinessType;
