@@ -177,8 +177,9 @@ describe('SARS and tax', () => {
   it('an amount paid as the client’s agent: no invoice item makes it revenue, and the exempt option says it’s no supply (2, and the check of the fixes)', () => {
     expect(industryProfile('accounting').items.find((i) => /agent/i.test(i.d))).toBeUndefined();
     // Neither supply nor revenue: off the invoice (the IFRS review's check of the fixes).
-    expect(SALE_VAT.exempt.hint).toMatch(/\(A fee you pay in a client’s name as their agent and recover at cost is neither your supply nor your revenue, so it doesn’t go on your invoice\. A courier you book yourself and charge on is your own supply, with VAT\.\)/);
-    expect(read('docs/ACCOUNTANT.md')).toMatch(/IFRS for SMEs 23\.4 leaves amounts collected for others out\) or its supply \(VAT\s+Act s54\(2\)\)/);
+    expect(SALE_VAT.exempt.hint).toMatch(/\(A fee you pay in a client’s name as their agent and recover at cost is generally neither your supply nor your revenue\. Shap counts every invoice line as revenue, so leave it off your Shap invoices and recover it another way: check with your accountant\. A courier you book yourself and charge on is your own supply, with VAT\.\)/);
+    expect(read('docs/ACCOUNTANT.md')).toMatch(/generally is neither: it isn't\s+the practice's revenue \(IFRS for SMEs 23\.4 leaves amounts collected for others out\) or its supply\s+\(VAT\s+Act s54\(2\)\)/);
+    expect(read('docs/ACCOUNTANT.md')).toMatch(/A client's database is opened only if this Shap's own login owns it/);
   });
 
   it('the personal-service caution for a practice’s own company, registration as a tax practitioner, and the industry hint’s aids (3–5)', () => {

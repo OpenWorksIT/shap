@@ -37,8 +37,9 @@ entries newer than the version you're running before you update.
   year (or before it and invoiced only after the year end) that wasn't on an invoice issued by the
   year end, directly or through a quote (with its value at your hourly rates), to consider accruing
   the revenue; and the revenue policy no longer says all work is invoiced as it's done when it isn't.
-- An amount paid in a client's name as their agent, and recovered at cost, is no supply by you: the
-  VAT option *Exempt or not a supply* says so. Turnover tax's caution says a business with more than
+- The VAT option *Exempt or not a supply* says a fee paid in a client's name as their agent and
+  recovered at cost is generally neither your supply nor your revenue, so it stays off your Shap
+  invoices (check with your accountant). Turnover tax's caution says a business with more than
   20% of its receipts from professional services (for a company, with its investment income) can't
   be on it.
 - A demo company's database someone else made under its name is never used (the demo is off, and the

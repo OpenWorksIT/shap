@@ -147,11 +147,17 @@ export class ClientDbs {
    */
   async assertOwned(dbName: string): Promise<void> {
     this.checker ??= createDb(this.practiceUrl, { max: 2, idleSeconds: 30 });
-    const [r] = await this.checker<{ mine: boolean; owner: string }[]>`
-      select datdba = (select oid from pg_roles where rolname = current_user) as mine, pg_get_userbyid(datdba) as owner from pg_database where datname = ${dbName}`;
-    if (!r) throw Object.assign(new Error(`This client’s database (${dbName}) isn’t on the server.`), { code: 'missing' });
+    const [r] = await this.checker<{ mine: boolean; owner: string; me: string }[]>`
+      select datdba = (select oid from pg_roles where rolname = current_user) as mine, pg_get_userbyid(datdba) as owner, current_user::text as me from pg_database where datname = ${dbName}`;
+    if (!r) throw Object.assign(new Error(`This client’s database (${dbName}) isn’t on the server. Whoever runs the server restores it from its backup.`), { code: 'missing' });
+    // Handing over a database someone planted would run its code as this Shap's login: said so.
     if (!r.mine)
-      throw Object.assign(new Error(`This client’s database (${dbName}) belongs to another login (${r.owner}), so Shap doesn’t open it. If it’s the client’s, whoever runs the server hands it to this Shap’s login: alter database "${dbName}" owner to <that login> (docs/ACCOUNTANT.md).`), { code: 'not_ours' });
+      throw Object.assign(
+        new Error(
+          `This client’s database (${dbName}) belongs to another login (${r.owner}), so Shap doesn’t open it. Only if you know where it came from (made by this server’s own Postgres login before a move to a least-privilege login, or restored from this client’s backup), whoever runs the server can hand it to this Shap’s login: alter database "${dbName}" owner to "${r.me}"; If not, leave it and find out who made it (docs/ACCOUNTANT.md).`,
+        ),
+        { code: 'not_ours' },
+      );
   }
 
   /** A client's pool, for a request: once its database is checked as this Shap's own. */

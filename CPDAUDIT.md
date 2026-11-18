@@ -1305,6 +1305,15 @@ cap's pattern is `starts_with` (CodeQL flagged the hand-escaped LIKE). Smaller: 
 someone is given a client", the law as well as the professional body for who may sign, the agent
 line in the changelog hedged, move-in's cost types in order.
 
+The fourth round (`0ccef71`): security (the penetration test: nothing to fix), IFRS, SARS and
+accounting ready. Words, still to fix, and fixed: the exempt hint said flatly that an agent's
+amount is neither supply nor revenue: it says "generally", gives Shap's own limit as the reason it
+stays off a Shap invoice (Shap counts every invoice line as revenue) and says to check with an
+accountant, in both apps and their changelogs; the refusal of a client's database owned by another
+login gave the command to hand it over with no warning: it names that login, says to hand it over
+only when you know where it came from (and otherwise to find out who made it), and ACCOUNTANT.md
+says why; the refusal of a missing database says it's restored from the server's backup.
+
 ### Code scanning (CodeQL), first run
 
 - The Accounts screen's download links carried the period's dates unencoded (flagged as text

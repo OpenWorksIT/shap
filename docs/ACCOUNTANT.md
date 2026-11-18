@@ -66,9 +66,9 @@ so choosing it switches that off and says why: docs/SARS.md.) Yes adds a step, *
 
 **A practice's own invoices**: what it bought itself and charges on (a courier it booked) is a
 recharged cost, its own supply (with VAT if it's a vendor) and its revenue. An amount paid in the
-client's name as its agent and recovered at cost (a CIPC or SARS fee) is neither: it isn't the
-practice's revenue (IFRS for SMEs 23.4 leaves amounts collected for others out) or its supply (VAT
-Act s54(2)), and the slip's VAT isn't its to claim. Every line on a Shap invoice is revenue, so
+client's name as its agent and recovered at cost (a CIPC or SARS fee) generally is neither: it isn't
+the practice's revenue (IFRS for SMEs 23.4 leaves amounts collected for others out) or its supply
+(VAT Act s54(2)), and the slip's VAT isn't its to claim. Every line on a Shap invoice is revenue, so
 Shap has no item for it: recover it outside Shap's invoices, or with a journal through a balance
 sheet account, as the practice's own policy has it.
 
@@ -525,5 +525,12 @@ docs/SARS.md lists each rule and its source; they're checked with the standard S
   a practice"); `deploy/vps/ctl/shap-ctl.sh`'s `practice` step, tested in
   `apps/server/test/ctl-script.test.ts`. A login that may make databases chooses their names, so
   shap-ctl's backups take only names Shap makes (`shap`, `shap_<company>`, `<db>__c_<hex>`), one a
-  line, and a name never steers where they're written. Client databases made by a superuser before a move to
-  `shap_app` are handed over with `alter database "<name>" owner to shap_app;`.
+  line, and a name never steers where they're written. Client databases made by a superuser before
+  a move to `shap_app` are handed over with `alter database "<name>" owner to shap_app;`.
+- **A client's database is opened only if this Shap's own login owns it** (checked from the
+  practice's own database, before it's migrated, opened, checked or used for monthly invoices). One
+  another login made under a client's name (one that may make databases, after the client's was
+  dropped or while it's restored) could be set up to run its own code in this Shap's sessions, so it
+  isn't used. Hand one over only if you know where it came from (made by this server's own Postgres
+  login before a move to a least-privilege login, or restored from this client's backup); if not,
+  leave it and find out who made it.

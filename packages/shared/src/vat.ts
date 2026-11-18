@@ -25,7 +25,7 @@ export const SALE_VAT: Record<SaleVatCode, { label: string; short: string; field
     label: 'Exempt or not a supply',
     short: 'Exempt',
     field: '3',
-    hint: 'No VAT, and no VAT can be claimed on what went into it: residential rent, financial services (such as interest), and some education and public transport. Also amounts that aren’t a supply at all. (A fee you pay in a client’s name as their agent and recover at cost is neither your supply nor your revenue, so it doesn’t go on your invoice. A courier you book yourself and charge on is your own supply, with VAT.)',
+    hint: 'No VAT, and no VAT can be claimed on what went into it: residential rent, financial services (such as interest), and some education and public transport. Also amounts that aren’t a supply at all. (A fee you pay in a client’s name as their agent and recover at cost is generally neither your supply nor your revenue. Shap counts every invoice line as revenue, so leave it off your Shap invoices and recover it another way: check with your accountant. A courier you book yourself and charge on is your own supply, with VAT.)',
   },
 };
 
