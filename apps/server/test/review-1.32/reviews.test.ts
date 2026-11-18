@@ -7,7 +7,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { activityOf, COMPILE_SIGNS, industryProfile, PRACTICE_CAUTION, PRACTICE_OWN_SERVER, PRACTICE_PROFILES, SALE_VAT, SERVER_NOT_MANAGED, setupCautions, TURNOVER_TAX_PROFESSIONAL } from '@shap/shared';
+import { ACCOUNTANT_TERMS_VERSION, activityOf, COMPILE_SIGNS, industryProfile, PRACTICE_CAUTION, PRACTICE_OWN_SERVER, PRACTICE_PROFILES, SALE_VAT, SERVER_NOT_MANAGED, setupCautions, TURNOVER_TAX_PROFESSIONAL } from '@shap/shared';
 import { buildStatements } from '../../src/statements/build.js';
 import { expectCleanAudit, login, ref, setup, type TestEnv } from '../helpers.js';
 
@@ -242,5 +242,47 @@ describe('words on screen and liability', () => {
     expect(ctl).toMatch(/echo "practice: Postgres said: \$out"/);
     expect(panel).toMatch(/\.replace\('your name and email', 'their name and email'\)/);
     expect(read('apps/web/src/pages/Welcome.tsx')).toMatch(/These are sign-ins to Shap\. Payroll, for anyone on a salary, is the next question\./);
+  });
+});
+
+describe('words on screen and liability, the fifth round: a refusal Shap wrote, said whole from a route', () => {
+  const SQUATTER = 'shap_t_squatter_r132';
+  let env: TestEnv;
+  let dbName = '';
+  beforeAll(async () => {
+    env = await setup();
+  });
+  afterAll(async () => {
+    if (dbName) await env.sql.unsafe(`drop database if exists "${dbName}" with (force)`);
+    await env.sql.unsafe(`drop role if exists ${SQUATTER}`);
+    await expectCleanAudit(env.sql, FY);
+    await env.close();
+  });
+
+  it('a client’s database another login owns: the checks and the working papers say all of it, the caution and the whole command', async () => {
+    const owner = await login(env.app, 'owner@example.co.za');
+    const { settings } = await owner.get('/api/reference');
+    await owner.post('/api/practice/terms', { version: ACCOUNTANT_TERMS_VERSION });
+    await owner.post('/api/settings', { ...settings, industry: 'accounting', features: { ...settings.features, practice: true } }, 'PUT');
+    dbName = `${env.ctx.clients.practiceDb}__c_dddddddddddd`;
+    await env.sql.unsafe(`drop database if exists "${dbName}" with (force)`);
+    await env.sql.unsafe(`drop role if exists ${SQUATTER}`);
+    await env.sql.unsafe(`create role ${SQUATTER} login password 'made-up-password-5'`);
+    await env.sql.unsafe(`create database "${dbName}" owner ${SQUATTER}`);
+    const [me] = await env.sql<{ id: string; current: string }[]>`select id, current_user::text as current from users where email = 'owner@example.co.za'`;
+    const [c] = await env.sql<{ id: string }[]>`insert into practice_clients (id, name, kind, created_by, db_name) values ('dddddddd-dddd-4ddd-8ddd-dddddddddddd', 'Made-up Squatted Bakery', 'kept', ${me!.id}, ${dbName}) returning id`;
+    const routes: { method: 'GET' | 'POST'; url: string }[] = [
+      { method: 'POST', url: `/api/practice/clients/${c!.id}/checks` },
+      { method: 'GET', url: `/api/practice/clients/${c!.id}/file` },
+    ];
+    for (const { method, url } of routes) {
+      const r = await owner.call({ method, url, ...(method === 'POST' ? { payload: {} } : {}) });
+      const body = r.json() as { error: string; code?: string };
+      expect(r.statusCode, url).toBe(409);
+      expect(body.code).toBe('not_ours');
+      expect(body.error).toContain(`belongs to another login (${SQUATTER}), so Shap doesn’t open it. Only if you know where it came from`);
+      expect(body.error).toContain(`(alter database "${dbName}" owner to "${me!.current}";). If not, leave it and find out who made it (docs/ACCOUNTANT.md).`);
+      expect(body.error).toMatch(/find out who made it \(docs\/ACCOUNTANT\.md\)\.$/);
+    }
   });
 });

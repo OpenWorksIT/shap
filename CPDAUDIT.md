@@ -1314,6 +1314,11 @@ login gave the command to hand it over with no warning: it names that login, say
 only when you know where it came from (and otherwise to find out who made it), and ACCOUNTANT.md
 says why; the refusal of a missing database says it's restored from the server's backup.
 
+The fifth round (`c3f5bf2`): words, still to fix, and fixed: the routes that refuse such a
+database cut what they say at 400 characters, so the new refusal lost its caution and half its
+command: Shap's own refusals are said whole (only the database server's own text is cut), the
+command is in brackets, and a test asks the checks and the working papers for it.
+
 ### Code scanning (CodeQL), first run
 
 - The Accounts screen's download links carried the period's dates unencoded (flagged as text

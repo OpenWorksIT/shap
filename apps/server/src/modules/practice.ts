@@ -27,7 +27,7 @@ import { audit } from '../lib/audit.js';
 import { today } from '../lib/books.js';
 import { badRequest, forbidden, HttpError, notFound } from '../lib/errors.js';
 import { routePath } from '../lib/http.js';
-import { clientDbName, cutWords, databaseRights, healthOf, mirrorUser, otherCompanies, roleFor, rolesFor, saveHealth, unmirrorUser, type ClientHealth } from '../lib/practice.js';
+import { clientDbName, cutWords, databaseRights, healthOf, mirrorUser, otherCompanies, ownRefusal, roleFor, rolesFor, saveHealth, unmirrorUser, type ClientHealth } from '../lib/practice.js';
 import { SERVER_ONLY, under } from '../lib/server-only.js';
 import { applyPocketShare, readPocketShare } from './import/pocket-share.js';
 import { appVersion, askCtl, BACKUP_NAME, ctlPending, ctlStatus } from './system.js';
@@ -309,7 +309,7 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     try {
       return await clients.openOwn(dbName);
     } catch (err) {
-      throw new HttpError(409, (err as Error).message.slice(0, 400), 'not_ours');
+      throw new HttpError(409, ownRefusal(err), 'not_ours');
     }
   };
   const usable = (c: ClientRow) => {

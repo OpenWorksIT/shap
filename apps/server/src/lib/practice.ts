@@ -63,6 +63,17 @@ export async function otherCompanies(sql: Sql, o: { testDbs?: string[] } = {}): 
 export const MAX_CLIENT_POOLS = 12;
 
 /** The clients' pools, made when first needed. */
+/**
+ * What a route says when a client's database isn't opened. assertOwned's refusals are Shap's own
+ * words, said whole (cut short, the caution and half the command were lost); anything else (the
+ * database server's own text) is cut short.
+ */
+export const ownRefusal = (err: unknown): string => {
+  const e = err as Error & { code?: unknown };
+  const message = String(e?.message ?? '');
+  return e?.code === 'missing' || e?.code === 'not_ours' ? message : message.slice(0, 400);
+};
+
 export class ClientDbs {
   private pools = new Map<string, Sql>();
   constructor(private readonly practiceUrl: string) {}
@@ -154,7 +165,7 @@ export class ClientDbs {
     if (!r.mine)
       throw Object.assign(
         new Error(
-          `This client’s database (${dbName}) belongs to another login (${r.owner}), so Shap doesn’t open it. Only if you know where it came from (made by this server’s own Postgres login before a move to a least-privilege login, or restored from this client’s backup), whoever runs the server can hand it to this Shap’s login: alter database "${dbName}" owner to "${r.me}"; If not, leave it and find out who made it (docs/ACCOUNTANT.md).`,
+          `This client’s database (${dbName}) belongs to another login (${r.owner}), so Shap doesn’t open it. Only if you know where it came from (made by this server’s own Postgres login before a move to a least-privilege login, or restored from this client’s backup), whoever runs the server can hand it to this Shap’s login (alter database "${dbName}" owner to "${r.me}";). If not, leave it and find out who made it (docs/ACCOUNTANT.md).`,
         ),
         { code: 'not_ours' },
       );
@@ -221,7 +232,7 @@ export async function migrateClients(practice: Sql, clients: ClientDbs, log: { i
       ok.push(c.id);
     } catch (err) {
       log.warn({ err }, 'a client’s books: migrations failed');
-      await practice`update practice_clients set migrate_error = ${String((err as Error).message).slice(0, 500)} where id = ${c.id}`;
+      await practice`update practice_clients set migrate_error = ${String((err as Error).message).slice(0, 1000)} where id = ${c.id}`;
       failed.push(c.id);
     }
   }

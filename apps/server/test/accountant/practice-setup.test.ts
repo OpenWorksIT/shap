@@ -218,7 +218,7 @@ describe('the server, for a practice: a real company on a server other companies
       expect(r.failed).toContain(c!.id);
       const [row] = await env.sql<{ migrateError: string }[]>`select migrate_error from practice_clients where id = ${c!.id}`;
       expect(row!.migrateError).toMatch(/belongs to another login \(shap_t_squatter2\), so Shap doesn’t open it\. Only if you know where it came from/);
-      expect(row!.migrateError).toContain(`alter database "${ROLE}__c_aaaaaaaaaaaa" owner to "${ROLE}"; If not, leave it and find out who made it`);
+      expect(row!.migrateError).toContain(`alter database "${ROLE}__c_aaaaaaaaaaaa" owner to "${ROLE}";). If not, leave it and find out who made it`);
       await expect(env.ctx.clients.openOwn(`${ROLE}__c_aaaaaaaaaaaa`)).rejects.toThrow(/belongs to another login/);
       await expect(env.ctx.clients.withOwn(`${ROLE}__c_aaaaaaaaaaaa`, async () => 1)).rejects.toThrow(/belongs to another login/);
     } finally {
