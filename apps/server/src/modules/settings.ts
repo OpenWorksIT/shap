@@ -26,8 +26,23 @@ export async function applyIndustry(db: Db, industry: string) {
     await db`insert into cost_categories (name, kind, account_id, sort)
              select ${c.name}, ${c.kind}, a.id, ${i - 20} from accounts a where a.code = ${c.account}
              and not exists (select 1 from cost_categories x where lower(x.name) = lower(${c.name}))`;
+    // One Shap had already (Software & subscriptions, say) is listed first too.
+    await db`update cost_categories set sort = ${i - 20} where lower(name) = lower(${c.name}) and sort > ${i - 20}`;
   }
-  const back = ['Demo', 'PPE', 'Vehicle Transfer', 'Tool'].filter((n) => !p.hide.includes(n));
+  // The revenue accounts the line types post to, named for this kind of business (a practice's
+  // "Fees"), while the books haven't used them and they still have Shap's own names.
+  if (p.revenue) {
+    for (const [key, name, was] of [
+      ['revenue_labour', p.revenue.labour, 'Project revenue – labour'],
+      ['revenue_materials', p.revenue.materials, 'Project revenue – materials'],
+      ['revenue_other', p.revenue.other, 'Other income'],
+    ] as const) {
+      await db`update accounts a set name = ${name} where a.system_key = ${key} and a.name = ${was}
+               and not exists (select 1 from ledger l where l.account_id = a.id)
+               and not exists (select 1 from accounts x where lower(x.name) = lower(${name}) and x.id <> a.id)`;
+    }
+  }
+  const back = ['Demo', 'PPE', 'Vehicle Transfer', 'Tool', 'Parts'].filter((n) => !p.hide.includes(n));
   if (back.length) await db`update cost_categories set active = true where name in ${db(back)}`;
   if (p.hide.length) await db`update cost_categories set active = false where name in ${db(p.hide)} and not exists (select 1 from costs where category_id = cost_categories.id)`;
 }

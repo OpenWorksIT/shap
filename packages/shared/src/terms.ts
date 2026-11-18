@@ -7,6 +7,7 @@
  *
  * Change TERMS_VERSION when the published terms change in a way people must agree to again.
  */
+import { TURNOVER_TAX_PROFESSIONAL } from './setup.js';
 export const TERMS_VERSION = '2026-11-09';
 export const TERMS_URL = 'https://www.openworks.co.za/shap/terms/';
 export const DISCLAIMER_URL = 'https://www.openworks.co.za/shap/disclaimer/';
@@ -23,13 +24,13 @@ export const PRACTICE_NOTE =
   'What Shap’s checks find and the returns shown are worked out from what’s captured in each client’s books and its settings, and from Shap’s SARS tables, which may be out of date. They’re aids for you to check, not advice, and not every check or return: Shap lists only those it can work out. Shap files nothing with SARS or CIPC and signs nothing. Shap is free software from OpenWorks IT, who are not accountants, tax practitioners or auditors.';
 /** Said back before Shap Accountant is switched on: what the practice answers for. */
 export const PRACTICE_CAUTION =
-  'Shap Accountant keeps your clients’ books on this server. Their backups, who in your practice opens them, and their personal information (POPIA) are your practice’s responsibility, what Shap’s checks find and the returns it shows are aids for your practitioners to check, not advice, and books brought in from another package are for you to check against it.';
+  'Shap Accountant keeps your clients’ books on this server. Their backups, who in your practice opens them, and their personal information (POPIA) are your practice’s responsibility, what Shap’s checks find and the returns it shows are aids for your practitioners to check, not advice, and books brought in from another package are for you to check against it. Completing returns or giving tax advice for a fee needs registration as a tax practitioner (Tax Administration Act s240): Shap doesn’t check it.';
 /** Where a practice's Shap runs (docs/ACCOUNTANT.md): said in setup, on Practice and in the docs. */
 export const PRACTICE_OWN_SERVER =
-  'Shap Accountant needs Shap on a server of its own: a VPS that’s only your practice’s, or your own PC. Not a company added to a Shap server that other businesses use: on a server of its own, your clients’ books, their backups and who can reach them are your practice’s alone.';
+  'Shap Accountant needs Shap on a server of its own: a VPS (a server rented online) or a computer that only your practice uses, run by your practice or someone it chooses. Not a company added to a Shap server that other businesses use. The server’s security, its backups, and who can reach your clients’ books are then your practice’s to look after.';
 /** Where this Shap's database login can't make the clients' databases, and Shap can't ask the server to allow it. */
 export const SERVER_NOT_MANAGED =
-  'Shap can’t make your clients’ databases here yet: this Shap’s database login isn’t allowed to make databases, and Shap can’t ask this server to allow it. On a VPS of your own set up as Shap’s deployment guide has it (Settings → System shows updates and backups there), Shap sets this up by itself; anywhere else, whoever runs the server allows it (docs/ACCOUNTANT.md, on Shap’s GitHub).';
+  'Shap can’t make your clients’ databases here: this Shap’s database login isn’t allowed to make databases, and Shap can’t ask this server to allow it. Where Settings → Updates & backups looks after the server, Shap can ask it for this; anywhere else, whoever runs the server allows it (docs/ACCOUNTANT.md, on Shap’s GitHub).';
 /**
  * With each Shap Pocket share brought in (Practice): what Shap does and doesn't do with one. The
  * disclaimer's "Sharing your books with your accountant (Shap Pocket)" says the same.
@@ -156,7 +157,7 @@ export function setupCautions(a: {
     out.push('You use casual labour: Shap records their days and pay, but doesn’t work out, deduct or pay PAYE, UIF or the Compensation Fund on day wages, or register you with anyone. Someone you pay by the day is usually your employee in the law, so these may apply: the national minimum wage to every worker, PAYE and the Compensation Fund to employees’ pay, and UIF and the Basic Conditions of Employment Act’s rules on hours and leave from 24 hours a month. Keeping to them is up to you: check with your accountant or a labour practitioner.');
     if (!a.employees) out.push('SDL: once everything you pay employees (day wages included) is expected to pass R500 000 over the next 12 months, SDL (1% of it) is usually due, registered with SARS (some employers, such as qualifying public benefit organisations, are exempt). Shap doesn’t work out SDL on day wages: check with your accountant.');
   }
-  if (a.turnoverTax) out.push('You’re on turnover tax: Shap estimates it from your turnover, but the TT01 registration and the TT03 return are yours to file.');
+  if (a.turnoverTax) out.push(`You’re on turnover tax: Shap estimates it from your turnover, but the TT01 registration and the TT03 return are yours to file. ${TURNOVER_TAX_PROFESSIONAL}`);
   if (a.paysDividends) out.push('Dividends: each dividend paid is declared to SARS on the DTR01 and DTR02 by the last day of the next month (an exemption is claimed on the DTR01, so exempt dividends are declared too: confirm with your accountant). Shap records them and reminds you; declaring and paying is up to you.');
   return out;
 }

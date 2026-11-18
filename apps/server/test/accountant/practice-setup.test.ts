@@ -8,7 +8,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ACCOUNTANT_TERMS_VERSION, PRACTICE_PROFILES, SERVER_NOT_MANAGED, STARTING_PROFILES, withNeeds } from '@shap/shared';
+import { ACCOUNTANT_TERMS_VERSION, PRACTICE_OWN_SERVER, PRACTICE_PROFILES, SERVER_NOT_MANAGED, STARTING_PROFILES, withNeeds } from '@shap/shared';
 import { createDb } from '../../src/db/index.js';
 import { expectCleanAudit, login, sessionFor, setup, type TestEnv } from '../helpers.js';
 
@@ -27,8 +27,13 @@ const dropClientsOf = async (admin: TestEnv['sql'], practiceDb: string) => {
   for (const { datname } of await admin<{ datname: string }[]>`select datname from pg_database where datname like ${pattern}`) await admin.unsafe(`drop database if exists "${datname}" with (force)`);
 };
 
-describe('the server, for a practice: its database login, and asking shap-ctl', () => {
-  // A server set up with a least-privilege login (docs/deployment.md): it may not make databases until allowed.
+/**
+ * A Shap whose database login may not make databases until allowed (a least-privilege login,
+ * docs/deployment.md, or a test server added before 1.32). The test databases' cluster holds other
+ * shap_* databases (this run's own, at least), so it's a server other companies share, unless it's
+ * a test server: these run as a test server, and the next describe as a real company.
+ */
+describe('the server, for a practice: its database login, and asking shap-ctl (a test server)', () => {
   const ROLE = 'shap_t_nocreate';
   const adminUrl = new URL(process.env.DATABASE_URL!);
   const appUrl = new URL(process.env.DATABASE_URL!);
@@ -48,9 +53,8 @@ describe('the server, for a practice: its database login, and asking shap-ctl', 
     await admin.unsafe(`drop role if exists ${ROLE}`);
     await admin.unsafe(`create role ${ROLE} login password 'made-up-password-1'`);
     await admin.unsafe(`create database ${ROLE} owner ${ROLE}`);
-    env = await setup({ env: { DATABASE_URL: appUrl.toString(), CTL_DIR: ctl, REQUEST_DIR: ctl } });
+    env = await setup({ env: { DATABASE_URL: appUrl.toString(), CTL_DIR: ctl, REQUEST_DIR: ctl, TEST_SERVER: 'true' } });
     owner = await login(env.app, 'owner@example.co.za');
-    await switchOn(owner);
   });
   afterAll(async () => {
     await expectCleanAudit(env.sql);
@@ -63,9 +67,19 @@ describe('the server, for a practice: its database login, and asking shap-ctl', 
     rmSync(ctl, { recursive: true, force: true });
   });
 
+  it('asks the server only once Shap Accountant is on, its terms accepted', async () => {
+    writeFileSync(join(ctl, 'status.json'), JSON.stringify({ check: { at: '2026-11-18T08:00:00Z' } }));
+    const off = await owner.call({ method: 'POST', url: '/api/practice/server', payload: {}, ...from() });
+    expect(off.statusCode).toBe(400);
+    expect(off.json().error).toMatch(/Shap Accountant is off/);
+    expect(existsSync(join(ctl, 'request'))).toBe(false);
+    rmSync(join(ctl, 'status.json'));
+    await switchOn(owner);
+  });
+
   it('says this Shap can’t make its clients’ databases, and why, where nothing can ask the server', async () => {
-    expect(await owner.get('/api/practice/server')).toMatchObject({ ready: false, login: ROLE, managed: false, pending: false, asked: null, testServer: false });
-    const r = await owner.call({ method: 'POST', url: '/api/practice/server', payload: {} });
+    expect(await owner.get('/api/practice/server')).toMatchObject({ ready: false, login: ROLE, managed: false, pending: false, asked: null, testServer: true });
+    const r = await owner.call({ method: 'POST', url: '/api/practice/server', payload: {}, ...from() });
     expect(r.statusCode).toBe(400);
     expect(r.json().error).toBe(SERVER_NOT_MANAGED);
     // Adding a client says so, and leaves nothing half made.
@@ -79,14 +93,14 @@ describe('the server, for a practice: its database login, and asking shap-ctl', 
     writeFileSync(join(ctl, 'status.json'), JSON.stringify({ check: { at: '2026-11-18T08:00:00Z' } }));
     // Something else asked for first goes first.
     writeFileSync(join(ctl, 'request'), 'backup\n');
-    const busy = await owner.call({ method: 'POST', url: '/api/practice/server', payload: {} });
+    const busy = await owner.call({ method: 'POST', url: '/api/practice/server', payload: {}, ...from() });
     expect(busy.statusCode).toBe(409);
     expect(readFileSync(join(ctl, 'request'), 'utf8')).toBe('backup\n');
     rmSync(join(ctl, 'request'));
-    expect(await owner.post('/api/practice/server')).toMatchObject({ ready: false, managed: true, pending: true });
+    expect((await owner.call({ method: 'POST', url: '/api/practice/server', payload: {}, ...from() })).json()).toMatchObject({ ready: false, managed: true, pending: true });
     expect(readFileSync(join(ctl, 'request'), 'utf8')).toBe('practice\n');
     // Asked again while it waits: nothing more is written or logged.
-    expect(await owner.post('/api/practice/server')).toMatchObject({ pending: true });
+    expect((await owner.call({ method: 'POST', url: '/api/practice/server', payload: {}, ...from() })).json()).toMatchObject({ pending: true });
     expect(await env.sql`select details from audit_log where action = 'system_practice'`).toEqual([{ details: { login: ROLE } }]);
   });
 
@@ -97,7 +111,7 @@ describe('the server, for a practice: its database login, and asking shap-ctl', 
     writeFileSync(join(ctl, 'status.json'), JSON.stringify({ practice: { at: '2026-11-18T08:01:00Z', ok: true, login: ROLE, message: `Its database login (${ROLE}) may now make databases.` } }));
     expect(await owner.get('/api/practice/server')).toMatchObject({ ready: true, pending: false, asked: { ok: true, message: expect.stringMatching(/may now make databases/) } });
     // Ready: asking again changes nothing.
-    expect(await owner.post('/api/practice/server')).toMatchObject({ ready: true });
+    expect((await owner.call({ method: 'POST', url: '/api/practice/server', payload: {}, ...from() })).json()).toMatchObject({ ready: true });
     expect(existsSync(join(ctl, 'request'))).toBe(false);
     const { id } = await owner.post<{ id: string }>('/api/practice/clients', { name: 'Made-up Motors' });
     const [c] = await env.sql<{ dbName: string }[]>`select db_name from practice_clients where id = ${id}`;
@@ -110,6 +124,62 @@ describe('the server, for a practice: its database login, and asking shap-ctl', 
       expect((await who.call({ method: 'GET', url: '/api/practice/server' })).statusCode).toBe(403);
       expect((await who.call({ method: 'POST', url: '/api/practice/server', payload: {}, ...from() })).statusCode).toBe(403);
     }
+  });
+
+  it('keeps a test server’s made-up clients few: 10 at most, archived ones too (the security review)', async () => {
+    const n = (await env.sql<{ n: number }[]>`select count(*)::int as n from practice_clients`)[0]!.n;
+    const owner1 = (await env.sql<{ id: string }[]>`select id from users where email = 'owner@example.co.za'`)[0]!.id;
+    for (let i = n; i < 10; i++) await env.sql`insert into practice_clients (name, kind, created_by, archived_at) values (${`Made-up ${i}`}, 'kept', ${owner1}, now())`;
+    const r = await owner.call({ method: 'POST', url: '/api/practice/clients', payload: { name: 'One too many' }, ...from() });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error).toMatch(/A test server keeps at most 10 clients’ books/);
+    await env.sql`delete from practice_clients where db_name is null`;
+  });
+});
+
+describe('the server, for a practice: a real company on a server other companies share (the security review)', () => {
+  const ROLE = 'shap_t_shared';
+  const adminUrl = new URL(process.env.DATABASE_URL!);
+  const appUrl = new URL(process.env.DATABASE_URL!);
+  appUrl.username = ROLE;
+  appUrl.password = 'made-up-password-1';
+  appUrl.pathname = `/${ROLE}`;
+  const ctl = mkdtempSync(join(tmpdir(), 'shap-practice-ctl-'));
+  let admin: TestEnv['sql'];
+  let env: TestEnv;
+  let owner: Who;
+  beforeAll(async () => {
+    adminUrl.pathname = '/postgres';
+    admin = createDb(adminUrl.toString(), { max: 1 });
+    await admin.unsafe(`drop database if exists ${ROLE} with (force)`);
+    await admin.unsafe(`drop role if exists ${ROLE}`);
+    await admin.unsafe(`create role ${ROLE} login password 'made-up-password-1'`);
+    await admin.unsafe(`create database ${ROLE} owner ${ROLE}`);
+    // Another company's books on the same server.
+    await admin.unsafe('drop database if exists shap_madeupneighbour with (force)');
+    await admin.unsafe('create database shap_madeupneighbour');
+    writeFileSync(join(ctl, 'status.json'), JSON.stringify({ check: { at: '2026-11-18T08:00:00Z' } }));
+    env = await setup({ env: { DATABASE_URL: appUrl.toString(), CTL_DIR: ctl, REQUEST_DIR: ctl } });
+    owner = await login(env.app, 'owner@example.co.za');
+    await switchOn(owner);
+  });
+  afterAll(async () => {
+    await expectCleanAudit(env.sql);
+    await env.close();
+    await admin.unsafe(`drop database if exists ${ROLE} with (force)`);
+    await admin.unsafe(`drop role if exists ${ROLE}`);
+    await admin.unsafe('drop database if exists shap_madeupneighbour with (force)');
+    await admin.end();
+    rmSync(ctl, { recursive: true, force: true });
+  });
+
+  it('never asks the server to let it make databases, and says Shap Accountant needs a server of its own', async () => {
+    expect(await owner.get('/api/practice/server')).toMatchObject({ ready: false, managed: true, otherCompanies: true, testServer: false });
+    const r = await owner.call({ method: 'POST', url: '/api/practice/server', payload: {}, ...from() });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error).toMatch(/Other companies’ books are on this server, so Shap doesn’t ask it/);
+    expect(r.json().error).toContain(PRACTICE_OWN_SERVER);
+    expect(existsSync(join(ctl, 'request'))).toBe(false);
   });
 });
 
@@ -239,6 +309,24 @@ describe('the practice’s people, from setup', () => {
     const again = await owner.call({ method: 'POST', url: '/api/practice/team', payload: { ...team, people: [person('Late', 'late@example.co.za', 'Bookkeeper')] }, ...from() });
     expect(again.statusCode).toBe(400);
     expect(again.json().error).toMatch(/Settings → People who sign in/);
+  });
+
+  it('makes one team when two are sent at once, and never changes a profile someone is on (the security review)', async () => {
+    // As setup found it: nobody else signs in yet (the team made above is taken out of Shap).
+    await env.sql`update users set active = false where email <> 'owner@example.co.za'`;
+    const one = { profiles: [{ name: 'Made-up clerk', access: ['practice.clients'] }], people: [person('Ayanda Twice', 'ayanda@example.co.za', 'Made-up clerk')] };
+    const two = { profiles: [{ name: 'Made-up clerk', access: ['practice.clients'] }], people: [person('Busi Twice', 'busi@example.co.za', 'Made-up clerk')] };
+    const [a, b] = await Promise.all([owner.call({ method: 'POST', url: '/api/practice/team', payload: one, ...from() }), owner.call({ method: 'POST', url: '/api/practice/team', payload: two, ...from() })]);
+    expect([a.statusCode, b.statusCode].sort()).toEqual([200, 400]);
+    expect([a, b].find((x) => x.statusCode === 400)!.json().error).toMatch(/Someone else signs in here already/);
+    expect(await env.sql`select 1 from users where email in ('ayanda@example.co.za', 'busi@example.co.za')`).toHaveLength(1);
+    // Someone signed out of Shap for now is still on Admin: setup doesn't change it under them.
+    await env.sql`update users set active = false where email <> 'owner@example.co.za'`;
+    const r = await owner.call({ method: 'POST', url: '/api/practice/team', payload: { profiles: [{ name: 'Admin', access: ['reports.view'] }], people: [person('Carl Later', 'carl@example.co.za', 'Admin')] }, ...from() });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error).toMatch(/Someone is on the profile Admin already/);
+    expect(await env.sql`select 1 from users where email = 'carl@example.co.za'`).toHaveLength(0);
+    await env.sql`update users set active = true where email in ('thandi@example.co.za', 'pieter@example.co.za', 'lerato@example.co.za')`;
   });
 
   it('is never done in a client’s books', async () => {

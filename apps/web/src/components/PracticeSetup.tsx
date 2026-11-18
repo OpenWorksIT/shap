@@ -1,9 +1,9 @@
 /**
- * Shap Accountant from setup (docs/ACCOUNTANT.md, "Setting up a practice"): the server's part, made
- * ready in the background while the owner answers (each client's books are a database of their own,
- * so this Shap's database login must be allowed to make them: shap-ctl allows it where it looks after
- * the server), and the practice's people (solo, or a sign-in each on a profile, now or later).
- * The server's part shows on Practice too, while it isn't ready.
+ * Shap Accountant from setup (docs/ACCOUNTANT.md, "Setting up a practice"): the server's part (each
+ * client's books are a database of their own, so this Shap's database login must be allowed to make
+ * them: setup checks while the owner answers, and once the terms are accepted at the end, asks shap-ctl
+ * where it looks after a server of the practice's own), and the practice's people (solo, or a sign-in
+ * each on a profile, now or later). The server's part shows on Practice too, while it isn't ready.
  */
 import { useEffect, useRef, useState } from 'react';
 import { passwordProblem, PRACTICE_OWN_SERVER, SERVER_NOT_MANAGED, TEAM_MAX, withNeeds, type Feature, type Task } from '@shap/shared';
@@ -23,30 +23,38 @@ export interface ServerState {
   othersSignIn: boolean;
 }
 
-/** How long setup waits for shap-ctl before saying it's taking long (it usually answers in seconds). */
-const WAIT_MS = 3 * 60 * 1000;
+/** Other companies' books share the server (a test server's are made up): Shap Accountant doesn't belong here. */
+export const sharedServer = (s: ServerState) => s.otherCompanies && !s.testServer;
+/** Shap may ask shap-ctl for it: it looks after this server, which is the practice's alone, and nothing's waiting. */
+export const mayAsk = (s: ServerState) => !s.ready && s.managed && !sharedServer(s) && !s.pending;
 
-/**
- * The server's state, asked again every few seconds while shap-ctl has the request. `ask`: ask it
- * by itself where it can (setup, once the practice says it keeps clients' books here).
- */
-export function usePracticeServer(ask: boolean) {
+/** How long before saying the server is taking long (it usually answers in seconds; behind an update, minutes). */
+const WAIT_MS = 2 * 60 * 1000;
+
+/** The server's state, looked at again every few seconds while shap-ctl has the request (or is busy). */
+export function usePracticeServer() {
   const [state, setState] = useState<ServerState | null>(null);
   const [error, setError] = useState('');
   const [slow, setSlow] = useState(false);
-  const asked = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const [tick, setTick] = useState(0);
   const since = useRef(0);
+  const busyRef = useRef(false);
   const request = async () => {
     setError('');
+    since.current = since.current || Date.now();
     try {
-      asked.current = true;
-      since.current = Date.now();
       setState(await api<ServerState>('/api/practice/server', { body: {} }));
+      busyRef.current = false;
+      setBusy(false);
     } catch (err) {
-      // Busy with another request (an update, a backup): asked again on the next look.
-      if (err instanceof ApiError && err.code === 'ctl_busy') asked.current = false;
-      else setError(err instanceof ApiError ? err.message : 'Couldn’t ask the server');
+      // Busy with an update or a backup: asked again once it's done (below).
+      if (err instanceof ApiError && err.code === 'ctl_busy') {
+        busyRef.current = true;
+        setBusy(true);
+      } else setError(err instanceof ApiError ? err.message : 'Couldn’t ask the server');
     }
+    setTick((t) => t + 1);
   };
   useEffect(() => {
     let stop = false;
@@ -56,8 +64,8 @@ export function usePracticeServer(ask: boolean) {
         const s = await api<ServerState>('/api/practice/server');
         if (stop) return;
         setState(s);
-        if (!s.ready && s.managed && !s.pending && ask && !asked.current) await request();
-        const waiting = !s.ready && s.managed && (s.pending || asked.current);
+        if (busyRef.current && mayAsk(s)) await request();
+        const waiting = !s.ready && (s.pending || busyRef.current);
         if (waiting && since.current && Date.now() - since.current > WAIT_MS) setSlow(true);
         if (waiting && !stop) timer = setTimeout(() => void look(), 3000);
       } catch (err) {
@@ -70,60 +78,88 @@ export function usePracticeServer(ask: boolean) {
       if (timer) clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ask]);
-  return { state, error, slow, request };
+  }, [tick]);
+  return { state, error, slow, busy, request };
 }
 
-/** What the server is ready for, in words: on setup's practice step, and on Practice while it isn't ready. */
-export function PracticeServer({ ask, onlyIfNotReady, onState }: { ask: boolean; onlyIfNotReady?: boolean; onState?: (s: ServerState) => void }) {
-  const { state, error, slow, request } = usePracticeServer(ask);
+/**
+ * What the server can do for Shap Accountant, in words that are true in each state it can be in: on
+ * setup's practice step (it only looks: the asking is at the end, once the terms are accepted), and
+ * on Practice for the owner while it isn't ready (with the button to ask), or isn't the practice's alone.
+ */
+export function PracticeServer({ where, onState }: { where: 'setup' | 'practice'; onState?: (s: ServerState) => void }) {
+  const { state, error, slow, busy, request } = usePracticeServer();
   useEffect(() => {
     if (state) onState?.(state);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state]);
   if (!state) return error ? <div className="banner alert small">{error}</div> : <p className="xs muted">Looking at this server…</p>;
-  const shared = state.otherCompanies && !state.testServer;
-  if (onlyIfNotReady && state.ready && !shared) return null;
-  const failed = state.asked && !state.asked.ok && !state.pending;
+  const shared = sharedServer(state);
+  if (where === 'practice' && state.ready && !shared) return null;
+  const failed = !state.ready && !state.pending && !busy && state.asked && !state.asked.ok;
+  let head: string;
+  let body: string;
+  let command = false;
+  let ask: string | null = null;
+  if (shared) {
+    head = 'Other companies’ books are on this server too';
+    body = `${PRACTICE_OWN_SERVER}${state.ready ? '' : ' Here, this Shap’s database login can’t make databases, and isn’t meant to, so your clients’ books can’t be kept on this server.'}`;
+  } else if (state.ready) {
+    head = 'Shap can make your clients’ databases here';
+    body = `Each client you add gets a database of its own on this server. The server’s security, its backups, and who in your practice opens which books are your practice’s to look after.${state.testServer ? ' A test server: try Shap Accountant here with made-up clients only (10 at most).' : ''}`;
+  } else if (state.testServer) {
+    head = 'This test server can’t make its clients’ databases yet';
+    body = 'Whoever runs the server can let it make its made-up clients’ databases (docs/TEST_SERVER.md, on Shap’s GitHub):';
+    command = true;
+  } else if (!state.managed) {
+    head = 'Shap can’t make your clients’ databases here yet';
+    body = SERVER_NOT_MANAGED;
+    command = true;
+  } else if (state.pending || busy) {
+    head = 'Asking the server to let Shap make your clients’ databases…';
+    body = busy
+      ? 'The server is busy with an update or a backup: Shap asks once it’s done.'
+      : slow
+        ? where === 'setup'
+          ? 'The server hasn’t answered yet. Carry on: Practice shows this until it has.'
+          : 'The server hasn’t answered yet: this goes once it has.'
+        : 'It usually takes a few seconds.';
+  } else if (failed) {
+    head = 'The server didn’t let Shap make your clients’ databases';
+    body = `The server said: ${state.asked!.message} Whoever runs the server can allow it by hand (docs/ACCOUNTANT.md, on Shap’s GitHub):`;
+    command = true;
+    ask = 'Ask the server again';
+  } else {
+    head = 'Shap can’t make your clients’ databases here yet';
+    body =
+      where === 'setup'
+        ? 'When you accept the terms at the end, Shap asks the server to let this Shap’s database login make databases, and nothing more.'
+        : 'Shap can ask the server to let this Shap’s database login make them, and nothing more.';
+    ask = where === 'practice' ? 'Ask the server' : null;
+  }
   return (
-    <div className={`panel panel-pad stack ${state.ready ? '' : 'banner'}`} style={{ gap: 8 }}>
-      <strong className="small">
-        {state.ready ? (
-          <>
-            <Icon name="check" size={16} /> This server can keep your clients’ books
-          </>
-        ) : state.managed && (state.pending || !failed) ? (
-          'Setting this server up for your clients’ books…'
-        ) : (
-          'This server can’t keep your clients’ books yet'
-        )}
-      </strong>
-      <span className="xs muted">
-        {state.ready
-          ? 'Each client you add gets a database of its own here. Their backups, and who in your practice opens them, are your practice’s to look after.'
-          : state.managed && !failed
-            ? slow
-              ? 'The server hasn’t answered yet. You can carry on: Shap Accountant’s Practice page says when it’s ready.'
-              : 'Shap is asking the server to let it make a database for each client. You can carry on while it does: it takes a few seconds.'
-            : failed
-              ? `The server said: ${state.asked!.message} Whoever runs it can see why in its log (journalctl -u shap-ctl).`
-              : SERVER_NOT_MANAGED}
-      </span>
-      {!state.ready && !state.managed && state.login && (
+    <div className={`panel panel-pad stack ${state.ready && !shared ? '' : 'banner'}`} style={{ gap: 8 }}>
+      <strong className="small">{head}</strong>
+      <span className="xs muted">{body}</span>
+      {command && state.login && (
         <span className="xs muted">
           For whoever runs the server: <code>alter role "{state.login}" createdb;</code>
         </span>
       )}
-      {!state.ready && state.managed && failed && (
+      {ask && (
         <button type="button" className="btn small start" onClick={() => void request()}>
-          Ask the server again
+          {ask}
         </button>
       )}
-      {state.testServer && <span className="xs muted">A test server: try Shap Accountant here with made-up clients only.</span>}
-      {shared && <span className="xs">Other companies’ books are on this server too. {PRACTICE_OWN_SERVER}</span>}
       {error && <div className="banner alert small">{error}</div>}
     </div>
   );
+}
+
+/** At the end of setup, once the terms are accepted: asks shap-ctl where it may (Practice follows it). Never stops setup. */
+export async function askServerIfNeeded(s: ServerState | null): Promise<void> {
+  if (!s || !mayAsk(s)) return;
+  await api('/api/practice/server', { body: {} }).catch(() => undefined);
 }
 
 /* ------------------------------------------------------------------ the practice's people */
@@ -175,7 +211,7 @@ export function teamProblem(t: Team, ownerEmail: string): string | null {
     if (!looksLikeEmail(p.email)) return `Enter ${p.name.trim() || 'everyone'}’s email`;
     if (!names.includes(p.profile.trim().toLowerCase())) return `Choose a profile for ${p.name.trim()}`;
     const pw = passwordProblem(p.password, p);
-    if (pw) return `${p.name.trim()}’s starting password: ${pw}`;
+    if (pw) return `${p.name.trim()}’s starting password: ${pw.replace('your name and email', 'their name and email')}`;
   }
   if (new Set(emails).size !== emails.length) return 'Two people have the same email: each signs in with their own';
   if (emails.includes(ownerEmail.trim().toLowerCase())) return 'That’s your own email: each person signs in with theirs';
@@ -233,7 +269,7 @@ export function PracticeTeam({ team, onChange, has, othersSignIn }: { team: Team
           <Field label="How many staff?" hint={`Not counting you. Up to ${TEAM_MAX} here; more later.`}>
             {(p) => <input {...p} className="input" type="number" min={1} max={TEAM_MAX} value={team.people.length || 1} onChange={(e) => set({ people: sized(Number(e.target.value)) })} style={{ width: 100 }} />}
           </Field>
-          {othersSignIn && <p className="xs muted">Others sign in here already, so add the rest of your team under Settings → People who sign in, once you’re set up.</p>}
+          {othersSignIn && <p className="xs muted">Others sign in here already, so add your team under Settings → People who sign in, once you’re set up.</p>}
           <div className="choice-grid">
             <button type="button" className={`choice small ${team.now === true ? 'on' : ''}`} aria-pressed={team.now === true} disabled={othersSignIn} onClick={() => set({ now: true })}>
               Add their sign-ins now
@@ -275,7 +311,7 @@ export function PracticeTeam({ team, onChange, has, othersSignIn }: { team: Team
           <div className="stack-sm">
             <strong className="small">Their sign-ins</strong>
             {team.people.map((p, i) => {
-              const pw = p.password ? passwordProblem(p.password, p) : 'At least 10 characters';
+              const pw = p.password ? passwordProblem(p.password, p)?.replace('your name and email', 'their name and email') : 'At least 10 characters';
               return (
                 <div key={i} className="panel panel-pad form-grid" data-private>
                   <Field label="Name">{(f) => <input {...f} className="input" value={p.name} maxLength={100} onChange={(e) => person(i, { name: e.target.value })} />}</Field>

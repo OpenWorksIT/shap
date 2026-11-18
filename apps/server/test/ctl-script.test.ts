@@ -2,11 +2,12 @@
  * shap-ctl.sh's steps for Shap Accountant (deploy/vps/ctl/shap-ctl.sh), run as the tests can: each
  * function sourced on its own, against a stand-in docker that answers from the test and writes down
  * every call. What's checked: only the server's own Shap's login is given CREATEDB, read from the
- * compose files and never trusted beyond a plain login name; a superuser is left as it is; a test
- * server added with --test-server may make databases, a real added company never.
+ * compose files and never trusted beyond a plain login name, and never while a real company added
+ * with add-company.sh shares the server; a superuser is left as it is; and the backups take only the
+ * databases Shap names, whatever names a login that may make databases chooses.
  */
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -19,19 +20,21 @@ printf '%s\\n' "$*" >> "$FAKE_LOG"
 case "$*" in
   "compose config --format json") printf '%s' "$FAKE_CONFIG" ;;
   *"select rolsuper or rolcreatedb"*) printf '%s\\n' "$FAKE_CAN" ;;
-  *"select 1 from pg_roles"*) case "$*" in *"'shap_test'"*) echo 1 ;; esac ;;
+  *"select datname from pg_database"*) printf '%s\\n' "$FAKE_DBS" ;;
+  *"pg_dump"*) printf 'dump of %s' "\${@: -2:1}" ;;
   *"alter role"*) [ "\${FAKE_ALTER_FAILS:-}" = yes ] && exit 1 ;;
 esac
 exit 0
 `;
 
 /** Runs one of the script's steps; returns what it wrote to status.json and every docker call. */
-function run(step: 'practice' | 'test_servers', env: { config?: unknown; can?: string; alterFails?: boolean; companies?: Record<string, string> } = {}) {
+function run(step: 'practice' | 'backup manual', env: { config?: unknown; can?: string; alterFails?: boolean; companies?: Record<string, string>; dbs?: string } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'shap-ctl-script-'));
   const bin = join(dir, 'bin');
   const vps = join(dir, 'vps');
   const ctl = join(dir, 'ctl');
-  for (const d of [bin, vps, ctl]) mkdirSync(d);
+  const backups = join(dir, 'backups');
+  for (const d of [bin, vps, ctl, backups]) mkdirSync(d);
   writeFileSync(join(bin, 'docker'), FAKE_DOCKER);
   chmodSync(join(bin, 'docker'), 0o755);
   if (env.companies) {
@@ -43,13 +46,14 @@ function run(step: 'practice' | 'test_servers', env: { config?: unknown; can?: s
   let code = 0;
   try {
     // $0 is the test's own name, so the script sees it's sourced and doesn't run main.
-    execFileSync('bash', ['-c', `source "$1"; VPS="$2"; CTL="$3"; ${step}`, 'shap-ctl-test', SCRIPT, vps, ctl], {
+    execFileSync('bash', ['-c', `source "$1"; VPS="$2"; CTL="$3"; BACKUPS="$4"; APP_GID="$(id -g)"; KEEP_DAILY=14; ${step}`, 'shap-ctl-test', SCRIPT, vps, ctl, backups], {
       env: {
         PATH: `${bin}:${process.env.PATH}`,
         FAKE_LOG: log,
         FAKE_CONFIG: JSON.stringify(env.config ?? {}),
         FAKE_CAN: env.can ?? '',
         FAKE_ALTER_FAILS: env.alterFails ? 'yes' : '',
+        FAKE_DBS: env.dbs ?? '',
       },
       stdio: 'pipe',
     });
@@ -57,7 +61,7 @@ function run(step: 'practice' | 'test_servers', env: { config?: unknown; can?: s
     code = (err as { status?: number }).status ?? 1;
   }
   const status = existsSync(join(ctl, 'status.json')) ? (JSON.parse(readFileSync(join(ctl, 'status.json'), 'utf8')) as Record<string, any>) : {};
-  return { code, status, calls: readFileSync(log, 'utf8').split('\n').filter(Boolean) };
+  return { code, status, calls: readFileSync(log, 'utf8').split('\n').filter(Boolean), dir, backups };
 }
 
 const appUrl = (url: string) => ({ services: { app: { environment: { DATABASE_URL: url } }, 'app-friend': { environment: { DATABASE_URL: 'postgres://shap_friend:pw@db:5432/shap_friend' } } } });
@@ -96,22 +100,30 @@ describe('shap-ctl: Shap Accountant’s databases', () => {
     expect(run('practice', { config: {} })).toMatchObject({ code: 1, status: { practice: { ok: false, login: '' } } });
   });
 
-  it('lets a test server added here make databases, and never a real company added here', () => {
-    const r = run('test_servers', {
-      companies: {
-        test: 'SHAP_DOMAIN=shaptest.example.co.za\nTEST_SERVER=true\nCOLLECTOR_URL=off\n',
-        friend: 'SHAP_DOMAIN=shap.friend.example.co.za\nMFA_REQUIRED=true\n',
-        sneaky: 'SHAP_DOMAIN=x\n# TEST_SERVER=true\nTEST_SERVER=truely\n',
-      },
-    });
-    expect(r.code).toBe(0);
-    const alters = r.calls.filter((c) => c.includes('alter role'));
-    expect(alters).toEqual([expect.stringMatching(/alter role shap_test createdb$/)]);
-    // Without any added companies, nothing is done.
-    expect(run('test_servers').calls).toEqual([]);
+  it('never on a server a real company added with add-company.sh shares; a test server added here doesn’t count', () => {
+    const shared = run('practice', { config: appUrl('postgres://shap_app:x@db/shap'), can: 'f', companies: { friend: 'SHAP_DOMAIN=shap.friend.example.co.za\n', test: 'TEST_SERVER=true\n' } });
+    expect(shared.code).toBe(1);
+    expect(shared.status.practice).toMatchObject({ ok: false, message: expect.stringMatching(/Other companies' books are on this server/) });
+    expect(shared.calls).toEqual([]);
+    // A line that says test server, then one that says otherwise: the last is the one Docker uses.
+    expect(run('practice', { config: appUrl('postgres://shap_app:x@db/shap'), can: 'f', companies: { was: 'TEST_SERVER=true\nTEST_SERVER=false\n' } }).code).toBe(1);
+    const tests = run('practice', { config: appUrl('postgres://shap_app:x@db/shap'), can: 'f', companies: { test: 'SHAP_DOMAIN=shaptest.example.co.za\nTEST_SERVER=true\nCOLLECTOR_URL=off\n' } });
+    expect(tests.code).toBe(0);
+    expect(tests.calls.filter((c) => c.includes('alter role'))).toEqual([expect.stringMatching(/alter role "shap_app" createdb$/)]);
   });
 
-  it('is asked for by the app’s request, and add-company.sh gives a test server the same', () => {
+  it('backs up only the databases Shap names, whatever names a login that may make databases chooses', () => {
+    const r = run('backup manual', { dbs: ['shap', 'shap_friend', 'shap__c_0123456789ab', 'shap_test__c_ba9876543210', 'shap_demo', 'shap_zz ../shap/shap_friend', '../shap/shap_friend', 'shap_secy ../../../escaped', 'Shap_Upper', 'shap_x;rm -rf'].join('\n') });
+    const dumped = r.calls.filter((c) => c.includes('pg_dump')).map((c) => /-d (\S+) -Fc$/.exec(c)?.[1]);
+    expect(dumped).toEqual(['shap', 'shap_friend', 'shap__c_0123456789ab', 'shap_test__c_ba9876543210']);
+    const files = readdirSync(r.backups).sort();
+    expect(files.map((f) => f.replace(/-manual-.*$/, ''))).toEqual(['shap', 'shap__c_0123456789ab', 'shap_friend', 'shap_test__c_ba9876543210']);
+    expect(readFileSync(join(r.backups, files.find((f) => f.startsWith('shap_friend-'))!), 'utf8')).toBe('dump of shap_friend');
+    // Nothing written outside the backups.
+    expect(readdirSync(r.dir).sort()).toEqual(['backups', 'bin', 'ctl', 'docker.log', 'vps']);
+  });
+
+  it('is asked for by the app’s request, and add-company.sh lets a test server make databases', () => {
     const script = readFileSync(SCRIPT, 'utf8');
     expect(script).toMatch(/^\s+practice\) practice ;;$/m);
     // The request file is read as a-z and - only, then must be one of the fixed actions.

@@ -447,7 +447,12 @@ async function checkMadeUp(env: TestEnv, owner: Awaited<ReturnType<typeof sessio
   const months = new Set<string>();
   for (let d = from; d <= t; d = addDays(d, 1)) if ((d === from || d.endsWith('-01')) && onOrAfter(d) <= t) months.add(d.slice(0, 7));
   const [rent] = await sql<{ n: number }[]>`select count(*)::int as n from costs where description = 'Rent for the premises'`;
-  if (['retail', 'hair', 'mechanic', 'catering', 'health'].includes(a.industry)) expect(rent!.n).toBe(months.size);
+  if (tradeFor(a.industry).rent > 0) expect(rent!.n).toBe(months.size);
+  // A practice keeps its own books: no bookkeeper's fee; its rent under the cost type its setup added (1.32's reviews).
+  if (a.industry === 'accounting') {
+    expect(await sql`select 1 from costs where description = 'Bookkeeping fee'`).toHaveLength(0);
+    expect(await sql`select 1 from costs c join cost_categories k on k.id = c.category_id where c.description = 'Rent for the premises' and k.name <> 'Office rent'`).toHaveLength(0);
+  }
   // Every VAT period the books reach, once due, has its VAT201: field 20 paid on its due date, or
   // the refund in (about three weeks after); none for a nil return.
   if (a.vat) {

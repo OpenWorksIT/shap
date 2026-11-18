@@ -33,7 +33,7 @@ import {
   vatRateOn,
   flipOf,
   formatDate,
-  INDUSTRIES,
+  activityOf,
   SECTION_LABELS,
   STATEMENT_LINES,
   statementLineLabel,
@@ -548,6 +548,15 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
   const dayWages = Number(dayLabour!.wages);
   const dayEmployees = dayWages > 0;
   const dayMonths = dayLabour!.months;
+  // Time tracked up to the year end and not on an invoice issued by then: work done that the books
+  // haven't recognised as revenue yet (IFRS for SMEs 23.14), valued at the hourly rates in Shap.
+  const [unbilledTime] = await db<{ minutes: number; valueCents: string }[]>`
+    select coalesce(sum(t.minutes), 0)::int as minutes,
+           coalesce(sum(round(t.minutes * coalesce(nullif(p.hourly_rate_cents, 0), (select hourly_rate_cents from settings where id), 0) / 60.0)), 0)::bigint as value_cents
+    from time_entries t left join projects p on p.id = t.project_id left join documents d on d.id = t.billed_document_id
+    where t.minutes > 0 and (t.started_at at time zone 'Africa/Johannesburg')::date <= ${fyEnd}::date
+      and (d.id is null or d.status <> 'issued' or d.issue_date > ${fyEnd}::date)`;
+  const unbilledMinutes = unbilledTime!.minutes;
   const policyDefaults = defaultPolicies(bt, {
     lives,
     employees: moved(['salaries', 'director_salary', 'payroll_levies']) || dayEmployees,
@@ -555,6 +564,7 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
     deferredTax: lineTotals.has('deferred_tax_asset') || lineTotals.has('deferred_tax_liability'),
     edition: editionFor(fyStart),
     wip: accounts.some((a) => a.systemKey === 'wip' && val(a, 'atEnd') !== 0),
+    unbilledTime: unbilledMinutes > 0,
   });
   // A first year has no previous year to be consistent with.
   if (!hasPrior) policyDefaults.basis = policyDefaults.basis.replace(' The accounting policies are consistent with those of the previous year.', '');
@@ -869,6 +879,16 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
   const wipAcc = accounts.find((a) => a.systemKey === 'wip');
   const wip = wipAcc ? val(wipAcc, 'atEnd') : 0;
   if (wip) look('Work in progress at the year end is recoverable, and work done is invoiced', false, `${formatZar(wip)} of job costs not yet invoiced at the year end, carried at cost. If a job will make a loss, write its costs down; if work was done but not invoiced, consider accruing the revenue (stage of completion).`);
+  // Time tracked but not invoiced by the year end (23.14): revenue for work done, if it will be billed.
+  if (unbilledMinutes > 0) {
+    const hours = Math.round(unbilledMinutes / 6) / 10;
+    const value = Number(unbilledTime!.valueCents);
+    look(
+      'Work done but not invoiced by the year end is considered (IFRS for SMEs 23.14)',
+      false,
+      `${hours} hour${hours === 1 ? '' : 's'} of time tracked up to the year end ${hours === 1 ? 'wasn’t' : 'weren’t'} on an invoice issued by then${value > 0 ? ` (${formatZar(value)} at the hourly rates in Shap)` : ''}. If that work was for clients and will be billed, consider accruing the revenue at the year end (stage of completion); time that won’t be billed needs nothing.`,
+    );
+  }
   // Receivables long overdue (11.21): impaired if they won't be recovered.
   const [old] = await db<{ n: number; owing: string }[]>`
     select count(*)::int as n, coalesce(sum(owing), 0)::bigint as owing from (
@@ -957,7 +977,7 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
     ownersNet: bt === 'sole_prop' || bt === 'partnership' ? contrib((a) => cls(a) === 'owner_loans', 'mvCur') : null,
     taxed: kind.taxedAs === 'company',
     shareChange: colAt(['share_capital'], 'atEnd') - colAt(['share_capital'], 'atPrior'),
-    industry: (INDUSTRIES as readonly { key: string; label: string }[]).find((i) => i.key === settings.industry)?.label ?? '',
+    industry: activityOf(settings.industry),
   });
   const title = bt === 'company' || bt === 'inc' || bt === 'cc' || bt === 'npc' || bt === 'coop' ? 'Annual Financial Statements' : 'Financial Statements';
   return {

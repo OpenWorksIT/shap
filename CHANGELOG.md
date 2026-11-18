@@ -5,27 +5,40 @@ entries newer than the version you're running before you update.
 
 ## 1.32.0 (18 November 2026)
 
-- **Shap Accountant from the first-run questions.** Choose *Accounting, bookkeeping or tax practice*,
-  say you'll keep your clients' books in Shap too, and setup does the rest: a step for your
-  practice, the Shap Accountant terms with Shap's at the end, then Practice opens. The practice's own
-  books start as a practice's usually are (invoices only, the time tracker, no counter sales), and
-  any later question can change that.
-- **The server, got ready in the background.** Each client's books are a database of their own, so
-  Shap checks that its database login may make databases. On a VPS where Settings → System looks
-  after updates and backups, it asks the server to allow it (shap-ctl's new `practice` step: the
-  server's own Shap's login only, `CREATEDB` and nothing more) while you answer the rest. Anywhere
-  else it says what whoever runs the server does. Practice shows the owner the same until it's
-  ready, and adding a client says so.
+- **Shap Accountant from the first-run questions.** Choose *Accounting, bookkeeping or tax practice*
+  and say you'll keep your clients' books in Shap too: a step for your practice follows, the Shap
+  Accountant terms come with Shap's at the end, and then Practice opens. The practice's own books
+  start as a practice's usually are (invoices only, the time tracker, no counter sales; fees,
+  recharged costs and other revenue; cost types for costs recharged to clients, software, CPD and
+  office rent), and any later question can change that. An accounting practice can't be on turnover
+  tax, so choosing it switches that off and says why.
+- **The server.** Each client's books are a database of their own, so the practice step checks that
+  this Shap's database login may make databases, and says what it found. Once you've accepted the
+  terms, on a server whose Settings → Updates & backups is looked after by shap-ctl and that no other
+  company shares, Shap asks it once (shap-ctl's new `practice` step: this Shap's own login only,
+  `CREATEDB` and nothing more). Anywhere else it says what whoever runs the server does. Practice
+  shows the owner the server's answer until it can make clients' databases, with *Ask the server*.
 - **Your practice's people, in setup.** Just you, or you and your staff: how many, and now or later.
   Now: the profiles (Bookkeeper, Practice manager and Admin, each changeable, and your own) and each
   person's name, email, profile and starting password (Shap suggests one), made all at once when you
-  accept the terms. Later: Settings → People who sign in, as before.
-- **A server of its own.** Shap Accountant needs Shap on a server of its own: a VPS that's only your
-  practice's, or your own PC. A company added to someone else's Shap server can't keep clients'
-  books (add-company.sh says so), and setup says when other companies' books share the server. A
-  test server can try Shap Accountant with made-up clients: `--test-server` lets its login make
-  databases, and shap-ctl does the same for test servers added before this (on its next check,
-  nightly or update).
+  accept the terms. Later: Settings → People who sign in, as before. Who opens it says that whoever
+  compiles a client's statements signs the compilation report in their own name.
+- **A server of its own.** Shap Accountant needs Shap on a server of its own: a VPS or a computer
+  only your practice uses. A company added to someone else's Shap server can't keep clients' books
+  (add-company.sh says so), and the practice step and Practice say when other companies' books are
+  on the server. A test server can try Shap Accountant with up to 10 made-up clients:
+  `--test-server` lets its login make databases (docs/TEST_SERVER.md has the command for one added
+  before this).
+- **Backups**: shap-ctl backs up only the databases Shap names, whatever names a database login that
+  may make databases gives its own, and a name never decides where a backup is written.
+- **Time not invoiced by the year end**: the financial statements' checks list time tracked up to
+  the year end that wasn't on an invoice issued by then (with its value at your hourly rates), to
+  consider accruing the revenue, and the revenue policy no longer says all work is invoiced as it's
+  done when it isn't.
+- An amount paid in a client's name as their agent, and recovered at cost, is no supply by you: the
+  VAT option *Exempt or not a supply* says so, and an accounting practice's *Paid for you as your
+  agent, at cost* comes without VAT. Turnover tax's caution says a business with more than 20% of its
+  receipts from professional services can't be on it.
 
 ## 1.31.0 (17 November 2026)
 

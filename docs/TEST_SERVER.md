@@ -32,13 +32,20 @@ the server, so an update reaches it at the same time.
 Whoever is going to fill and wipe the books needs an **Owner** sign-in on the test server
 (Settings → People who sign in). Wiping keeps everyone's sign-ins and two-factor set-up.
 
-**Shap Accountant** can be tried on a test server, with made-up clients: its database login may
-make databases (each client's books are one). `--test-server` allows that, and shap-ctl keeps it
-so for test servers added before 1.32 (on its next check, nightly or update). A real company added
-to the server never may: a practice runs Shap on a server of its own (docs/ACCOUNTANT.md). The
-made-up clients' books are databases of their own (`shap_test__c_…`): wiping the test server's
-books keeps them, as it keeps a practice's list of clients; archive them on Practice, or drop them
-on the server.
+**Shap Accountant** can be tried on a test server, with made-up clients (10 at most: each client's
+books are a database on a server real companies share). `--test-server` lets the test server's
+database login make databases. A test server added before 1.32 is let with one command:
+
+```bash
+cd /opt/shap/deploy/vps
+sudo docker compose exec -T db psql -U shap -d postgres -c 'alter role shap_test createdb'
+```
+
+A real company added to the server never may: a practice runs Shap on a server of its own
+(docs/ACCOUNTANT.md). To make a test server a real company, take the right away again
+(`alter role shap_test nocreatedb`). The made-up clients' books are databases of their own
+(`shap_test__c_…`): wiping the test server's books keeps them, as it keeps a practice's list of
+clients; archive them on Practice, or drop them on the server.
 
 ## Using it
 

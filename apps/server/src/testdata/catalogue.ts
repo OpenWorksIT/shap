@@ -337,8 +337,10 @@ export const TRADES: Record<string, Trade> = {
       ['Annual financial statements', 'each', 9500, 'labour'],
       ['Income tax return', 'each', 1800, 'labour'],
       ['Professional time', 'hour', 950, 'labour'],
+      ['Travel', 'km', 4.76, 'other'],
     ],
-    materials: [],
+    // Recharged to clients (the practice's own costs, charged on with VAT).
+    materials: [['Courier', 'each', 180]],
     docs: [8, 16],
     size: 1,
     rent: 6500,

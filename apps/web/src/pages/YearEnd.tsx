@@ -712,6 +712,7 @@ export function ProvisionalTax() {
                       Small business corporation rates (s12E)
                       <div className="xs muted">
                         {data.businessType === 'inc' && 'Usually not for an Inc.: a personal service (law, accounting, engineering, health) with fewer than three full-time employees who aren’t connected to the owners can’t use it. '}
+                        {data.businessType !== 'inc' && settings.industry === 'accounting' && 'Accounting is a personal service: a practice with fewer than three full-time employees who aren’t connected to its owners can’t use it (s12E(4)(d)). '}
                         {overLimit
                           ? 'Not this year: gross income over R20 million. Flat 27% company rate.'
                           : onSbc

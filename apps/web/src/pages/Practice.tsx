@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { ACCOUNTANT_TERMS_MEANS, ACCOUNTANT_TERMS_URL, ACCOUNTANT_TERMS_VERSION, dayOf, formatDate, LEVEL_WORDS, LINK_SESSION_HOURS, LINKED_LEVEL_WORDS, POCKET_SHARE_NOTE, PRACTICE_NOTE, PRACTICE_TERMS_TICK, STATEMENT_STATUS_LABELS, todayIso, WHO_OPENS_LINKED, type Level, type StatementStatus } from '@shap/shared';
+import { ACCOUNTANT_TERMS_MEANS, ACCOUNTANT_TERMS_URL, ACCOUNTANT_TERMS_VERSION, COMPILE_SIGNS, dayOf, formatDate, LEVEL_WORDS, LINK_SESSION_HOURS, LINKED_LEVEL_WORDS, POCKET_SHARE_NOTE, PRACTICE_NOTE, PRACTICE_TERMS_TICK, STATEMENT_STATUS_LABELS, todayIso, WHO_OPENS_LINKED, type Level, type StatementStatus } from '@shap/shared';
 import { AccountantPoints, AccountantTermsAccept } from '../components/AccountantTerms';
 import { PracticeServer } from '../components/PracticeSetup';
 import { PageHead } from '../components/Shell';
@@ -211,7 +211,7 @@ export default function PracticePage() {
       <PageHead title="Practice" sub="Shap Accountant: your clients’ books, kept here (each in a database of its own) or on their own Shap" />
       <p className="xs muted">{PRACTICE_NOTE}</p>
       {/* The owner sees while this server can't make clients' databases yet, or isn't the practice's alone. */}
-      {isOwner && <PracticeServer ask={false} onlyIfNotReady />}
+      {isOwner && <PracticeServer where="practice" />}
       {manage && (
         <form className="panel panel-pad row wrap" style={{ gap: 8, alignItems: 'flex-end' }} onSubmit={add}>
           <Field label={kind === 'linked' ? 'The link they gave you' : 'A client'} className="grow">
@@ -553,6 +553,7 @@ function AccessDrawer({ client, people, onClose, onSaved }: { client: PracticeCl
           ))}
           {client.linked?.level === 'compile' && <p className="xs muted">The client lets your practice read their books and compile the statements there, not write them up: whoever opens them does that.</p>}
           <p className="xs muted">{client.kind === 'pocket' ? WHO_OPENS_POCKET : client.kind === 'linked' ? WHO_OPENS_LINKED : WHO_OPENS_KEPT}</p>
+          <p className="xs muted">{COMPILE_SIGNS}</p>
         </div>
       )}
     </Drawer>

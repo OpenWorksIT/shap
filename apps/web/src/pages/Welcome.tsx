@@ -2,12 +2,12 @@
  * The first time the books are opened: a few questions, one at a time, and the app ends up
  * exactly as big as the business needs. Everything can be changed later in Settings.
  */
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ACCOUNTANT_TERMS_VERSION, BUSINESS_TYPES, ENTITIES, entity, extrasFor, featureOn, featuresFor, INDUSTRIES, paysOutProfit, PRACTICE_CAUTION, PRACTICE_OWN_SERVER, PRACTICE_PROFILES, withNeeds, payoutWord, payeRefProblem, regNumberProblem, sdlRefFor, setupCautions, TERMS_VERSION, PRACTICE_TERMS_TICK, TURNOVER_TAX_LIMIT_CENTS, formatZar, uifRefProblem, vatNumberProblem, vatThresholds, WORKFLOWS, type EmployerAnswer, type IndustryKey, type SetupExtras, type Workflow, PAYMENT_DAYS, dayLabel, withPaymentTerm } from '@shap/shared';
+import { ACCOUNTANT_TERMS_VERSION, BUSINESS_TYPES, ENTITIES, entity, extrasFor, featureOn, featuresFor, INDUSTRIES, paysOutProfit, PRACTICE_CAUTION, PRACTICE_OWN_SERVER, PRACTICE_PROFILES, PROFESSIONAL_SERVICE_INDUSTRIES, TURNOVER_TAX_PROFESSIONAL, withNeeds, payoutWord, payeRefProblem, regNumberProblem, sdlRefFor, setupCautions, TERMS_VERSION, PRACTICE_TERMS_TICK, TURNOVER_TAX_LIMIT_CENTS, formatZar, uifRefProblem, vatNumberProblem, vatThresholds, WORKFLOWS, type EmployerAnswer, type IndustryKey, type SetupExtras, type Workflow, PAYMENT_DAYS, dayLabel, withPaymentTerm } from '@shap/shared';
 import { TermsReview } from '../components/Terms';
 import { AccountantTermsTick } from '../components/AccountantTerms';
-import { PracticeServer, PracticeTeam, teamBody, teamProblem, type Team } from '../components/PracticeSetup';
+import { askServerIfNeeded, PracticeServer, PracticeTeam, teamBody, teamProblem, type ServerState, type Team } from '../components/PracticeSetup';
 import { useClientHere } from '../components/ClientBanner';
 import { LogoField } from '../components/BusinessForm';
 import { Logo } from '../components/Logo';
@@ -61,6 +61,10 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
   const [team, setTeam] = useState<Team>(() => ({ who: null, now: null, profiles: PRACTICE_PROFILES.map((p) => ({ name: p.name, access: withNeeds(p.access), hint: p.hint })), people: [] }));
   const [teamDone, setTeamDone] = useState(false);
   const [othersSignIn, setOthersSignIn] = useState(false);
+  // What setup last saw of the server (practice step): asked at the end, once the terms are accepted.
+  const server = useRef<ServerState | null>(null);
+  // Choosing an accounting practice answers the counter-sales question "no" and switches turnover tax off (it can't be on it): undone if another kind is chosen.
+  const [preset, setPreset] = useState<{ sales: boolean; turnoverTax: boolean }>({ sales: false, turnoverTax: false });
   const [practiceAccepted, setPracticeAccepted] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -114,9 +118,13 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
       }
       // The practice's people, all at once (or none, if one of them can't be made: said here, to put right).
       if (practiceOn && team.who === 'staff' && team.now && !teamDone) {
-        await api('/api/practice/team', { body: teamBody(team) });
+        // Made already (a retry after its answer was lost): not made twice.
+        const now = await api<ServerState>('/api/practice/server');
+        if (!now.othersSignIn) await api('/api/practice/team', { body: teamBody(team) });
         setTeamDone(true);
       }
+      // The terms are accepted and Shap Accountant is on: where Shap may, it asks the server now (Practice follows it).
+      if (practiceOn) await askServerIfNeeded(server.current);
       setTone(f.tone);
       // Moving from another package: straight to the screen that brings the books across. A
       // practice: to its clients.
@@ -247,18 +255,32 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
                     setIndustry(i.key);
                     setWorkflow(i.workflow);
                     setExtras(extrasFor(i.key));
-                    // A practice doesn't sell over the counter (the next questions can say otherwise).
-                    if (i.key === 'accounting' && sales === null) setSales(false);
+                    // A practice doesn't sell over the counter (the next questions can say otherwise), and
+                    // can't be on turnover tax; another kind chosen after it puts back what this changed.
+                    if (i.key === 'accounting') {
+                      const next = { sales: preset.sales || sales === null, turnoverTax: preset.turnoverTax || f.turnoverTax };
+                      if (sales === null) setSales(false);
+                      if (f.turnoverTax) set('turnoverTax', false);
+                      setPreset(next);
+                    } else {
+                      if (preset.sales && sales === false) setSales(null);
+                      if (preset.turnoverTax) set('turnoverTax', true);
+                      setPreset({ sales: false, turnoverTax: false });
+                    }
                   }}
                 >
                   {i.label}
                 </button>
               ))}
             </div>
+            {industry === 'accounting' && preset.turnoverTax && (
+              <p className="xs muted panel panel-pad">Turnover tax is switched off: an accounting practice can’t be on it, as more than 20% of its receipts are from professional services (the Sixth Schedule to the Income Tax Act, para 3(b)). Check with SARS if you think yours is different.</p>
+            )}
+            {industry !== 'accounting' && PROFESSIONAL_SERVICE_INDUSTRIES.includes(industry) && f.turnoverTax && <p className="xs banner">{TURNOVER_TAX_PROFESSIONAL}</p>}
             {industry === 'accounting' && !client && (
               <YesNo
                 q="Will you keep your clients’ books in Shap too?"
-                hint={`Shap Accountant: each client’s books in a database of their own on this server, one list of your clients with what Shap’s checks find and some of the returns coming up, engagement letters and working papers. Shap sets the server up for it while you answer the rest. ${PRACTICE_OWN_SERVER}`}
+                hint={`Shap Accountant: each client’s books in a database of their own on this server; one list of your clients with what Shap’s checks find and some of the returns coming up, as aids to check; and draft engagement letters and working papers. If you say yes, Shap checks this server while you answer, and when you accept the terms at the end, asks it to let this Shap’s database login make databases (and nothing more) where it can. ${PRACTICE_OWN_SERVER}`}
                 value={practice}
                 onChange={setPractice}
               />
@@ -293,10 +315,18 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
         )}
 
         {step === 'practice' && (
-          <Q title="Your practice" sub="Shap gets this server ready for your clients’ books while you answer.">
-            <PracticeServer ask onState={(st) => (setOthersSignIn(st.othersSignIn), st.othersSignIn && team.now ? setTeam({ ...team, now: false }) : undefined)} />
+          <Q title="Your practice" sub="Shap checks whether this server can make a database for each client while you answer.">
+            <PracticeServer
+              where="setup"
+              onState={(st) => {
+                server.current = st;
+                setOthersSignIn(st.othersSignIn);
+                if (st.othersSignIn && team.now) setTeam({ ...team, now: false });
+              }}
+            />
             <strong className="small">Who works in your practice?</strong>
             <PracticeTeam team={team} onChange={setTeam} has={(k) => featureOn(planned(), k)} othersSignIn={othersSignIn} />
+            <p className="xs muted">These are sign-ins to Shap. Payroll, for anyone on a salary, is the next question.</p>
             {nav(teamProblem(team, user.email) === null)}
             {team.who && teamProblem(team, user.email) && <p className="xs muted">{teamProblem(team, user.email)}</p>}
           </Q>

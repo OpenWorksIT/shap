@@ -11,6 +11,8 @@ export interface IndustryItem {
   d: string;
   cat: 'labour' | 'materials' | 'other';
   unit?: string;
+  /** Its VAT, where it isn't the standard rate (an amount paid as the client's agent is no supply). */
+  vat?: 'exempt';
 }
 
 export interface IndustryProfile {
@@ -32,6 +34,11 @@ export interface IndustryProfile {
   categories: { name: string; kind: 'materials' | 'overhead'; account: string }[];
   /** Builder-only cost types to hide from the pickers (still kept for old costs). */
   hide: string[];
+  /**
+   * Names for the revenue accounts the three line types post to, given when the kind is chosen on
+   * books that haven't used them yet (otherwise Shap's own: "Project revenue – labour"…).
+   */
+  revenue?: { labour: string; materials: string; other: string };
 }
 
 const TRADE_HIDE: string[] = [];
@@ -381,7 +388,8 @@ const P: Record<string, Partial<IndustryProfile>> = {
     hide: OFFICE_HIDE,
   },
   accounting: {
-    lines: { labour: 'Fees', materials: 'Expenses', other: 'Other' },
+    // "Recharged costs": what the practice bought itself and charges on (its own supply, with VAT if it's a vendor).
+    lines: { labour: 'Fees', materials: 'Recharged costs', other: 'Other' },
     units: ['month', 'hour', 'item', 'km'],
     items: [
       { d: 'Monthly bookkeeping', cat: 'labour', unit: 'month' },
@@ -390,7 +398,10 @@ const P: Record<string, Partial<IndustryProfile>> = {
       { d: 'Annual financial statements', cat: 'labour', unit: 'item' },
       { d: 'Income tax return', cat: 'labour', unit: 'item' },
       { d: 'Professional time', cat: 'labour', unit: 'hour' },
+      { d: 'Courier', cat: 'materials', unit: 'item' },
       { d: 'Travel', cat: 'other', unit: 'km' },
+      // Paid in the client's name as its agent and recovered at cost: no supply by the practice (VAT Act s54(2)).
+      { d: 'Paid for you as your agent, at cost (CIPC, SARS)', cat: 'other', unit: 'item', vat: 'exempt' },
     ],
     heading: 'e.g. Bookkeeping for Bloom Café, March',
     costStock: 'e.g. Courier for a client’s documents',
@@ -398,11 +409,13 @@ const P: Record<string, Partial<IndustryProfile>> = {
     supplier: 'e.g. Software supplier',
     part: 'e.g. Courier for this client',
     categories: [
+      { name: 'Costs recharged to clients', kind: 'materials', account: '5010' },
       { name: 'Software & subscriptions', kind: 'overhead', account: '6180' },
       { name: 'Training & CPD', kind: 'overhead', account: '6210' },
       { name: 'Office rent', kind: 'overhead', account: '6200' },
     ],
-    hide: [...OFFICE_HIDE, 'Tool'],
+    hide: [...OFFICE_HIDE, 'Tool', 'Parts'],
+    revenue: { labour: 'Fees', materials: 'Recharged costs', other: 'Other revenue' },
   },
   tutor: {
     lines: { labour: 'Lessons', materials: 'Books & materials', other: 'Other' },

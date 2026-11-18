@@ -49,11 +49,11 @@ main() {
   fi
 
   case "$action" in
-    check) test_servers; check ;;
-    update) local rc=0; update || rc=$?; test_servers; return $rc ;;
+    check) check ;;
+    update) update ;;
     backup) backup manual ;;
     practice) practice ;;
-    nightly) backup daily; test_servers; check ;;
+    nightly) backup daily; check ;;
     *) echo "Unknown action: $action"; return 1 ;;
   esac
 }
@@ -112,8 +112,17 @@ backup() { # backup daily|manual|pre-update
   put backingUp "$(jq -n --arg at "$(now)" '{at: $at}')"
   install -d -m 0750 -o root -g "$APP_GID" "$BACKUPS"
   cd "$VPS" || return 1
-  dbs="$(docker compose exec -T db psql -U shap -d postgres -Atc "select datname from pg_database where (datname = 'shap' or datname like 'shap\_%') and datname not like '%\_demo' order by 1")" || ok=false
-  for db in $dbs; do
+  # Only names Shap makes (shap, shap_<company>, a practice's <db>__c_<hex>), one a line, checked
+  # again here: a login that may make databases (a test server's) chooses its databases' names, and
+  # a name must never steer where root writes.
+  local names
+  names="$(docker compose exec -T db psql -U shap -d postgres -Atc "select datname from pg_database where datname ~ '^shap(_[a-z0-9_]+)?$' and datname !~ '_demo$' order by 1")" || ok=false
+  dbs=""
+  while IFS= read -r db; do
+    [[ "$db" =~ ^shap(_[a-z0-9_]+)?$ ]] && [[ ! "$db" =~ _demo$ ]] && dbs+="$db"$'\n'
+  done <<< "$names"
+  while IFS= read -r db; do
+    [ -n "$db" ] || continue
     out="$BACKUPS/$db-$kind-$stamp.dump"
     if docker compose exec -T db pg_dump -U shap -d "$db" -Fc > "$out.part" && docker compose exec -T db pg_restore --list < "$out.part" > /dev/null; then
       mv -f "$out.part" "$out"
@@ -121,14 +130,15 @@ backup() { # backup daily|manual|pre-update
     else
       ok=false; rm -f "$out.part"
     fi
-  done
+  done <<< "$dbs"
   # (The demo company, shap_demo, is made up and rebuilt on demand: never backed up.)
   # Keep the last $KEEP_DAILY nightly backups and the last 5 of the others, per database.
-  for db in $dbs; do
+  while IFS= read -r db; do
+    [ -n "$db" ] || continue
     ls -1t "$BACKUPS/$db"-daily-*.dump 2>/dev/null | tail -n +"$((KEEP_DAILY + 1))" | xargs -r rm -f --
     ls -1t "$BACKUPS/$db"-manual-*.dump 2>/dev/null | tail -n +6 | xargs -r rm -f --
     ls -1t "$BACKUPS/$db"-pre-update-*.dump 2>/dev/null | tail -n +6 | xargs -r rm -f --
-  done
+  done <<< "$dbs"
   put backup "$(jq -n --arg at "$(now)" --arg kind "$kind" --argjson ok "$ok" '{at: $at, kind: $kind, ok: $ok}')"
   put backingUp null
   $ok
@@ -172,11 +182,22 @@ update() {
 # of its own, so its database login must be allowed to make databases. The default install's login
 # (shap) is Postgres's superuser and already may; a least-privilege login (docs/deployment.md,
 # Hardening) is given CREATEDB, and nothing more. Only the server's own Shap (the "app" service),
-# never a company added with add-company.sh: a practice runs Shap on a server of its own
-# (docs/ACCOUNTANT.md). Asked for by its owner, from setup or the Practice page.
+# and only on a server that's the practice's alone: never while a real company added with
+# add-company.sh shares it (a practice runs Shap on a server of its own: docs/ACCOUNTANT.md), and
+# never for an added company's login. Asked for by its owner, once Shap Accountant is switched on.
 practice() {
-  local url login can msg ok=false
+  local url login can msg out ok=false f last
+  said() { put practice "$(jq -n --arg at "$(now)" --argjson ok "$ok" --arg login "$login" --arg message "$1" '{at: $at, ok: $ok, login: $login, message: $message}')"; echo "practice: $1"; }
   cd "$VPS" || return 1
+  login=""
+  for f in companies/*.env; do
+    [ -e "$f" ] || continue
+    last="$(grep -E '^TEST_SERVER=' "$f" 2>/dev/null | tail -n 1)"
+    if [ "$last" != TEST_SERVER=true ]; then
+      said "Other companies' books are on this server, so Shap won't let this Shap make databases: Shap Accountant needs Shap on a server of its own (docs/ACCOUNTANT.md)."
+      return 1
+    fi
+  done
   # The login, from this server's compose files (root's), never from inside the app's container.
   url="$(docker compose config --format json 2>/dev/null | jq -r '.services.app.environment.DATABASE_URL // empty' 2>/dev/null)"
   login="${url#*://}"
@@ -184,38 +205,23 @@ practice() {
   login="${login%%:*}"
   if ! [[ "$login" =~ ^[a-z_][a-z0-9_]{0,62}$ ]]; then
     login=""
-    msg="Couldn't read this Shap's database login from the compose files."
-  else
-    can="$(docker compose exec -T db psql -U shap -d postgres -Atc "select rolsuper or rolcreatedb from pg_roles where rolname = '$login'" 2>/dev/null | tr -d '[:space:]')"
-    case "$can" in
-      t) ok=true; msg="Its database login ($login) may already make databases." ;;
-      f)
-        if docker compose exec -T db psql -U shap -d postgres -v ON_ERROR_STOP=1 -qc "alter role \"$login\" createdb" >/dev/null 2>&1; then
-          ok=true; msg="Its database login ($login) may now make databases."
-        else
-          msg="Postgres didn't let its database login ($login) make databases."
-        fi ;;
-      *) msg="Postgres doesn't know its database login ($login)." ;;
-    esac
+    said "Couldn't read this Shap's database login from the compose files."
+    return 1
   fi
-  put practice "$(jq -n --arg at "$(now)" --argjson ok "$ok" --arg login "$login" --arg message "$msg" '{at: $at, ok: $ok, login: $login, message: $message}')"
+  can="$(docker compose exec -T db psql -U shap -d postgres -Atc "select rolsuper or rolcreatedb from pg_roles where rolname = '$login'" 2>&1 | tr -d '[:space:]')"
+  case "$can" in
+    t) ok=true; msg="This Shap's database login ($login) may already make databases." ;;
+    f)
+      if out="$(docker compose exec -T db psql -U shap -d postgres -v ON_ERROR_STOP=1 -qc "alter role \"$login\" createdb" 2>&1)"; then
+        ok=true; msg="This Shap's database login ($login) may now make databases."
+      else
+        echo "practice: Postgres said: $out"
+        msg="Postgres didn't let this Shap's database login ($login) make databases."
+      fi ;;
+    *) echo "practice: Postgres said: $can"; msg="Postgres doesn't know this Shap's database login ($login)." ;;
+  esac
+  said "$msg"
   $ok
-}
-
-# A test server added here (add-company.sh --test-server) is for trying every part of Shap on
-# made-up books, Shap Accountant included: its login may make databases (its made-up clients').
-# A real company added here never is. Kept so on each run, for test servers added before this.
-test_servers() {
-  local f slug
-  cd "$VPS" || return 0
-  for f in companies/*.env; do
-    [ -f "$f" ] && [ ! -L "$f" ] || continue
-    grep -qx 'TEST_SERVER=true' "$f" || continue
-    slug="$(basename "$f" .env)"
-    [[ "$slug" =~ ^[a-z][a-z0-9]{1,19}$ ]] || continue
-    docker compose exec -T db psql -U shap -d postgres -Atc "select 1 from pg_roles where rolname = 'shap_$slug' and not rolcreatedb and not rolsuper" 2>/dev/null | grep -qx 1 || continue
-    docker compose exec -T db psql -U shap -d postgres -qc "alter role shap_$slug createdb" >/dev/null 2>&1 || true
-  done
 }
 
 # Run by systemd; sourced by the tests (apps/server/test/ctl-script.test.ts), which run one step

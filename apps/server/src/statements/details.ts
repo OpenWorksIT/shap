@@ -23,6 +23,8 @@ export interface PolicyContext {
   edition?: string;
   /** Job costs waiting for their invoice at the year end (work in progress). */
   wip?: boolean;
+  /** Time tracked up to the year end that wasn't invoiced by then: the work isn't all invoiced as it's done. */
+  unbilledTime?: boolean;
 }
 
 const COMPANYISH: BusinessType[] = ['company', 'inc', 'cc', 'npc', 'coop'];
@@ -87,7 +89,7 @@ export function defaultPolicies(bt: BusinessType, ctx: PolicyContext = { lives: 
       : `The financial statements have been prepared using the recognition and measurement principles of ${standard}, for ${specialPurposeFor(bt)}. They are prepared on the historical cost basis and presented in South African Rand. The accounting policies are consistent with those of the previous year.`,
     going_concern: `The financial statements are prepared on the going concern basis: ${who.toLowerCase()} is expected to continue operating for the foreseeable future.`,
     revenue:
-      `Revenue is what is received or receivable for goods sold and services rendered in the ordinary course of business, excluding value-added tax, after discounts and returns. Revenue from selling goods is recognised when the goods are delivered to the buyer (at the counter, when they are sold). Revenue from services is recognised as the work is performed, which is when it is invoiced: the business invoices its work as it is done.${ctx.wip ? ' The costs of jobs not yet invoiced at the year end are carried as work in progress, at cost.' : ''}`,
+      `Revenue is what is received or receivable for goods sold and services rendered in the ordinary course of business, excluding value-added tax, after discounts and returns. Revenue from selling goods is recognised when the goods are delivered to the buyer (at the counter, when they are sold). Revenue from services is recognised as the work is performed${ctx.unbilledTime ? '.' : ', which is when it is invoiced: the business invoices its work as it is done.'}${ctx.wip ? ' The costs of jobs not yet invoiced at the year end are carried as work in progress, at cost.' : ''}`,
     ppe: `Property, plant and equipment is carried at cost less accumulated depreciation and any impairment loss. Depreciation is charged on the straight-line basis over each asset’s expected useful life to its residual value.${lives} Useful lives and residual values are reviewed when there is an indication that they have changed. The profit or loss on disposing of an asset is the difference between what it was sold for and its carrying amount.`,
     intangibles:
       'Intangible assets (patents, trade marks and software) are carried at cost less accumulated amortisation and any impairment loss, and amortised on the straight-line basis over their expected useful lives.',

@@ -17,11 +17,11 @@ import { createReadStream, existsSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { ACCOUNTANT_TERMS_URL, ACCOUNTANT_TERMS_VERSION, BUSINESS_TYPES, deadlinesFor, featureOn, isTask, LEVELS, plainName, PRACTICE_TERMS_TICK, readLink, SERVER_NOT_MANAGED, teamInput, TERMS_URL, TERMS_VERSION, VAT_CATEGORIES, withNeeds, type DeadlineInputs, type Level } from '@shap/shared';
+import { ACCOUNTANT_TERMS_URL, ACCOUNTANT_TERMS_VERSION, BUSINESS_TYPES, deadlinesFor, featureOn, isTask, LEVELS, plainName, PRACTICE_OWN_SERVER, PRACTICE_TERMS_TICK, readLink, SERVER_NOT_MANAGED, teamInput, TERMS_URL, TERMS_VERSION, VAT_CATEGORIES, withNeeds, type DeadlineInputs, type Level } from '@shap/shared';
 import { z } from 'zod';
 import { browserName, can, checkNewPassword, CLIENT_COOKIE, confirmPassword, CLIENT_SESSION_COOKIE, createUser, loadUser, requireAccess, requireRole, SESSION_COOKIE, userOrThrow, type AuthUser } from '../auth.js';
 import type { Ctx } from '../context.js';
-import type { Sql } from '../db/index.js';
+import { pgCode, PG, type Sql } from '../db/index.js';
 import { dbScope, inClient } from '../db/routing.js';
 import { audit } from '../lib/audit.js';
 import { today } from '../lib/books.js';
@@ -56,6 +56,11 @@ export const IN_A_CLIENT_TOO = ['/api/practice/here', '/api/practice/leave'];
  */
 export const POCKET_COPY_MAY = [/^\/api\/statements\//, /^\/api\/attachments$/, /^\/api\/auth\//, /^\/api\/feedback$/, /^\/api\/practice\/(here|leave)$/];
 export const POCKET_COPY = 'These books are a Shap Pocket client’s, from their shares: they change them in Shap Pocket and share them again. Here the practice compiles their statements and records the approval of whoever signs them for the business (its directors, members, partners or owner).';
+
+/** Setup's team step, once someone else signs in. */
+const OTHERS_SIGN_IN = 'Someone else signs in here already, so your team is added under Settings → People who sign in, one at a time.';
+/** A test server's made-up clients: each one's books are a database on a server real companies share. */
+export const TEST_SERVER_CLIENTS = 10;
 
 const CLOSED = 'Those books are no longer open here: go back to the practice (Practice, in the menu) and open them again.';
 const NOT_GIVEN = 'You haven’t been given this client: ask whoever runs the practice’s Shap.';
@@ -351,13 +356,17 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/practice/server', practiceOwner, async (req) => serverState(userOrThrow(req).id));
   app.post('/api/practice/server', { ...practiceOwner, config: limit(5) }, async (req) => {
     const user = userOrThrow(req);
+    // Asked once Shap Accountant is on, its terms accepted for the practice (the end of setup, or Practice).
+    await assertOn();
     const state = await serverState(user.id);
     if (state.ready || state.pending) return state;
+    // Never on a server that other companies' books share (shap-ctl refuses too): a practice's Shap runs on a server of its own.
+    if (state.otherCompanies && !state.testServer) throw badRequest(`Other companies’ books are on this server, so Shap doesn’t ask it to let this Shap make databases. ${PRACTICE_OWN_SERVER}`);
     if (!state.managed) throw badRequest(SERVER_NOT_MANAGED);
     // One request at a time: an update or a backup asked for already goes first, and this is asked again after it.
     const waiting = ctlPending(config);
-    if (waiting) throw new HttpError(409, 'The server is busy with another request just now: Shap asks again in a moment.', 'ctl_busy');
-    if (!(await askCtl(config, 'practice'))) throw badRequest('Shap can’t leave the request for the server. Whoever runs it runs deploy/vps/ctl/install.sh again.');
+    if (waiting) throw new HttpError(409, 'The server is busy with an update or a backup: Shap asks once it’s done.', 'ctl_busy');
+    if (!(await askCtl(config, 'practice'))) throw badRequest('Shap can’t leave the request for the server. Whoever runs the server can fix this by running deploy/vps/ctl/install.sh again.');
     await audit(real, { userId: user.id, action: 'system_practice', entity: 'system', ip: req.ip, details: { login: state.login } });
     return { ...state, pending: true };
   });
@@ -372,7 +381,7 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (inClient()) throw forbidden('That’s the practice’s own, so it isn’t done in a client’s books: tap Back to the practice, at the top, first.');
     await assertOn();
     const input = parse(teamInput, req.body);
-    if (await othersSignIn(me.id)) throw badRequest('Someone else signs in here already, so your team is added under Settings → People who sign in, one at a time.');
+    if (await othersSignIn(me.id)) throw badRequest(OTHERS_SIGN_IN);
     const emails = input.people.map((p) => p.email);
     if (new Set(emails).size !== emails.length) throw badRequest('Two people have the same email: each signs in with their own.');
     if (emails.includes(me.email.toLowerCase())) throw badRequest('One of them has your email: each person signs in with their own.');
@@ -382,11 +391,16 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (new Set(profileNames).size !== profileNames.length) throw badRequest('Two profiles have the same name: give each its own.');
     for (const p of input.people) checkNewPassword(p.password, p);
     const made = await real.begin(async (tx) => {
+      // One team at a time: two at once would each find nobody else signed in.
+      await tx`select pg_advisory_xact_lock(hashtext('shap:practice_team'))`;
+      if ((await tx`select 1 from users where id <> ${me.id} and link_id is null and active limit 1`).length) throw badRequest(OTHERS_SIGN_IN);
       const ids = new Map<string, string>();
       for (const p of input.profiles) {
         const access = withNeeds(p.access.filter(isTask));
-        // Shap's own (Admin, say) are changed as ticked here: nobody is on them yet.
-        const [had] = await tx<{ id: string }[]>`select id from profiles where lower(name) = lower(${p.name})`;
+        // Shap's own (Admin, say) are changed as ticked here, but only while nobody is on them at all
+        // (someone signed out of Shap for now would have the change when let back in).
+        const [had] = await tx<{ id: string; people: number }[]>`select id, (select count(*)::int from users u where u.profile_id = profiles.id) as people from profiles where lower(name) = lower(${p.name})`;
+        if (had?.people) throw badRequest(`Someone is on the profile ${p.name} already: change it under Settings → People who sign in, or give this one another name.`);
         const [row] = had
           ? await tx<{ id: string }[]>`update profiles set access = ${access}, updated_at = now() where id = ${had.id} returning id`
           : await tx<{ id: string }[]>`insert into profiles (name, access) values (${p.name}, ${access}) returning id`;
@@ -403,6 +417,9 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
         n++;
       }
       return n;
+    }).catch((err) => {
+      if (pgCode(err) === PG.uniqueViolation) throw new HttpError(409, 'Someone saved people or profiles with these names just now: reload, and look under Settings → People who sign in.', 'conflict');
+      throw err;
     });
     return { people: made };
   });
@@ -457,6 +474,11 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     // kept: written up here; imported: brought in from the package the client keeps them in
     // (books-import.ts); pocket: a read-only copy of their Shap Pocket books, from their shares.
     const { name, kind } = parse(z.object({ name: z.string().trim().min(1).max(200), kind: z.enum(['kept', 'imported', 'pocket']).default('kept') }), req.body);
+    // A test server shares its server with real companies: its made-up clients' databases are kept few.
+    if (config.TEST_SERVER) {
+      const [n] = await real<{ n: number }[]>`select count(*)::int as n from practice_clients where kind <> 'linked'`;
+      if (n!.n >= TEST_SERVER_CLIENTS) throw badRequest(`A test server keeps at most ${TEST_SERVER_CLIENTS} clients’ books (archived ones count: they stay on the server).`);
+    }
     const [c] = await real<{ id: string }[]>`insert into practice_clients (name, kind, created_by) values (${name}, ${kind}, ${user.id}) returning id`;
     const dbName = clientDbName(clients.practiceDb, c!.id);
     try {

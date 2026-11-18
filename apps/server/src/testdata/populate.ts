@@ -918,7 +918,10 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
     if (trade.rent) plan2.push([at(1), 'Rent for the premises', Math.round(withVat(R(trade.rent), first) * (small ? 0.5 : 1) * fixed), 'Rent', 'Harbourside Properties (made up)']);
     plan2.push([at(3), 'Cellphone contract', R(r.around(650, 0.05)), 'Cellphone', 'Example Mobile (made up)']);
     plan2.push([at(5), 'Business insurance', R(850), 'Insurance', 'Shieldwell Insurance (made up)']);
-    plan2.push([at(15), 'Bookkeeping fee', Math.round(R(1_500) * fixed), 'Accounting', 'Ledger & Co Bookkeeping (made up)']);
+    // An accounting practice keeps its own books: it pays for its people's CPD instead.
+    if (s.industry === 'accounting') {
+      if (r.chance(0.25)) plan2.push([at(r.int(5, 25)), 'CPD course', R(r.around(1_800, 0.3)), 'Training & CPD', 'Ledgerline Training (made up)']);
+    } else plan2.push([at(15), 'Bookkeeping fee', Math.round(R(1_500) * fixed), 'Accounting', 'Ledger & Co Bookkeeping (made up)']);
     if (trade.asset === 'computer') plan2.push([at(10), 'Software subscriptions', R(r.around(420, 0.1)), 'Software & subscriptions', 'Cloudnine Hosting (made up)']);
     if (r.chance(0.4)) plan2.push([at(r.int(5, 25)), 'Advertising', R(r.around(900, 0.3)), 'Advertising', 'Coast Community Ads (made up)']);
     if (r.chance(0.3) && trade.asset !== 'computer') plan2.push([at(r.int(5, 25)), 'Small tools', R(r.around(600, 0.4)), 'Tool', trade.suppliers[0]!]);
@@ -928,7 +931,8 @@ export async function populate(io: Io, db: Db, opts: PopulateOptions): Promise<P
     for (const [date, description, total, catName, supplier, code] of plan2) {
       const personally = code === 'not_claimable' && r.chance(0.3);
       on(date, async () => {
-        const catId = catName === 'Rent' ? await category('Rent', 'overhead', 'rent') : await cat(catName);
+        // A practice rents its office under the cost type its setup added (industry.ts).
+        const catId = catName === 'Rent' ? (s.industry === 'accounting' ? await cat('Office rent') : await category('Rent', 'overhead', 'rent')) : await cat(catName);
         await cost({ date, description, totalCents: total, category: catId, supplier, code, sourceId: personally ? ownerPaid : undefined });
       });
     }

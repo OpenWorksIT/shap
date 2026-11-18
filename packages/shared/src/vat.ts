@@ -25,7 +25,7 @@ export const SALE_VAT: Record<SaleVatCode, { label: string; short: string; field
     label: 'Exempt or not a supply',
     short: 'Exempt',
     field: '3',
-    hint: 'No VAT, and no VAT can be claimed on what went into it: residential rent, financial services (such as interest), and some education and public transport. Also amounts that aren’t a supply at all.',
+    hint: 'No VAT, and no VAT can be claimed on what went into it: residential rent, financial services (such as interest), and some education and public transport. Also amounts that aren’t a supply at all, such as a fee you paid in your client’s name as their agent and recover at cost (a courier you booked yourself and charge on is your own supply, with VAT).',
   },
 };
 

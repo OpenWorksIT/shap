@@ -49,7 +49,7 @@ import { ClipsSetting } from '../components/HowItWorks';
 import { TermPicks } from '../components/TermPicks';
 import { LogoPlacer } from '../components/LogoPlacer';
 import { LogoField } from '../components/BusinessForm';
-import { ACCOUNTANT_TERMS_VERSION, FEATURES, FEATURE_GROUPS, FEATURE_KEYS, featureOn, INDUSTRIES, PRACTICE_CAUTION, TURNOVER_TAX_LIMIT_CENTS } from '@shap/shared';
+import { ACCOUNTANT_TERMS_VERSION, FEATURES, FEATURE_GROUPS, FEATURE_KEYS, featureOn, INDUSTRIES, PRACTICE_CAUTION, PROFESSIONAL_SERVICE_INDUSTRIES, TURNOVER_TAX_LIMIT_CENTS, TURNOVER_TAX_PROFESSIONAL } from '@shap/shared';
 import { AccountantTermsAccept } from '../components/AccountantTerms';
 import { useClientHere } from '../components/ClientBanner';
 import { WipeData } from '../components/WipeData';
@@ -381,6 +381,7 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
                   {kind.taxedAs === 'company' && ' For now a company on turnover tax needs its year to end in February (the 2026 Budget proposed dropping this; it isn’t law yet).'}
                   {kind.taxedAs === 'partners' && ' Each partner registers and pays on their own share of the turnover.'}
                 </div>
+                {f.turnoverTax && PROFESSIONAL_SERVICE_INDUSTRIES.includes(settings.industry) && <div className="xs banner">{TURNOVER_TAX_PROFESSIONAL}</div>}
               </span>
             </label>}
             <div className="form-grid">

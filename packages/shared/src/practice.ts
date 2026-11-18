@@ -34,6 +34,9 @@ export const LEVEL_WORDS: Record<Level, string> = {
   books: 'Writes up the books, as their owner in Shap',
   compile: 'Reads them and compiles the statements, as their accountant in Shap (read only)',
 };
+/** Who opens it, beside the choice: compiling is signing, in that person's own name. */
+export const COMPILE_SIGNS =
+  'Whoever compiles a client’s statements signs the compilation report (for a close corporation, the accounting officer’s report) in their own name: give a client to compile only to someone who signs for your practice.';
 
 export interface DeadlineInputs {
   businessType: BusinessType;
