@@ -284,5 +284,9 @@ describe('words on screen and liability, the fifth round: a refusal Shap wrote, 
       expect(body.error).toContain(`(alter database "${dbName}" owner to "${me!.current}";). If not, leave it and find out who made it (docs/ACCOUNTANT.md).`);
       expect(body.error).toMatch(/find out who made it \(docs\/ACCOUNTANT\.md\)\.$/);
     }
+    // Shown as an error toast: it stays long enough to read (the words review's sixth round), not 8 seconds for every error.
+    const ui = read('apps/web/src/components/ui.tsx');
+    expect(ui).toMatch(/tone !== 'error' \? 4000 : Math\.min\(60_000, Math\.max\(8000, \(typeof text === 'string' \? text\.length : 0\) \* 70\)\)/);
+    expect(ui).toMatch(/setTimeout\(\(\) => setToasts\(\(t\) => t\.filter\(\(x\) => x\.id !== id\)\), toastMs\(raw, tone\)\)/);
   });
 });

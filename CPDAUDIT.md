@@ -1319,6 +1319,10 @@ database cut what they say at 400 characters, so the new refusal lost its cautio
 command: Shap's own refusals are said whole (only the database server's own text is cut), the
 command is in brackets, and a test asks the checks and the working papers for it.
 
+The sixth round (`6ff53cf`): words ready. Its notes, done: an error toast stays long enough to read
+(70 ms a character, 8 seconds to a minute; any can be tapped away), not 8 seconds for every error;
+a code comment back above the class it's about.
+
 ### Code scanning (CodeQL), first run
 
 - The Accounts screen's download links carried the period's dates unencoded (flagged as text

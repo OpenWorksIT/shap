@@ -62,7 +62,6 @@ export async function otherCompanies(sql: Sql, o: { testDbs?: string[] } = {}): 
 /** How many clients' pools stay open at once (each up to 3 connections): the least used close first. */
 export const MAX_CLIENT_POOLS = 12;
 
-/** The clients' pools, made when first needed. */
 /**
  * What a route says when a client's database isn't opened. assertOwned's refusals are Shap's own
  * words, said whole (cut short, the caution and half the command were lost); anything else (the
@@ -74,6 +73,7 @@ export const ownRefusal = (err: unknown): string => {
   return e?.code === 'missing' || e?.code === 'not_ours' ? message : message.slice(0, 400);
 };
 
+/** The clients' pools, made when first needed. */
 export class ClientDbs {
   private pools = new Map<string, Sql>();
   constructor(private readonly practiceUrl: string) {}

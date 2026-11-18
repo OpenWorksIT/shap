@@ -280,6 +280,9 @@ interface Toast {
   tone?: 'error';
 }
 const ToastCtx = createContext<(text: ReactNode, tone?: Toast['tone']) => void>(() => {});
+/** How long a toast stays: an error stays long enough to read (one with a command in it can run to 80 words), and any can be tapped away. */
+const toastMs = (text: ReactNode, tone?: Toast['tone']) =>
+  tone !== 'error' ? 4000 : Math.min(60_000, Math.max(8000, (typeof text === 'string' ? text.length : 0) * 70));
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -287,7 +290,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     const text = typeof raw === 'string' && tone !== 'error' ? flavour(raw) : raw;
     const id = Date.now() + Math.random();
     setToasts((t) => [...t.slice(-3), { id, text, tone }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), tone === 'error' ? 8000 : 4000);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), toastMs(raw, tone));
   }, []);
   return (
     <ToastCtx.Provider value={push}>
