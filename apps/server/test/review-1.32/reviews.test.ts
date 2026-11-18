@@ -391,12 +391,13 @@ describe('security and privacy, the sixth round: this Shap’s login and the com
   });
 
   it('a look-alike of this Shap’s own login is never said as if it were it, beside the command', async () => {
-    await env.sql.unsafe(`create role ${q(APP)} login`);
+    // CI's Postgres asks for a password: a made-up one.
+    await env.sql.unsafe(`create role ${q(APP)} login password 'made-up-password-6'`);
     await env.sql.unsafe(`create role ${q(LOOKALIKE)} nologin`);
     await env.sql.unsafe(`create database "${dbs[2]}" owner ${q(LOOKALIKE)}`);
     const u = new URL(env.ctx.clients.urlFor(env.ctx.clients.practiceDb));
     u.username = APP;
-    u.password = '';
+    u.password = 'made-up-password-6';
     const asApp = new ClientDbs(u.toString());
     try {
       const err = await asApp.assertOwned(dbs[2]!).then(
