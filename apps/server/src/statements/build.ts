@@ -194,6 +194,30 @@ export function yearStartOf(fyEnd: string): string {
 
 export { governingFor } from './details.js';
 
+/**
+ * Time not on an invoice issued by the year end (directly, or on a quote an issued invoice was made
+ * from): work done that the books haven't recognised as revenue yet (IFRS for SMEs 23.14), valued at
+ * the hourly rates in Shap. The year's own time, and earlier time invoiced only after the year end
+ * (work in progress then too); earlier time never invoiced is left out (it isn't this year's). Each
+ * time entry's invoice is found by a join, never a search of every invoice for each one.
+ */
+export async function unbilledTimeAt(db: Db, fyStart: string, fyEnd: string): Promise<{ minutes: number; valueCents: number }> {
+  const [r] = await db<{ minutes: number; valueCents: string }[]>`
+    with q as (
+      select source_quote_id as quote, min(issue_date) as issued from documents
+      where kind = 'invoice' and status = 'issued' and source_quote_id is not null group by 1),
+    t as (
+      select t.minutes, coalesce(nullif(p.hourly_rate_cents, 0), (select hourly_rate_cents from settings where id), 0) as rate,
+             (t.started_at at time zone 'Africa/Johannesburg')::date as day,
+             coalesce(case when d.kind = 'invoice' and d.status = 'issued' then d.issue_date end, q.issued) as invoiced
+      from time_entries t left join projects p on p.id = t.project_id
+      left join documents d on d.id = t.billed_document_id left join q on q.quote = t.billed_document_id
+      where t.minutes > 0)
+    select coalesce(sum(minutes), 0)::int as minutes, coalesce(sum(round(minutes * rate / 60.0)), 0)::bigint as value_cents
+    from t where day <= ${fyEnd}::date and (invoiced is null or invoiced > ${fyEnd}::date) and (day >= ${fyStart}::date or invoiced > ${fyEnd}::date)`;
+  return { minutes: r!.minutes, valueCents: Number(r!.valueCents) };
+}
+
 export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: StatementDetails): Promise<Statements> {
   const settings = await getSettings(db);
   const details = detailsOverride ?? (await loadDetails(db));
@@ -548,21 +572,8 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
   const dayWages = Number(dayLabour!.wages);
   const dayEmployees = dayWages > 0;
   const dayMonths = dayLabour!.months;
-  // Time not on an invoice issued by the year end (directly, or on a quote an issued invoice was made
-  // from): work done that the books haven't recognised as revenue yet (IFRS for SMEs 23.14), valued
-  // at the hourly rates in Shap. The year's own time, and earlier time invoiced only after the year
-  // end (work in progress then too); earlier time never invoiced is left out (it isn't this year's).
-  const [unbilledTime] = await db<{ minutes: number; valueCents: string }[]>`
-    with t as (
-      select t.minutes, coalesce(nullif(p.hourly_rate_cents, 0), (select hourly_rate_cents from settings where id), 0) as rate,
-             (t.started_at at time zone 'Africa/Johannesburg')::date as day,
-             (select min(i.issue_date) from documents i where i.kind = 'invoice' and i.status = 'issued'
-                and (i.id = t.billed_document_id or (i.source_quote_id is not null and i.source_quote_id = t.billed_document_id))) as invoiced
-      from time_entries t left join projects p on p.id = t.project_id
-      where t.minutes > 0)
-    select coalesce(sum(minutes), 0)::int as minutes, coalesce(sum(round(minutes * rate / 60.0)), 0)::bigint as value_cents
-    from t where day <= ${fyEnd}::date and (invoiced is null or invoiced > ${fyEnd}::date) and (day >= ${fyStart}::date or invoiced > ${fyEnd}::date)`;
-  const unbilledMinutes = unbilledTime!.minutes;
+  const unbilledTime = await unbilledTimeAt(db, fyStart, fyEnd);
+  const unbilledMinutes = unbilledTime.minutes;
   const policyDefaults = defaultPolicies(bt, {
     lives,
     employees: moved(['salaries', 'director_salary', 'payroll_levies']) || dayEmployees,
@@ -888,7 +899,7 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
   // Time tracked but not invoiced by the year end (23.14): revenue for work done, if it will be billed.
   if (unbilledMinutes > 0) {
     const hours = Math.round(unbilledMinutes / 6) / 10;
-    const value = Number(unbilledTime!.valueCents);
+    const value = unbilledTime.valueCents;
     look(
       'Work done but not invoiced by the year end is considered (IFRS for SMEs 23.14)',
       false,

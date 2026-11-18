@@ -31,7 +31,7 @@ import { audit } from '../lib/audit.js';
 import { freshTotals, getSettings, today } from '../lib/books.js';
 import { letterSections, servicesFor, type LetterInput, type LetterSection } from '../lib/engagement.js';
 import { renderFilePdf, renderLetterPdf } from '../lib/engagement-pdf.js';
-import { badRequest, forbidden, notFound } from '../lib/errors.js';
+import { badRequest, forbidden, notFound, HttpError } from '../lib/errors.js';
 import type { ClientHealth } from '../lib/practice.js';
 import { parse } from '../lib/validate.js';
 import { lastEnded, letterStanding, tbHash, yearTb, type CoverLetter, type YearTb } from '../lib/papers.js';
@@ -101,13 +101,18 @@ export function registerWorkingPaperRoutes(app: FastifyInstance, ctx: Ctx): void
     if (c.archivedAt) throw badRequest(ARCHIVED);
   };
   /** Its books' own Sql (books on this server), or null (on its own Shap). */
-  const booksOf = (c: ClientRow): Sql | null => {
+  const booksOf = async (c: ClientRow): Promise<Sql | null> => {
     if (c.kind === 'linked' || !c.dbName) return null;
     if (c.migrateError) throw badRequest('Shap couldn’t bring this client’s books up to date when it last started: their working papers open again once it can.');
-    return clients.get(c.dbName);
+    // Only its own database (one another login made under its name never: lib/practice.ts assertOwned).
+    try {
+      return await clients.openOwn(c.dbName);
+    } catch (err) {
+      throw new HttpError(409, (err as Error).message.slice(0, 400), 'not_ours');
+    }
   };
   const factsOf = async (c: ClientRow): Promise<ClientFacts> => {
-    const books = booksOf(c);
+    const books = await booksOf(c);
     if (books) {
       const s = await getSettings(books);
       await freshTotals(books);
@@ -140,7 +145,7 @@ export function registerWorkingPaperRoutes(app: FastifyInstance, ctx: Ctx): void
       union select fy_end::text from practice_signoffs where client_id = ${c.id}
       union select fy_end::text from practice_ticks where client_id = ${c.id}`;
     for (const k of kept) out.add(k.fyEnd);
-    const books = booksOf(c);
+    const books = await booksOf(c);
     if (books) {
       const ended = await books<{ fyEnd: string }[]>`
         select fy_end::text as fy_end from year_ends where fy_end < ${today()}::date
@@ -156,7 +161,7 @@ export function registerWorkingPaperRoutes(app: FastifyInstance, ctx: Ctx): void
     return f;
   };
   const tbOf = async (c: ClientRow, fyEnd: string): Promise<YearTb | null> => {
-    const books = booksOf(c);
+    const books = await booksOf(c);
     return books ? yearTb(books, fyEnd) : null;
   };
   const names = async () => new Map((await real<{ id: string; name: string }[]>`select id, name from users`).map((u) => [u.id, u.name]));
@@ -394,7 +399,7 @@ export function registerWorkingPaperRoutes(app: FastifyInstance, ctx: Ctx): void
     }
     if (!years.includes(year)) throw badRequest(NO_YEAR);
     const who = await names();
-    const books = booksOf(c);
+    const books = await booksOf(c);
     const tb = await tbOf(c, year);
     const ticks = await real<TickRow[]>`select * from practice_ticks where client_id = ${c.id} and fy_end = ${year}`;
     const notes = await real<NoteRow[]>`select ${noteCols(real)} from practice_notes where client_id = ${c.id} and fy_end = ${year} order by raised_at`;
@@ -479,7 +484,7 @@ export function registerWorkingPaperRoutes(app: FastifyInstance, ctx: Ctx): void
     notArchived(c);
     const { fyEnd, accountId, which, on } = parse(z.object({ fyEnd: yearEnd, accountId: uuid, which: z.enum(['prepared', 'reviewed']), on: z.boolean() }), req.body);
     if (which === 'prepared' && level !== 'books') throw forbidden('Ticking an account as prepared is for whoever writes up their books.');
-    if (!booksOf(c)) throw badRequest('Their books are on their own Shap, so their trial balance isn’t here to tick: use review notes and the year’s sign-offs.');
+    if (!(await booksOf(c))) throw badRequest('Their books are on their own Shap, so their trial balance isn’t here to tick: use review notes and the year’s sign-offs.');
     await yearOf(c, fyEnd);
     const tb = (await tbOf(c, fyEnd))!;
     const line = tb.rows.find((r) => r.id === accountId);

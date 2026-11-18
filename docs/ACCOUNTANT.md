@@ -46,9 +46,9 @@ so choosing it switches that off and says why: docs/SARS.md.) Yes adds a step, *
   starting password (Shap suggests one; the owner passes it on). They're made when the terms are
   accepted at the end, all at once or none (`POST /api/practice/team`), and only while nobody but
   the owner signs in: after that, one at a time in Settings. Which clients each person opens, and
-  how, is chosen per client (Who opens which, below). Given a client either way, they can open it to
-  compile, and whoever compiles signs the compilation report in their own name: the practice says
-  who compiles.
+  how, is chosen per client (Who opens which, below). Whichever way they're given a client, they can
+  open it to compile, and whoever compiles signs the compilation report in their own name: who may
+  sign one is the practice's to decide.
 - The practice's own books start as a practice's usually are: invoices only, the time tracker, no
   counter sales; its line types and revenue accounts named Fees, Recharged costs and Other revenue,
   and the cost of what it recharges "Costs recharged to clients" (while unused: another kind of

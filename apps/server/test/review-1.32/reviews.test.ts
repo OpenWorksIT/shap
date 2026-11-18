@@ -21,9 +21,9 @@ describe('IFRS for SMEs and company law', () => {
     expect(bookkeeper!.hint).toMatch(/^Opens the clients they’re given, to write up their books\./);
     expect(bookkeeper!.hint).not.toMatch(/or reading them and compiling the statements/);
     // Given either way, a client can be opened to compile (the check of the fixes): said, and who may sign left to the practice.
-    expect(bookkeeper!.hint).toMatch(/Given a client either way, they can also open it to compile, which signs the compilation report \(a close corporation’s accounting officer’s report\) in their own name: who may sign one is your practice’s to decide/);
+    expect(bookkeeper!.hint).toMatch(/Whichever way they’re given a client, they can also open it to compile; compiling signs the compilation report \(a close corporation’s accounting officer’s report\) in their own name, and who may sign one is your practice’s to decide/);
     expect(manager!.hint).toMatch(/as a client’s owner in Shap/);
-    expect(COMPILE_SIGNS).toMatch(/^Given a client either way, someone can open it to compile\. .*signs the compilation report \(for a close corporation, the accounting officer’s report\) in their own name\. Who in your practice may sign one is your practice’s to decide, under its professional body’s rules\.$/);
+    expect(COMPILE_SIGNS).toMatch(/^Whichever way someone is given a client \(to write up or to compile\), they can open it to compile\. .*signs the compilation report \(for a close corporation, the accounting officer’s report\) in their own name\. Who in your practice may sign one is your practice’s to decide, under the law \(for a close corporation, its Act\) and its professional body’s rules\.$/);
     expect(COMPILE_SIGNS).not.toMatch(/give a client to compile only/);
     expect(read('apps/web/src/pages/Practice.tsx')).toMatch(/<p className="xs muted">\{COMPILE_SIGNS\}<\/p>/);
   });
@@ -112,6 +112,29 @@ describe('a practice’s own books, set up as setup does (IFRS 2–4, accounting
     expect((await buildStatements(env.sql, '2027-02-28')).checks.find((c) => /not invoiced by the year end/.test(c.label))).toBeUndefined();
   });
 
+  it('finds each time entry’s invoice quickly, however many there are (the accounting review’s third round)', async () => {
+    // 6 000 draft invoices with an hour each on them (drafts: nothing in the ledger), the way a busy
+    // practice's ten years of the time tracker would look to the query.
+    const before = (await env.sql<{ n: number }[]>`select count(*)::int as n from documents`)[0]!.n;
+    await env.sql`
+      insert into documents (kind, number, status, issue_date, title, subtotal_cents, total_cents)
+      select 'invoice', 'SPEED' || lpad(i::text, 6, '0'), 'draft', '2026-01-10', 'Made-up', 0, 0 from generate_series(1, 6000) i`;
+    await env.sql`
+      insert into time_entries (started_at, ended_at, minutes, note, billed_document_id)
+      select '2026-01-05T08:00:00+02:00', '2026-01-05T09:00:00+02:00', 60, 'Made-up speed', d.id from documents d where d.number like 'SPEED%'`;
+    try {
+      const { unbilledTimeAt } = await import('../../src/statements/build.js');
+      const t0 = Date.now();
+      const r = await unbilledTimeAt(env.sql, '2025-03-01', FY);
+      expect(Date.now() - t0).toBeLessThan(1500);
+      expect(r.minutes).toBeGreaterThanOrEqual(6000 * 60);
+    } finally {
+      await env.sql`delete from time_entries where note = 'Made-up speed'`;
+      await env.sql`delete from documents where number like 'SPEED%'`;
+      expect((await env.sql<{ n: number }[]>`select count(*)::int as n from documents`)[0]!.n).toBe(before);
+    }
+  });
+
   it('puts a practice’s materials brought in from another package under its own cost type (the check of the fixes)', async () => {
     const bank = await (await ref(env.sql)).src('Business bank');
     const bills = `ContactName,InvoiceNumber,InvoiceDate,DueDate,Total,TaxTotal,InvoiceAmountPaid,InvoiceAmountDue,Description,Quantity,UnitAmount,LineAmount,AccountCode,Type,Status
@@ -153,7 +176,8 @@ describe('SARS and tax', () => {
 
   it('an amount paid as the client’s agent: no invoice item makes it revenue, and the exempt option says it’s no supply (2, and the check of the fixes)', () => {
     expect(industryProfile('accounting').items.find((i) => /agent/i.test(i.d))).toBeUndefined();
-    expect(SALE_VAT.exempt.hint).toMatch(/a fee you paid in your client’s name as their agent and recover at cost \(a courier you booked yourself and charge on is your own supply, with VAT\)/);
+    // Neither supply nor revenue: off the invoice (the IFRS review's check of the fixes).
+    expect(SALE_VAT.exempt.hint).toMatch(/\(A fee you pay in a client’s name as their agent and recover at cost is neither your supply nor your revenue, so it doesn’t go on your invoice\. A courier you book yourself and charge on is your own supply, with VAT\.\)/);
     expect(read('docs/ACCOUNTANT.md')).toMatch(/IFRS for SMEs 23\.4 leaves amounts collected for others out\) or its supply \(VAT\s+Act s54\(2\)\)/);
   });
 
@@ -183,6 +207,8 @@ describe('words on screen and liability', () => {
     // Busy: asked again only every so often, never in a loop (the check of the fixes).
     expect(panel).toMatch(/const ASK_EVERY_MS = 15_000;/);
     expect(panel).toMatch(/if \(busyRef\.current && mayAsk\(s\) && Date\.now\(\) - lastAsk\.current >= ASK_EVERY_MS\)/);
+    // A refusal over other companies since gone reads as never asked (the words review's third round).
+    expect(panel).toMatch(/!\(state\.asked\.shared && !state\.otherCompanies\)/);
     // In setup, a failed answer has no button: Shap asks again at the end.
     expect(panel).toMatch(/if \(where === 'setup'\) body = `The server said: \$\{state\.asked!\.message\} When you accept the terms at the end, Shap asks the server again\./);
     expect(panel).toMatch(/When you accept the terms at the end, Shap asks the server/);

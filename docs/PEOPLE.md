@@ -18,8 +18,8 @@ admin who doesn't see payroll), or **Only what I tick** for someone without a pr
 An accounting practice setting up Shap Accountant (docs/ACCOUNTANT.md, "Setting up a practice") is
 offered **Bookkeeper** (opens the clients they're given, to write up their books) and **Practice
 manager** (adds clients and chooses who opens each, and how), with **Admin**, and can make its
-people's sign-ins there, all at once. Given a client either way, someone can open it to compile,
-and whoever compiles signs the compilation report in their own name (docs/ACCOUNTANT.md, "Who opens
+people's sign-ins there, all at once. Whichever way someone is given a client, they can open it to
+compile, and whoever compiles signs the compilation report in their own name (docs/ACCOUNTANT.md, "Who opens
 which").
 
 When a profile changes, everyone on it has the change at once (their next tap), except what was

@@ -1290,6 +1290,21 @@ exceptions; "Settings → Features" is "What you use". Smaller: curly apostrophe
 messages, "busy with another request", less than 0.1 hours, "usually" for the SBC caution, the
 investment income in the turnover tax rule, the turnover note only while it's off.
 
+The third round (`af643c7`): SARS ready again. Still to fix, and fixed: a client's database dropped
+(or part-way through a restore) and made again by another login that may make databases was still
+migrated and opened, its code running as this Shap's login (Postgres's superuser on the default
+install): only a database this Shap's own login owns is migrated or opened (checked from the
+practice's own database, never the client's), in setup, requests, the checks and monthly invoices;
+the unbilled-time query searched every invoice for each time entry (6 000 of each: 2 to 7 seconds,
+in every statements view and the practice's checks): a join, milliseconds, the same in Pocket; a
+company added since shap-ctl last counted wasn't seen as another company: shap-ctl names the test
+servers' databases and the app counts every other one; the exempt option's hint told people to put
+an agent's amount on an invoice line: it says it's neither supply nor revenue and doesn't go on the
+invoice; a refusal over other companies since gone stayed on screen: it reads as never asked. The
+cap's pattern is `starts_with` (CodeQL flagged the hand-escaped LIKE). Smaller: "whichever way
+someone is given a client", the law as well as the professional body for who may sign, the agent
+line in the changelog hedged, move-in's cost types in order.
+
 ### Code scanning (CodeQL), first run
 
 - The Accounts screen's download links carried the period's dates unencoded (flagged as text

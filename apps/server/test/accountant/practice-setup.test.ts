@@ -189,14 +189,43 @@ describe('the server, for a practice: a real company on a server other companies
     expect(existsSync(join(ctl, 'request'))).toBe(false);
   });
 
-  it('goes by shap-ctl’s count of the companies added where it has one: a test server isn’t another company (the check of the fixes)', async () => {
-    writeFileSync(join(ctl, 'status.json'), JSON.stringify({ companies: { real: 0, test: 1 } }));
+  it('leaves out the test servers shap-ctl names: a test server isn’t another company, a company added since its count is (the check of the fixes)', async () => {
+    // Every other company-like database on this cluster, named as test servers.
+    const others = (await admin<{ datname: string }[]>`select datname from pg_database where datname ~ '^shap(_[a-z0-9]+)?$' and datname !~ '_demo$'`).map((d) => d.datname);
+    expect(others).toContain('shap_madeupneighbour');
+    writeFileSync(join(ctl, 'status.json'), JSON.stringify({ companies: { real: 0, test: others.length, testDbs: others } }));
     expect(await owner.get('/api/practice/server')).toMatchObject({ otherCompanies: false });
     expect((await owner.call({ method: 'POST', url: '/api/practice/server', payload: {}, ...from() })).json()).toMatchObject({ pending: true });
     expect(readFileSync(join(ctl, 'request'), 'utf8')).toBe('practice\n');
     rmSync(join(ctl, 'request'));
-    writeFileSync(join(ctl, 'status.json'), JSON.stringify({ companies: { real: 1, test: 0 } }));
+    // One not named a test server (added since shap-ctl last counted, say): another company's.
+    writeFileSync(join(ctl, 'status.json'), JSON.stringify({ companies: { real: 0, test: others.length - 1, testDbs: others.filter((d) => d !== 'shap_madeupneighbour') } }));
     expect(await owner.get('/api/practice/server')).toMatchObject({ otherCompanies: true });
+  });
+
+  it('never migrates or opens a client’s database another login made under its name (the security review)', async () => {
+    // Made as a client's would be, by this Shap's login, then gone, and made again by another.
+    await admin.unsafe(`alter role ${ROLE} createdb`);
+    await admin.unsafe(`drop database if exists ${ROLE}__c_aaaaaaaaaaaa with (force)`);
+    await admin.unsafe(`drop role if exists shap_t_squatter2`);
+    await admin.unsafe(`create role shap_t_squatter2 login password 'made-up-password-1'`);
+    await admin.unsafe(`create database ${ROLE}__c_aaaaaaaaaaaa owner shap_t_squatter2`);
+    const owner1 = (await env.sql<{ id: string }[]>`select id from users where email = 'owner@example.co.za'`)[0]!.id;
+    const [c] = await env.sql<{ id: string }[]>`insert into practice_clients (id, name, kind, created_by, db_name) values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Made-up squatted', 'kept', ${owner1}, ${`${ROLE}__c_aaaaaaaaaaaa`}) returning id`;
+    try {
+      const { migrateClients } = await import('../../src/lib/practice.js');
+      const r = await migrateClients(env.sql, env.ctx.clients, { info: () => undefined, warn: () => undefined });
+      expect(r.failed).toContain(c!.id);
+      const [row] = await env.sql<{ migrateError: string }[]>`select migrate_error from practice_clients where id = ${c!.id}`;
+      expect(row!.migrateError).toMatch(/belongs to another login \(shap_t_squatter2\), so Shap doesn’t open it/);
+      await expect(env.ctx.clients.openOwn(`${ROLE}__c_aaaaaaaaaaaa`)).rejects.toThrow(/belongs to another login/);
+      await expect(env.ctx.clients.withOwn(`${ROLE}__c_aaaaaaaaaaaa`, async () => 1)).rejects.toThrow(/belongs to another login/);
+    } finally {
+      await env.sql`delete from practice_clients where id = ${c!.id}`;
+      await admin.unsafe(`drop database if exists ${ROLE}__c_aaaaaaaaaaaa with (force)`);
+      await admin.unsafe(`drop role if exists shap_t_squatter2`);
+      await admin.unsafe(`alter role ${ROLE} nocreatedb`);
+    }
   });
 });
 

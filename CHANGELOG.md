@@ -11,7 +11,8 @@ entries newer than the version you're running before you update.
   start as a practice's usually are (invoices only, the time tracker, no counter sales; fees,
   recharged costs and other revenue; cost types for costs recharged to clients, software, CPD and
   office rent), and any later question can change that. An amount you pay in a client's name as
-  their agent isn't your revenue or your supply: Shap has no invoice item for it (docs/ACCOUNTANT.md). An accounting practice can't be on turnover
+  their agent generally isn't your revenue or your supply, so Shap has no invoice item for it
+  (docs/ACCOUNTANT.md; check with your accountant). An accounting practice can't be on turnover
   tax, so choosing it switches that off and says why.
 - **The server.** Each client's books are a database of their own, so the practice step checks that
   this Shap's database login may make databases, and says what it found. Once you've accepted the
@@ -22,9 +23,9 @@ entries newer than the version you're running before you update.
 - **Your practice's people, in setup.** Just you, or you and your staff: how many, and now or later.
   Now: the profiles (Bookkeeper, Practice manager and Admin, each changeable, and your own) and each
   person's name, email, profile and starting password (Shap suggests one), made all at once when you
-  accept the terms. Later: Settings → People who sign in, as before. Who opens it says that someone
-  given a client either way can open it to compile, and that whoever compiles signs the compilation
-  report in their own name.
+  accept the terms. Later: Settings → People who sign in, as before. Who opens it says that whichever
+  way someone is given a client, they can open it to compile, and that whoever compiles signs the
+  compilation report in their own name.
 - **A server of its own.** Shap Accountant needs Shap on a server of its own: a VPS or a computer
   only your practice uses. A company added to someone else's Shap server can't keep clients' books
   (add-company.sh says so), and the practice step and Practice say when other companies' books are

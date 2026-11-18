@@ -101,7 +101,8 @@ export function PracticeServer({ where, onState }: { where: 'setup' | 'practice'
   if (!state) return error ? <div className="banner alert small">{error}</div> : <p className="xs muted">Looking at this server…</p>;
   const shared = sharedServer(state);
   if (where === 'practice' && state.ready && !shared) return null;
-  const failed = !state.ready && !state.pending && !busy && state.asked && !state.asked.ok;
+  // A refusal because of other companies that are gone since (the server's next count): as if never asked.
+  const failed = !state.ready && !state.pending && !busy && state.asked && !state.asked.ok && !(state.asked.shared && !state.otherCompanies);
   let head: string;
   let body: string;
   let command = false;
@@ -133,7 +134,7 @@ export function PracticeServer({ where, onState }: { where: 'setup' | 'practice'
           ? 'The server hasn’t answered yet. Carry on: Practice shows this until it has.'
           : 'The server hasn’t answered yet: this goes once it has.'
         : 'It usually takes a few seconds.';
-  } else if (failed && state.asked!.shared) {
+  } else if (failed && state.asked!.shared && state.otherCompanies) {
     // shap-ctl found a real company added to the server: Shap Accountant doesn't belong there.
     head = 'Other companies’ books are on this server too';
     body = `The server said: ${state.asked!.message}`;

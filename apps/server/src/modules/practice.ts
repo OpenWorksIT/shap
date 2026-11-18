@@ -266,7 +266,9 @@ export function registerPracticeScope(app: FastifyInstance, ctx: Ctx): void {
     const [c] = await dbs.real<ClientRow[]>`select * from practice_clients where id = ${id} and archived_at is null and db_name is not null and migrate_error is null`;
     const level = c ? await levelFor(dbs.real, user, c.id) : null;
     if (!c || !level) return fail();
-    const sql = clients.get(c.dbName!);
+    // Only its own database (one another login made under its name never: lib/practice.ts).
+    const sql = await clients.openOwn(c.dbName!).catch(() => null);
+    if (!sql) return fail();
     // Their session in the client's books, as that same person and as who they were let in as: gone,
     // ended, or their level lowered since, and they're back in the practice.
     const token = req.cookies?.[CLIENT_SESSION_COOKIE];
@@ -301,6 +303,14 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [c] = await real<ClientRow[]>`select * from practice_clients where id = ${id}`;
     if (!c) throw notFound('Client');
     return c;
+  };
+  /** A client's books on this server, only if their database is this Shap's own (lib/practice.ts assertOwned). */
+  const ownBooks = async (dbName: string) => {
+    try {
+      return await clients.openOwn(dbName);
+    } catch (err) {
+      throw new HttpError(409, (err as Error).message.slice(0, 400), 'not_ours');
+    }
   };
   const usable = (c: ClientRow) => {
     if (!c.dbName) throw badRequest('This client’s books were never finished on the server: archive it and add it again.');
@@ -340,10 +350,11 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { may, login } = await databaseRights(real);
     const status = ctlStatus(config);
     const asked = status && typeof status.practice === 'object' && status.practice ? (status.practice as { at?: string; ok?: boolean; message?: string; shared?: boolean }) : null;
-    // Other companies on the server: as shap-ctl counts them where it looks after the server (a test
-    // server isn't one), otherwise from the databases' names (where a test server's can't be told apart).
-    const counted = status && typeof status.companies === 'object' && status.companies ? (status.companies as { real?: unknown }) : null;
-    const others = counted && typeof counted.real === 'number' ? counted.real > 0 || (await otherCompanies(real, { mainOnly: true })) : await otherCompanies(real);
+    // Other companies on the server, from the databases' names, less the test servers' where shap-ctl
+    // looks after the server and has named them (a test server isn't another company: its books are made up).
+    const counted = status && typeof status.companies === 'object' && status.companies ? (status.companies as { testDbs?: unknown }) : null;
+    const testDbs = Array.isArray(counted?.testDbs) ? counted.testDbs.filter((d): d is string => typeof d === 'string' && /^shap_[a-z0-9]{2,20}$/.test(d)).slice(0, 50) : [];
+    const others = await otherCompanies(real, { testDbs });
     return {
       ready: may,
       login,
@@ -483,9 +494,8 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
       // few, counted one request at a time (the row is in before the next counts), rows or databases.
       if (config.TEST_SERVER) {
         await tx`select pg_advisory_xact_lock(hashtext('shap:test_server_clients'))`;
-        const pattern = `${clients.practiceDb.replace(/_/g, '\\_')}\\_\\_c\\_%`;
         const [n] = await tx<{ n: number }[]>`
-          select greatest((select count(*) from practice_clients where kind <> 'linked'), (select count(*) from pg_database where datname like ${pattern}))::int as n`;
+          select greatest((select count(*) from practice_clients where kind <> 'linked'), (select count(*) from pg_database where starts_with(datname, ${`${clients.practiceDb}__c_`})))::int as n`;
         if (n!.n >= TEST_SERVER_CLIENTS) throw badRequest(`A test server keeps at most ${TEST_SERVER_CLIENTS} clients’ books (archived ones count: they stay on the server).`);
       }
       return tx<{ id: string }[]>`insert into practice_clients (name, kind, created_by) values (${name}, ${kind}, ${user.id}) returning id`;
@@ -659,7 +669,7 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (as === 'books' && given !== 'books') throw forbidden('You’ve been given these books to read and compile, not to write up.');
     // (A Shap Pocket client's copy takes only the practice's own work on it, at either level: POCKET_COPY_MAY.)
     const level = as ?? given;
-    const sql = clients.get(dbName);
+    const sql = await ownBooks(dbName);
     await mirrorUser(sql, user, level);
     const token = newToken();
     await sql`insert into sessions (token_hash, user_id, expires_at, user_agent, ip)
@@ -721,7 +731,7 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     }
     const dbName = usable(c);
     if (!(await levelFor(real, user, c.id))) throw forbidden(NOT_GIVEN);
-    const health = await refreshHealth(c.id, clients.get(dbName));
+    const health = await refreshHealth(c.id, await ownBooks(dbName));
     if (!health) throw badRequest('Shap’s checks couldn’t run on this client’s books. Open them and look, or let us know: tap Feedback, then Bug found.');
     return { health: { ...health, deadlines: health.deadlineInputs ? deadlinesFor(health.deadlineInputs, today()) : [] } };
   });
@@ -742,7 +752,7 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     });
     // Whoever lost the client, or whose level changed, is out of its books at once (open it again, as given now).
     const now = new Map(access.map((a) => [a.userId, a.level]));
-    if (c.dbName) for (const b of before) if (now.get(b.userId) !== b.level) await unmirrorUser(clients.get(c.dbName), b.userId);
+    if (c.dbName) for (const b of before) if (now.get(b.userId) !== b.level) await unmirrorUser(await ownBooks(c.dbName), b.userId);
     // On the client's own Shap: asked to take them out now. Whoever their Shap didn't answer for is
     // said (they're out when their sign-in there ends; their next one is as given now).
     const stillIn: string[] = [];
@@ -773,7 +783,7 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
       await tx`update practice_clients set archived_at = ${archived ? new Date() : null} where id = ${c.id}`;
       await audit(tx, { userId: user.id, action: archived ? 'practice_client_archive' : 'practice_client_unarchive', entity: 'practice_client', entityId: c.id, ip: req.ip });
     });
-    if (archived && c.dbName) await clients.get(c.dbName)`delete from sessions`;
+    if (archived && c.dbName) await (await ownBooks(c.dbName))`delete from sessions`;
     return { ok: true };
   });
 
@@ -803,7 +813,7 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (c.kind !== 'pocket') throw badRequest('This client’s books aren’t kept on Shap Pocket.');
     const { name, dataBase64, acceptTerms } = parse(z.object({ name: z.string().max(200), dataBase64: z.string().max(Math.round(config.UPLOAD_MB * 1024 * 1024 * 1.4)), acceptTerms: z.boolean().default(false) }), req.body);
     const share = readPocketShare(name, Buffer.from(dataBase64, 'base64'));
-    const sql = clients.get(dbName);
+    const sql = await ownBooks(dbName);
     const [terms] = await sql<{ termsVersion: string }[]>`select terms_version from settings where id`;
     const accepting = (terms?.termsVersion ?? '') !== TERMS_VERSION;
     if (accepting && !acceptTerms) throw badRequest(`Confirm that you accept the Shap Accountant terms of use for your practice’s use of Shap on these books first: ${PRACTICE_TERMS_TICK}`, { needsTerms: true });

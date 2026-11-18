@@ -87,13 +87,16 @@ put() { # put KEY JSON
 # TEST_SERVER= line of each, as Docker reads it). For the app's Shap Accountant: a practice's Shap
 # runs on a server no real company shares.
 companies() {
-  local f last real=0 test=0
+  local f last slug real=0 test=0 tests=()
   for f in "$VPS"/companies/*.env; do
     [ -e "$f" ] || continue
     last="$(grep -E '^TEST_SERVER=' "$f" 2>/dev/null | tail -n 1)"
-    if [ "$last" = TEST_SERVER=true ]; then test=$((test + 1)); else real=$((real + 1)); fi
+    slug="$(basename "$f" .env)"
+    if [ "$last" = TEST_SERVER=true ] && [[ "$slug" =~ ^[a-z][a-z0-9]{1,19}$ ]]; then test=$((test + 1)); tests+=("shap_$slug"); else real=$((real + 1)); fi
   done
-  put companies "$(jq -n --argjson real "$real" --argjson test "$test" '{real: $real, test: $test}')"
+  # The test servers' databases by name, so the app counts any other company's database, added
+  # since this ran or not, as another company's (a new test server too, until the next count).
+  put companies "$(jq -n --argjson real "$real" --argjson test "$test" '{real: $real, test: $test, testDbs: $ARGS.positional}' --args "${tests[@]}")"
   REAL_COMPANIES=$real
 }
 

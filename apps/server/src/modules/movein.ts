@@ -851,7 +851,7 @@ export async function applyPlan(tx: Db, plan: Plan, o: ApplyOptions, userId: str
 
   // Costs and bills.
   if (plan.costs.length) {
-    const cats = await tx<{ id: string; name: string; kind: string }[]>`select id, name, kind from cost_categories where active`;
+    const cats = await tx<{ id: string; name: string; kind: string }[]>`select id, name, kind from cost_categories where active order by sort, name`;
     const sundry = cats.find((c) => c.name === 'Sundry') ?? cats.find((c) => c.kind === 'overhead') ?? cats[0];
     const [billSrc] = await tx<{ id: string }[]>`select id from payment_sources where role = 'bills'`;
     const paidFrom = o.costSourceId ?? settings.defaultCostSourceId;

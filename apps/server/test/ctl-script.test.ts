@@ -104,13 +104,13 @@ describe('shap-ctl: Shap Accountant’s databases', () => {
     const shared = run('practice', { config: appUrl('postgres://shap_app:x@db/shap'), can: 'f', companies: { friend: 'SHAP_DOMAIN=shap.friend.example.co.za\n', test: 'TEST_SERVER=true\n' } });
     expect(shared.code).toBe(1);
     expect(shared.status.practice).toMatchObject({ ok: false, shared: true, message: expect.stringMatching(/Other companies’ books are on this server, so Shap doesn’t ask for this/) });
-    expect(shared.status.companies).toEqual({ real: 1, test: 1 });
+    expect(shared.status.companies).toEqual({ real: 1, test: 1, testDbs: ['shap_test'] });
     expect(shared.calls).toEqual([]);
     // A line that says test server, then one that says otherwise: the last is the one Docker uses.
     expect(run('practice', { config: appUrl('postgres://shap_app:x@db/shap'), can: 'f', companies: { was: 'TEST_SERVER=true\nTEST_SERVER=false\n' } }).code).toBe(1);
     const tests = run('practice', { config: appUrl('postgres://shap_app:x@db/shap'), can: 'f', companies: { test: 'SHAP_DOMAIN=shaptest.example.co.za\nTEST_SERVER=true\nCOLLECTOR_URL=off\n' } });
     expect(tests.code).toBe(0);
-    expect(tests.status.companies).toEqual({ real: 0, test: 1 });
+    expect(tests.status.companies).toEqual({ real: 0, test: 1, testDbs: ['shap_test'] });
     expect(tests.status.practice).toMatchObject({ ok: true, shared: false });
     expect(tests.calls.filter((c) => c.includes('alter role'))).toEqual([expect.stringMatching(/alter role "shap_app" createdb$/)]);
   });

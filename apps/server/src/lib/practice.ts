@@ -50,11 +50,12 @@ export async function databaseRights(sql: Sql): Promise<{ may: boolean; login: s
  * add-company.sh adds (shap_<name>), but not this one's own, its demo or its clients'. A practice's
  * Shap belongs on a server of its own (docs/ACCOUNTANT.md), so setup and Practice say so.
  */
-export async function otherCompanies(sql: Sql, o: { mainOnly?: boolean } = {}): Promise<boolean> {
-  // mainOnly: just the first company's (shap), when shap-ctl has counted the added ones itself.
+export async function otherCompanies(sql: Sql, o: { testDbs?: string[] } = {}): Promise<boolean> {
+  // testDbs: the test servers' databases, by name, as shap-ctl last counted them (made-up books).
   const [r] = await sql<{ n: number }[]>`
     select count(*)::int as n from pg_database
-    where ${o.mainOnly ? sql`datname = 'shap'` : sql`datname ~ '^shap(_[a-z0-9]+)?$'`} and datname <> current_database() and datname !~ '_demo$' and not datistemplate`;
+    where datname ~ '^shap(_[a-z0-9]+)?$' and datname <> current_database() and datname !~ '_demo$' and not datistemplate
+      and not (datname = any(${o.testDbs ?? []}::text[]))`;
   return (r?.n ?? 0) > 0;
 }
 
@@ -136,12 +137,37 @@ export class ClientDbs {
     await practice.unsafe(`drop database if exists "${dbName}" with (force)`);
   }
 
+  /** Asks the practice's own database (never the client's: its settings could steer a query there) who owns a client's. */
+  private checker: Sql | null = null;
+  /**
+   * Only a database this Shap's own login owns is opened. One another login made under a client's
+   * name (one that may make databases, on a server a test server shares, after the client's was
+   * dropped or while it's restored) could be set up to run its own code in this Shap's sessions,
+   * and this Shap's login may be Postgres's superuser.
+   */
+  async assertOwned(dbName: string): Promise<void> {
+    this.checker ??= createDb(this.practiceUrl, { max: 2, idleSeconds: 30 });
+    const [r] = await this.checker<{ mine: boolean; owner: string }[]>`
+      select datdba = (select oid from pg_roles where rolname = current_user) as mine, pg_get_userbyid(datdba) as owner from pg_database where datname = ${dbName}`;
+    if (!r) throw Object.assign(new Error(`This client’s database (${dbName}) isn’t on the server.`), { code: 'missing' });
+    if (!r.mine)
+      throw Object.assign(new Error(`This client’s database (${dbName}) belongs to another login (${r.owner}), so Shap doesn’t open it. If it’s the client’s, whoever runs the server hands it to this Shap’s login: alter database "${dbName}" owner to <that login> (docs/ACCOUNTANT.md).`), { code: 'not_ours' });
+  }
+
+  /** A client's pool, for a request: once its database is checked as this Shap's own. */
+  async openOwn(dbName: string): Promise<Sql> {
+    if (!dbName.startsWith(`${this.practiceDb}__c_`) || !/^[a-z0-9_]{1,63}$/.test(dbName)) throw new Error(`Not one of this practice's client databases: ${dbName}`);
+    await this.assertOwned(dbName);
+    return this.get(dbName);
+  }
+
   /**
    * A pool of its own for a job in the background (the checks after an update, the monthly
    * invoices): never shared with requests, so ending it when the job is done can't cut one short.
    */
   async withOwn<T>(dbName: string, job: (sql: Sql) => Promise<T>): Promise<T> {
     if (!dbName.startsWith(`${this.practiceDb}__c_`) || !/^[a-z0-9_]{1,63}$/.test(dbName)) throw new Error(`Not one of this practice's client databases: ${dbName}`);
+    await this.assertOwned(dbName);
     const sql = createDb(this.urlFor(dbName), { max: 2, idleSeconds: 10 });
     try {
       return await job(sql);
@@ -157,8 +183,9 @@ export class ClientDbs {
   }
 
   async end(): Promise<void> {
-    const all = [...this.pools.values()];
+    const all = [...this.pools.values(), ...(this.checker ? [this.checker] : [])];
     this.pools.clear();
+    this.checker = null;
     await Promise.all(all.map((s) => s.end({ timeout: 5 })));
   }
 }
@@ -180,6 +207,8 @@ export async function migrateClients(practice: Sql, clients: ClientDbs, log: { i
   }
   for (const c of await practice<{ id: string; dbName: string }[]>`select id, db_name from practice_clients where db_name is not null order by created_at`) {
     try {
+      // Never one another login made under its name (assertOwned): marked, and not opened.
+      await clients.assertOwned(c.dbName);
       await clients.revokePublic(practice, c.dbName);
       await clients.withOwn(c.dbName, (sql) => migrate(sql, (m) => log.info(`a client's books: ${m}`)));
       await practice`update practice_clients set migrate_error = null where id = ${c.id} and migrate_error is not null`;
