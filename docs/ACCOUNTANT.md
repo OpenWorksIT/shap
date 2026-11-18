@@ -533,6 +533,6 @@ docs/SARS.md lists each rule and its source; they're checked with the standard S
   dropped or while it's restored) could be set up to run its own code in this Shap's sessions, so it
   isn't used. Hand one over only if you know where it came from (made by this server's own Postgres
   login before a move to a least-privilege login, or restored from this client's backup); if not,
-  leave it and find out who made it. Staff who open it are told only that it isn't opened; the
-  owner is told whose it is, this Shap's login and the command (as the server panel is the
-  owner's). A login name Shap wouldn't make is shown in plain ASCII, anything else escaped.
+  leave it and find out who made it. Staff who open it are told whose it is and that it isn't
+  opened, and to ask the owner; the owner is also told this Shap's login and the command (as the
+  server panel is the owner's). A login name Shap wouldn't make is shown in plain ASCII, anything else escaped.

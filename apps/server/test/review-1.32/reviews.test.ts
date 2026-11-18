@@ -362,7 +362,7 @@ describe('security and privacy, the sixth round: this Shap’s login and the com
     for (const r of staff) {
       expect(r.status).toBe(409);
       expect(r.code).toBe('not_ours');
-      expect(r.error).toBe(`This client’s database (${dbs[0]}) belongs to another login (${SQUATTER}), so Shap doesn’t open it. The practice’s owner is told what to do when they open it.`);
+      expect(r.error).toBe(`This client’s database (${dbs[0]}) belongs to another login (${SQUATTER}), so Shap doesn’t open it. Ask the practice’s owner to open it: Shap tells them what to do.`);
       expect(r.error).not.toContain(`"${me}"`);
       expect(r.error).not.toMatch(/alter database/);
     }
@@ -371,6 +371,8 @@ describe('security and privacy, the sixth round: this Shap’s login and the com
       expect(r.status).toBe(409);
       expect(r.error).toContain(`(alter database "${dbs[0]}" owner to "${me}";). If not, leave it and find out who made it (docs/ACCOUNTANT.md).`);
     }
+    // And the docs say what staff are told: whose it is too (the words check of this round).
+    expect(read('docs/ACCOUNTANT.md')).toMatch(/Staff who open it are told whose it is and that it isn't\s+opened, and to ask the owner; the owner is also told this Shap's login and the command/);
   });
 
   it('another login’s name is said in printable ASCII only, unless it’s one Shap would make', async () => {

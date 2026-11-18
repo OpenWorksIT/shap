@@ -1333,6 +1333,9 @@ of this Shap's login beside the command): one Shap wouldn't make is said in prin
 The command doubles any `"` in this Shap's login. `ownRefusal` still cuts every error that isn't
 Shap's own (no SQLSTATE can be `missing` or `not_ours`).
 
+Words on that text: ACCOUNTANT.md said staff are told only that it isn't opened, but they're told
+whose it is too: it says so; staff are told to ask the owner to open it.
+
 ### Code scanning (CodeQL), first run
 
 - The Accounts screen's download links carried the period's dates unencoded (flagged as text

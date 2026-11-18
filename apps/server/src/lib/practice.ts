@@ -188,7 +188,7 @@ export class ClientDbs {
         new Error(
           `${refused} Only if you know where it came from (made by this server’s own Postgres login before a move to a least-privilege login, or restored from this client’s backup), whoever runs the server can hand it to this Shap’s login (alter database "${dbName}" owner to "${r.me.replace(/"/g, '""')}";). If not, leave it and find out who made it (docs/ACCOUNTANT.md).`,
         ),
-        { code: 'not_ours', staff: `${refused} The practice’s owner is told what to do when they open it.` },
+        { code: 'not_ours', staff: `${refused} Ask the practice’s owner to open it: Shap tells them what to do.` },
       );
     }
   }
