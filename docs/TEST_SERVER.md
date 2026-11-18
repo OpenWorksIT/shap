@@ -32,6 +32,14 @@ the server, so an update reaches it at the same time.
 Whoever is going to fill and wipe the books needs an **Owner** sign-in on the test server
 (Settings → People who sign in). Wiping keeps everyone's sign-ins and two-factor set-up.
 
+**Shap Accountant** can be tried on a test server, with made-up clients: its database login may
+make databases (each client's books are one). `--test-server` allows that, and shap-ctl keeps it
+so for test servers added before 1.32 (on its next check, nightly or update). A real company added
+to the server never may: a practice runs Shap on a server of its own (docs/ACCOUNTANT.md). The
+made-up clients' books are databases of their own (`shap_test__c_…`): wiping the test server's
+books keeps them, as it keeps a practice's list of clients; archive them on Practice, or drop them
+on the server.
+
 ## Using it
 
 1. **Set up**: the first-run questions, as for a real business: the kind of business, the trade,

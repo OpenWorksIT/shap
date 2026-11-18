@@ -21,6 +21,8 @@ export const INDUSTRIES = [
   { key: 'design', label: 'Graphic design or creative', workflow: 'quote_invoice' },
   { key: 'photo', label: 'Photographer or videographer', workflow: 'quote_invoice' },
   { key: 'consulting', label: 'Consultant or freelancer', workflow: 'quote_invoice' },
+  // A practice can keep its clients' books here too (Shap Accountant): setup asks, after this.
+  { key: 'accounting', label: 'Accounting, bookkeeping or tax practice', workflow: 'invoice' },
   { key: 'tutor', label: 'Tutor or coach', workflow: 'invoice' },
   { key: 'catering', label: 'Catering or events', workflow: 'quote_invoice' },
   { key: 'health', label: 'Health or wellness practice', workflow: 'invoice' },
@@ -49,7 +51,7 @@ export interface SetupExtras {
   upfront: boolean;
 }
 
-const HOURLY: readonly string[] = ['it', 'design', 'photo', 'consulting', 'tutor', 'health', 'mechanic'];
+const HOURLY: readonly string[] = ['it', 'design', 'photo', 'consulting', 'accounting', 'tutor', 'health', 'mechanic'];
 const TRAVEL: readonly string[] = ['builder', 'electrician', 'plumber', 'painter', 'handyman', 'garden', 'cleaning', 'it', 'photo', 'consulting', 'catering'];
 const ON_ACCOUNT: readonly string[] = ['builder', 'electrician', 'plumber', 'painter', 'mechanic', 'catering'];
 const UPFRONT: readonly string[] = ['builder', 'design', 'photo', 'catering', 'it'];

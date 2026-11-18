@@ -35,6 +35,28 @@ export function clientDbName(practiceDb: string, clientId: string): string {
 
 export const dbNameOf = (url: string) => new URL(url).pathname.replace(/^\//, '') || 'shap';
 
+/**
+ * Whether this Shap's database login may make databases: each client's books are one. The default
+ * install's login is Postgres's superuser and may; a least-privilege one (docs/deployment.md) needs
+ * CREATEDB, which shap-ctl gives the server's own Shap when asked (deploy/vps/ctl/shap-ctl.sh).
+ */
+export async function databaseRights(sql: Sql): Promise<{ may: boolean; login: string }> {
+  const [r] = await sql<{ login: string; may: boolean }[]>`select current_user::text as login, coalesce((select rolsuper or rolcreatedb from pg_roles where rolname = current_user), false) as may`;
+  return { may: Boolean(r?.may), login: r?.login ?? '' };
+}
+
+/**
+ * Other companies' books on this database server: the first company's (shap) and those
+ * add-company.sh adds (shap_<name>), but not this one's own, its demo or its clients'. A practice's
+ * Shap belongs on a server of its own (docs/ACCOUNTANT.md), so setup and Practice say so.
+ */
+export async function otherCompanies(sql: Sql): Promise<boolean> {
+  const [r] = await sql<{ n: number }[]>`
+    select count(*)::int as n from pg_database
+    where datname ~ '^shap(_[a-z0-9]+)?$' and datname <> current_database() and datname !~ '_demo$' and not datistemplate`;
+  return (r?.n ?? 0) > 0;
+}
+
 /** How many clients' pools stay open at once (each up to 3 connections): the least used close first. */
 export const MAX_CLIENT_POOLS = 12;
 

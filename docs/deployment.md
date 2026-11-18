@@ -5,6 +5,10 @@ You open it on your PC and phone at an address like `https://shap.yourcompany.co
 
 For testing on a PC first, use [deploy/test](../deploy/test/README.md).
 
+An accounting practice keeping its clients' books in Shap (Shap Accountant) runs Shap on a server
+of its own, this one or its own PC, never as a company added to someone else's
+([ACCOUNTANT.md](ACCOUNTANT.md), "A server of its own"). Setup gets the server ready for it.
+
 ## Before you start
 
 - A small VPS in South Africa (1–2 vCPU, 2 GB RAM and 20 GB SSD is plenty), running Debian or
@@ -117,6 +121,9 @@ sudo docker compose exec app-friend node apps/server/dist/db/create-owner.js \
   --email them@theircompany.co.za --name "Their Name" --company "Their Company (Pty) Ltd"
 ```
 
+A company added here can't keep an accounting practice's clients' books (Shap Accountant): a
+practice runs Shap on a server of its own (docs/ACCOUNTANT.md).
+
 Their settings and keys are in `deploy/vps/companies/friend.env` (email settings go there too).
 Backups include every company's database. To take a company off the server, stop its container
 (`docker compose rm -sf app-friend`), delete its block from `companies.yml`, its `sites/friend.caddy`
@@ -221,6 +228,7 @@ setup.
 
   Pre-create the demo database (`createdb -O shap_app shap_demo`) so the app doesn't need
   `CREATEDB`, unless Shap Accountant is on: it makes each client's database (docs/ACCOUNTANT.md).
+  Setting up Shap Accountant asks shap-ctl to give the app's login `CREATEDB` (and nothing more).
   (Tenant companies added with `add-company.sh` already use their own non-superuser roles.)
 - **Update from signed releases, not branch tips.** "Update" pulls `main` from GitHub and rebuilds
   on the server, so whoever controls that branch or the GitHub account controls the server. For a

@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { ACCOUNTANT_TERMS_MEANS, ACCOUNTANT_TERMS_URL, ACCOUNTANT_TERMS_VERSION, dayOf, formatDate, LEVEL_WORDS, LINK_SESSION_HOURS, LINKED_LEVEL_WORDS, POCKET_SHARE_NOTE, PRACTICE_NOTE, PRACTICE_TERMS_TICK, STATEMENT_STATUS_LABELS, todayIso, WHO_OPENS_LINKED, type Level, type StatementStatus } from '@shap/shared';
 import { AccountantPoints, AccountantTermsAccept } from '../components/AccountantTerms';
+import { PracticeServer } from '../components/PracticeSetup';
 import { PageHead } from '../components/Shell';
 import { Drawer, Empty, ErrorBox, Field, Loading, Money, useToast } from '../components/ui';
 import { api, ApiError } from '../lib/api';
@@ -209,6 +210,8 @@ export default function PracticePage() {
     <div className="stack-lg">
       <PageHead title="Practice" sub="Shap Accountant: your clients’ books, kept here (each in a database of its own) or on their own Shap" />
       <p className="xs muted">{PRACTICE_NOTE}</p>
+      {/* The owner sees while this server can't make clients' databases yet, or isn't the practice's alone. */}
+      {isOwner && <PracticeServer ask={false} onlyIfNotReady />}
       {manage && (
         <form className="panel panel-pad row wrap" style={{ gap: 8, alignItems: 'flex-end' }} onSubmit={add}>
           <Field label={kind === 'linked' ? 'The link they gave you' : 'A client'} className="grow">

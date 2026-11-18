@@ -15,6 +15,45 @@ them. Shap files nothing with SARS or CIPC, and signs nothing.
 Switching it on says back what the practice answers for: its clients' backups, who in the practice
 opens them, their personal information (POPIA), and checking what Shap shows.
 
+## A server of its own
+
+**Shap Accountant needs Shap on a server of its own**: a VPS that's only the practice's
+(docs/deployment.md), or the practice's own PC (deploy/test runs Shap on a PC; it keeps no backups,
+so those are the practice's to make). Not a company added with `add-company.sh` to a Shap server
+that other businesses use: such a company's database login can't make databases, so it can't keep
+clients' books, and on a server of its own the clients' books, their backups and who can reach them
+are the practice's alone. A test server added with `--test-server` (docs/TEST_SERVER.md) can try
+Shap Accountant, with made-up clients only.
+
+## Setting up a practice
+
+In the first-run questions, **What do you do? → Accounting, bookkeeping or tax practice** asks
+**Will you keep your clients' books in Shap too?** Yes adds a step, **Your practice**:
+
+- **The server**, got ready while the owner answers the rest. Each client's books are a database of
+  their own, so this Shap's database login must be allowed to make databases
+  (`GET /api/practice/server`, the owner's only). The default install's login is Postgres's
+  superuser and may already. On a VPS where shap-ctl looks after the server (Settings → System),
+  Shap asks it in the background (`POST /api/practice/server` leaves the `practice` request):
+  shap-ctl reads the server's own Shap's login from the compose files (never from inside the app)
+  and, if it may not, gives it `CREATEDB` and nothing more; never an added company's login. Anywhere
+  else, the step says so, and whoever runs the server allows it (`alter role "<login>" createdb;`).
+  The step also says when other companies' books are on the same server. Until the server is
+  ready, Practice shows the owner the same, and adding a client says so.
+- **Who works in your practice?** Just me (a solo practitioner), or me and my staff: how many, and
+  whether to add their sign-ins now or later (Settings → People who sign in). Now: the profiles
+  (**Bookkeeper**: opens the clients they're given; **Practice manager**: adds clients and chooses
+  who opens each; **Admin**: Shap's own, for the practice's own books), each changeable here, and
+  more can be added; then each person's name, email, profile and starting password (Shap suggests
+  one; the owner passes it on). They're made when the terms are accepted at the end, all at once or
+  none (`POST /api/practice/team`), and only while nobody but the owner signs in: after that, one at
+  a time in Settings. Which clients each person opens, and how, is chosen per client (Who opens
+  which, below).
+- The practice's own books start as a practice's usually are (invoices only, the time tracker, no
+  counter sales), and every later question can change that.
+- **The terms**: Shap's, and the Shap Accountant terms, accepted for the practice by its owner (both
+  ticks). Setup then opens Practice.
+
 ## The Shap Accountant terms
 
 A practice uses Shap Accountant on the [Shap Accountant terms of
@@ -464,5 +503,7 @@ docs/SARS.md lists each rule and its source; they're checked with the standard S
 - The penetration test (deploy/test/pentest.mjs, section 6) tries the walls on every release.
 - **The database login must be allowed to create databases** (the default install's is). A
   server set up with a least-privilege login (docs/deployment.md) needs `alter role shap_app
-  createdb;` for Shap Accountant. Client databases made by a superuser before a move to
+  createdb;` for Shap Accountant: shap-ctl does that when setup or Practice asks (above, "Setting up
+  a practice"); `deploy/vps/ctl/shap-ctl.sh`'s `practice` step, tested in
+  `apps/server/test/ctl-script.test.ts`. Client databases made by a superuser before a move to
   `shap_app` are handed over with `alter database "<name>" owner to shap_app;`.

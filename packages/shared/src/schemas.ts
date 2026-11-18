@@ -72,6 +72,24 @@ export const profileInput = z.object({
   access: z.array(z.string().max(40)).max(100).default([]),
 });
 
+/** At most this many people at once, in setup (Shap Accountant's team step). */
+export const TEAM_MAX = 50;
+/** A practice's people, from setup: its profiles and a sign-in for each person, on one of them. */
+export const teamInput = z.object({
+  profiles: z.array(profileInput).max(12).default([]),
+  people: z
+    .array(
+      z.object({
+        name: text(100).min(1, 'Name is needed'),
+        email: z.string().trim().toLowerCase().email('Enter a valid email'),
+        password: z.string().min(10, 'At least 10 characters').max(200),
+        profile: text(60).min(1, 'Choose a profile'),
+      }),
+    )
+    .min(1, 'Add someone, or skip this step for now')
+    .max(TEAM_MAX),
+});
+
 export const settingsInput = z.object({
   companyName: text(120).min(1, 'Company name is needed'),
   tradingName: text(120).default(''),

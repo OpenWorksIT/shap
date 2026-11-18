@@ -3,6 +3,30 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.32.0 (18 November 2026)
+
+- **Shap Accountant from the first-run questions.** Choose *Accounting, bookkeeping or tax practice*,
+  say you'll keep your clients' books in Shap too, and setup does the rest: a step for your
+  practice, the Shap Accountant terms with Shap's at the end, then Practice opens. The practice's own
+  books start as a practice's usually are (invoices only, the time tracker, no counter sales), and
+  any later question can change that.
+- **The server, got ready in the background.** Each client's books are a database of their own, so
+  Shap checks that its database login may make databases. On a VPS where Settings → System looks
+  after updates and backups, it asks the server to allow it (shap-ctl's new `practice` step: the
+  server's own Shap's login only, `CREATEDB` and nothing more) while you answer the rest. Anywhere
+  else it says what whoever runs the server does. Practice shows the owner the same until it's
+  ready, and adding a client says so.
+- **Your practice's people, in setup.** Just you, or you and your staff: how many, and now or later.
+  Now: the profiles (Bookkeeper, Practice manager and Admin, each changeable, and your own) and each
+  person's name, email, profile and starting password (Shap suggests one), made all at once when you
+  accept the terms. Later: Settings → People who sign in, as before.
+- **A server of its own.** Shap Accountant needs Shap on a server of its own: a VPS that's only your
+  practice's, or your own PC. A company added to someone else's Shap server can't keep clients'
+  books (add-company.sh says so), and setup says when other companies' books share the server. A
+  test server can try Shap Accountant with made-up clients: `--test-server` lets its login make
+  databases, and shap-ctl does the same for test servers added before this (on its next check,
+  nightly or update).
+
 ## 1.31.0 (17 November 2026)
 
 - **Shap Accountant: engagement letters** (Practice → a client → Working papers and letters). Draft

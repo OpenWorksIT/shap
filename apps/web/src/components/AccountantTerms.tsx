@@ -1,7 +1,7 @@
 /**
  * The Shap Accountant terms of use (terms.ts): Shap's terms, with what a practice takes on when it
  * keeps its clients' books in Shap, said plainly before its owner accepts them for the practice.
- * Asked before Shap Accountant is switched on (Settings → What you use) and again whenever the
+ * Asked before Shap Accountant is switched on (at the end of setup, or Settings → What you use) and again whenever the
  * terms change (Practice). Shap's own terms, for everyone else, don't change with them.
  */
 import { useState } from 'react';
@@ -58,6 +58,19 @@ export function AccountantTermsAccept({ cautions = [], onAccepted }: { cautions?
   };
   return (
     <div className="stack terms">
+      <AccountantTermsTick cautions={cautions} ticked={ticked} onTicked={setTicked} />
+      {error && <div className="banner alert small">{error}</div>}
+      <button type="button" className="btn primary block" disabled={!ticked || busy} onClick={() => void accept()}>
+        {busy ? 'Saving…' : 'Accept for my practice'}
+      </button>
+    </div>
+  );
+}
+
+/** What the practice answers for, the points and the box its owner ticks: here, and at the end of setup (Welcome). */
+export function AccountantTermsTick({ cautions = [], ticked, onTicked }: { cautions?: string[]; ticked: boolean; onTicked: (v: boolean) => void }) {
+  return (
+    <>
       {cautions.length > 0 && (
         <div className="panel panel-pad stack" style={{ gap: 8 }}>
           <strong className="small">What your practice answers for</strong>
@@ -70,16 +83,12 @@ export function AccountantTermsAccept({ cautions = [], onAccepted }: { cautions?
       )}
       <AccountantPoints />
       <label className="check panel panel-pad terms-accept">
-        <input type="checkbox" checked={ticked} onChange={(e) => setTicked(e.target.checked)} />
+        <input type="checkbox" checked={ticked} onChange={(e) => onTicked(e.target.checked)} />
         <span>
           <strong className="small">{ACCOUNTANT_TERMS_TICK}</strong>
           <div className="xs muted">{ACCOUNTANT_TERMS_MEANS}</div>
         </span>
       </label>
-      {error && <div className="banner alert small">{error}</div>}
-      <button type="button" className="btn primary block" disabled={!ticked || busy} onClick={() => void accept()}>
-        {busy ? 'Saving…' : 'Accept for my practice'}
-      </button>
-    </div>
+    </>
   );
 }

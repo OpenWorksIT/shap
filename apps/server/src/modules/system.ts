@@ -10,6 +10,7 @@ import { readdir, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { confirmPassword, requireRole, userOrThrow } from '../auth.js';
+import type { Config } from '../config.js';
 import type { Ctx } from '../context.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, notFound } from '../lib/errors.js';
@@ -24,10 +25,42 @@ export function appVersion(): string {
   return (rootPackage as { version?: string }).version ?? '0.0.0';
 }
 
+/** What shap-ctl last wrote (deploy/vps/ctl/shap-ctl.sh), or null where it doesn't look after this server. */
+export function ctlStatus(config: Pick<Config, 'CTL_DIR'>): Record<string, unknown> | null {
+  try {
+    return JSON.parse(readFileSync(join(config.CTL_DIR, 'status.json'), 'utf8')) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+/** The request waiting for shap-ctl, if one is. */
+export function ctlPending(config: Pick<Config, 'REQUEST_DIR'>): string | null {
+  try {
+    return readFileSync(join(config.REQUEST_DIR, 'request'), 'utf8').trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/** The things the app may ask shap-ctl to do: the request file holds one of these, and nothing else. */
+export const CTL_ACTIONS = ['check', 'update', 'backup', 'practice'] as const;
+export type CtlAction = (typeof CTL_ACTIONS)[number];
+
+/** Leaves shap-ctl its request (false: the drop-box isn't there or isn't writable). */
+export async function askCtl(config: Pick<Config, 'REQUEST_DIR'>, action: CtlAction): Promise<boolean> {
+  try {
+    await writeFile(join(config.REQUEST_DIR, 'request'), `${action}\n`, { mode: 0o660 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export const BACKUP_NAME = /^[a-z0-9_]+-(daily|manual|pre-update)-\d{4}-\d{2}-\d{2}_\d{4}\.dump$/;
 
 export function registerSystemRoutes(app: FastifyInstance, ctx: Ctx): void {
-  const { CTL_DIR, REQUEST_DIR, BACKUP_DIR, GIT_SHA } = ctx.config;
+  const { BACKUP_DIR, GIT_SHA } = ctx.config;
   const owner = { preHandler: requireRole('owner') };
   const version = appVersion();
 
@@ -46,20 +79,8 @@ export function registerSystemRoutes(app: FastifyInstance, ctx: Ctx): void {
   };
   const ownsBackup = (name: string, db: string): boolean => name.startsWith(`${db}-`);
 
-  const readStatus = () => {
-    try {
-      return JSON.parse(readFileSync(join(CTL_DIR, 'status.json'), 'utf8')) as Record<string, unknown>;
-    } catch {
-      return null;
-    }
-  };
-  const pending = () => {
-    try {
-      return readFileSync(join(REQUEST_DIR, 'request'), 'utf8').trim() || null;
-    } catch {
-      return null;
-    }
-  };
+  const readStatus = () => ctlStatus(ctx.config);
+  const pending = () => ctlPending(ctx.config);
 
   app.get('/api/system', owner, async () => {
     const status = readStatus();
@@ -94,11 +115,7 @@ export function registerSystemRoutes(app: FastifyInstance, ctx: Ctx): void {
     const user = userOrThrow(req);
     const { action } = parse(z.object({ action: z.enum(['check', 'update', 'backup']) }), req.body);
     if (!readStatus()) throw badRequest('Updates and backups from here aren’t set up on this server yet (deploy/vps/ctl/install.sh).');
-    try {
-      await writeFile(join(REQUEST_DIR, 'request'), `${action}\n`, { mode: 0o660 });
-    } catch {
-      throw badRequest('Shap can’t leave the request for the server. Run deploy/vps/ctl/install.sh again.');
-    }
+    if (!(await askCtl(ctx.config, action))) throw badRequest('Shap can’t leave the request for the server. Run deploy/vps/ctl/install.sh again.');
     await audit(ctx.sql, { userId: user.id, action: `system_${action}`, entity: 'system', ip: req.ip });
     return { ok: true };
   });

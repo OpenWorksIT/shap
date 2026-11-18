@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Shap's hands on the server. Runs as root on the VPS, started by systemd:
 #   - when Settings → System in the app asks (it writes a request file: check, update or backup)
+#   - when its owner sets up Shap Accountant (setup or Practice: practice)
 #   - every night (backup, then check for updates)
 # The app itself never gets Docker or root: it can only leave a note and read the status.
 #
-#   shap-ctl.sh [check|update|backup|nightly]     (no argument: read the app's request)
+#   shap-ctl.sh [check|update|backup|practice|nightly]     (no argument: read the app's request)
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 main() {
@@ -48,10 +49,11 @@ main() {
   fi
 
   case "$action" in
-    check) check ;;
-    update) update ;;
+    check) test_servers; check ;;
+    update) local rc=0; update || rc=$?; test_servers; return $rc ;;
     backup) backup manual ;;
-    nightly) backup daily; check ;;
+    practice) practice ;;
+    nightly) backup daily; test_servers; check ;;
     *) echo "Unknown action: $action"; return 1 ;;
   esac
 }
@@ -166,5 +168,59 @@ update() {
   check
 }
 
-main "$@"
-exit $?
+# Shap Accountant: the server's own Shap keeps each of its practice's clients' books in a database
+# of its own, so its database login must be allowed to make databases. The default install's login
+# (shap) is Postgres's superuser and already may; a least-privilege login (docs/deployment.md,
+# Hardening) is given CREATEDB, and nothing more. Only the server's own Shap (the "app" service),
+# never a company added with add-company.sh: a practice runs Shap on a server of its own
+# (docs/ACCOUNTANT.md). Asked for by its owner, from setup or the Practice page.
+practice() {
+  local url login can msg ok=false
+  cd "$VPS" || return 1
+  # The login, from this server's compose files (root's), never from inside the app's container.
+  url="$(docker compose config --format json 2>/dev/null | jq -r '.services.app.environment.DATABASE_URL // empty' 2>/dev/null)"
+  login="${url#*://}"
+  login="${login%%@*}"
+  login="${login%%:*}"
+  if ! [[ "$login" =~ ^[a-z_][a-z0-9_]{0,62}$ ]]; then
+    login=""
+    msg="Couldn't read this Shap's database login from the compose files."
+  else
+    can="$(docker compose exec -T db psql -U shap -d postgres -Atc "select rolsuper or rolcreatedb from pg_roles where rolname = '$login'" 2>/dev/null | tr -d '[:space:]')"
+    case "$can" in
+      t) ok=true; msg="Its database login ($login) may already make databases." ;;
+      f)
+        if docker compose exec -T db psql -U shap -d postgres -v ON_ERROR_STOP=1 -qc "alter role \"$login\" createdb" >/dev/null 2>&1; then
+          ok=true; msg="Its database login ($login) may now make databases."
+        else
+          msg="Postgres didn't let its database login ($login) make databases."
+        fi ;;
+      *) msg="Postgres doesn't know its database login ($login)." ;;
+    esac
+  fi
+  put practice "$(jq -n --arg at "$(now)" --argjson ok "$ok" --arg login "$login" --arg message "$msg" '{at: $at, ok: $ok, login: $login, message: $message}')"
+  $ok
+}
+
+# A test server added here (add-company.sh --test-server) is for trying every part of Shap on
+# made-up books, Shap Accountant included: its login may make databases (its made-up clients').
+# A real company added here never is. Kept so on each run, for test servers added before this.
+test_servers() {
+  local f slug
+  cd "$VPS" || return 0
+  for f in companies/*.env; do
+    [ -f "$f" ] && [ ! -L "$f" ] || continue
+    grep -qx 'TEST_SERVER=true' "$f" || continue
+    slug="$(basename "$f" .env)"
+    [[ "$slug" =~ ^[a-z][a-z0-9]{1,19}$ ]] || continue
+    docker compose exec -T db psql -U shap -d postgres -Atc "select 1 from pg_roles where rolname = 'shap_$slug' and not rolcreatedb and not rolsuper" 2>/dev/null | grep -qx 1 || continue
+    docker compose exec -T db psql -U shap -d postgres -qc "alter role shap_$slug createdb" >/dev/null 2>&1 || true
+  done
+}
+
+# Run by systemd; sourced by the tests (apps/server/test/ctl-script.test.ts), which run one step
+# at a time against a stand-in docker.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main "$@"
+  exit $?
+fi

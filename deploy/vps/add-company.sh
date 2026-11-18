@@ -9,6 +9,10 @@
 #
 # --test-server: a Shap for trying Shap out with made-up books (docs/TEST_SERVER.md). Its owner
 # fills the books with made-up data for any setup and wipes them again; nothing is shared from it.
+# Shap Accountant can be tried on it too: its login may make databases (its made-up clients').
+#
+# A real accounting practice doesn't go here: Shap Accountant needs Shap on a server of its own
+# (docs/ACCOUNTANT.md), so a company added here can't keep clients' books.
 #
 # Point the domain's DNS A record at this VPS first, so Caddy can get its certificate.
 # SPDX-License-Identifier: AGPL-3.0-or-later
@@ -63,6 +67,10 @@ create database $DB owner $DB;
 revoke connect on database $DB from public;
 revoke connect on database shap from public;
 SQL
+# A test server may try Shap Accountant, on made-up clients: each one's books are a database.
+if [ "$TEST_SERVER" = true ]; then
+  docker compose exec -T db psql -U shap -d postgres -v ON_ERROR_STOP=1 -qc "alter role $DB createdb"
+fi
 
 # 2. Its settings: address, database and its own encryption key.
 mkdir -p companies
@@ -155,3 +163,8 @@ Create their owner login (they choose a password at first sign-in if you leave i
 
 Backups (deploy/backup/backup.sh) pick up the new database automatically.
 MSG
+if [ "$TEST_SERVER" = true ]; then
+  echo "Shap Accountant can be tried on it, with made-up clients (each client's books are a database of their own)."
+else
+  echo "Shap Accountant isn't for a company added here: an accounting practice runs Shap on a server of its own (docs/ACCOUNTANT.md)."
+fi

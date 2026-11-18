@@ -4,8 +4,10 @@
  */
 import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BUSINESS_TYPES, ENTITIES, entity, extrasFor, featuresFor, INDUSTRIES, paysOutProfit, payoutWord, payeRefProblem, regNumberProblem, sdlRefFor, setupCautions, TERMS_VERSION, PRACTICE_TERMS_TICK, TURNOVER_TAX_LIMIT_CENTS, formatZar, uifRefProblem, vatNumberProblem, vatThresholds, WORKFLOWS, type EmployerAnswer, type IndustryKey, type SetupExtras, type Workflow, PAYMENT_DAYS, dayLabel, withPaymentTerm } from '@shap/shared';
+import { ACCOUNTANT_TERMS_VERSION, BUSINESS_TYPES, ENTITIES, entity, extrasFor, featureOn, featuresFor, INDUSTRIES, paysOutProfit, PRACTICE_CAUTION, PRACTICE_OWN_SERVER, PRACTICE_PROFILES, withNeeds, payoutWord, payeRefProblem, regNumberProblem, sdlRefFor, setupCautions, TERMS_VERSION, PRACTICE_TERMS_TICK, TURNOVER_TAX_LIMIT_CENTS, formatZar, uifRefProblem, vatNumberProblem, vatThresholds, WORKFLOWS, type EmployerAnswer, type IndustryKey, type SetupExtras, type Workflow, PAYMENT_DAYS, dayLabel, withPaymentTerm } from '@shap/shared';
 import { TermsReview } from '../components/Terms';
+import { AccountantTermsTick } from '../components/AccountantTerms';
+import { PracticeServer, PracticeTeam, teamBody, teamProblem, type Team } from '../components/PracticeSetup';
 import { useClientHere } from '../components/ClientBanner';
 import { LogoField } from '../components/BusinessForm';
 import { Logo } from '../components/Logo';
@@ -17,11 +19,12 @@ import type { Settings } from '../lib/types';
 import { MarketWhat } from '../components/MarketShare';
 import { setTone } from '../lib/words';
 
-const STEPS = ['hello', 'structure', 'industry', 'people', 'workflow', 'selling', 'extras', 'logo', 'details', 'tone', 'terms'] as const;
+// 'practice': only for an accounting practice that keeps its clients' books here (Shap Accountant).
+const STEPS = ['hello', 'structure', 'industry', 'practice', 'people', 'workflow', 'selling', 'extras', 'logo', 'details', 'tone', 'terms'] as const;
 type Step = (typeof STEPS)[number];
 
 export default function WelcomePage({ canRestore = true }: { canRestore?: boolean }) {
-  const { settings, refreshReference } = useAuthed();
+  const { settings, refreshReference, user } = useAuthed();
   const navigate = useNavigate();
   const [step, setStep] = useState<Step>('hello');
   const [f, setF] = useState<Settings>({ ...settings });
@@ -53,9 +56,18 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
   const [monthEnd, setMonthEnd] = useState<'manual' | 'auto' | null>(settings.features.sales || settings.vatRegistered ? settings.monthEndMode ?? null : null);
   const [monthEndDay, setMonthEndDay] = useState(settings.monthEndDay ?? 7);
   const extra = (k: keyof SetupExtras) => (v: boolean) => setExtras((x) => ({ ...x, [k]: v }));
+  // An accounting practice: does it keep its clients' books here (Shap Accountant)? Its people, and its terms.
+  const [practice, setPractice] = useState<boolean | null>(null);
+  const [team, setTeam] = useState<Team>(() => ({ who: null, now: null, profiles: PRACTICE_PROFILES.map((p) => ({ name: p.name, access: withNeeds(p.access), hint: p.hint })), people: [] }));
+  const [teamDone, setTeamDone] = useState(false);
+  const [othersSignIn, setOthersSignIn] = useState(false);
+  const [practiceAccepted, setPracticeAccepted] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setF((x) => ({ ...x, [k]: v }));
+  // Never in a practice's client's books: a practice of its own is the practice's own Shap only.
+  const practiceOn = !client && industry === 'accounting' && practice === true;
+  const steps = STEPS.filter((s) => s !== 'practice' || practiceOn);
   const kind = entity(f.businessType);
   // Pays its owners out of profit (dividends, or a CC's or trust's distributions).
   const paysOut = paysOutProfit(f.businessType);
@@ -68,18 +80,24 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
   const compulsory = formatZar(vatThresholds(new Date().toISOString().slice(0, 10)).compulsoryCents, { cents: false });
   const common = f.businessType === 'sole_prop' || f.businessType === 'company';
   const go = (s: Step) => (setError(''), setStep(s), window.scrollTo(0, 0));
-  const next = () => go(STEPS[STEPS.indexOf(step) + 1]!);
-  const back = () => go(STEPS[STEPS.indexOf(step) - 1]!);
-  const n = STEPS.indexOf(step);
+  const next = () => go(steps[steps.indexOf(step) + 1]!);
+  const back = () => go(steps[steps.indexOf(step) - 1]!);
+  const n = steps.indexOf(step);
+
+  /** The parts of Shap the answers switch on. */
+  const planned = () => ({
+    ...f.features,
+    ...featuresFor({ workflow, employees: Boolean(employees), casual: Boolean(casual), company: paysOut, dividends: dividendsAlways || (dividends ?? false), extras, payshap: Boolean(f.payshapId.trim()), selling: { sales: Boolean(sales), inventory: Boolean(inventory) }, statements: Boolean(statements) }),
+    ...(practiceOn ? { practice: true } : {}),
+  });
 
   const finish = async () => {
     setBusy(true);
     setError('');
-    const features = {
-      ...f.features,
-      ...featuresFor({ workflow, employees: Boolean(employees), casual: Boolean(casual), company: paysOut, dividends: dividendsAlways || (dividends ?? false), extras, payshap: Boolean(f.payshapId.trim()), selling: { sales: Boolean(sales), inventory: Boolean(inventory) }, statements: Boolean(statements) }),
-    };
+    const features = planned();
     try {
+      // Shap Accountant goes on once its terms are accepted for the practice (practice.ts), here.
+      if (practiceOn) await api('/api/practice/terms', { body: { version: ACCOUNTANT_TERMS_VERSION } });
       const employer = employees
         ? { payeRegistered: paye === 'yes', payeRef: paye === 'yes' ? f.payeRef : '', uifRegistered: uif === 'yes', uifRef: uif === 'yes' ? f.uifRef : '', sdl: sdl === 'yes' }
         : { payeRegistered: null, payeRef: '', uifRegistered: null, uifRef: '', sdl: false };
@@ -94,9 +112,16 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
           await api('/api/periods/month-end', { method: 'PUT', body: { mode: 'manual', day: monthEndDay } });
         }
       }
+      // The practice's people, all at once (or none, if one of them can't be made: said here, to put right).
+      if (practiceOn && team.who === 'staff' && team.now && !teamDone) {
+        await api('/api/practice/team', { body: teamBody(team) });
+        setTeamDone(true);
+      }
       setTone(f.tone);
-      // Moving from another package: straight to the screen that brings the books across.
+      // Moving from another package: straight to the screen that brings the books across. A
+      // practice: to its clients.
       if (movingIn) navigate('/move-in', { replace: true });
+      else if (practiceOn) navigate('/practice', { replace: true });
       await refreshReference();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Couldn’t save');
@@ -124,8 +149,8 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
     <div className="welcome">
       <div className="welcome-card stack-lg">
         {n > 0 && (
-          <div className="steps" aria-label={`Step ${n} of ${STEPS.length - 1}`}>
-            {STEPS.slice(1).map((s, i) => (
+          <div className="steps" aria-label={`Step ${n} of ${steps.length - 1}`}>
+            {steps.slice(1).map((s, i) => (
               <span key={s} className={i < n ? 'on' : ''} />
             ))}
           </div>
@@ -222,12 +247,22 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
                     setIndustry(i.key);
                     setWorkflow(i.workflow);
                     setExtras(extrasFor(i.key));
+                    // A practice doesn't sell over the counter (the next questions can say otherwise).
+                    if (i.key === 'accounting' && sales === null) setSales(false);
                   }}
                 >
                   {i.label}
                 </button>
               ))}
             </div>
+            {industry === 'accounting' && !client && (
+              <YesNo
+                q="Will you keep your clients’ books in Shap too?"
+                hint={`Shap Accountant: each client’s books in a database of their own on this server, one list of your clients with what Shap’s checks find and some of the returns coming up, engagement letters and working papers. Shap sets the server up for it while you answer the rest. ${PRACTICE_OWN_SERVER}`}
+                value={practice}
+                onChange={setPractice}
+              />
+            )}
             {!client && (
             <div className="panel panel-pad stack" style={{ gap: 8 }}>
               <strong className="small">Can Shap let OpenWorks know, anonymously, what kind of business uses it?</strong>
@@ -253,7 +288,17 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
               </span>
             </label>
             )}
-            {nav(Boolean(industry) && (consent !== null || Boolean(client)))}
+            {nav(Boolean(industry) && (consent !== null || Boolean(client)) && (industry !== 'accounting' || Boolean(client) || practice !== null))}
+          </Q>
+        )}
+
+        {step === 'practice' && (
+          <Q title="Your practice" sub="Shap gets this server ready for your clients’ books while you answer.">
+            <PracticeServer ask onState={(st) => (setOthersSignIn(st.othersSignIn), st.othersSignIn && team.now ? setTeam({ ...team, now: false }) : undefined)} />
+            <strong className="small">Who works in your practice?</strong>
+            <PracticeTeam team={team} onChange={setTeam} has={(k) => featureOn(planned(), k)} othersSignIn={othersSignIn} />
+            {nav(teamProblem(team, user.email) === null)}
+            {team.who && teamProblem(team, user.email) && <p className="xs muted">{teamProblem(team, user.email)}</p>}
           </Q>
         )}
 
@@ -443,14 +488,15 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
         )}
 
         {step === 'terms' && (
-          <Q title="Last step: the terms of use" sub="Shap is free, and it’s yours to run. These are the few things that come with that.">
+          <Q title="Last step: the terms of use" sub={practiceOn ? 'Shap is free, and it’s yours to run. These are the few things that come with that, and the Shap Accountant terms, for your practice.' : 'Shap is free, and it’s yours to run. These are the few things that come with that.'}>
             <TermsReview
               cautions={setupCautions({ vatRegistered: f.vatRegistered, employees: Boolean(employees), casual: Boolean(casual), payeRegistered: paye, uifRegistered: uif, sdl, turnoverTax: kind.turnoverTax && f.turnoverTax, paysDividends: dividendsAlways || Boolean(dividends) })}
               accepted={accepted}
               onAccepted={setAccepted}
               tick={client ? PRACTICE_TERMS_TICK : undefined}
             />
-            {nav(accepted, busy ? 'Setting up…' : 'Accept and open my books', () => void finish())}
+            {practiceOn && <AccountantTermsTick cautions={[PRACTICE_CAUTION]} ticked={practiceAccepted} onTicked={setPracticeAccepted} />}
+            {nav(accepted && (!practiceOn || practiceAccepted), busy ? 'Setting up…' : practiceOn ? 'Accept and open my practice' : 'Accept and open my books', () => void finish())}
           </Q>
         )}
       </div>

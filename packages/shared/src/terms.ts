@@ -24,6 +24,12 @@ export const PRACTICE_NOTE =
 /** Said back before Shap Accountant is switched on: what the practice answers for. */
 export const PRACTICE_CAUTION =
   'Shap Accountant keeps your clients’ books on this server. Their backups, who in your practice opens them, and their personal information (POPIA) are your practice’s responsibility, what Shap’s checks find and the returns it shows are aids for your practitioners to check, not advice, and books brought in from another package are for you to check against it.';
+/** Where a practice's Shap runs (docs/ACCOUNTANT.md): said in setup, on Practice and in the docs. */
+export const PRACTICE_OWN_SERVER =
+  'Shap Accountant needs Shap on a server of its own: a VPS that’s only your practice’s, or your own PC. Not a company added to a Shap server that other businesses use: on a server of its own, your clients’ books, their backups and who can reach them are your practice’s alone.';
+/** Where this Shap's database login can't make the clients' databases, and Shap can't ask the server to allow it. */
+export const SERVER_NOT_MANAGED =
+  'Shap can’t make your clients’ databases here yet: this Shap’s database login isn’t allowed to make databases, and Shap can’t ask this server to allow it. On a VPS of your own set up as Shap’s deployment guide has it (Settings → System shows updates and backups there), Shap sets this up by itself; anywhere else, whoever runs the server allows it (docs/ACCOUNTANT.md, on Shap’s GitHub).';
 /**
  * With each Shap Pocket share brought in (Practice): what Shap does and doesn't do with one. The
  * disclaimer's "Sharing your books with your accountant (Shap Pocket)" says the same.

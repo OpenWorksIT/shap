@@ -6,7 +6,7 @@
  * the change at once, except what was changed for them.
  */
 import { useMemo, useState, type FormEvent } from 'react';
-import { formatDate, LINK_SESSION_HOURS, neededBy, passwordProblem, ROLE_HINTS, ROLE_LABELS, shownGroups, TASKS, withNeeds, type Role, type Task } from '@shap/shared';
+import { formatDate, LINK_SESSION_HOURS, neededBy, passwordProblem, ROLE_HINTS, ROLE_LABELS, shownGroups, TASKS, withNeeds, type Feature, type Role, type Task } from '@shap/shared';
 import { Drawer, ErrorBox, Field, Icon, Loading, useToast } from './ui';
 import { usePasswordPrompt } from './PasswordPrompt';
 import { YourAccountant } from './YourAccountant';
@@ -149,9 +149,11 @@ export function People() {
  * ticks everything under it; a job another one needs is ticked with it (and can't be unticked
  * while that one is). What's ticked for a part that's switched off is kept as it was.
  */
-export function AccessTicks({ value, onChange, base }: { value: Task[]; onChange: (v: Task[]) => void; base?: Task[] }) {
+export function AccessTicks({ value, onChange, base, has: willHave }: { value: Task[]; onChange: (v: Task[]) => void; base?: Task[]; has?: (f: Feature) => boolean }) {
   const { has } = useAuthed();
-  const groups = useMemo(() => shownGroups(has), [has]);
+  // In setup, the parts of Shap the answers so far will switch on (none is on yet).
+  const partsOn = willHave ?? has;
+  const groups = useMemo(() => shownGroups(partsOn), [partsOn]);
   const on = new Set(value);
   const needed = new Map<string, string[]>();
   for (const t of value) for (const n of withNeeds([t])) if (n !== t) needed.set(n, [...(needed.get(n) ?? []), label(t)]);

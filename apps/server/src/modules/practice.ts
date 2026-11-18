@@ -17,9 +17,9 @@ import { createReadStream, existsSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { ACCOUNTANT_TERMS_URL, ACCOUNTANT_TERMS_VERSION, BUSINESS_TYPES, deadlinesFor, featureOn, LEVELS, plainName, PRACTICE_TERMS_TICK, readLink, TERMS_URL, TERMS_VERSION, VAT_CATEGORIES, type DeadlineInputs, type Level } from '@shap/shared';
+import { ACCOUNTANT_TERMS_URL, ACCOUNTANT_TERMS_VERSION, BUSINESS_TYPES, deadlinesFor, featureOn, isTask, LEVELS, plainName, PRACTICE_TERMS_TICK, readLink, SERVER_NOT_MANAGED, teamInput, TERMS_URL, TERMS_VERSION, VAT_CATEGORIES, withNeeds, type DeadlineInputs, type Level } from '@shap/shared';
 import { z } from 'zod';
-import { browserName, can, CLIENT_COOKIE, confirmPassword, CLIENT_SESSION_COOKIE, loadUser, requireAccess, requireRole, SESSION_COOKIE, userOrThrow, type AuthUser } from '../auth.js';
+import { browserName, can, checkNewPassword, CLIENT_COOKIE, confirmPassword, CLIENT_SESSION_COOKIE, createUser, loadUser, requireAccess, requireRole, SESSION_COOKIE, userOrThrow, type AuthUser } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Sql } from '../db/index.js';
 import { dbScope, inClient } from '../db/routing.js';
@@ -27,10 +27,10 @@ import { audit } from '../lib/audit.js';
 import { today } from '../lib/books.js';
 import { badRequest, forbidden, HttpError, notFound } from '../lib/errors.js';
 import { routePath } from '../lib/http.js';
-import { clientDbName, cutWords, healthOf, mirrorUser, roleFor, rolesFor, saveHealth, unmirrorUser, type ClientHealth } from '../lib/practice.js';
+import { clientDbName, cutWords, databaseRights, healthOf, mirrorUser, otherCompanies, roleFor, rolesFor, saveHealth, unmirrorUser, type ClientHealth } from '../lib/practice.js';
 import { SERVER_ONLY, under } from '../lib/server-only.js';
 import { applyPocketShare, readPocketShare } from './import/pocket-share.js';
-import { appVersion, BACKUP_NAME } from './system.js';
+import { appVersion, askCtl, BACKUP_NAME, ctlPending, ctlStatus } from './system.js';
 import { linkCall, LinkError } from '../lib/link-call.js';
 import { lastEnded, papersFor } from '../lib/papers.js';
 import { newToken, sha256 } from '../lib/tokens.js';
@@ -324,6 +324,89 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { version };
   });
 
+  /**
+   * The server, for Shap Accountant (setup asks as soon as the practice says it keeps clients'
+   * books here, and Practice while it can't yet): may this Shap's database login make each client's
+   * database, and is the server the practice's alone? Where shap-ctl looks after the server, its
+   * owner asks it to allow that (POST), in the background; elsewhere, whoever runs the server does.
+   */
+  const othersSignIn = async (me: string) => (await real`select 1 from users where id <> ${me} and link_id is null and active limit 1`).length > 0;
+  const serverState = async (me: string) => {
+    const { may, login } = await databaseRights(real);
+    const status = ctlStatus(config);
+    const asked = status && typeof status.practice === 'object' && status.practice ? (status.practice as { at?: string; ok?: boolean; message?: string }) : null;
+    return {
+      ready: may,
+      login,
+      managed: status != null,
+      pending: ctlPending(config) === 'practice',
+      asked: asked ? { at: String(asked.at ?? ''), ok: asked.ok === true, message: String(asked.message ?? '').slice(0, 400) } : null,
+      otherCompanies: await otherCompanies(real),
+      testServer: config.TEST_SERVER,
+      // Setup's team step makes the practice's people only while nobody else signs in (below).
+      othersSignIn: await othersSignIn(me),
+    };
+  };
+  const practiceOwner = { preHandler: requireRole('owner') };
+  app.get('/api/practice/server', practiceOwner, async (req) => serverState(userOrThrow(req).id));
+  app.post('/api/practice/server', { ...practiceOwner, config: limit(5) }, async (req) => {
+    const user = userOrThrow(req);
+    const state = await serverState(user.id);
+    if (state.ready || state.pending) return state;
+    if (!state.managed) throw badRequest(SERVER_NOT_MANAGED);
+    // One request at a time: an update or a backup asked for already goes first, and this is asked again after it.
+    const waiting = ctlPending(config);
+    if (waiting) throw new HttpError(409, 'The server is busy with another request just now: Shap asks again in a moment.', 'ctl_busy');
+    if (!(await askCtl(config, 'practice'))) throw badRequest('Shap can’t leave the request for the server. Whoever runs it runs deploy/vps/ctl/install.sh again.');
+    await audit(real, { userId: user.id, action: 'system_practice', entity: 'system', ip: req.ip, details: { login: state.login } });
+    return { ...state, pending: true };
+  });
+
+  /**
+   * The practice's people, from setup: its profiles (what each kind of staff does) and a sign-in for
+   * each person on one, all at once or none. Only while nobody else signs in here yet: after that,
+   * Settings → People who sign in, one at a time.
+   */
+  app.post('/api/practice/team', { ...practiceOwner, config: limit(5) }, async (req) => {
+    const me = userOrThrow(req);
+    if (inClient()) throw forbidden('That’s the practice’s own, so it isn’t done in a client’s books: tap Back to the practice, at the top, first.');
+    await assertOn();
+    const input = parse(teamInput, req.body);
+    if (await othersSignIn(me.id)) throw badRequest('Someone else signs in here already, so your team is added under Settings → People who sign in, one at a time.');
+    const emails = input.people.map((p) => p.email);
+    if (new Set(emails).size !== emails.length) throw badRequest('Two people have the same email: each signs in with their own.');
+    if (emails.includes(me.email.toLowerCase())) throw badRequest('One of them has your email: each person signs in with their own.');
+    const taken = await real<{ email: string }[]>`select email from users where email in ${real(emails)}`;
+    if (taken.length) throw badRequest(`Someone already signs in with ${taken.map((t) => t.email).join(', ')}.`);
+    const profileNames = input.profiles.map((p) => p.name.toLowerCase());
+    if (new Set(profileNames).size !== profileNames.length) throw badRequest('Two profiles have the same name: give each its own.');
+    for (const p of input.people) checkNewPassword(p.password, p);
+    const made = await real.begin(async (tx) => {
+      const ids = new Map<string, string>();
+      for (const p of input.profiles) {
+        const access = withNeeds(p.access.filter(isTask));
+        // Shap's own (Admin, say) are changed as ticked here: nobody is on them yet.
+        const [had] = await tx<{ id: string }[]>`select id from profiles where lower(name) = lower(${p.name})`;
+        const [row] = had
+          ? await tx<{ id: string }[]>`update profiles set access = ${access}, updated_at = now() where id = ${had.id} returning id`
+          : await tx<{ id: string }[]>`insert into profiles (name, access) values (${p.name}, ${access}) returning id`;
+        ids.set(p.name.toLowerCase(), row!.id);
+        await audit(tx, { userId: me.id, action: had ? 'update' : 'create', entity: 'profile', entityId: row!.id, ip: req.ip, details: { name: p.name, access } });
+      }
+      let n = 0;
+      for (const person of input.people) {
+        let profileId = ids.get(person.profile.toLowerCase());
+        if (!profileId) profileId = (await tx<{ id: string }[]>`select id from profiles where lower(name) = lower(${person.profile})`)[0]?.id;
+        if (!profileId) throw badRequest(`There’s no profile called ${person.profile}: choose one of the profiles for ${person.name}.`);
+        const u = await createUser(tx, { name: person.name, email: person.email, password: person.password, role: 'staff', profileId, accessAdd: [], accessRemove: [] });
+        await audit(tx, { userId: me.id, action: 'create', entity: 'user', entityId: u.id, ip: req.ip, details: { role: 'staff', profileId, add: [], remove: [], from: 'setup' } });
+        n++;
+      }
+      return n;
+    });
+    return { people: made };
+  });
+
   app.get('/api/practice', view, async (req) => {
     const user = userOrThrow(req);
     await assertOn();
@@ -382,7 +465,7 @@ export function registerPracticeRoutes(app: FastifyInstance, ctx: Ctx): void {
       await real`delete from practice_clients where id = ${c!.id}`;
       req.log.error({ err }, 'practice: a client’s database couldn’t be made');
       if ((err as { code?: string }).code === '42501')
-        throw badRequest('Couldn’t make this client’s books on the server. Shap Accountant needs the database login to be allowed to create databases: whoever runs the server can allow it (docs/ACCOUNTANT.md, on Shap’s GitHub).');
+        throw new HttpError(400, `Couldn’t make this client’s books on the server: this Shap’s database login isn’t allowed to make databases. ${user.role === 'owner' ? 'The Practice page says' : 'Your practice’s owner sees, on the Practice page,'} what to do (docs/ACCOUNTANT.md, on Shap’s GitHub).`, 'no_createdb');
       throw err;
     }
     await real.begin(async (tx) => {

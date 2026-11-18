@@ -186,3 +186,14 @@ export const STARTING_PROFILES: readonly { name: string; access: readonly Task[]
   { name: 'Admin', access: ['documents.edit', 'documents.paid', 'clients.edit', 'costs.manage', 'bills.pay', 'stock.buy', 'reports.view', 'bank.reconcile', 'sales.view', 'labour.view'] },
   { name: 'Site staff', access: ['labour.log', 'costs.capture', 'jobs.view'] },
 ];
+
+/**
+ * The profiles setup offers a practice (Shap Accountant), each changeable there and later: who
+ * opens the clients they're given, who runs the client list, and who keeps the practice's own books
+ * (Shap's Admin). Which clients each person opens, and how, is chosen per client (Who opens it).
+ */
+export const PRACTICE_PROFILES: readonly { name: string; access: readonly Task[]; hint: string }[] = [
+  { name: 'Bookkeeper', access: ['practice.clients'], hint: 'Opens the clients they’re given, as each is given: writing up the books, or reading them and compiling the statements' },
+  { name: 'Practice manager', access: ['practice.manage'], hint: 'Adds clients and chooses who opens each (themselves included), sees every client, and makes the engagement letters' },
+  { name: 'Admin', access: STARTING_PROFILES.find((p) => p.name === 'Admin')!.access, hint: 'The practice’s own books: its invoices and what’s paid on them, its clients, costs and bills, the reports and the bank' },
+];

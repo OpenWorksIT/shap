@@ -15,6 +15,10 @@ come with Shap, and **New profile** adds more (a bookkeeper, a storeman). Each p
 profile, and **Adjust for this person** changes it for them alone (a teller who may also refund, an
 admin who doesn't see payroll), or **Only what I tick** for someone without a profile.
 
+An accounting practice setting up Shap Accountant (docs/ACCOUNTANT.md, "Setting up a practice") is
+offered **Bookkeeper** (opens the clients they're given) and **Practice manager** (adds clients and
+chooses who opens each), with **Admin**, and can make its people's sign-ins there, all at once.
+
 When a profile changes, everyone on it has the change at once (their next tap), except what was
 changed for them: Shap keeps a person's changes as what's ticked beyond their profile and what's
 taken off it, so those stay as they were. A profile can only be removed once nobody is on it.
