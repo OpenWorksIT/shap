@@ -328,6 +328,25 @@ export const TRADES: Record<string, Trade> = {
     dayRate: 600,
     suppliers: ['Cloudnine Hosting (made up)', 'Paperclip Office Supplies (made up)'],
   },
+  // An accounting practice's own books (its clients' books are each a database of their own).
+  accounting: {
+    services: [
+      ['Monthly bookkeeping', 'month', 3500, 'labour'],
+      ['Monthly payroll', 'month', 1200, 'labour'],
+      ['VAT201 return', 'each', 950, 'labour'],
+      ['Annual financial statements', 'each', 9500, 'labour'],
+      ['Income tax return', 'each', 1800, 'labour'],
+      ['Professional time', 'hour', 950, 'labour'],
+    ],
+    materials: [],
+    docs: [8, 16],
+    size: 1,
+    rent: 6500,
+    asset: 'computer',
+    staff: [['Bookkeeper', 16000]],
+    dayRate: 500,
+    suppliers: ['Ledgerline Software (made up)', 'Paperclip Office Supplies (made up)'],
+  },
   tutor: {
     services: [
       ['Lesson (1 hour)', 'hour', 350, 'labour'],

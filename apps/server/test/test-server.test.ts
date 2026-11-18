@@ -335,6 +335,8 @@ const SETUPS: Answers[] = [
   { businessType: 'sole_prop', industry: 'retail', workflow: 'invoice', sales: true, inventory: true, monthEnd: 'auto' },
   { businessType: 'cc', industry: 'handyman', vat: true, vatCategory: 'A', workflow: 'quote_job_invoice', employees: true, fyEndMonth: 6, extras: { travel: true } },
   { businessType: 'inc', industry: 'consulting', vat: true, workflow: 'quote_invoice', employees: true, sdl: true, extras: { hourly: true } },
+  // 1.32: an accounting practice's own books, as setup starts them (its clients' are databases of their own).
+  { businessType: 'company', industry: 'accounting', vat: true, workflow: 'invoice', employees: true, extras: { hourly: true } },
 ];
 
 describe('test server: every kind of setup passes the books audit', () => {
