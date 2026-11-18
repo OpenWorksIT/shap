@@ -1338,6 +1338,12 @@ whose it is too: it says so; staff are told to ask the owner to open it. The sec
 those fixes: ready; its nit, done: an unusual login name is said in quotes with its quotes and
 backslashes escaped (as JSON does), so a bracket in it can't add words that read as Shap's.
 
+All five ready: security (the penetration test: nothing to fix), IFRS, SARS and accounting at
+`0ccef71`, and the security and words checks of every change since at `80dd287` (what changed after
+`0ccef71` is the exempt hint's hedge, which IFRS read as sound and words checked against SARS.md,
+the refusal's words and who's told them, and an error toast's time). Shap Pocket 1.11.3 at
+`701211e`.
+
 ### Code scanning (CodeQL), first run
 
 - The Accounts screen's download links carried the period's dates unencoded (flagged as text

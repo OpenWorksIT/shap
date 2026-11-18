@@ -535,4 +535,5 @@ docs/SARS.md lists each rule and its source; they're checked with the standard S
   login before a move to a least-privilege login, or restored from this client's backup); if not,
   leave it and find out who made it. Staff who open it are told whose it is and that it isn't
   opened, and to ask the owner; the owner is also told this Shap's login and the command (as the
-  server panel is the owner's). A login name Shap wouldn't make is shown in quotes, in plain ASCII, anything else escaped.
+  server panel is the owner's). A login name Shap wouldn't make is shown in quotes, in plain
+  ASCII, anything else escaped.
