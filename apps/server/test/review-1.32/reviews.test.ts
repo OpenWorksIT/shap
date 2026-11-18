@@ -8,8 +8,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ACCOUNTANT_TERMS_VERSION, activityOf, COMPILE_SIGNS, industryProfile, PRACTICE_CAUTION, PRACTICE_OWN_SERVER, PRACTICE_PROFILES, SALE_VAT, SERVER_NOT_MANAGED, setupCautions, TURNOVER_TAX_PROFESSIONAL } from '@shap/shared';
+import { createUser } from '../../src/auth.js';
+import { ClientDbs, loginShown, ownRefusal } from '../../src/lib/practice.js';
 import { buildStatements } from '../../src/statements/build.js';
-import { expectCleanAudit, login, ref, setup, type TestEnv } from '../helpers.js';
+import { expectCleanAudit, login, ref, sessionFor, setup, type TestEnv } from '../helpers.js';
 
 const ROOT = join(import.meta.dirname, '../../../..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
@@ -288,5 +290,123 @@ describe('words on screen and liability, the fifth round: a refusal Shap wrote, 
     const ui = read('apps/web/src/components/ui.tsx');
     expect(ui).toMatch(/tone !== 'error' \? 4000 : Math\.min\(60_000, Math\.max\(8000, \(typeof text === 'string' \? text\.length : 0\) \* 70\)\)/);
     expect(ui).toMatch(/setTimeout\(\(\) => setToasts\(\(t\) => t\.filter\(\(x\) => x\.id !== id\)\), toastMs\(raw, tone\)\)/);
+  });
+});
+
+describe('security and privacy, the sixth round: this Shap’s login and the command are the owner’s, and another login’s name can’t mislead', () => {
+  const P = 'shap_t_r132s6_';
+  const SQUATTER = `${P}squat`;
+  // Outside Shap's control: a quoted role name can hold a direction mark, quotes and a newline.
+  const ODD = `${P}‮"x\ny`;
+  const APP = `${P}app`;
+  const LOOKALIKE = `${P}аpp`; // a Cyrillic а
+  const ROLES = [SQUATTER, ODD, APP, LOOKALIKE];
+  const SQUATTED_ID = '99999999-9999-4999-8999-999999999999';
+  const ODD_ID = '88888888-8888-4888-8888-888888888888';
+  const q = (role: string) => `"${role.replace(/"/g, '""')}"`;
+  const ownWords = (s: string) => s.replace(/[’‘“”–—…→]/g, '');
+  let env: TestEnv;
+  let me = '';
+  const dbs: string[] = [];
+  const dropAll = async () => {
+    for (const d of dbs) await env.sql.unsafe(`drop database if exists "${d}" with (force)`);
+    for (const r of ROLES) await env.sql.unsafe(`drop role if exists ${q(r)}`);
+  };
+  const idOf = async (email: string) => (await env.sql<{ id: string }[]>`select id from users where email = ${email}`)[0]!.id;
+  const refusal = async (who: Awaited<ReturnType<typeof sessionFor>>, method: 'GET' | 'POST', url: string, payload?: unknown) => {
+    const r = await who.call({ method, url, ...(method === 'GET' ? {} : { payload: (payload ?? {}) as never }) });
+    const body = r.json() as { error?: string; code?: string };
+    return { status: r.statusCode, code: body.code, error: body.error ?? '' };
+  };
+
+  beforeAll(async () => {
+    env = await setup();
+    const practiceDb = env.ctx.clients.practiceDb;
+    dbs.push(`${practiceDb}__c_999999999999`, `${practiceDb}__c_888888888888`, `${practiceDb}__c_777777777777`);
+    await dropAll();
+    me = (await env.sql<{ me: string }[]>`select current_user::text as me`)[0]!.me;
+    const owner = await login(env.app, 'owner@example.co.za');
+    const { settings } = await owner.get('/api/reference');
+    await owner.post('/api/practice/terms', { version: ACCOUNTANT_TERMS_VERSION });
+    await owner.post('/api/settings', { ...settings, industry: 'accounting', features: { ...settings.features, practice: true } }, 'PUT');
+    await createUser(env.sql, { name: 'Made-up Bookkeeper', email: 'bk6@example.co.za', password: 'test-password-6', role: 'staff', accessAdd: ['practice.clients'] });
+    await createUser(env.sql, { name: 'Made-up Manager', email: 'pm6@example.co.za', password: 'test-password-6', role: 'staff', accessAdd: ['practice.clients', 'practice.manage'] });
+    await env.sql.unsafe(`create role ${q(SQUATTER)} nologin`);
+    await env.sql.unsafe(`create database "${dbs[0]}" owner ${q(SQUATTER)}`);
+    await env.sql.unsafe(`create role ${q(ODD)} nologin`);
+    await env.sql.unsafe(`create database "${dbs[1]}" owner ${q(ODD)}`);
+    const o = await idOf('owner@example.co.za');
+    await env.sql`insert into practice_clients (id, name, kind, created_by, db_name) values
+      (${SQUATTED_ID}, 'Made-up Squatted Joinery', 'kept', ${o}, ${dbs[0]!}),
+      (${ODD_ID}, 'Made-up Odd-Named Nursery', 'kept', ${o}, ${dbs[1]!})`;
+    const bk = await idOf('bk6@example.co.za');
+    await env.sql`insert into practice_access (client_id, user_id, level) values (${SQUATTED_ID}, ${bk}, 'compile'), (${ODD_ID}, ${bk}, 'compile')`;
+  });
+  afterAll(async () => {
+    await dropAll();
+    await expectCleanAudit(env.sql, FY);
+    await env.close();
+  });
+
+  it('staff given the client, and a practice manager, are told it isn’t opened, without this Shap’s login or the command; the owner is told all of it', async () => {
+    const bk = await sessionFor(env, 'bk6@example.co.za');
+    const pm = await sessionFor(env, 'pm6@example.co.za');
+    const owner = await sessionFor(env, 'owner@example.co.za');
+    const staff = [
+      await refusal(bk, 'POST', `/api/practice/clients/${SQUATTED_ID}/checks`),
+      await refusal(bk, 'GET', `/api/practice/clients/${SQUATTED_ID}/file`),
+      await refusal(bk, 'POST', `/api/practice/clients/${SQUATTED_ID}/open`),
+      await refusal(pm, 'POST', `/api/practice/clients/${SQUATTED_ID}/archive`, { archived: true }),
+    ];
+    await env.sql`update practice_clients set archived_at = null where id = ${SQUATTED_ID}`;
+    for (const r of staff) {
+      expect(r.status).toBe(409);
+      expect(r.code).toBe('not_ours');
+      expect(r.error).toBe(`This client’s database (${dbs[0]}) belongs to another login (${SQUATTER}), so Shap doesn’t open it. The practice’s owner is told what to do when they open it.`);
+      expect(r.error).not.toContain(`"${me}"`);
+      expect(r.error).not.toMatch(/alter database/);
+    }
+    for (const url of [`/api/practice/clients/${SQUATTED_ID}/checks`, `/api/practice/clients/${SQUATTED_ID}/open`]) {
+      const r = await refusal(owner, 'POST', url);
+      expect(r.status).toBe(409);
+      expect(r.error).toContain(`(alter database "${dbs[0]}" owner to "${me}";). If not, leave it and find out who made it (docs/ACCOUNTANT.md).`);
+    }
+  });
+
+  it('another login’s name is said in printable ASCII only, unless it’s one Shap would make', async () => {
+    expect(loginShown('shap_app')).toBe('shap_app');
+    expect(loginShown(`a‮b"\nc\u{1F600}`)).toBe('one with an unusual name, a\\u202eb"\\u000ac\\u{1f600}');
+    const owner = await sessionFor(env, 'owner@example.co.za');
+    const bk = await sessionFor(env, 'bk6@example.co.za');
+    for (const who of [owner, bk]) {
+      const r = await refusal(who, 'GET', `/api/practice/clients/${ODD_ID}/file`);
+      expect(r.status).toBe(409);
+      expect(ownWords(r.error)).toMatch(/^[\x20-\x7e]*$/);
+      expect(r.error).toContain(`belongs to another login (one with an unusual name, ${P}\\u202e"x\\u000ay), so Shap doesn’t open it.`);
+    }
+  });
+
+  it('a look-alike of this Shap’s own login is never said as if it were it, beside the command', async () => {
+    await env.sql.unsafe(`create role ${q(APP)} login`);
+    await env.sql.unsafe(`create role ${q(LOOKALIKE)} nologin`);
+    await env.sql.unsafe(`create database "${dbs[2]}" owner ${q(LOOKALIKE)}`);
+    const u = new URL(env.ctx.clients.urlFor(env.ctx.clients.practiceDb));
+    u.username = APP;
+    u.password = '';
+    const asApp = new ClientDbs(u.toString());
+    try {
+      const err = await asApp.assertOwned(dbs[2]!).then(
+        () => null,
+        (e: Error) => e,
+      );
+      expect(err).toBeInstanceOf(Error);
+      const said = ownRefusal(err);
+      expect(said).toContain(`owner to "${APP}";`);
+      expect(said).toContain(`belongs to another login (one with an unusual name, ${P}\\u0430pp)`);
+      expect(ownWords(said)).toMatch(/^[\x20-\x7e]*$/);
+      expect(said).not.toContain(`(${LOOKALIKE})`);
+    } finally {
+      await asApp.end();
+    }
   });
 });

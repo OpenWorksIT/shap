@@ -32,7 +32,7 @@ import { freshTotals, getSettings, today } from '../lib/books.js';
 import { letterSections, servicesFor, type LetterInput, type LetterSection } from '../lib/engagement.js';
 import { renderFilePdf, renderLetterPdf } from '../lib/engagement-pdf.js';
 import { badRequest, forbidden, notFound, HttpError } from '../lib/errors.js';
-import { ownRefusal, type ClientHealth } from '../lib/practice.js';
+import { refusedBooks, type ClientHealth } from '../lib/practice.js';
 import { parse } from '../lib/validate.js';
 import { lastEnded, letterStanding, tbHash, yearTb, type CoverLetter, type YearTb } from '../lib/papers.js';
 import { accountantTermsAccepted, ACCOUNTANT_TERMS_NEEDED, levelFor, practiceOn, type ClientRow } from './practice.js';
@@ -108,7 +108,7 @@ export function registerWorkingPaperRoutes(app: FastifyInstance, ctx: Ctx): void
     try {
       return await clients.openOwn(c.dbName);
     } catch (err) {
-      throw new HttpError(409, ownRefusal(err), 'not_ours');
+      throw refusedBooks(err);
     }
   };
   const factsOf = async (c: ClientRow): Promise<ClientFacts> => {

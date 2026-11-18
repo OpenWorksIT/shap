@@ -13,6 +13,7 @@
 import { addDays, featureOn, financialYear, LEVELS, type DeadlineInputs, type Level } from '@shap/shared';
 import { auditBooks } from '../audit/books.js';
 import { createDb, type Sql } from '../db/index.js';
+import { HttpError } from './errors.js';
 import { migrate } from '../db/migrate.js';
 import { buildStatements } from '../statements/build.js';
 import { currentStatements, stillSigned } from '../modules/financial-statements.js';
@@ -65,13 +66,32 @@ export const MAX_CLIENT_POOLS = 12;
 /**
  * What a route says when a client's database isn't opened. assertOwned's refusals are Shap's own
  * words, said whole (cut short, the caution and half the command were lost); anything else (the
- * database server's own text) is cut short.
+ * database server's own text) is cut short. This Shap's login and the command to hand a database
+ * over are the owner's (as the server panel is): staff are told the refusal without them.
  */
-export const ownRefusal = (err: unknown): string => {
-  const e = err as Error & { code?: unknown };
+export const ownRefusal = (err: unknown, to: 'owner' | 'staff' = 'owner'): string => {
+  const e = err as Error & { code?: unknown; staff?: unknown };
   const message = String(e?.message ?? '');
-  return e?.code === 'missing' || e?.code === 'not_ours' ? message : message.slice(0, 400);
+  if (e?.code === 'not_ours') return to === 'owner' ? message : String(e.staff ?? '');
+  return e?.code === 'missing' ? message : message.slice(0, 400);
 };
+
+/** A route's 409 when a client's database isn't opened: staff are told less than the owner (ownRefusal). */
+export const refusedBooks = (err: unknown): HttpError => Object.assign(new HttpError(409, ownRefusal(err, 'staff'), 'not_ours'), { forOwner: ownRefusal(err, 'owner') });
+
+/**
+ * Another login's name, as Postgres has it, is chosen by whoever made the database: one Shap or
+ * shap-ctl would make is said as it is; any other is said in printable ASCII only (anything else
+ * as \uXXXX), so a direction mark can't turn the words round and a look-alike can't pass for this
+ * Shap's own login.
+ */
+export const loginShown = (name: string): string =>
+  /^[a-z0-9_]{1,63}$/.test(name)
+    ? name
+    : `one with an unusual name, ${[...name].map((ch) => {
+        const cp = ch.codePointAt(0)!;
+        return cp >= 0x20 && cp <= 0x7e ? ch : cp <= 0xffff ? `\\u${cp.toString(16).padStart(4, '0')}` : `\\u{${cp.toString(16)}}`;
+      }).join('')}`;
 
 /** The clients' pools, made when first needed. */
 export class ClientDbs {
@@ -161,14 +181,16 @@ export class ClientDbs {
     const [r] = await this.checker<{ mine: boolean; owner: string; me: string }[]>`
       select datdba = (select oid from pg_roles where rolname = current_user) as mine, pg_get_userbyid(datdba) as owner, current_user::text as me from pg_database where datname = ${dbName}`;
     if (!r) throw Object.assign(new Error(`This client’s database (${dbName}) isn’t on the server. Whoever runs the server restores it from its backup.`), { code: 'missing' });
-    // Handing over a database someone planted would run its code as this Shap's login: said so.
-    if (!r.mine)
+    // Handing over a database someone planted would run its code as this Shap's login: said so (to the owner; staff are told it isn't opened).
+    if (!r.mine) {
+      const refused = `This client’s database (${dbName}) belongs to another login (${loginShown(r.owner)}), so Shap doesn’t open it.`;
       throw Object.assign(
         new Error(
-          `This client’s database (${dbName}) belongs to another login (${r.owner}), so Shap doesn’t open it. Only if you know where it came from (made by this server’s own Postgres login before a move to a least-privilege login, or restored from this client’s backup), whoever runs the server can hand it to this Shap’s login (alter database "${dbName}" owner to "${r.me}";). If not, leave it and find out who made it (docs/ACCOUNTANT.md).`,
+          `${refused} Only if you know where it came from (made by this server’s own Postgres login before a move to a least-privilege login, or restored from this client’s backup), whoever runs the server can hand it to this Shap’s login (alter database "${dbName}" owner to "${r.me.replace(/"/g, '""')}";). If not, leave it and find out who made it (docs/ACCOUNTANT.md).`,
         ),
-        { code: 'not_ours' },
+        { code: 'not_ours', staff: `${refused} The practice’s owner is told what to do when they open it.` },
       );
+    }
   }
 
   /** A client's pool, for a request: once its database is checked as this Shap's own. */

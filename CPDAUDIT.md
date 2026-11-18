@@ -1323,6 +1323,16 @@ The sixth round (`6ff53cf`): words ready. Its notes, done: an error toast stays 
 (70 ms a character, 8 seconds to a minute; any can be tapped away), not 8 seconds for every error;
 a code comment back above the class it's about.
 
+A security check of the fifth and sixth rounds (a separate agent; the penetration test's routes
+unchanged): ready, with two should-fixes, fixed: staff given a client (and a practice manager,
+through Who opens it and Archive) were told this Shap's database login and handed the command,
+though the server panel that says the login is the owner's: staff are told only that it isn't
+opened (an HttpError's `forOwner` text goes to the owner alone); the other login's name, chosen by
+whoever made the database, was said as Postgres has it (a direction mark, a newline, a look-alike
+of this Shap's login beside the command): one Shap wouldn't make is said in printable ASCII only.
+The command doubles any `"` in this Shap's login. `ownRefusal` still cuts every error that isn't
+Shap's own (no SQLSTATE can be `missing` or `not_ours`).
+
 ### Code scanning (CodeQL), first run
 
 - The Accounts screen's download links carried the period's dates unencoded (flagged as text

@@ -1,4 +1,6 @@
 export class HttpError extends Error {
+  /** What the owner is told instead of the message (more than staff are, such as this Shap's database login): app.ts sends it only to the owner. */
+  forOwner?: string;
   constructor(
     public readonly statusCode: number,
     message: string,

@@ -226,7 +226,9 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   app.setErrorHandler((err: Error, req, reply) => {
     if (err instanceof DemoUnavailable) return reply.code(503).send({ error: err.message, code: 'demo_unavailable' });
     if (err instanceof HttpError) {
-      return reply.code(err.statusCode).send({ error: err.message, code: err.code, details: err.details });
+      // Staff are told the message; the owner, what's for the owner where there's more (lib/errors.ts).
+      const error = err.forOwner && req.user?.role === 'owner' ? err.forOwner : err.message;
+      return reply.code(err.statusCode).send({ error, code: err.code, details: err.details });
     }
     const status = (err as { statusCode?: number }).statusCode;
     if (status === 429) return reply.code(429).send({ error: 'Too many requests. Please wait a moment and try again.', code: 'rate_limited' });
