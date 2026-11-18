@@ -1206,6 +1206,69 @@ rendered in 1.7 to 4.2 seconds on a machine loaded at 5.7 on two cores, the serv
 as soon as it was done; the penetration test gave 0 to fix, 52 OK. Tests: `papers` (notes and
 replies sent at once), `letter` (the DTR01 sentence), each failing on `1eb2b1b`.
 
+### The five reviews of 1.32 and Shap Pocket 1.11.3 (Shap Accountant from the first-run questions; before release)
+
+Setup asks an accounting practice whether it keeps its clients' books in Shap, checks the server
+(each client's books are a database), makes the practice's people at the end and accepts both sets
+of terms; shap-ctl gains a `practice` step (CREATEDB for the server's own Shap's login). Five
+separate agents reviewed `b61eef0..4d384b2`, each walking setup as a practice (the words review in
+every state of the server's panel, with Playwright). None said it was ready.
+
+- Security and privacy, with the penetration test (0 to fix, 51 OK): shap-ctl's backups split the
+  databases' names on spaces and wrote each dump at `<backups>/<name>-…`, so a login that may make
+  databases (which this change gave test servers) could name one to overwrite another company's
+  backup with its own books, or have root write outside the backups: the names are read one a line,
+  only those Shap makes (`^shap(_[a-z0-9_]+)?$`, not a demo), checked in SQL and again in bash.
+  shap-ctl no longer gives test servers CREATEDB on its own (add-company.sh `--test-server` does, at
+  the operator's say-so; one command for an older one). Its `practice` step gave a hardened login
+  CREATEDB whenever any owner asked, with Shap Accountant off and on a server real companies share:
+  it refuses while any added company isn't a test server, and the app asks only with Shap Accountant
+  on and its terms accepted (the end of setup, or Practice's button), never with other companies'
+  books on the server. No root-side opt-in: on a server no other company shares, the server's own
+  Shap already holds everything on it. A test server could make clients' databases without end
+  (12 MB each, backed up nightly, on a server real companies share): 10 at most. Two team requests at
+  once both found nobody else signed in: made under an advisory lock, checked again inside, a
+  duplicate name 409 (not a 500); and a profile anyone is on, signed in or not, isn't changed by it.
+- IFRS for SMEs and company law: the Bookkeeper profile read as someone who compiles, and compiling
+  signs the compilation report (a CC's accounting officer's report, s62) in that person's name: it
+  writes up, and Who opens it says compiling is signing (`COMPILE_SIGNS`). Time tracked up to the
+  year end and not invoiced by then wasn't flagged, while the policy said all work is invoiced as
+  it's done (23.14): a look item with its value at the rates, and the policy worded to fit, in Shap
+  and Pocket. A practice's revenue note showed "Project revenue – labour" and an "Other income" row
+  inside revenue: its revenue accounts are named Fees, Recharged costs and Other revenue while unused.
+  Its client costs went under Parts: "Costs recharged to clients", Parts hidden. The nature of the
+  business says "accounting, bookkeeping and tax services". Noted, not changed: amounts paid as the
+  client's agent still run through revenue and costs (the docs say so, netting is the practice's
+  call); a practice's own statements compiled internally isn't defaulted.
+- SARS and tax: setup let an accounting practice stay on turnover tax, though more than 20% of its
+  receipts from a professional service ends being a micro business (Sixth Schedule para 3(b), para
+  1's list): choosing it switches turnover tax off and says why, and setup, Settings and the
+  cautions say the rule for the other professional kinds (Pocket too). An "Expenses" line invited VAT
+  on a fee paid as the client's agent (s54(2)): the practice's item for it comes without VAT, the
+  exempt option's hint says when, and the line is "Recharged costs". The SBC caution shows for a
+  practice (s12E(4)(d)), the practice's caution says completing returns for a fee needs registration
+  as a tax practitioner (TAA s240), and the industry hint says the checks are aids.
+- Accounting and arithmetic (setup through the API as `finish()` does, both sets of books audited,
+  the made-up practice's VAT201s and EMP201s checked against its ledger): a retried setup whose team
+  was made but whose answer was lost was stuck: it asks first and doesn't send it twice. The rent
+  check missed the new trade, choosing another kind after a practice kept its "no sales", and the
+  made-up practice paid another bookkeeper: fixed. A matching cost type Shap had already is listed
+  first. Unchanged: earlier kinds' cost types stay on (as before).
+- Words on screen and liability: Practice said "Shap is asking" when nothing had been asked, and on
+  an added company's server the panel told the operator to give its login CREATEDB, beside the words
+  saying it mustn't: one set of words per state, the command never on a shared server, "Ask the
+  server" where Shap may. "Shap gets this server ready", a tick saying the server "can keep your
+  clients' books" and "who can reach them are your practice's alone" read as promises: Shap checks
+  and asks, the server's security and backups are the practice's to look after (the Shap Accountant
+  terms 3.7 and 10.1 already say so: no terms change). "Or your own PC" pointed at deploy/test (for
+  testing, no backups): a computer only the practice uses. "Settings → System" is "Updates &
+  backups". The request went before the terms were accepted: it goes at the end, after both. Smaller
+  words: shap-ctl's messages name whose login and log why, "their name", payroll comes next.
+
+Tests: `accountant/practice-setup.test.ts`, `ctl-script.test.ts` (failing on the reviewed script,
+which wrote outside the backups), `review-1.32/reviews.test.ts`, `test-server.test.ts`, and Pocket's
+`shap-1.32.test.ts`, each failing without its fix.
+
 ### Code scanning (CodeQL), first run
 
 - The Accounts screen's download links carried the period's dates unencoded (flagged as text
