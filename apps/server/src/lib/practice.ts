@@ -81,14 +81,15 @@ export const refusedBooks = (err: unknown): HttpError => Object.assign(new HttpE
 
 /**
  * Another login's name, as Postgres has it, is chosen by whoever made the database: one Shap or
- * shap-ctl would make is said as it is; any other is said in printable ASCII only (anything else
- * as \uXXXX), so a direction mark can't turn the words round and a look-alike can't pass for this
- * Shap's own login.
+ * shap-ctl would make is said as it is; any other is said in quotes, with its quotes and
+ * backslashes escaped (as JSON does), in printable ASCII only (anything else as \uXXXX), so a
+ * direction mark can't turn the words round, a bracket in it can't add words that read as Shap's,
+ * and a look-alike can't pass for this Shap's own login.
  */
 export const loginShown = (name: string): string =>
   /^[a-z0-9_]{1,63}$/.test(name)
     ? name
-    : `one with an unusual name, ${[...name].map((ch) => {
+    : `one with an unusual name, ${[...JSON.stringify(name)].map((ch) => {
         const cp = ch.codePointAt(0)!;
         return cp >= 0x20 && cp <= 0x7e ? ch : cp <= 0xffff ? `\\u${cp.toString(16).padStart(4, '0')}` : `\\u{${cp.toString(16)}}`;
       }).join('')}`;

@@ -1334,7 +1334,9 @@ The command doubles any `"` in this Shap's login. `ownRefusal` still cuts every 
 Shap's own (no SQLSTATE can be `missing` or `not_ours`).
 
 Words on that text: ACCOUNTANT.md said staff are told only that it isn't opened, but they're told
-whose it is too: it says so; staff are told to ask the owner to open it.
+whose it is too: it says so; staff are told to ask the owner to open it. The security check of
+those fixes: ready; its nit, done: an unusual login name is said in quotes with its quotes and
+backslashes escaped (as JSON does), so a bracket in it can't add words that read as Shap's.
 
 ### Code scanning (CodeQL), first run
 

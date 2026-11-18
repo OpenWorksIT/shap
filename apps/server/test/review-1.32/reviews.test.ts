@@ -297,9 +297,9 @@ describe('security and privacy, the sixth round: this Shap’s login and the com
   const P = 'shap_t_r132s6_';
   const SQUATTER = `${P}squat`;
   // Outside Shap's control: a quoted role name can hold a direction mark, quotes and a newline.
-  const ODD = `${P}‮"x\ny`;
+  const ODD = `${P}\u202e"x\ny`;
   const APP = `${P}app`;
-  const LOOKALIKE = `${P}аpp`; // a Cyrillic а
+  const LOOKALIKE = `${P}\u0430pp`; // a Cyrillic a (U+0430)
   const ROLES = [SQUATTER, ODD, APP, LOOKALIKE];
   const SQUATTED_ID = '99999999-9999-4999-8999-999999999999';
   const ODD_ID = '88888888-8888-4888-8888-888888888888';
@@ -377,14 +377,16 @@ describe('security and privacy, the sixth round: this Shap’s login and the com
 
   it('another login’s name is said in printable ASCII only, unless it’s one Shap would make', async () => {
     expect(loginShown('shap_app')).toBe('shap_app');
-    expect(loginShown(`a‮b"\nc\u{1F600}`)).toBe('one with an unusual name, a\\u202eb"\\u000ac\\u{1f600}');
+    expect(loginShown(`a\u202eb"\nc\u{1F600}`)).toBe('one with an unusual name, "a\\u202eb\\"\\nc\\u{1f600}"');
+    // A bracket, a quote or a backslash can't close Shap's words or pass for an escape (the security check's nit).
+    expect(loginShown('x), restored (\\u005f')).toBe('one with an unusual name, "x), restored (\\\\u005f"');
     const owner = await sessionFor(env, 'owner@example.co.za');
     const bk = await sessionFor(env, 'bk6@example.co.za');
     for (const who of [owner, bk]) {
       const r = await refusal(who, 'GET', `/api/practice/clients/${ODD_ID}/file`);
       expect(r.status).toBe(409);
       expect(ownWords(r.error)).toMatch(/^[\x20-\x7e]*$/);
-      expect(r.error).toContain(`belongs to another login (one with an unusual name, ${P}\\u202e"x\\u000ay), so Shap doesn’t open it.`);
+      expect(r.error).toContain(`belongs to another login (one with an unusual name, "${P}\\u202e\\"x\\ny"), so Shap doesn’t open it.`);
     }
   });
 
@@ -404,7 +406,7 @@ describe('security and privacy, the sixth round: this Shap’s login and the com
       expect(err).toBeInstanceOf(Error);
       const said = ownRefusal(err);
       expect(said).toContain(`owner to "${APP}";`);
-      expect(said).toContain(`belongs to another login (one with an unusual name, ${P}\\u0430pp)`);
+      expect(said).toContain(`belongs to another login (one with an unusual name, "${P}\\u0430pp")`);
       expect(ownWords(said)).toMatch(/^[\x20-\x7e]*$/);
       expect(said).not.toContain(`(${LOOKALIKE})`);
     } finally {
