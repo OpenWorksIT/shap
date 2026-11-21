@@ -1548,10 +1548,13 @@ The tenth check (`2b7055e`, two reviewers over the five areas): security (the pe
 to fix, 55 OK), IFRS and words ready. Fixed: the ninth round's add-back of payments dated after the
 13 weeks read provisional tax as dividends tax (SARS, accounting); two long tracker types sharing
 their first 80 characters broke the import (one cost type now, with a warning); a cost type's kind
-into or out of asset moved a closed period's VAT between boxes 14 and 15 (refused: older, in both
-apps). Noted, not changed: an older refund paid during the last period, netted into the balance
+into or out of asset moved a closed period's VAT between boxes 14 and 15 (older than round 9;
+refused now, in both apps). Noted, not changed: an older refund paid during the last period, netted into the balance
 before it, is taken against last period's refund (the forecast can understate VAT owed for ended
-periods then); a kind change on a big type takes a second or two.
+periods then); a kind change on a big type takes a second or two; adding an asset for a cost in a
+closed period checks the asset's date, not the cost's (its VAT can move into box 14). The final
+check of these fixes: one warning called a short tracker type long on a second import (fixed, with a
+test).
 
 Tests: `review-1.33/*` (bank, link, home, forecast and its rounds, budgets, words, sars,
 words-round4, security-round5, round6, acc-round6, security-round6-lock and -share, round7-ifrs,

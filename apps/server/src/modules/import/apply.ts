@@ -123,17 +123,19 @@ export async function applyTracker(sql: Sql, plan: TrackerPlan, opts: ImportOpti
       if (hit) return hit;
       // (Named as Settings takes a name: 80 characters at most.)
       const name = (type.trim().toLowerCase() === stockName ? `${type.trim().slice(0, 60)} (from the tracker)` : type.trim().slice(0, 80)).trim();
-      // Two long types that start the same are one cost type (their first 80 characters).
+      // One already there by that name (an earlier import's, or two long types that start the same:
+      // their first 80 characters) is the same cost type.
+      const long = type.trim().length > 80;
       const [same] = await tx<{ id: string }[]>`select id from cost_categories where lower(name) = lower(${name})`;
       if (same) {
         byName.set(key, same.id);
-        warnings.push(`The cost type "${type.trim()}" is longer than Shap takes: it's put with "${name}", which starts the same.`);
+        if (long) warnings.push(`The cost type "${type.trim()}" is longer than Shap takes: it's put with "${name}", which starts the same.`);
         return same.id;
       }
       const [row] = await tx<{ id: string }[]>`
         insert into cost_categories (name, kind, account_id, sort) values (${name}, 'overhead', ${sundryAcc}, (select coalesce(max(sort), 0) + 1 from cost_categories)) returning id`;
       byName.set(key, row!.id);
-      warnings.push(`New cost type "${name}" was added as a running cost (Sundry). Change where it posts under Settings → Lists.`);
+      warnings.push(`New cost type "${name}"${long ? ` (cut from "${type.trim()}", longer than Shap takes)` : ''} was added as a running cost (Sundry). Change where it posts under Settings → Lists.`);
       return row!.id;
     };
     const personalCat = byName.get('personal (owner)')!;

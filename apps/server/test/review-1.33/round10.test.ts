@@ -78,3 +78,27 @@ describe('a cost type’s kind and a closed VAT period’s VAT201', () => {
     await env.sql`update settings set lock_date = null where id`;
   });
 });
+
+describe('a second tracker import over the first, a type named as Shap’s stock type (final check)', () => {
+  let env: TestEnv;
+  beforeAll(async () => {
+    env = await setup();
+  });
+  afterAll(async () => {
+    await expectCleanAudit(env.sql);
+    await env.close();
+  });
+
+  it('puts it with the cost type the first made, without calling a short name long', async () => {
+    const built = await buildDemoTracker(today());
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(built.buffer as never);
+    wb.getWorksheet('Costs')!.getRow(2).getCell(5).value = 'Stock purchases';
+    const plan = await readTracker(Buffer.from(await wb.xlsx.writeBuffer()));
+    const first = await applyTracker(env.sql, plan, { replace: true, agreeTrialBalance: true });
+    expect(first.warnings.some((w) => /^New cost type "Stock purchases \(from the tracker\)" was added/.test(w))).toBe(true);
+    const second = await applyTracker(env.sql, plan, { replace: true, agreeTrialBalance: true });
+    expect(second.warnings.filter((w) => /longer than Shap takes/.test(w))).toEqual([]);
+    expect((await env.sql`select 1 from cost_categories where name = 'Stock purchases (from the tracker)'`).length).toBe(1);
+  });
+});
