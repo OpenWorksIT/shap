@@ -14,6 +14,7 @@ import {
   CATEGORY_KIND_LABELS,
   CATEGORY_KINDS,
   BUSINESS_TYPES,
+  cipcKind,
   ENTITIES,
   entity,
   formatDate,
@@ -49,7 +50,7 @@ import { ClipsSetting } from '../components/HowItWorks';
 import { TermPicks } from '../components/TermPicks';
 import { LogoPlacer } from '../components/LogoPlacer';
 import { LogoField } from '../components/BusinessForm';
-import { ACCOUNTANT_TERMS_VERSION, FEATURES, FEATURE_GROUPS, FEATURE_KEYS, featureOn, INDUSTRIES, PRACTICE_CAUTION, PROFESSIONAL_SERVICE_INDUSTRIES, TURNOVER_TAX_LIMIT_CENTS, TURNOVER_TAX_PROFESSIONAL } from '@shap/shared';
+import { ACCOUNTANT_TERMS_VERSION, CIPC_HINT, COIDA_REMINDER, COOP_CIPC, FEATURES, FEATURE_GROUPS, FEATURE_KEYS, featureOn, INDUSTRIES, PRACTICE_CAUTION, PROFESSIONAL_SERVICE_INDUSTRIES, TURNOVER_TAX_LIMIT_CENTS, TURNOVER_TAX_PROFESSIONAL } from '@shap/shared';
 import { AccountantTermsAccept } from '../components/AccountantTerms';
 import { useClientHere } from '../components/ClientBanner';
 import { WipeData } from '../components/WipeData';
@@ -178,6 +179,12 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
                   {(p) => <input {...p} className="input" value={f.regNumber} onChange={(e) => set('regNumber', e.target.value)} placeholder={kind.regPlaceholder} />}
                 </Field>
               )}
+              {cipcKind(f.businessType) && (
+                <Field label="Date of incorporation" hint={CIPC_HINT}>
+                  {(p) => <input {...p} className="input" type="date" max={todayIso()} value={f.incorporatedOn ?? ''} onChange={(e) => set('incorporatedOn', e.target.value || null)} />}
+                </Field>
+              )}
+              {f.businessType === 'coop' && <p className="xs muted">{COOP_CIPC}</p>}
               <Field label="VAT number" hint={f.vatRegistered ? '10 digits starting with 4' : 'Once you’re registered for VAT'} error={(f.vatNumber !== settings.vatNumber ? vatNumberProblem(f.vatNumber) : null) ?? (f.vatRegistered && !f.vatNumber.trim() ? 'Needed while registered for VAT (Invoicing & books)' : undefined) ?? undefined}>
                 {(p) => <input {...p} className="input" inputMode="numeric" value={f.vatNumber} onChange={(e) => set('vatNumber', e.target.value)} />}
               </Field>
@@ -216,6 +223,15 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
                   </p>
                 )}
               </div>
+            )}
+            {(has('payroll') || has('workers')) && (
+              <label className="check">
+                <input type="checkbox" checked={Boolean(f.coidaRegistered)} onChange={(e) => set('coidaRegistered', e.target.checked)} />
+                <span>
+                  Registered with the Compensation Fund (COIDA, cover for injuries at work)
+                  <span className="xs muted" style={{ display: 'block' }}>{COIDA_REMINDER}</span>
+                </span>
+              </label>
             )}
             {ref.brands.length > 1 && (
               <Field label="Default trading name" hint="For new jobs and documents when the job or client doesn’t say">

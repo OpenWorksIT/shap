@@ -8,9 +8,10 @@ the same release.
 
 Shap is free software from OpenWorks IT, who are not accountants, auditors or tax practitioners.
 Shap Accountant is a tool in a practitioner's hands: what its checks find and the dates it shows
-are worked out from what's captured in each client's books, and from Shap's SARS tables, which may
-be out of date. They're aids, not advice, and not every check or return. The practitioner checks
-them. Shap files nothing with SARS or CIPC, and signs nothing.
+are worked out from what's captured in each client's books, and from Shap's tables of SARS, CIPC
+and Compensation Fund dates, which may be out of date. They're aids, not advice, and not every
+check or return. The practitioner checks them. Shap files nothing with SARS, CIPC or the
+Compensation Fund, and signs nothing.
 
 Switching it on says back what the practice answers for: its clients' backups, who in the practice
 opens them, their personal information (POPIA), and checking what Shap shows.
@@ -498,9 +499,13 @@ Some of them, from each client's own settings, worked out again each time the li
 VAT201, the EMP201 (nil ones included, for an employer registered for PAYE), provisional tax
 (each partner's own for a partnership, and the voluntary third payment), turnover tax, a company's
 ITR14 or TT03, an approved PBO's IT12EI, dividends tax, and the filing season's ITR12, ITR12T,
-IT3(t) and EMP501 interim dates. Returns due in the last few weeks show as "was due": Shap can't
-tell whether they were filed. Not there: the CIPC annual return (Shap doesn't keep the date of
-incorporation) and the Compensation Fund's return of earnings.
+IT3(t) and EMP501 interim dates, and (since 1.33) CIPC's annual return for a company or close
+corporation whose date of incorporation is in Settings → Company, and the Compensation Fund's
+return of earnings for an employer that says it's registered with the Fund, once the Fund has
+announced the season (only announced seasons are shown). A client on its own Shap sends these from
+1.33, for a link its owner made from 1.33 on (the owner is told so before linking; an older link
+isn't sent them). Returns due in the last few weeks show as "was due": Shap can't tell whether they were
+filed.
 
 docs/SARS.md lists each rule and its source; they're checked with the standard SARS update
 (CPDAUDIT.md section 2).

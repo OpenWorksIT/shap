@@ -25,6 +25,7 @@ import {
   type PaymentMethod,
   type SaleVatCode,
 } from '@shap/shared';
+import { BarcodeScanner, canScan } from '../components/Barcode';
 import { PageHead } from '../components/Shell';
 import { PdfPreview } from '../components/PdfPreview';
 import { Drawer, Empty, ErrorBox, Field, Icon, Loading, Money, MoneyInput, Segmented, Tabs, useToast } from '../components/ui';
@@ -130,6 +131,7 @@ function Till({ onSold }: { onSold: (id: string) => void }) {
   const [done, setDone] = useState<{ id: string; number: string; totalCents: number; change: number | null } | null>(null);
   const [preview, setPreview] = useState<{ id: string; title: string } | null>(null);
   const [adding, setAdding] = useState(false);
+  const [scanning, setScanning] = useState(false);
 
   const vatRate = settings.vatRegistered ? vatRateOn(date) : 0;
   const sources = counterSources(ref.sources);
@@ -155,6 +157,19 @@ function Till({ onSold }: { onSold: (id: string) => void }) {
       : 'Zero-rated goods over R50 need a full tax invoice with the buyer’s name and address (VAT Act s20(5)).';
   const needsClient = fullInvoice || asInvoice;
 
+  /** The item with this code (a scanned or typed barcode) onto the slip; otherwise, find it. */
+  const byCode = (raw: string) => {
+    const code = raw.trim().toLowerCase();
+    const it = (items.data ?? []).find((x) => x.active && x.sku.trim().toLowerCase() === code);
+    if (it) {
+      add(it);
+      setSearch('');
+      toast(`${it.description} added`);
+    } else {
+      setSearch(raw.trim());
+      if ((items.data ?? []).every((x) => !x.sku.toLowerCase().includes(code) && !x.description.toLowerCase().includes(code))) toast(`No item has the code ${raw.trim()}: sell it as something not on the list, or ask whoever looks after the items to add it`, 'error');
+    }
+  };
   const add = (it: Item) => {
     setDone(null);
     setCart((c) => {
@@ -231,8 +246,35 @@ function Till({ onSold }: { onSold: (id: string) => void }) {
         <div className="toolbar">
           <div className="search">
             <Icon name="search" size={18} />
-            <input className="input" placeholder="Find an item or code" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Find an item" />
+            <input
+              className="input"
+              placeholder="Find an item or code"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              // A barcode scanner types the code and presses Enter: the item with that code goes on the slip.
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' || !search.trim()) return;
+                e.preventDefault();
+                byCode(search);
+              }}
+              aria-label="Find an item"
+            />
           </div>
+          {canScan() && (
+            <button type="button" className="btn" onClick={() => setScanning(true)}>
+              <Icon name="camera" size={18} />
+              Scan
+            </button>
+          )}
+          {scanning && (
+            <BarcodeScanner
+              onClose={() => setScanning(false)}
+              onCode={(code) => {
+                setScanning(false);
+                byCode(code);
+              }}
+            />
+          )}
           {inventory && (
             <Segmented
               label="Stock"
@@ -1029,6 +1071,7 @@ export function ItemDrawer({ item, onClose, onSaved }: { item: Item | null; onCl
     reorderLevel: String(item?.reorderLevel ?? 0),
     active: item?.active ?? true,
   });
+  const [scanning, setScanning] = useState(false);
   const [error, setError] = useState('');
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((x) => ({ ...x, [k]: v }));
   const submit = async (e: FormEvent) => {
@@ -1050,8 +1093,26 @@ export function ItemDrawer({ item, onClose, onSaved }: { item: Item | null; onCl
         <Field label="Name">{(p) => <input {...p} className="input" value={f.description} onChange={(e) => set('description', e.target.value)} required autoFocus={!item} />}</Field>
         <div className="form-grid">
           <Field label="Code (optional)" hint="A barcode or your own code, to find it quickly">
-            {(p) => <input {...p} className="input" value={f.sku} onChange={(e) => set('sku', e.target.value)} />}
+            {(p) => (
+              <div className="row" style={{ gap: 6 }}>
+                <input {...p} className="input" value={f.sku} onChange={(e) => set('sku', e.target.value)} maxLength={40} />
+                {canScan() && (
+                  <button type="button" className="btn" onClick={() => setScanning(true)} aria-label="Scan the barcode">
+                    <Icon name="camera" size={18} />
+                  </button>
+                )}
+              </div>
+            )}
           </Field>
+          {scanning && (
+            <BarcodeScanner
+              onClose={() => setScanning(false)}
+              onCode={(code) => {
+                setScanning(false);
+                set('sku', code);
+              }}
+            />
+          )}
           <Field label="Sold per (optional)">{(p) => <input {...p} className="input" value={f.unit} onChange={(e) => set('unit', e.target.value)} placeholder="e.g. each, kg, box" />}</Field>
         </div>
         <div className="form-grid">

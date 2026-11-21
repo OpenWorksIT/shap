@@ -29,6 +29,8 @@ import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { registerMonthlyRoutes } from './modules/monthly.js';
 import { registerDashboardRoutes } from './modules/dashboard.js';
+import { registerForecastRoutes } from './modules/forecast.js';
+import { registerBudgetRoutes } from './modules/budgets.js';
 import { registerDocumentRoutes } from './modules/documents.js';
 import { registerImportRoutes } from './modules/import/routes.js';
 import { registerProjectRoutes } from './modules/projects.js';
@@ -270,6 +272,8 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   registerTestServerRoutes(app, ctx, bus);
   registerSettingsRoutes(app, ctx);
   registerDashboardRoutes(app, ctx);
+  registerForecastRoutes(app, ctx);
+  registerBudgetRoutes(app, ctx);
   registerClientRoutes(app, ctx);
   registerProjectRoutes(app, ctx);
   registerWorkerRoutes(app, ctx);

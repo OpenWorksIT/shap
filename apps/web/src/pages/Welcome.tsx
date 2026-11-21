@@ -4,7 +4,7 @@
  */
 import { useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ACCOUNTANT_TERMS_VERSION, BUSINESS_TYPES, ENTITIES, entity, extrasFor, featureOn, featuresFor, INDUSTRIES, paysOutProfit, PRACTICE_CAUTION, PRACTICE_OWN_SERVER, PRACTICE_PROFILES, PROFESSIONAL_SERVICE_INDUSTRIES, TURNOVER_TAX_PROFESSIONAL, withNeeds, payoutWord, payeRefProblem, regNumberProblem, sdlRefFor, setupCautions, TERMS_VERSION, PRACTICE_TERMS_TICK, TURNOVER_TAX_LIMIT_CENTS, formatZar, uifRefProblem, vatNumberProblem, vatThresholds, WORKFLOWS, type EmployerAnswer, type IndustryKey, type SetupExtras, type Workflow, PAYMENT_DAYS, dayLabel, withPaymentTerm } from '@shap/shared';
+import { ACCOUNTANT_TERMS_VERSION, BUSINESS_TYPES, CIPC_HINT, cipcKind, COIDA_NOTE, COIDA_REMINDER, COOP_CIPC, todayIso, ENTITIES, entity, extrasFor, featureOn, featuresFor, INDUSTRIES, paysOutProfit, PRACTICE_CAUTION, PRACTICE_OWN_SERVER, PRACTICE_PROFILES, PROFESSIONAL_SERVICE_INDUSTRIES, TURNOVER_TAX_PROFESSIONAL, withNeeds, payoutWord, payeRefProblem, regNumberProblem, sdlRefFor, setupCautions, TERMS_VERSION, PRACTICE_TERMS_TICK, TURNOVER_TAX_LIMIT_CENTS, formatZar, uifRefProblem, vatNumberProblem, vatThresholds, WORKFLOWS, type EmployerAnswer, type IndustryKey, type SetupExtras, type Workflow, PAYMENT_DAYS, dayLabel, withPaymentTerm } from '@shap/shared';
 import { TermsReview } from '../components/Terms';
 import { AccountantTermsTick } from '../components/AccountantTerms';
 import { askServerIfNeeded, PracticeServer, PracticeTeam, teamBody, teamProblem, type ServerState, type Team } from '../components/PracticeSetup';
@@ -40,6 +40,8 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
   const [paye, setPaye] = useState<EmployerAnswer | null>(null);
   const [uif, setUif] = useState<EmployerAnswer | null>(null);
   const [sdl, setSdl] = useState<EmployerAnswer | null>(null);
+  // Registered with the Compensation Fund (COIDA): a return of earnings each year, for employees and casual workers alike.
+  const [coida, setCoida] = useState<EmployerAnswer | null>(null);
   const [accepted, setAccepted] = useState(false);
   // A practice's client's books (Shap Accountant): nothing about them goes to OpenWorks, so the two
   // sharing questions aren't asked, and the terms are accepted for the practice's use of Shap on them.
@@ -105,7 +107,9 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
       const employer = employees
         ? { payeRegistered: paye === 'yes', payeRef: paye === 'yes' ? f.payeRef : '', uifRegistered: uif === 'yes', uifRef: uif === 'yes' ? f.uifRef : '', sdl: sdl === 'yes' }
         : { payeRegistered: null, payeRef: '', uifRegistered: null, uifRef: '', sdl: false };
-      const { logoId: _l, termsAcceptedAt: _t, ...rest } = { ...f, ...employer, features, industry, usageConsent: !client && Boolean(consent), marketConsent: !client && market, marketNoticeSeen: true, setupDone: true, termsVersion: TERMS_VERSION, fyEndMonth: kind.febYearEnd ? 2 : f.fyEndMonth, turnoverTax: kind.turnoverTax && f.turnoverTax } as Settings & { logoId: string | null };
+      // Only a company or CC files CIPC's annual return; only an employer, the Fund's return of earnings.
+      const reminders = { incorporatedOn: cipcKind(f.businessType) ? (f.incorporatedOn ?? null) : null, coidaRegistered: employees || casual ? coida === 'yes' : null };
+      const { logoId: _l, termsAcceptedAt: _t, ...rest } = { ...f, ...employer, ...reminders, features, industry, usageConsent: !client && Boolean(consent), marketConsent: !client && market, marketNoticeSeen: true, setupDone: true, termsVersion: TERMS_VERSION, fyEndMonth: kind.febYearEnd ? 2 : f.fyEndMonth, turnoverTax: kind.turnoverTax && f.turnoverTax } as Settings & { logoId: string | null };
       await api('/api/settings', { method: 'PUT', body: rest });
       if ((sales || f.vatRegistered) && monthEnd) {
         try {
@@ -366,6 +370,13 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
               </div>
             )}
             <YesNo q="Do you use casual labour, paid by the day?" hint="Log the days they work on each job and what you’ve paid them. Shap keeps that record only: the minimum wage, UIF, PAYE and the Compensation Fund for them are yours to handle (Workers has reminders)." value={casual} onChange={setCasual} />
+            {(employees || casual) && (
+              <div className="panel panel-pad stack" style={{ gap: 12 }}>
+                <Answer q="Are you registered with the Compensation Fund (COIDA)?" value={coida} onChange={setCoida} />
+                {coida === 'yes' && <p className="xs muted">{COIDA_REMINDER}</p>}
+                {coida && coida !== 'yes' && <p className="xs banner">{COIDA_NOTE}</p>}
+              </div>
+            )}
             {paysOut && dividendsAlways && (
               <p className="xs muted panel panel-pad">
                 {kind.the.charAt(0).toUpperCase() + kind.the.slice(1)} declares every {payoutWord(f.businessType)} it pays to SARS (the DTR01 and DTR02, by the end of the next month), so the {payoutWord(f.businessType)}s section is on, ready for when you pay one.
@@ -379,7 +390,7 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
                 onChange={setDividends}
               />
             )}
-            {nav(employees !== null && casual !== null && (!paysOut || dividendsAlways || dividends !== null) && (!employees || (paye !== null && uif !== null && sdl !== null && !payeProblem && !uifProblem)))}
+            {nav(employees !== null && casual !== null && (!paysOut || dividendsAlways || dividends !== null) && (!employees || (paye !== null && uif !== null && sdl !== null && !payeProblem && !uifProblem)) && (!(employees || casual) || coida !== null))}
           </Q>
         )}
 
@@ -503,6 +514,12 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
                   {(p) => <input {...p} className="input" value={f.regNumber} onChange={(e) => set('regNumber', e.target.value)} placeholder={kind.regPlaceholder} />}
                 </Field>
               )}
+              {cipcKind(f.businessType) && (
+                <Field label="Date of incorporation (optional)" hint={CIPC_HINT}>
+                  {(p) => <input {...p} className="input" type="date" max={todayIso()} value={f.incorporatedOn ?? ''} onChange={(e) => set('incorporatedOn', e.target.value || null)} />}
+                </Field>
+              )}
+              {f.businessType === 'coop' && <p className="xs muted">{COOP_CIPC}</p>}
             </div>
             <Field label="Payment terms (on invoices)">{(p) => <textarea {...p} className="textarea" rows={2} value={f.invoiceTerms} onChange={(e) => set('invoiceTerms', e.target.value)} />}</Field>
             {nav(!regProblem)}
@@ -520,7 +537,7 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
         {step === 'terms' && (
           <Q title="Last step: the terms of use" sub={practiceOn ? 'Shap is free, and it’s yours to run. These are the few things that come with that, and the Shap Accountant terms, for your practice.' : 'Shap is free, and it’s yours to run. These are the few things that come with that.'}>
             <TermsReview
-              cautions={setupCautions({ vatRegistered: f.vatRegistered, employees: Boolean(employees), casual: Boolean(casual), payeRegistered: paye, uifRegistered: uif, sdl, turnoverTax: kind.turnoverTax && f.turnoverTax, paysDividends: dividendsAlways || Boolean(dividends) })}
+              cautions={setupCautions({ vatRegistered: f.vatRegistered, employees: Boolean(employees), casual: Boolean(casual), payeRegistered: paye, uifRegistered: uif, sdl, turnoverTax: kind.turnoverTax && f.turnoverTax, paysDividends: dividendsAlways || Boolean(dividends), coidaRegistered: employees || casual ? coida : null, cipc: Boolean(cipcKind(f.businessType)), incorporatedOn: f.incorporatedOn, coop: f.businessType === 'coop' })}
               accepted={accepted}
               onAccepted={setAccepted}
               tick={client ? PRACTICE_TERMS_TICK : undefined}

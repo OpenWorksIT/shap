@@ -2685,3 +2685,24 @@ button.list-row {
 .btn.start {
   align-self: flex-start;
 }
+
+/* Scanning a barcode with the camera (components/Barcode.tsx) */
+.scan-video {
+  width: 100%;
+  max-height: 60vh;
+  border-radius: 10px;
+  background: #000;
+  object-fit: cover;
+}
+
+/* Cash-flow forecast and budgets (Accounts) */
+.table tr.sub-row td {
+  background: var(--sunken);
+  border-top: 0;
+}
+.bad-figure {
+  color: var(--alert);
+}
+.budget-grid input {
+  min-width: 96px;
+}

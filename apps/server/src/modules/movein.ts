@@ -669,17 +669,28 @@ export function suggestAccount(line: InTbLine, accounts: { id: string; code: str
   const n = line.name.toLowerCase().slice(0, 200);
   const exact = accounts.find((a) => a.name.toLowerCase() === n || (line.code && a.code === line.code && a.name.toLowerCase().includes(n.split(/\s+/)[0] ?? '')));
   if (exact) return exact.id;
+  const owedWord = /payable|control|owed|owing|due|liabilit|accru/;
   const rules: [RegExp, () => string | null][] = [
     [/accum.*(dep|amort)/, () => byKey('accumulated_depreciation')],
     [/vehicle|motor/, () => (/(dep|expense|fuel|repair|maint)/.test(n) ? null : byKey('fixed_assets_vehicles'))],
     [/equipment|tools|furniture|computer|fixed asset|plant|machinery/, () => (/(dep|expense|small)/.test(n) ? null : byKey('fixed_assets'))],
     [/\bbank\b|cheque|current account|savings|call account|fnb|absa|nedbank|standard bank|capitec|investec/, () => (/charge|fee|interest/.test(n) ? null : byKey('bank'))],
     [/petty cash|cash on hand|^cash/, () => byCode('1050')],
+    [/\bvat\b|output tax|input tax|value added/, () => byKey('vat')],
+    // Each SARS payroll tax on its own account, as books brought in from another package are (and
+    // the EMP201 pays): not the workers' wages owed.
+    [/\bpaye\b|employees?.? tax/, () => (/expense/.test(n) ? null : byKey('paye_payable'))],
+    // The employer's UIF and SDL are costs too: a debit balance not named as owed is the expense.
+    // Named as owed comes first: "Employer UIF payable" is SARS's, whatever else it says.
+    [/\buif\b|unemployment insurance/, () => (/expense/.test(n) || (!owedWord.test(n) && (/contrib|company|employer/.test(n) || line.cents > 0)) ? null : byKey('uif_payable'))],
+    [/\bsdl\b|skills development/, () => (/expense/.test(n) || (line.cents > 0 && !owedWord.test(n)) ? null : byKey('sdl_payable'))],
+    [/dividends? (withholding )?tax|\bdwt\b/, () => byKey('dwt_payable')],
+    [/salar.*(owed|payable)|wages payable|accrued wages/, () => byKey('wages_payable')],
+    [/income tax|provisional tax|sars/, () => (/expense/.test(n) ? byKey('income_tax') : byKey('income_tax_payable'))],
+    // After the taxes and wages owed: "VAT payable" or "PAYE payable" is SARS's, not a supplier's
+    // (nor "VAT receivable" a client's).
     [/debtor|receivable|accounts receivable|trade receivables/, () => byKey('receivables')],
     [/creditor|payable|accounts payable|trade payables/, () => byKey('payables') ?? byCode('2000')],
-    [/\bvat\b|output tax|input tax|value added/, () => byKey('vat')],
-    [/paye|uif|sdl|salar.*(owed|payable)|wages payable|accrued wages/, () => byKey('wages_payable')],
-    [/income tax|provisional tax|sars/, () => (/expense/.test(n) ? byKey('income_tax') : byKey('income_tax_payable'))],
     [/loan.*(director|shareholder|member|owner)|director.*loan|shareholder.*loan|drawings|owner|capital account/, () => byKey('owner_loan')],
     [/share capital|stated capital|ordinary shares/, () => byKey('share_capital')],
     [/retained|accumulated (profit|loss)|reserves/, () => byKey('retained_earnings')],

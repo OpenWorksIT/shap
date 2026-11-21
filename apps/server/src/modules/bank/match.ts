@@ -252,3 +252,34 @@ export function guessIncome(description: string, accounts: { id: string; systemK
   if (!/interest|int\.? ?cr|cash ?back|reward|ebucks|vitality money|discovery miles/i.test(description)) return null;
   return (accounts.find((a) => a.systemKey === 'revenue_other') ?? accounts.find((a) => /other income/i.test(a.name)))?.id ?? null;
 }
+
+/** A saved rule: a line whose description contains `matchText`, money the same way. */
+export interface BankRule {
+  id: string;
+  matchText: string;
+  direction: 'out' | 'in';
+  categoryId: string | null;
+  incomeAccountId: string | null;
+  supplier: string;
+}
+
+const squash = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+/** Each rule's words tidied once, not once a statement line. */
+const squashed = new WeakMap<BankRule, string>();
+const wordsOf = (r: BankRule) => {
+  let w = squashed.get(r);
+  if (w === undefined) squashed.set(r, (w = squash(r.matchText)));
+  return w;
+};
+
+/** The rule a statement line fits (its description contains the rule's words): the longest wins. */
+export function ruleFor(description: string, amountCents: number, rules: BankRule[]): BankRule | null {
+  const d = squash(description);
+  const dir = amountCents < 0 ? 'out' : 'in';
+  let best: BankRule | null = null;
+  for (const r of rules) {
+    if (r.direction !== dir || !d.includes(wordsOf(r))) continue;
+    if (!best || r.matchText.length > best.matchText.length) best = r;
+  }
+  return best;
+}

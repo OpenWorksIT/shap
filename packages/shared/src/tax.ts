@@ -1,4 +1,4 @@
-import { businessDayOnOrBefore, monthLabel } from './dates.js';
+import { addDays, addMonths, businessDayOnOrBefore, formatDate, isBusinessDay, monthLabel } from './dates.js';
 import { splitByShares } from './entities.js';
 /**
  * South African company income tax, for provisional tax estimates.
@@ -400,6 +400,52 @@ export const FILING_SEASON_DATES: readonly { key: string; label: string; due: st
   { key: 'it3t-2026', label: 'IT3(t) for the year to February 2026', due: '2026-09-30', who: 'trust' },
   { key: 'emp501-2027-interim', label: 'EMP501 interim reconciliation (March to August 2026)', due: '2026-10-30', who: 'employer' },
 ];
+
+/**
+ * The Compensation Fund's return of earnings: the season the Fund announces each year in the
+ * Government Gazette for the assessment year just ended (March to February). Like the filing
+ * season, it changes every year and a season not yet announced isn't here: it's checked with each
+ * standard update (docs/SARS.md, CPDAUDIT.md section 2). An employer registered with the Fund
+ * files one, casual workers' wages included (docs/CASUAL_LABOUR.md).
+ * - 2025 assessment year (1 March 2025 to 28 February 2026): 1 April to 30 June 2026, Notice 3894
+ *   of 2026, https://www.gov.za/sites/default/files/gcis_document/202604/54524gen3894.pdf
+ */
+export const ROE_SEASONS: readonly { key: string; label: string; opens: string; due: string }[] = [
+  { key: 'roe-2025', label: 'Return of earnings to the Compensation Fund (March 2025 to February 2026)', opens: '2026-04-01', due: '2026-06-30' },
+];
+
+/** The date `days` business days after `iso` (not counting `iso` itself). */
+export function addBusinessDays(iso: string, days: number): string {
+  let d = iso;
+  for (let n = 0; n < days; ) {
+    d = addDays(d, 1);
+    if (isBusinessDay(d)) n++;
+  }
+  return d;
+}
+
+/**
+ * CIPC annual returns, from the date of incorporation (on the registration certificate):
+ * - a company files within 30 business days after each anniversary of the date it was incorporated
+ *   (Companies Regulations, 2011, reg 30(1)(c)): https://www.acts.co.za/companies-act-2008/r351_30__company_annual_returns
+ * - a close corporation, from the start of its anniversary month to the end of the month after it
+ *   (CIPC's notice, as published by the SA Accounting Academy):
+ *   https://accountingacademy.co.za/news/read/cipc-reminder-to-companies-and-close-corporations-to-file-annual-returns
+ * The first is a year after incorporation. Shap files nothing with CIPC: these are reminders.
+ */
+export function cipcAnnualReturns(kind: 'company' | 'cc', incorporatedOn: string, from: string, until: string): { key: string; label: string; due: string }[] {
+  const out: { key: string; label: string; due: string }[] = [];
+  const startYear = Number(incorporatedOn.slice(0, 4)) + 1;
+  for (let y = Math.max(startYear, Number(from.slice(0, 4)) - 1); y <= Number(until.slice(0, 4)) + 1; y++) {
+    // 29 February's anniversary, in a year without one, is the 28th.
+    let anniversary = `${y}${incorporatedOn.slice(4)}`;
+    if (Number.isNaN(Date.parse(`${anniversary}T00:00:00Z`)) || new Date(`${anniversary}T00:00:00Z`).toISOString().slice(0, 10) !== anniversary) anniversary = `${y}-02-28`;
+    const due = kind === 'company' ? addBusinessDays(anniversary, 30) : addDays(addMonths(`${anniversary.slice(0, 7)}-01`, 2), -1);
+    const when = kind === 'company' ? '30 business days after it' : 'a close corporation’s: by the end of the month after it';
+    if (due >= from && due <= until) out.push({ key: `cipc-${y}`, label: `CIPC annual return for the anniversary of incorporation on ${formatDate(anniversary, 'long')} (${when})`, due });
+  }
+  return out;
+}
 
 /** The last business day of a month, public holidays included (turnover tax and provisional tax payments). */
 export function lastBusinessDay(year: number, month: number): string {

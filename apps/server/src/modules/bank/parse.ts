@@ -1,9 +1,10 @@
 /**
- * Reads a bank or card statement exported as CSV. South African banks each have their own
- * layout (FNB, Standard Bank, Absa, Nedbank, Capitec…), and some exports have no header row,
- * so the columns are found by name where there is a header and by their contents where not.
+ * Reads a bank or card statement exported as CSV, OFX (QFX) or QIF. South African banks each
+ * have their own CSV layout (FNB, Standard Bank, Absa, Nedbank, Capitec…), and some exports have
+ * no header row, so the columns are found by name where there is a header and by their contents
+ * where not. OFX and QIF are the same everywhere, so they're read by their tags.
  */
-import { parseCsv } from '../clients.js';
+import { MAX_CSV_CELL, MAX_CSV_ROWS, parseCsv } from '../clients.js';
 
 export interface StatementRow {
   date: string; // YYYY-MM-DD
@@ -75,10 +76,11 @@ export function parseStatementAmount(raw: string): number | null {
   if (s.endsWith('-')) (sign = -sign), (s = s.slice(0, -1));
   if (s.startsWith('-')) (sign = -sign), (s = s.slice(1));
   else if (s.startsWith('+')) s = s.slice(1);
-  if (s.includes(',') && s.includes('.')) s = s.replace(/,/g, '');
+  // With both, the last one is the decimal point: 1,234.56 or 1.234,56.
+  if (s.includes(',') && s.includes('.')) s = s.lastIndexOf(',') > s.lastIndexOf('.') ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
   else if (/,\d{2}$/.test(s) && (s.match(/,/g) ?? []).length === 1) s = s.replace(',', '.');
   else s = s.replace(/,/g, '');
-  if (!/^\d+(\.\d+)?$/.test(s)) return null;
+  if (!/^(\d+(\.\d+)?|\.\d+)$/.test(s)) return null;
   return sign * Math.round(Number(s) * 100);
 }
 
@@ -217,13 +219,231 @@ export function parseStatementCsv(text: string, opts: { flip?: boolean } = {}): 
   };
 }
 
+const FINGERPRINT_TEXT = 2000;
+
 /** A stable key for a transaction, so a re-uploaded or overlapping statement doesn't double up. */
 export function fingerprints(rows: StatementRow[]): string[] {
   const seen = new Map<string, number>();
   return rows.map((r) => {
-    const base = `${r.date}|${r.amountCents}|${r.description.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+    // The description's first 2 000 letters and digits: enough to tell lines apart, and short
+    // enough for the database's index (a longer key can't be stored).
+    const base = `${r.date}|${r.amountCents}|${r.description.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, FINGERPRINT_TEXT)}`;
     const n = (seen.get(base) ?? 0) + 1;
     seen.set(base, n);
     return `${base}|${n}`;
   });
+}
+
+/** Which kind of file a statement is, from what's in it (not its name). */
+export function statementFormat(text: string): 'ofx' | 'qif' | 'csv' {
+  const head = text.slice(0, 4000);
+  if (/OFXHEADER|<OFX>|<STMTTRN>/i.test(head) || /<STMTTRN>/i.test(text.slice(0, 200_000))) return 'ofx';
+  if (/^\s*!(Type|Account|Option)\b/im.test(head) || /^\^\s*$/m.test(head)) return 'qif';
+  return 'csv';
+}
+
+/** A statement in any of the formats Shap reads. */
+export function parseStatement(text: string, opts: { flip?: boolean } = {}): ParsedStatement {
+  const f = statementFormat(text);
+  return f === 'ofx' ? parseStatementOfx(text, opts) : f === 'qif' ? parseStatementQif(text, opts) : parseStatementCsv(text, opts);
+}
+
+/** The same limits as a CSV's: a description as long as a cell, and as many lines as rows. */
+const cap = (description: string) => (description.length > MAX_CSV_CELL ? description.slice(0, MAX_CSV_CELL) : description);
+const tooMany = (n: number) => {
+  if (n > MAX_CSV_ROWS) throw new Error(`That file has too many transactions (${MAX_CSV_ROWS.toLocaleString('en-ZA')} at most)`);
+};
+const ONE_ACCOUNT = 'This file has more than one account’s statement in it. Export one account at a time from your bank and bring each in on its own account.';
+
+const finish = (rows: StatementRow[], opts: { flip?: boolean }, dateOrder: DateOrder, columns: ParsedStatement['columns'], skipped: number): ParsedStatement => {
+  if (!rows.length) throw new Error('No transactions found in this file');
+  const out = rows.map((r) => ({ ...r, amountCents: opts.flip ? -r.amountCents : r.amountCents }));
+  // Stable: transactions on the same day keep the file's order.
+  out.sort((a, b) => a.date.localeCompare(b.date));
+  return { rows: out, skipped, pending: 0, dateOrder, columns };
+};
+
+/** Characters written as entities, decoded in one pass: "&amp;lt;" is "&lt;", never "<". */
+const NAMED: Record<string, string> = { lt: '<', gt: '>', quot: '"', apos: "'", amp: '&' };
+const decodeEntities = (s: string) =>
+  s.replace(/&(?:#(\d{1,7})|#x([0-9a-f]{1,6})|(lt|gt|quot|apos|amp));/gi, (e, dec?: string, hex?: string, name?: string) => {
+    if (name) return NAMED[name.toLowerCase()] ?? e;
+    const n = dec ? Number(dec) : parseInt(hex!, 16);
+    return n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : e;
+  });
+
+/** Each tag's pattern, made once. */
+const TAG_PATTERNS = new Map<string, RegExp>();
+/** An OFX element's text: <TAG>value (OFX 1, no closing tag) or <TAG>value</TAG> (OFX 2). */
+const ofxTag = (block: string, tag: string): string | null => {
+  let re = TAG_PATTERNS.get(tag);
+  if (!re) TAG_PATTERNS.set(tag, (re = new RegExp(`<${tag}>([^<\\r\\n]*)`, 'i')));
+  const m = re.exec(block);
+  return m ? decodeEntities(m[1]!.trim()) : null;
+};
+
+/**
+ * The next place `tag` is found at or after `from`, remembered between calls so that a tag that
+ * isn't there (or is far off) is looked for once, not once a transaction: a file is read in one
+ * pass however it's made.
+ */
+const finder = (upper: string, tag: string) => {
+  let at = -2;
+  return (from: number) => {
+    if (at === -1) return Infinity;
+    if (at < from) at = upper.indexOf(tag, from);
+    return at === -1 ? Infinity : at;
+  };
+};
+
+/** OFX transaction types that are money out, for a file whose amounts carry no sign (the rest are money in). */
+const OFX_OUT = new Set(['DEBIT', 'POS', 'FEE', 'SRVCHG', 'ATM', 'CHECK', 'PAYMENT', 'DIRECTDEBIT', 'REPEATPMT', 'CASH']);
+
+/**
+ * OFX (QFX is the same): each <STMTTRN> is a transaction with its posted date (YYYYMMDD…), a
+ * signed amount (money in positive) and a name and memo. The ledger balance, when given, is the
+ * balance at the end of the statement, so it goes on the last transaction up to that date.
+ */
+export function parseStatementOfx(text: string, opts: { flip?: boolean } = {}): ParsedStatement {
+  // Upper case for finding tags, letter for letter (toUpperCase can lengthen some letters, which
+  // would put the places found out of step with the text).
+  const upper = text.replace(/[a-z]+/g, (w) => w.toUpperCase());
+  const statements = (upper.match(/<STMTRS>|<CCSTMTRS>/g) ?? []).length;
+  if (statements > 1) throw new Error(ONE_ACCOUNT);
+  type Raw = { fitid: string | null; date: string | null; amount: number | null; type: string; description: string };
+  const raws: Raw[] = [];
+  const close = finder(upper, '</STMTTRN>');
+  const list = finder(upper, '</BANKTRANLIST>');
+  const next = finder(upper, '<STMTTRN>');
+  for (let start = next(0); start !== Infinity; ) {
+    // Every transaction counts against the limit, read or not.
+    tooMany(raws.length + 1);
+    const from = start + '<STMTTRN>'.length;
+    const following = next(from);
+    const end = Math.min(close(from), following, list(from), upper.length);
+    start = following;
+    const b = text.slice(from, end);
+    raws.push({
+      fitid: ofxTag(b, 'FITID'),
+      date: parseStatementDate((ofxTag(b, 'DTPOSTED') ?? '').slice(0, 8)),
+      amount: parseStatementAmount(ofxTag(b, 'TRNAMT') ?? ''),
+      type: (ofxTag(b, 'TRNTYPE') ?? '').toUpperCase(),
+      description: cap(
+        [ofxTag(b, 'NAME'), ofxTag(b, 'MEMO')]
+          .filter((x): x is string => Boolean(x))
+          .filter((x, i, a) => a.indexOf(x) === i)
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim(),
+      ),
+    });
+  }
+  // The amounts' signs say which way the money went. Only a file with no negative amount at all
+  // (some banks write every amount positive) goes by the transaction types instead.
+  const signed = raws.some((r) => r.amount != null && r.amount < 0);
+  const rows: StatementRow[] = [];
+  let skipped = 0;
+  const seen = new Set<string>();
+  for (const r of raws) {
+    let amount = r.amount;
+    if (!signed && amount != null && OFX_OUT.has(r.type)) amount = -amount;
+    if (!r.date || amount == null || amount === 0) {
+      skipped++;
+      continue;
+    }
+    // The same transaction twice in one file (its bank's id, day and amount repeated) is brought in once.
+    if (r.fitid) {
+      const key = `${r.fitid}|${r.date}|${amount}`;
+      if (seen.has(key)) {
+        skipped++;
+        continue;
+      }
+      seen.add(key);
+    }
+    rows.push({ date: r.date, description: r.description || '(no description)', amountCents: amount, balanceCents: null });
+  }
+  // The ledger balance: the first <LEDGERBAL>, read from the little that follows it.
+  const at = upper.indexOf('<LEDGERBAL>');
+  let ledger: string | null = null;
+  if (at >= 0) {
+    const from = at + '<LEDGERBAL>'.length;
+    const w = upper.slice(from, from + 2000);
+    const ends = ['</LEDGERBAL>', '<AVAILBAL>', '</STMTRS>', '</CCSTMTRS>'].map((t) => w.indexOf(t)).filter((i) => i >= 0);
+    ledger = text.slice(from, from + (ends.length ? Math.min(...ends) : w.length));
+  }
+  const parsed = finish(rows, opts, 'dmy', { date: 'the date posted', description: 'the name and memo', amount: 'the amount', balance: ledger ? 'the ledger balance' : null }, skipped);
+  if (ledger) {
+    const bal = parseStatementAmount(ofxTag(ledger, 'BALAMT') ?? '');
+    const asOf = parseStatementDate((ofxTag(ledger, 'DTASOF') ?? '').slice(0, 8));
+    const last = [...parsed.rows].reverse().find((r) => !asOf || r.date <= asOf);
+    // A card's balance owed is money out, so it flips with the amounts.
+    if (bal != null && last) last.balanceCents = opts.flip ? -bal : bal;
+  }
+  return parsed;
+}
+
+/**
+ * QIF: one field a line (D date, T or U amount, P payee, M memo), each transaction ended by "^".
+ * Quicken writes some dates as 1/ 2'26 (2026); numeric dates are read day first unless every one
+ * only makes sense month first.
+ */
+export function parseStatementQif(text: string, opts: { flip?: boolean } = {}): ParsedStatement {
+  const recs: { d: string; t: string; p: string; m: string; l: string }[] = [];
+  let cur = { d: '', t: '', p: '', m: '', l: '' };
+  // An !Account block describes an account (its name and type), not a transaction. Between
+  // !Option:AutoSwitch and !Clear:AutoSwitch is a list of accounts, not the one this file is for.
+  let accounts = 0;
+  let inAccount = false;
+  let autoSwitch = false;
+  let type: string | null = null;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trimEnd();
+    if (!line) continue;
+    if (line.startsWith('!')) {
+      if (/^!Option:AutoSwitch/i.test(line)) autoSwitch = true;
+      else if (/^!Clear:AutoSwitch/i.test(line)) autoSwitch = false;
+      inAccount = /^!Account\b/i.test(line);
+      if (inAccount && !autoSwitch && ++accounts > 1) throw new Error(ONE_ACCOUNT);
+      // Transactions of a second kind of account (a bank's, then a card's) are another account's.
+      const t = /^!Type:(\w+)/i.exec(line)?.[1]?.toLowerCase();
+      if (t && !['class', 'cat', 'memorized', 'invitem', 'prices'].includes(t)) {
+        if (type && type !== t) throw new Error(ONE_ACCOUNT);
+        type = t;
+      }
+      continue;
+    }
+    if (line.startsWith('^')) {
+      if (!inAccount && !autoSwitch && (cur.d || cur.t)) recs.push(cur);
+      inAccount = false;
+      cur = { d: '', t: '', p: '', m: '', l: '' };
+      tooMany(recs.length);
+      continue;
+    }
+    if (inAccount || autoSwitch) continue;
+    const v = line.slice(1).trim();
+    if (line[0] === 'D') cur.d = v.replace(/'\s*(\d{2})$/, '/20$1').replace(/\s+/g, '');
+    else if (line[0] === 'T' || (line[0] === 'U' && !cur.t)) cur.t = v;
+    else if (line[0] === 'P') cur.p = cap(v);
+    else if (line[0] === 'M') cur.m = cap(v);
+    else if (line[0] === 'L') cur.l = cap(v);
+  }
+  if (cur.d || cur.t) recs.push(cur);
+  const order = detectDateOrder(recs.map((r) => r.d).filter((d) => /^\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}$/.test(d)));
+  const rows: StatementRow[] = [];
+  let skipped = 0;
+  for (const r of recs) {
+    const date = parseStatementDate(r.d, order);
+    const amount = parseStatementAmount(r.t);
+    // Quicken starts an account's file with its balance ("Opening Balance", a transfer to the
+    // account itself, [its name]); a bank's file may carry a balance line too. Balances, not money
+    // in or out, as in a CSV.
+    const balance = SKIP.test(r.p.trim()) || (/^opening balance/i.test(r.m.trim()) && /^\[.*\]$/.test(r.l.trim()));
+    if (!date || amount == null || amount === 0 || balance) {
+      skipped++;
+      continue;
+    }
+    const description = cap([r.p, r.m].filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).join(' ').replace(/\s+/g, ' ').trim());
+    rows.push({ date, description: description || '(no description)', amountCents: amount, balanceCents: null });
+  }
+  return finish(rows, opts, order, { date: 'the date', description: 'the payee and memo', amount: 'the amount', balance: null }, skipped);
 }

@@ -122,6 +122,10 @@ export const settingsInput = z.object({
   /** Registered with SARS as an employer (PAYE), and the reference (7…). */
   payeRegistered: z.boolean().nullable().optional(),
   payeRef: text(20).default(''),
+  /** A company's or CC's date of incorporation (its registration certificate): CIPC's annual return dates. Left unchanged when not sent. */
+  incorporatedOn: isoDate.nullable().optional(),
+  /** Registered with the Compensation Fund (COIDA) as an employer: a return of earnings each year. Left unchanged when not sent. */
+  coidaRegistered: z.boolean().nullable().optional(),
   /** Registered for UIF, and the employer reference (1234567/8, or SARS's U…). */
   uifRegistered: z.boolean().nullable().optional(),
   uifRef: text(20).default(''),
@@ -403,7 +407,8 @@ export const journalInput = z.object({
         memo: text(200).default(''),
       }),
     )
-    .min(2, 'A journal needs at least two lines'),
+    .min(2, 'A journal needs at least two lines')
+    .max(1000, 'A journal takes up to 1 000 lines: split a longer one into journals that each balance'),
 });
 
 export const assetInput = z.object({

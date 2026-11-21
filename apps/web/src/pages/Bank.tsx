@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { formatDate, formatZar } from '@shap/shared';
+import { formatDate, formatZar, ruleWord } from '@shap/shared';
 import { Drawer, Empty, ErrorBox, Field, Icon, Loading, Money, Segmented, useToast } from '../components/ui';
 import { api, ApiError } from '../lib/api';
 import { useApi } from '../lib/hooks';
@@ -23,6 +23,19 @@ interface Line {
   supplier: string;
   categoryId: string | null;
   incomeAccountId: string | null;
+  /** The saved rule that filled in the cost type (or income) and supplier, if one did. */
+  rule: { id: string; matchText: string } | null;
+}
+interface BankRule {
+  id: string;
+  matchText: string;
+  direction: 'out' | 'in';
+  categoryName: string | null;
+  incomeAccountName: string | null;
+  supplier: string;
+  /** Its cost type (or income account) is still in use: a rule whose isn't is kept but not applied. */
+  usable: boolean;
+  whyNot: 'off' | 'stock' | 'not_income' | null;
 }
 
 /** What a line becomes when captured: "cat:<cost type>" (a cost, or a refund for money in) or "inc:<income account>". */
@@ -40,6 +53,7 @@ interface Preview {
   duplicates: number;
   skipped: number;
   pending: number;
+  format: 'csv' | 'ofx' | 'qif';
   from: string;
   to: string;
   inCents: number;
@@ -57,6 +71,22 @@ type View = 'todo' | 'matched' | 'ignored' | 'all';
  * add bank fees and debit orders as costs, record client payments, book transfers, or leave
  * lines off (personal spending).
  */
+
+/** What a statement file's lines left out can be, by the file's kind (parse.ts on the server). */
+export const LEFT_OUT: Record<string, string> = {
+  csv: 'balance lines, or lines with no date or amount Shap could read',
+  ofx: 'transactions with no date or amount Shap could read, or one the bank listed twice',
+  qif: 'a balance line, or transactions with no date or amount Shap could read',
+};
+
+/** Why a rule isn't applied, and what to do about it. */
+export const ruleNotApplied = (why: BankRule['whyNot']): string =>
+  why === 'stock'
+    ? 'is a stock type now: stock comes in under Inventory, so change the rule’s cost type or take the rule away'
+    : why === 'not_income'
+      ? 'isn’t an income account now: change the rule or take it away'
+      : 'isn’t in use (switch it back on in Settings → Lists, or take the rule away)';
+
 export function BankRecon() {
   const { ref, can } = useAuthed();
   const isOwner = can('bank.reconcile');
@@ -72,6 +102,7 @@ export function BankRecon() {
   const [drawer, setDrawer] = useState<null | { kind: 'match' | 'transfer'; line: Line }>(null);
   const [showImport, setShowImport] = useState(false);
   const [showStatements, setShowStatements] = useState(false);
+  const [showRules, setShowRules] = useState(false);
 
   // Everything to do starts ticked the first time it shows: untick what you want left off.
   // After that your ticks (and "Not this") stay as you left them when the list reloads.
@@ -183,6 +214,11 @@ export function BankRecon() {
               Imported statements
             </button>
           )}
+          {isOwner && (
+            <button className="btn" onClick={() => setShowRules(true)}>
+              Rules
+            </button>
+          )}
           <span className="grow" />
           {data?.statementBalance && (
             <span className="small">
@@ -198,6 +234,7 @@ export function BankRecon() {
         </p>
       </section>
 
+      {showRules && <BankRules onClose={() => setShowRules(false)} onChanged={() => void reload()} />}
       {showStatements && (
         <ImportedStatements
           sourceId={sourceId}
@@ -291,6 +328,22 @@ export function BankRecon() {
                           onLeaveOff={() => void leaveOff([l.id])}
                           onFind={() => setDrawer({ kind: 'match', line: l })}
                           onTransfer={() => setDrawer({ kind: 'transfer', line: l })}
+                          onSaveRule={(matchText) =>
+                            run(async () => {
+                              const t = targetOf(l, edits[l.id]);
+                              await api('/api/bank/rules', {
+                                body: {
+                                  matchText,
+                                  direction: l.amountCents < 0 ? 'out' : 'in',
+                                  categoryId: t.startsWith('cat:') ? t.slice(4) : null,
+                                  incomeAccountId: t.startsWith('inc:') ? t.slice(4) : null,
+                                  supplier: edits[l.id]?.supplier ?? l.supplier,
+                                },
+                              });
+                              const supplier = edits[l.id]?.supplier ?? l.supplier;
+                              return `Saved: from now on, lines that say “${matchText}” are filled in like this${supplier ? `, with the supplier “${supplier}”` : ''}`;
+                            })
+                          }
                         />
                       </td>
                     </tr>
@@ -324,7 +377,7 @@ export function BankRecon() {
         </>
       ) : (
         <div className="panel">
-          <Empty title="No statement yet">Export this account’s transactions as CSV from online banking and import them here.</Empty>
+          <Empty title="No statement yet">Download this account’s transactions from online banking (CSV, OFX or QIF) and import them here.</Empty>
         </div>
       )}
       {drawer?.kind === 'match' && <MatchDrawer line={drawer.line} onClose={() => setDrawer(null)} onDone={() => (setDrawer(null), void reload())} />}
@@ -347,8 +400,10 @@ function LineAction(p: {
   onLeaveOff: () => void;
   onFind: () => void;
   onTransfer: () => void;
+  onSaveRule: (matchText: string) => void;
 }) {
   const { ref } = useAuthed();
+  const [ruling, setRuling] = useState<string | null>(null);
   const l = p.line;
   if (l.state === 'matched')
     return (
@@ -395,6 +450,35 @@ function LineAction(p: {
       )}
     </span>
   );
+  // A rule: every line that says this gets this cost type (or income) and supplier, from now on.
+  const rule = (
+    <span className="row wrap xs" style={{ gap: 6 }}>
+      {l.rule && <span className="chip">Your rule: “{l.rule.matchText}”</span>}
+      {ruling == null ? (
+        <button
+          className="btn quiet small"
+          disabled={p.busy || !targetOf(l, p.edit)}
+          onClick={() => setRuling(ruleWord(l.description))}
+          title="Fill in this cost type and supplier for every line that says this, from now on"
+        >
+          Always this
+        </button>
+      ) : (
+        <>
+          <label className="row" style={{ gap: 4 }}>
+            Lines that say
+            <input className="input small-input" value={ruling} onChange={(e) => setRuling(e.target.value)} maxLength={60} />
+          </label>
+          <button className="btn small" disabled={p.busy || ruling.trim().length < 3} onClick={() => (p.onSaveRule(ruling.trim()), setRuling(null))}>
+            Save rule
+          </button>
+          <button className="btn quiet small" onClick={() => setRuling(null)}>
+            Cancel
+          </button>
+        </>
+      )}
+    </span>
+  );
   if (l.state === 'suggested' && l.suggestion)
     return (
       <div className="stack" style={{ gap: 4 }}>
@@ -427,6 +511,7 @@ function LineAction(p: {
           </select>
           <input className="input small-input" value={p.edit.supplier ?? l.supplier} onChange={(e) => p.onEdit({ supplier: e.target.value })} aria-label="Supplier" />
         </div>
+        {rule}
         {more}
       </div>
     );
@@ -457,8 +542,60 @@ function LineAction(p: {
           <input className="input small-input" value={p.edit.supplier ?? l.supplier} onChange={(e) => p.onEdit({ supplier: e.target.value })} aria-label="Supplier" />
         )}
       </div>
+      {rule}
       {more}
     </div>
+  );
+}
+
+/** Your saved rules: what each fills in, and taking one away. */
+function BankRules({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
+  const toast = useToast();
+  const { data, error, loading, reload } = useApi<BankRule[]>('/api/bank/rules');
+  const [busy, setBusy] = useState(false);
+  const remove = async (r: BankRule) => {
+    setBusy(true);
+    try {
+      await api(`/api/bank/rules/${r.id}`, { method: 'DELETE' });
+      toast(`Rule for “${r.matchText}” taken away`);
+      await reload();
+      onChanged();
+    } catch (err) {
+      if (!(err instanceof ApiError)) console.error(err);
+      toast(err instanceof ApiError ? err.message : UNEXPECTED, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Drawer title="Rules" sub="A statement line whose description has a rule’s words in it comes filled in with the rule’s cost type (or income) and supplier. Nothing is captured until you tick it and tap Capture ticked." onClose={onClose}>
+      <ErrorBox error={error} onRetry={reload} />
+      {loading && !data ? (
+        <Loading />
+      ) : data?.length ? (
+        <ul className="list">
+          {data.map((r) => (
+            <li key={r.id} className="list-row">
+              <span className="grow small">
+                <strong>“{r.matchText}”</strong> ({r.direction === 'out' ? 'money out' : 'money in'}) → {r.categoryName ? `${r.categoryName}${r.direction === 'in' ? ' (refund)' : ''}` : r.incomeAccountName}
+                {r.supplier ? `, supplier ${r.supplier}` : ''}
+                {!r.usable && (
+                  <span className="xs muted">
+                    {' '}
+                    · not applied: {r.categoryName ?? r.incomeAccountName} {ruleNotApplied(r.whyNot)}
+                  </span>
+                )}
+              </span>
+              <button className="btn quiet small" disabled={busy} onClick={() => void remove(r)}>
+                Take away
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <Empty title="No rules yet">On a line that isn’t captured, choose what it is (a cost type, or income) and tap Always this.</Empty>
+      )}
+    </Drawer>
   );
 }
 
@@ -513,11 +650,11 @@ function ImportStatement({ sourceId, sourceName, onDone }: { sourceId: string; s
   return (
     <div className="fieldset stack">
       <strong>Import into {sourceName}</strong>
-      <p className="xs muted">In online banking, download the account’s transactions as CSV (any date range; lines already imported are skipped).</p>
+      <p className="xs muted">In online banking, download the account’s transactions as CSV, OFX (or QFX) or QIF, for any dates: lines already imported are skipped.</p>
       <label className="btn">
         <Icon name="upload" size={18} />
-        {busy && !preview ? 'Reading…' : file ? `Choose another file (${file.name})` : 'Choose the CSV file'}
-        <input type="file" accept=".csv,text/csv,.txt" hidden onChange={(e) => void choose(e.target.files?.[0])} />
+        {busy && !preview ? 'Reading…' : file ? `Choose another file (${file.name})` : 'Choose the statement file'}
+        <input type="file" accept=".csv,text/csv,.txt,.ofx,.qfx,.qif" hidden onChange={(e) => void choose(e.target.files?.[0])} />
       </label>
       {error && <div className="banner alert small">{error}</div>}
       {preview && file && (
@@ -526,9 +663,10 @@ function ImportStatement({ sourceId, sourceName, onDone }: { sourceId: string; s
             <strong>{preview.count}</strong> transactions, {formatDate(preview.from)} to {formatDate(preview.to)}: money in {formatZar(preview.inCents)}, money out{' '}
             {formatZar(preview.outCents)}.{preview.duplicates > 0 && ` ${preview.duplicates} are already imported and will be skipped.`}
             {preview.pending > 0 && ` ${preview.pending} pending (not yet cleared) left out: they come in with a later statement.`}
+            {preview.skipped > 0 && ` ${preview.skipped} line${preview.skipped === 1 ? '' : 's'} left out (${LEFT_OUT[preview.format] ?? LEFT_OUT.csv}). Check these totals against your statement.`}
             <br />
             <span className="xs muted">
-              Read from columns: {preview.columns.date} · {preview.columns.description} · {preview.columns.amount}
+              Read from: {preview.columns.date} · {preview.columns.description} · {preview.columns.amount}
               {preview.columns.balance ? ` · ${preview.columns.balance}` : ''}
             </span>
           </p>

@@ -13,7 +13,7 @@
  * SDL: 1% of payroll, for employers whose payroll is over R500 000 a year.
  * Dividends tax: https://www.sars.gov.za/types-of-tax/dividends-tax/ (20% since 22 February 2017)
  */
-import { businessDayOnOrBefore } from './dates.js';
+import { addMonths, businessDayOnOrBefore, formatDate, monthEnd } from './dates.js';
 import { individualTax, type AgeBand } from './tax.js';
 
 export const UIF_RATE = 0.01;
@@ -125,4 +125,26 @@ export const MICRO_DIVIDEND_EXEMPT_CENTS = 20_000_000;
 export function microDividendTax(grossCents: number, paidEarlierThisYearCents: number, exempt = false): number {
   const room = Math.max(0, MICRO_DIVIDEND_EXEMPT_CENTS - Math.max(0, paidEarlierThisYearCents));
   return dividendTax(Math.max(0, grossCents - room), exempt);
+}
+
+/**
+ * A run paid more than a month after its month (pay owed, paid late), or in the next tax year (a
+ * February run paid in March): employees' tax arises when the employer pays or becomes liable to pay (Fourth Schedule, paragraph 2), so which EMP201 it
+ * belongs on, and across 1 March which year's tables, is the accountant's to check. Shap puts it
+ * on the month it's paid. Null for a run paid in or just after its month, in the same tax year.
+ */
+export function latePayNote(period: string, payDate: string): string | null {
+  // The tax year a day is in: 1 March to the end of February.
+  const taxYear = (iso: string) => Number(iso.slice(0, 4)) - (Number(iso.slice(5, 7)) < 3 ? 1 : 0);
+  const year = taxYear(`${period}-01`);
+  const crosses = year !== taxYear(payDate);
+  const late = payDate > monthEnd(addMonths(`${period}-01`, 1));
+  if (!late && !crosses) return null;
+  const month = formatDate(`${period}-01`, 'long').replace(/^1 /, '');
+  const when = late
+    ? `The pay date is more than a month after ${month}.`
+    : payDate > `${period}-01`
+      ? `The pay date is in the next tax year (from 1 March ${year + 1}).`
+      : `The pay date is in the previous tax year (to ${formatDate(monthEnd(`${year}-02-01`), 'long')}).`;
+  return `${when} Employees’ tax arises when the business pays the salary, or becomes liable to pay it, so ${crosses ? 'which EMP201 this goes on and which tax year’s tables apply are' : 'which EMP201 this goes on is'} for your accountant to check: Shap puts it on the EMP201 for the month it’s paid.`;
 }

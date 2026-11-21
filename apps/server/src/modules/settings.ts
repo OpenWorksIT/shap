@@ -1,12 +1,12 @@
 import type { FastifyInstance } from 'fastify';
-import { ACCOUNTANT_TERMS_URL, ACCOUNTANT_TERMS_VERSION, accountInput, INDUSTRIES, SHAP_REVENUE_NAMES, attachmentInput, brandInput, categoryInput, entity, featureOn, industryProfile, isTask, profileInput, settingsInput, settingsNumberProblem, sourceInput, TERMS_URL, tidyNumbers, tweaksFor, userInput, vatRateOn, withNeeds, workTypeInput, type Role } from '@shap/shared';
+import { ACCOUNTANT_TERMS_URL, ACCOUNTANT_TERMS_VERSION, accountInput, cipcKind, INDUSTRIES, SHAP_REVENUE_NAMES, attachmentInput, brandInput, categoryInput, entity, featureOn, industryProfile, isTask, profileInput, settingsInput, settingsNumberProblem, sourceInput, TERMS_URL, tidyNumbers, tweaksFor, userInput, vatRateOn, withNeeds, workTypeInput, type Role } from '@shap/shared';
 import { z } from 'zod';
 import { accessOf, canAny, checkNewPassword, confirmPassword, createUser, endOtherSessions, hashPassword, requireAccess, requireRole, seesBooks, sessionToken, userOrThrow, type AuthUser } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { pgCode, PG, type Db } from '../db/index.js';
 import { dbScope } from '../db/routing.js';
 import { audit } from '../lib/audit.js';
-import { applyBusinessType, getSettings, lockAfterSettings, lockSettingsNow, today } from '../lib/books.js';
+import { applyBusinessType, getSettings, lockAfterSettings, lockSettingsNow, moveToAccount, today } from '../lib/books.js';
 import { checkInUsage } from './feedback.js';
 import { linkedLevels, takeOutOfLinked } from './practice.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
@@ -171,6 +171,9 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     // SARS: a company (CC, co-op) on turnover tax must have its year end on the last day of February
     // (TT01 FAQ). The 2026 Budget proposed dropping this; until the law changes, it stays.
     if (input.turnoverTax && input.fyEndMonth !== 2) throw badRequest('Turnover tax needs the year to end in February: change the financial year end first (SARS’s rule for companies on turnover tax).');
+    if (input.incorporatedOn && input.incorporatedOn > today()) throw badRequest('The date of incorporation can’t be in the future: it’s the date on the registration certificate.');
+    // Only a company or CC files CIPC's annual return: anyone else's date is left off.
+    if (input.incorporatedOn !== undefined && !cipcKind(input.businessType)) input.incorporatedOn = null;
     const before = await getSettings(sql);
     // VAT, registration, tax and employer numbers: the right shape, and a VAT number to be registered for VAT.
     const numberProblem = settingsNumberProblem(input, before);
@@ -331,18 +334,26 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.put('/api/accounts/:id', { preHandler: requireRole('owner') }, async (req) => {
     const { id } = parse(idParam, req.params);
     const input = parse(accountInput, req.body);
-    const [existing] = await sql<{ systemKey: string | null; type: string }[]>`select system_key, type from accounts where id = ${id}`;
+    const [existing] = await sql<{ systemKey: string | null; type: string; statementLine: string | null; name: string }[]>`select system_key, type, statement_line, name from accounts where id = ${id}`;
     if (!existing) throw notFound('Account');
     if (existing.systemKey && existing.type !== input.type) throw badRequest('Shap posts to this account automatically, so its type can’t change. You can rename it.');
     // Its type decides where its postings land (profit or the balance sheet): not for a closed year's.
     if (existing.type !== input.type && (await postedInClosedYear(sql, () => sql`select 1 from ledger l where l.account_id = ${id} and l.date <= (select lock_date from settings where id) limit 1`)))
       throw badRequest('This account has postings in a closed year, so its type can’t change. Make a new account for what’s coming instead.');
     try {
-      // The line stays as it was unless one is given (or the type changed to one it doesn't fit).
-      const [row] = input.statementLine
-        ? await sql`update accounts set code = ${input.code}, name = ${input.name}, type = ${input.type}, statement_line = ${input.statementLine}, active = ${input.active} where id = ${id} returning *`
-        : await sql`update accounts set code = ${input.code}, name = ${input.name}, type = ${input.type}, active = ${input.active} where id = ${id} returning *`;
-      return row;
+      return await sql.begin(async (tx) => {
+        // The line stays as it was unless one is given (or the type changed to one it doesn't fit).
+        const [row] = input.statementLine
+          ? await tx`update accounts set code = ${input.code}, name = ${input.name}, type = ${input.type}, statement_line = ${input.statementLine}, active = ${input.active} where id = ${id} returning *`
+          : await tx`update accounts set code = ${input.code}, name = ${input.name}, type = ${input.type}, active = ${input.active} where id = ${id} returning *`;
+        // A change of line or type moves what's in it, last year's figures too: in the audit log
+        // with it (the same transaction), as the accountant may need to say so in the statements
+        // (IFRS for SMEs 3.12).
+        const now = row as { type: string; statementLine: string | null };
+        if (now.type !== existing.type || now.statementLine !== existing.statementLine)
+          await audit(tx, { userId: userOrThrow(req).id, action: 'account_line_changed', entity: 'account', entityId: id, ip: req.ip, details: { name: existing.name, from: { type: existing.type, line: existing.statementLine }, to: { type: now.type, line: now.statementLine } } });
+        return row;
+      });
     } catch (err) {
       if (pgCode(err) === PG.uniqueViolation) throw conflict('An account with that code already exists');
       throw err;
@@ -364,23 +375,31 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     app.put(`/api/${path}/:id`, { preHandler: requireRole('owner') }, async (req) => {
       const { id } = parse(idParam, req.params);
       const input = parse(schema, req.body) as Record<string, unknown>;
-      // Moving a cost type or a payment account to another account in the books moves everything
-      // already captured with it: not what's in a closed year.
-      if (input.accountId) {
-        const [old] = await sql<{ accountId: string }[]>`select account_id from ${sql(table)} where id = ${id}`;
-        const used = () =>
-          table === 'cost_categories'
-            ? sql`select 1 from costs where category_id = ${id} and date <= (select lock_date from settings where id) limit 1`
-            : sql`select 1 from ledger l where l.account_id = ${old?.accountId ?? null} and l.date <= (select lock_date from settings where id) limit 1`;
-        if (old && old.accountId !== input.accountId && (await postedInClosedYear(sql, used)))
-          throw badRequest('What’s already captured with this goes to its account in a closed year, so the account can’t change. Make a new one for what’s coming instead.');
-      }
+      // A rename takes the row's full lock (its name is unique), so a capture against it at the same
+      // moment can deadlock with it: tried once more, then said.
+      const attempt = () =>
+        sql.begin(async (tx) => {
+          const change = async () => {
+            const [row] = await tx`update ${tx(table)} set ${tx(input)} where id = ${id} returning *`;
+            if (!row) throw notFound();
+            return row;
+          };
+          // Moving a cost type or a payment account to another account in the books moves
+          // everything already captured with it: checked, and logged (lib/books.ts moveToAccount).
+          if (input.accountId && (table === 'payment_sources' || table === 'cost_categories'))
+            return moveToAccount(tx, { table, id, to: input.accountId as string, userId: userOrThrow(req).id, ip: req.ip }, change);
+          return change();
+        });
       try {
-        const [row] = await sql`update ${sql(table)} set ${sql(input)} where id = ${id} returning *`;
-        if (!row) throw notFound();
-        return row;
+        try {
+          return await attempt();
+        } catch (err) {
+          if (pgCode(err) !== PG.deadlock) throw err;
+          return await attempt();
+        }
       } catch (err) {
         if (pgCode(err) === PG.uniqueViolation) throw conflict('That name is already used');
+        if (pgCode(err) === PG.deadlock) throw conflict('Someone was saving something against this at the same moment: try again.');
         throw err;
       }
     });

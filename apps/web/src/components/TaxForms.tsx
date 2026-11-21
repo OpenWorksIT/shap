@@ -22,6 +22,10 @@ interface Vat201Data {
   importedVatCents: number;
   /** How many lines on the VAT account came in that way (any at all: the return isn’t Shap’s). */
   importedVatLines?: number;
+  /** VAT on journals typed in during the period (not what Shap can tell is a payment): not in the boxes. */
+  handVatAddedCents?: number;
+  handVatOffCents?: number;
+  handVatLines?: number;
 }
 
 const periodLabel = (p: { start: string; end: string }) =>
@@ -76,6 +80,29 @@ export function Vat201() {
           )} Shap can’t split that into the VAT201’s boxes, so the boxes below leave it out and aren’t this period’s return. The return is the business’s, from their own records (or as their package worked it out): Shap doesn’t work it out or check it.
         </div>
       ) : null}
+      {data.handVatLines ? (
+        <div className="banner alert small">
+          Journals typed in{' '}
+          {(data.handVatAddedCents ?? 0) > 0 ? (
+            <>
+              added <Money cents={data.handVatAddedCents!} /> to the VAT owed
+              {(data.handVatOffCents ?? 0) > 0 ? (
+                <>
+                  {' '}
+                  and took <Money cents={data.handVatOffCents!} /> off it
+                </>
+              ) : null}
+            </>
+          ) : (data.handVatOffCents ?? 0) > 0 ? (
+            <>
+              took <Money cents={data.handVatOffCents!} /> off the VAT owed
+            </>
+          ) : (
+            'moved the VAT account'
+          )}{' '}
+          in this period ({data.handVatLines} line{data.handVatLines === 1 ? '' : 's'}). Shap leaves out what it can tell is a payment to or refund from SARS (VAT against the bank, cash, a card, your own money or SARS’s other taxes, such as PAYE), and import VAT journalled against the bank looks the same, so it isn’t counted here either. The boxes below are worked out from invoices, costs and assets, so they leave these out: whether and where they go on the return (a cash sale, a correction) is yours or your accountant’s to decide before you file.
+        </div>
+      ) : null}
       <section className="panel">
         <div className="panel-head spread">
           <strong>VAT201 for {periodLabel(data.period)}</strong>
@@ -100,7 +127,7 @@ export function Vat201() {
       </section>
       <p className="xs muted">
         Invoice basis: issued invoices and credit notes by their dates, and the VAT on costs by the slip’s date. Exports, exempt supplies and imports aren’t split out:
-        add those yourself. Box 4 is worked out from box 1 on eFiling; check it matches.{' '}
+        add those yourself. Import VAT journalled against the bank looks like a payment to SARS, so it isn’t in the boxes or counted with journals typed in: as input tax it goes in field 14A or 15A, which Shap doesn’t fill, for you or your accountant to add. Box 4 is worked out from box 1 on eFiling; check it matches.{' '}
         {has('guides') && <Link to="/guides/vat201">How to file it, step by step →</Link>}
       </p>
     </div>

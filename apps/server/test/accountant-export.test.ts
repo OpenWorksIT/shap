@@ -103,8 +103,8 @@ describe('accountant export', () => {
 
   it('knows which SARS dates are coming up', () => {
     const s = { vatRegistered: true, vatCategory: 'B' as const, turnoverTax: false, fyEndMonth: 2 };
-    expect(taxDue(s, '2026-11-02')).toEqual([{ key: 'vat201-2026-10-31', label: 'VAT201 for Sep to Oct 26', due: '2026-11-30', to: '/accounts?tab=vat201' }]);
-    expect(taxDue({ ...s, vatRegistered: false, turnoverTax: true }, '2027-02-01')).toEqual([{ key: 'tt-2027-02-26', label: 'Second turnover tax payment', due: '2027-02-26', to: '/accounts?tab=tax' }]);
+    expect(taxDue(s, '2026-11-02')).toEqual([{ key: 'vat201-2026-10-31', body: 'SARS', label: 'VAT201 for Sep to Oct 26', due: '2026-11-30', to: '/accounts?tab=vat201', action: 'Figures' }]);
+    expect(taxDue({ ...s, vatRegistered: false, turnoverTax: true }, '2027-02-01')).toEqual([{ key: 'tt-2027-02-26', body: 'SARS', label: 'Second turnover tax payment', due: '2027-02-26', to: '/accounts?tab=tax', action: 'Figures' }]);
     expect(taxDue({ ...s, vatRegistered: false }, '2026-11-02')).toEqual([]);
   });
 });

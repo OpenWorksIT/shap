@@ -14,7 +14,7 @@ import { confirmPassword, requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Tx } from '../db/index.js';
 import { audit } from '../lib/audit.js';
-import { applyBusinessType, getSettings, lockAfterSettings, lockSettingsNow, noteShapFigures } from '../lib/books.js';
+import { applyBusinessType, getSettings, lockAfterSettings, lockSettingsNow, moveToAccount, noteShapFigures } from '../lib/books.js';
 import { badRequest } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 import { cleanImage } from '../lib/images.js';
@@ -31,10 +31,11 @@ const fileSchema = z.object({
     // The same limits as typing them into Settings (lengths, an accent that's a colour).
     .array(brandInput.omit({ logoLayout: true }).extend({ logo }))
     .default([]),
-  accounts: z.array(z.object({ code: z.string().min(1), name: z.string().min(1), type: z.enum(['asset', 'liability', 'equity', 'income', 'cost_of_sales', 'expense']), statementLine: z.string().max(40).optional(), active: z.boolean().default(true) })).default([]),
-  sources: z.array(z.object({ name: z.string().min(1), kind: z.enum(['bank', 'card', 'cash', 'owner', 'other']), account: z.string(), active: z.boolean().default(true) })).default([]),
-  categories: z.array(z.object({ name: z.string().min(1), kind: z.enum(['materials', 'demo', 'overhead', 'asset', 'personal']), account: z.string(), active: z.boolean().default(true) })).default([]),
-  workTypes: z.array(z.object({ name: z.string().min(1), active: z.boolean().default(true) })).default([]),
+  // Names as Settings takes them (a refusal and the audit log name them).
+  accounts: z.array(z.object({ code: z.string().trim().min(1).max(10), name: z.string().trim().min(1).max(120), type: z.enum(['asset', 'liability', 'equity', 'income', 'cost_of_sales', 'expense']), statementLine: z.string().max(40).optional(), active: z.boolean().default(true) })).default([]),
+  sources: z.array(z.object({ name: z.string().trim().min(1).max(80), kind: z.enum(['bank', 'card', 'cash', 'owner', 'other']), account: z.string(), active: z.boolean().default(true) })).default([]),
+  categories: z.array(z.object({ name: z.string().trim().min(1).max(80), kind: z.enum(['materials', 'demo', 'overhead', 'asset', 'personal']), account: z.string(), active: z.boolean().default(true) })).default([]),
+  workTypes: z.array(z.object({ name: z.string().trim().min(1).max(80), active: z.boolean().default(true) })).default([]),
   clients: z
     .array(clientInput.omit({ brandId: true, code: true }).extend({ code: z.string().trim().max(30).nullable().default(null), vatNumber: z.string().trim().max(30).default(''), brand: z.string().max(80).nullable().default(null) }))
     .default([]),
@@ -100,7 +101,7 @@ export async function exportCompanyFile(tx: Tx | import('../db/index.js').Sql): 
   };
 }
 
-export async function restoreCompanyFile(tx: Tx, raw: unknown) {
+export async function restoreCompanyFile(tx: Tx, raw: unknown, by: { userId?: string; ip?: string } = {}) {
   // A company file can hold years of jobs: more room than a request.
   const file = parse(fileSchema, raw, { maxItems: 500_000 });
   const done: Record<string, number> = {};
@@ -142,6 +143,12 @@ export async function restoreCompanyFile(tx: Tx, raw: unknown) {
     await tx`update settings set ${tx(SETTINGS_COLUMNS[k])} = ${checked.data as never} where id`;
   }
   await applyBusinessType(tx, (await getSettings(tx)).businessType);
+  // As Settings has it: turnover tax and PBO approval only for the kinds of business that can have them.
+  {
+    const s = await getSettings(tx);
+    if (!entity(s.businessType).turnoverTax) await tx`update settings set turnover_tax = false where id and turnover_tax`;
+    if (s.businessType !== 'npc') await tx`update settings set approved_pbo = false where id and approved_pbo`;
+  }
   // A trust's, a sole proprietor's and a partnership's year of assessment ends in February: their
   // books' year too, as Settings keeps it (so the VAT201s, Home and the practice's list agree).
   if (entity((await getSettings(tx)).businessType).febYearEnd) await tx`update settings set fy_end_month = 2 where id and fy_end_month <> 2`;
@@ -174,23 +181,43 @@ export async function restoreCompanyFile(tx: Tx, raw: unknown) {
   }
 
   // Accounts and lists
+  // The accounts as they were, for the log of a payment account or cost type moved below.
+  const asWas = new Map((await tx<{ id: string; code: string; name: string; statementLine: string | null }[]>`select id, code, name, statement_line from accounts`).map((a) => [a.id, { code: a.code, name: a.name, line: a.statementLine }]));
   for (const a of file.accounts) {
-    // (A line that doesn't fit the type, or none, is set by the database's own rules.)
-    await tx`insert into accounts (code, name, type, statement_line, active) values (${a.code}, ${a.name}, ${a.type}, ${a.statementLine ?? null}, ${a.active})
-      on conflict (code) do update set name = excluded.name, active = excluded.active, statement_line = coalesce(excluded.statement_line, accounts.statement_line)`;
+    // (A line that doesn't fit the type is set by the database's own rules; none given keeps the
+    // line it has, as Settings does: the line trigger has filled the proposed row's by then.) A change of
+    // an account's line moves what's in it, last year's figures too: in the audit log, as an
+    // account's PUT logs it (IFRS for SMEs 3.12).
+    const [was] = await tx<{ id: string; name: string; type: string; statementLine: string | null }[]>`select id, name, type, statement_line from accounts where code = ${a.code}`;
+    const [now] = await tx<{ id: string; type: string; statementLine: string | null }[]>`insert into accounts (code, name, type, statement_line, active) values (${a.code}, ${a.name}, ${a.type}, ${a.statementLine ?? null}, ${a.active})
+      on conflict (code) do update set name = excluded.name, active = excluded.active, statement_line = coalesce(${a.statementLine ?? null}::text, accounts.statement_line)
+      returning id, type, statement_line`;
+    if (was && now && (now.type !== was.type || now.statementLine !== was.statementLine))
+      await audit(tx, { userId: by.userId ?? null, actor: by.userId ? 'user' : 'system', action: 'account_line_changed', entity: 'account', entityId: was.id, ip: by.ip, details: { name: was.name, from: { type: was.type, line: was.statementLine }, to: { type: now.type, line: now.statementLine }, by: 'the company file' } });
   }
   const acc = async (code: string) => {
     const [r] = await tx<{ id: string }[]>`select id from accounts where code = ${code}`;
     if (!r) throw badRequest(`The company file refers to account ${code}, which isn’t in the chart of accounts`);
     return r.id;
   };
+  // A payment account or cost type already here, on another account: moved as Settings → Lists
+  // moves one (what's captured with it goes too), so refused where that would reach a closed year
+  // or carry entries on or off the cash line, and logged.
   for (const s of file.sources) {
-    await tx`insert into payment_sources (name, kind, account_id, active, sort) values (${s.name}, ${s.kind}, ${await acc(s.account)}, ${s.active}, (select coalesce(max(sort), 0) + 1 from payment_sources))
-      on conflict (name) do update set kind = excluded.kind, account_id = excluded.account_id, active = excluded.active`;
+    const to = await acc(s.account);
+    const [here] = await tx<{ id: string; accountId: string }[]>`select id, account_id from payment_sources where name = ${s.name}`;
+    if (here)
+      await moveToAccount(tx, { table: 'payment_sources', id: here.id, to, file: s.name, fromAs: asWas.get(here.accountId), ...by }, () =>
+        tx`update payment_sources set kind = ${s.kind}, account_id = ${to}, active = ${s.active} where id = ${here.id}`);
+    else await tx`insert into payment_sources (name, kind, account_id, active, sort) values (${s.name}, ${s.kind}, ${to}, ${s.active}, (select coalesce(max(sort), 0) + 1 from payment_sources))`;
   }
   for (const c of file.categories) {
-    await tx`insert into cost_categories (name, kind, account_id, active, sort) values (${c.name}, ${c.kind}, ${await acc(c.account)}, ${c.active}, (select coalesce(max(sort), 0) + 1 from cost_categories))
-      on conflict (name) do update set kind = excluded.kind, account_id = excluded.account_id, active = excluded.active`;
+    const to = await acc(c.account);
+    const [here] = await tx<{ id: string; accountId: string }[]>`select id, account_id from cost_categories where name = ${c.name}`;
+    if (here)
+      await moveToAccount(tx, { table: 'cost_categories', id: here.id, to, file: c.name, fromAs: asWas.get(here.accountId), ...by }, () =>
+        tx`update cost_categories set kind = ${c.kind}, account_id = ${to}, active = ${c.active} where id = ${here.id}`);
+    else await tx`insert into cost_categories (name, kind, account_id, active, sort) values (${c.name}, ${c.kind}, ${to}, ${c.active}, (select coalesce(max(sort), 0) + 1 from cost_categories))`;
   }
   for (const w of file.workTypes) {
     await tx`insert into work_types (name, active, sort) values (${w.name}, ${w.active}, (select coalesce(max(sort), 0) + 1 from work_types)) on conflict (name) do update set active = excluded.active`;
@@ -283,7 +310,7 @@ export function registerCompanyFileRoutes(app: FastifyInstance, ctx: Ctx): void 
     // Replacing everything takes your password.
     await confirmPassword(sql, user.id, password, req.ip);
     const result = await sql.begin(async (tx) => {
-      const r = await restoreCompanyFile(tx, file);
+      const r = await restoreCompanyFile(tx, file, { userId: user.id, ip: req.ip });
       await audit(tx, { userId: user.id, action: 'restore_company_file', entity: 'settings', ip: req.ip, details: r });
       return r;
     });

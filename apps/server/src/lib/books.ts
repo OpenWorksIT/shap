@@ -1,5 +1,5 @@
 import type { FastifyRequest } from 'fastify';
-import { assessedLossCarried, closesBy, entity, featureOn, financialYear, periodLockDue, safeText, standardNames, todayIso, type BusinessType, type TaxEstimateFigures, type VatCategory } from '@shap/shared';
+import { addDays, assessedLossCarried, closesBy, entity, featureOn, financialYear, periodLockDue, safeText, standardNames, todayIso, type BusinessType, type TaxEstimateFigures, type VatCategory } from '@shap/shared';
 import type { Db } from '../db/index.js';
 import { audit } from './audit.js';
 import { badRequest } from './errors.js';
@@ -46,6 +46,10 @@ export interface SettingsRow {
   taxNumber: string;
   payeRegistered: boolean | null;
   payeRef: string;
+  /** A company's or CC's date of incorporation (CIPC's annual return dates), when the owner gave it. */
+  incorporatedOn: string | null;
+  /** Registered with the Compensation Fund (a return of earnings each year), when the owner said. */
+  coidaRegistered: boolean | null;
   uifRegistered: boolean | null;
   uifRef: string;
   /** The terms of use accepted (terms.ts TERMS_VERSION), and when. */
@@ -152,6 +156,124 @@ export async function importedVat(db: Db, start: string, end: string): Promise<{
     from journal_lines jl join journals j on j.id = jl.journal_id join accounts a on a.id = jl.account_id
     where a.system_key = 'vat' and j.ledger_import_id is not null and j.date between ${start}::date and ${end}::date`;
   return { lines: r?.n ?? 0, cents: Number(r?.t ?? 0) };
+}
+
+/**
+ * VAT on journals by hand (typed in, or an adjustment) in a period, other than what Shap can tell
+ * is a payment to or refund from SARS: VAT against money (the bank, cash, a card or any account you
+ * pay from, or your own money), with at most expense or income smaller than it beside it (SARS's
+ * interest, or interest on a refund). Shap's VAT201 boxes are worked out from documents, so these aren't in them; where
+ * they go on the return (a cash sale journalled, a correction) is the business's or their
+ * accountant's to say. What was added to the VAT owed (credits) and taken off it (debits), apart.
+ */
+export async function handVat(db: Db, start: string, end: string): Promise<{ lines: number; addedCents: number; offCents: number }> {
+  const [r] = await db<{ n: number; added: string; off: string }[]>`
+    with money as (
+      select id from accounts where statement_line in ('cash', 'bank_overdraft') or system_key in ('owner_loan', 'paye_payable', 'uif_payable', 'sdl_payable', 'income_tax_payable', 'dwt_payable')
+      union select account_id from payment_sources where kind in ('bank', 'cash', 'card', 'owner')
+    ), per as (
+      -- Each journal's lines read once (not once for each of its VAT lines): whether money is on it,
+      -- anything other than expense, income, VAT or money, and how much expense or income.
+      select jl.journal_id, bool_or(m.id is not null) as money,
+        bool_or(a.type not in ('expense', 'income') and coalesce(a.system_key, '') <> 'vat' and m.id is null) as other,
+        coalesce(sum(jl.debit_cents + jl.credit_cents) filter (where a.type in ('expense', 'income') and m.id is null), 0) as expense
+      from journal_lines jl join journals j on j.id = jl.journal_id join accounts a on a.id = jl.account_id
+      left join money m on m.id = jl.account_id
+      where j.kind in ('manual', 'adjustment') and j.date between ${start}::date and ${end}::date
+      group by jl.journal_id
+    )
+    select count(*)::int as n, coalesce(sum(jl.credit_cents), 0)::bigint as added, coalesce(sum(jl.debit_cents), 0)::bigint as off
+    from journal_lines jl join per p on p.journal_id = jl.journal_id join accounts a on a.id = jl.account_id
+    where a.system_key = 'vat' and not (p.money and not p.other and p.expense < abs(jl.credit_cents - jl.debit_cents))`;
+  return { lines: r?.n ?? 0, addedCents: Number(r?.added ?? 0), offCents: Number(r?.off ?? 0) };
+}
+
+/** An account as the audit log names it: its code, name and statement line. */
+async function accountWords(db: Db, id: string) {
+  const [a] = await db<{ code: string; name: string; statementLine: string | null }[]>`select code, name, statement_line from accounts where id = ${id}`;
+  return { id, code: a?.code ?? null, name: a?.name ?? null, line: a?.statementLine ?? null };
+}
+
+/**
+ * Moving a payment account or a cost type onto another account in the books, within a
+ * transaction (the list PUT, a company file brought in): everything already captured with it moves
+ * too. Refused when that moves anything in a closed year, or carries entries on or off the
+ * statements' cash lines; otherwise done by `update`, and in the audit log with both accounts'
+ * codes, names and lines and the amounts that moved, this year, last year and before (IFRS for
+ * SMEs 3.12). `file`: a company file's name for it, said in a refusal, which then says to change
+ * the file (Settings' advice doesn't get it in); `fromAs`: the old account as it was before the
+ * file changed it; `by`: who for the log.
+ */
+export async function moveToAccount<T>(
+  tx: Db,
+  o: { table: 'payment_sources' | 'cost_categories'; id: string; to: string; userId?: string | null; ip?: string; file?: string; fromAs?: { code: string; name: string; line: string | null } },
+  update: () => Promise<T>,
+): Promise<T> {
+  // No key update: a capture against it (its foreign key) isn't held up by this.
+  const [was] = await tx<{ accountId: string; name: string }[]>`select account_id, name from ${tx(o.table)} where id = ${o.id} for no key update`;
+  if (!was || was.accountId === o.to) return update();
+  const what = o.table === 'payment_sources' ? 'Paid from / into' : 'Cost type';
+  const refuse = (words: string, settingsFix: string, fileFix: string) =>
+    badRequest(o.file ? `The company file puts “${o.file}” (${what}) on another account. ${words} ${fileFix}` : `${words} ${settingsFix}`);
+  const [s] = await tx<{ lockDate: string | null; fyEndMonth: number }[]>`select lock_date::text as lock_date, fy_end_month from settings where id`;
+  const year = financialYear(today(), s?.fyEndMonth ?? 2);
+  const lastYearStart = financialYear(addDays(year.start, -1), s?.fyEndMonth ?? 2).start;
+  // What's on the old account, before and after: what moves is what leaves it (a journal's lines
+  // on it stay). Anything leaving a closed year is refused; the amounts go in the log.
+  const onOld = async () => {
+    const [n] = await tx<{ closed: string; earlier: string; lastYear: string; thisYear: string }[]>`
+      select count(*) filter (where l.date <= ${s?.lockDate ?? null}::date)::bigint as closed,
+        coalesce(sum(l.amount_cents) filter (where l.date < ${lastYearStart}::date), 0)::bigint as earlier,
+        coalesce(sum(l.amount_cents) filter (where l.date >= ${lastYearStart}::date and l.date < ${year.start}::date), 0)::bigint as last_year,
+        coalesce(sum(l.amount_cents) filter (where l.date >= ${year.start}::date), 0)::bigint as this_year
+      from ledger l where l.account_id = ${was.accountId}`;
+    return { closed: Number(n!.closed), earlier: Number(n!.earlier), lastYear: Number(n!.lastYear), thisYear: Number(n!.thisYear) };
+  };
+  // Its history goes with it to its new account: not on or off the statements' cash lines by the
+  // way (that's a judgement, made on the account's line). Only when one account is on them and the
+  // other isn't can anything cross: then all of it is counted, and what's from before this
+  // financial year (last year's figures).
+  const sides = await tx<{ cash: boolean }[]>`select coalesce(statement_line in ('cash', 'bank_overdraft'), false) as cash from accounts where id in ${tx([was.accountId, o.to])}`;
+  const crossing = sides.length === 2 && sides[0]!.cash !== sides[1]!.cash;
+  const onCash = async () => {
+    const [n] = await tx<{ total: string; lastYear: string }[]>`
+      select count(*)::bigint as total, count(*) filter (where l.date < ${year.start}::date)::bigint as last_year
+      from ledger l join accounts a on a.id = l.account_id where l.account_id in ${tx([was.accountId, o.to])} and a.statement_line in ('cash', 'bank_overdraft')`;
+    return { all: Number(n!.total), before: Number(n!.lastYear) };
+  };
+  const fromWords = o.fromAs ? { id: was.accountId, ...o.fromAs } : await accountWords(tx, was.accountId);
+  const oldBefore = await onOld();
+  const before = crossing ? await onCash() : null;
+  const row = await update();
+  const oldAfter = await onOld();
+  const changeFile = 'Change the file (give it a new name there, or leave it out) and load it again.';
+  if (oldAfter.closed !== oldBefore.closed)
+    throw refuse('What’s already captured with this goes to its account in a closed year, so the account can’t change.', 'Make a new one for what’s coming instead.', changeFile);
+  if (before) {
+    const after = await onCash();
+    if (after.all !== before.all)
+      throw refuse(
+        `What’s already captured with this would move on or off the statements’ cash line with it${after.before !== before.before ? ', last year’s figures too' : ''}.`,
+        `If the account it’s on now is on the wrong line, change that account’s line instead (Settings → Lists → Chart of accounts: that moves everything in it, last year’s figures too), after checking with your accountant; if the new account has nothing in it yet, put it on the same line first; otherwise add a new one under ${o.table === 'payment_sources' ? 'Paid from / into' : 'Cost types'} for what’s coming.`,
+        `${changeFile} Or give the new account the same line in the file, after checking with your accountant.`,
+      );
+  }
+  await audit(tx, {
+    userId: o.userId ?? null,
+    actor: o.userId ? 'user' : 'system',
+    action: 'moved_to_account',
+    entity: o.table === 'payment_sources' ? 'payment_source' : 'cost_category',
+    entityId: o.id,
+    ip: o.ip,
+    details: {
+      name: was.name,
+      from: fromWords,
+      to: await accountWords(tx, o.to),
+      moved: { thisYearCents: oldBefore.thisYear - oldAfter.thisYear, lastYearCents: oldBefore.lastYear - oldAfter.lastYear, earlierCents: oldBefore.earlier - oldAfter.earlier },
+      ...(o.file ? { by: 'the company file' } : {}),
+    },
+  });
+  return row;
 }
 
 export async function getSettings(db: Db): Promise<SettingsRow> {

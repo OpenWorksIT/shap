@@ -9,7 +9,9 @@ The code keeps tables by year: a table applies to years of assessment ending on 
 the last year of assessment checked against SARS: from the day after, CI fails until the next
 year's figures are checked and put in (the standard update, CPDAUDIT.md).
 
-Everything here is in the shared code, so it is the same in Shap Pocket.
+Everything here is in the shared code, so it is the same in Shap Pocket, except what's marked
+*Shap only*: CIPC's annual return, the Compensation Fund's return of earnings and the cash-flow
+forecast (from 1.33).
 
 The test server's made-up books (`apps/server/src/testdata/populate.ts`, `slip.ts`;
 docs/TEST_SERVER.md) take every rate and limit from the shared code too (`vatRateOn`,
@@ -18,7 +20,7 @@ docs/TEST_SERVER.md) take every rate and limit from the shared code too (`vatRat
 under SDL's R500 000 a year without SDL, trade kept to 70% of the VAT and turnover tax lines) are
 worth a look when those lines move.
 
-**Checked up to the year ending 28 February 2027 (2026/27), on 10 November 2026** (tax invoices again for 1.24).
+**Checked up to the year ending 28 February 2027 (2026/27), on 10 November 2026** (tax invoices again for 1.24); CIPC, the Compensation Fund and the forecast's tax figures on 21 November 2026 (1.33).
 
 The 2026/27 figures from Budget 2026 (the individual tables and rebates, the R2.3 million VAT and
 turnover tax limits, the R430 000 retirement cap) were still in Parliament when checked: the
@@ -62,7 +64,8 @@ year-end month, turnover tax, whether it employs people, PBO approval and those 
 refresh on leaving the books, as there is for a kept client.
 The dates the law fixes are in code there; the filing season's, which SARS sets each year, are in
 `tax.ts` `FILING_SEASON_DATES`; a public holiday the President declares for one year is in
-`dates.ts` `DECLARED_HOLIDAYS`. Each standard update checks all three.
+`dates.ts` `DECLARED_HOLIDAYS`; the Compensation Fund's return of earnings season, which the Fund
+gazettes each year, is in `tax.ts` `ROE_SEASONS`. Each standard update checks all four.
 
 | Return | Rule | Where | Source |
 | --- | --- | --- | --- |
@@ -74,9 +77,76 @@ The dates the law fixes are in code there; the filing season's, which SARS sets 
 | DTR01 | The end of the month after a dividend is paid | `dwtDue` | [SARS: dividends tax](https://www.sars.gov.za/types-of-tax/dividends-tax/) |
 | ITR12 (provisional taxpayers, each partner's), ITR12T, IT3(t), EMP501 interim | 22 January 2027, 22 January 2027, 30 September 2026, 30 October 2026 (31 October a Saturday) | `FILING_SEASON_DATES` | [SARS: tax season 2026](https://www.sars.gov.za/types-of-tax/personal-income-tax/tax-season/), [trust filing season](https://www.sars.gov.za/media-release/trust-filing-season-set-to-open/), [PAYE interim season](https://www.sars.gov.za/latest-news/paye-interim-filing-season-opens-today-21-september-2026/) |
 | A declared public holiday | 4 November 2026 (the local government elections) | `DECLARED_HOLIDAYS` | [SAnews](https://www.sanews.gov.za/node/84344) |
+| CIPC annual return (not SARS's; *Shap only*: on the list and Home since 1.33) | A company (Pty, Inc, NPC): within 30 business days after each anniversary of its incorporation (Companies Act s33(1), reg 30(1)(c); the anniversary itself not counted). A close corporation: by the end of the month after its anniversary month (Close Corporations Act s15A). The first a year after incorporation; from the date of incorporation in Settings → Company (optional). A co-operative files one with CIPC too: Shap doesn't work out its date, and says so (setup, Settings). External and domesticated companies (reg 30(1), 30(6)) aren't a kind of business in Shap. What goes with the return (the statements or the financial accountability supplement, the securities register, beneficial ownership) is the accountant's | `tax.ts` `cipcAnnualReturns`, `addBusinessDays`; `practice.ts` `cipcKind` | [Companies Regulations, 2011, reg 30](https://www.acts.co.za/companies-act-2008/r351_30__company_annual_returns), [Close Corporations Act s15A](https://www.acts.co.za/close-corporations-act-1984/15a__annual_return), [co-operatives: CIPC Notice 67 of 2024 (SA Accounting Academy)](https://accountingacademy.co.za/news/read/cipc-annual-submission-of-reports-and-filling-of-annual-returns-for-co-operatives) |
+| Return of earnings, Compensation Fund (COIDA; not SARS's; *Shap only*: since 1.33) | The season the Fund announces each year for the assessment year just ended: for March 2025 to February 2026, 1 April to 30 June 2026. The Fund may extend a season, and gives final dates for outstanding returns (for 2025 and earlier, 31 October 2026, Notice 4140 of 2026; in 2025 the season was extended to 31 July, Notice 3200 of 2025): the yearly check reads those too, though `ROE_SEASONS` keeps only the season's dates (a later final date isn't shown). Only for an employer that says it's registered with the Fund (setup and Settings); a mutual association such as FEM instead isn't the Fund's | `tax.ts` `ROE_SEASONS` | [Notice 3894 of 2026 (GG 54524)](https://www.gov.za/sites/default/files/gcis_document/202604/54524gen3894.pdf), [Notice 4140 of 2026 (GG 55347)](https://www.gov.za/sites/default/files/gcis_document/202609/55347gen4140.pdf), [the 2025 extension, Notice 3200 of 2025](https://www.acts.co.za/compensation/n3200_notice_no__3200_of_2025) |
 
-Not shown: the CIPC annual return (Shap doesn't keep the date of incorporation), the Compensation
-Fund's return of earnings, and a filing season SARS hasn't announced yet.
+Home shows the same CIPC and return of earnings dates, five weeks ahead (`dashboard.ts` `taxDue`),
+with whose return it is (SARS, CIPC or the Compensation Fund); CIPC's stays a month after it's due,
+as one that was due. The return of earnings is shown only for a season that's in `ROE_SEASONS`:
+none is guessed, and from April to July Home says when this year's isn't in this version's tables.
+The standard update is meant to add the Fund's next season once it's in the Gazette (usually in
+March or April; CPDAUDIT.md section 2), but no date is promised: from 1 May of the year after the
+last season's, the tests fail until it's in, and CI runs on 1 May and each Monday in May.
+
+### The cash-flow forecast's tax figures (Shap only, estimates)
+
+The forecast (`apps/server/src/modules/forecast.ts`) puts SARS's payments in the weeks they're
+due. Each is an estimate, said so on screen with who OpenWorks IT are:
+
+- **VAT**: on the invoice basis (Shap's VAT201s are). A period's VAT is everything that moves the
+  VAT account in it (invoices, costs and assets however they were paid, journals by hand with an
+  income or cost line, a ledger brought in), except payments and refunds (an entry of VAT against
+  money: the bank, cash, an overdraft, a card or any account paid from, or the owner's loan, with
+  at most expense or income smaller than the VAT beside it: SARS's interest or a penalty, or
+  interest on a refund) and balances brought in (opening balances, and a
+  trial balance brought in: its VAT is the balance on its date, not that period's own). What's
+  owed for periods that have ended (the VAT account today, less this period's VAT and payments
+  already booked ahead): the last period's own on its `vat201Due` (this week when that's past),
+  anything older this week (said as brought in with a trial balance when one came in since the
+  last period began: Shap can't put that balance in a SARS period). A payment beyond them comes off
+  this period's, up to what was paid since the period began beyond what the ended periods owed
+  when it began (a refund owed counted as nothing): one made ahead for it. A refund SARS owes isn't
+  netted off what's owed for another period, whether last period's or an older one, paid on time or not, until one comes in: then
+  VAT already overdue for an ended period is taken as set off against it first, up to what's still owed of it, as SARS must
+  ([TAA s191(1)](https://www.acts.co.za/tax/191__refunds_subject_to_set_off_and_deferral)) (SARS pays a refund after its
+  checks, and sets refunds off against debts itself: [VAT refunds for
+  vendors](https://www.sars.gov.za/types-of-tax/value-added-tax/vat-refunds-for-vendors/), [TAA
+  s191](https://www.acts.co.za/tax/191__refunds_subject_to_set_off_and_deferral), only against a
+  debt already overdue), nor forecast as money in. SARS's other tax accounts (PAYE, UIF, SDL, income
+  tax and dividends tax owed) count as money for this test, so VAT paid in one journal with PAYE is
+  a payment, and a refund SARS set off against PAYE a refund. Import VAT journalled against the bank
+  looks the same as a payment to SARS, so it's taken as one (and isn't on the VAT201's typed-in note
+  either: the VAT201 screen says so under the boxes, where it always shows: as input tax it goes in
+  field 14A or 15A, which Shap doesn't fill). Which period a
+  payment was for is SARS's to say (by its reference, which Shap doesn't keep): the split is an
+  estimate. This period's, documents dated ahead in it included, on its own `vat201Due`. Always
+  eFiling's date (the last business day), never the 25th. A vendor on the payments basis would owe
+  less, sooner or later. A business no longer registered still has what's in its VAT account forecast.
+- **EMP201**: those owed (`payrollAttention`) on their `emp201Due`, less what the books show paid
+  beyond them (PAYE, UIF and SDL owed in the books less than they list: an EMP201 paid by a journal,
+  or a VAT refund SARS set off against it), oldest first; what the books owe beyond them (brought
+  in when moving in, or a journal) this week, as if paid now; then, for each month after the
+  last run's period, each employee in that run whom a run for that month would still take (active,
+  started, not left: as `POST /api/pay-runs` chooses) at the middle of their last three pay lines, paid as
+  far into the month as the recent runs were (a December run paid on 2 January isn't January's), and
+  its PAYE, UIF (both halves) and SDL on the EMP201 for the month paid, as SARS groups them. The
+  employment tax incentive isn't taken off. A pay date before the month before its run's month, or
+  more than six months after it, is refused as a likely slip of the year or month (it could be
+  taxed on the wrong year's tables or go on the wrong EMP201); pay really that early or late is the
+  accountant's to record. A run paid more than a month after its month, or in another tax year (a
+  February run paid in March, or a March run paid in February), says, by its pay date, that which EMP201 it belongs on (and across
+  1 March which year's tables) is the accountant's to check: employees' tax arises when
+  the employer pays or becomes liable to pay ([Fourth Schedule para
+  2](https://www.acts.co.za/income-tax/sch4_2__employers_to_deduct_tax)), and Shap puts it on the
+  month paid (`latePayNote`).
+- **DTR01**: dividends tax owed, on its due date (`dwtDue`, from the day paid).
+- Not in it: provisional tax and turnover tax (said on screen).
+
+Home's debtor days are now measured against invoices as issued (their VAT in them), not grossed up
+by `vatRateOn`.
+
+Not shown: a filing season SARS hasn't announced yet, and a return of earnings season the Fund
+hasn't announced yet.
 
 ## VAT
 
@@ -158,6 +228,12 @@ Checked 11 November 2026.
   which part is this year's income to residents is the accountant's to work out). A dividend in a
   ledger brought in lists its dividends tax return on the practice list; one inside a trial
   balance can't (it has no day of its own).
+- VAT on journals typed in (a cash sale journalled, a correction): the VAT201's boxes are worked
+  out from invoices, costs and assets, so they leave it out. From 1.33 the VAT201 screen says how
+  much such journals added to the VAT owed and took off it in the period (leaving out what Shap
+  can tell is a payment to or refund from SARS: VAT against money, with or without SARS's interest
+  beside it; one paid with other tax may still be counted), and the books audit warns: where it
+  goes on the return is the business's or the accountant's (`lib/books.ts` `handVat`).
 - A sole proprietor's estimate leaves out the medical credits and the interest exemption; payroll
   has the credits.
 - VAT category D ending in months other than February and August, and E at a month other than the

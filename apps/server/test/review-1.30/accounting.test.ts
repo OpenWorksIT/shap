@@ -9,7 +9,7 @@
  * kept. All data made up.
  */
 import type { InjectOptions } from 'fastify';
-import { payLine } from '@shap/shared';
+import { LINK_WHAT_GOES_VERSION, payLine } from '@shap/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AddressInfo } from 'node:net';
 import { ACCOUNTANT_TERMS_VERSION } from '@shap/shared';
@@ -227,7 +227,7 @@ describe('a month written up in a linked client’s own Shap, and the same month
     await kept.post('/api/statements/details', await theirs.get('/api/statements/details'), 'PUT');
     const linked = (await owner.post<{ health: Record<string, unknown> }>(`/api/practice/clients/${linkedId}/checks`, {})).health;
     const keptH = (await owner.post<{ health: Record<string, unknown> }>(`/api/practice/clients/${keptId}/checks`, {})).health;
-    const direct = JSON.parse(JSON.stringify(healthForLink(await healthOf(own.sql))));
+    const direct = JSON.parse(JSON.stringify(healthForLink(await healthOf(own.sql), LINK_WHAT_GOES_VERSION)));
     // The kept client's checks also keep its trial balance's fingerprint (`tb`, 1.31): the practice's own, for its list, never sent over a link.
     expect(keptH.tb).toMatchObject({ fyEnd: '2026-02-28', hash: expect.stringMatching(/^[0-9a-f]{64}$/) });
     expect(linked.tb).toBeUndefined();

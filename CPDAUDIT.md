@@ -87,6 +87,12 @@ so in docs/SARS.md, and check them again once the Act is promulgated.
 5. From 1 March each year, the national minimum wage too (`NATIONAL_MINIMUM_WAGE`,
    `packages/shared/src/labour.ts`, docs/CASUAL_LABOUR.md): the tests fail until the tax year
    `SARS_CHECKED_TO` ends has its rate.
+6. Each autumn, the Compensation Fund's return of earnings season (`ROE_SEASONS`,
+   `packages/shared/src/tax.ts`), from the Fund's notice in the Government Gazette (usually March or
+   April), and any later notice that extends a season or sets a final date for outstanding returns
+   (docs/SARS.md). From 1 May of the year after the last season's, the tests fail until the next one
+   is in (`test/cipc-coida.test.ts`); CI runs on 1 May and each Monday in May even with nothing
+   pushed.
 
 ## 3. Every change (CI, `.github/workflows/ci.yml`)
 
@@ -1343,6 +1349,165 @@ All five ready: security (the penetration test: nothing to fix), IFRS, SARS and 
 `0ccef71` is the exempt hint's hedge, which IFRS read as sound and words checked against SARS.md,
 the refusal's words and who's told them, and an error toast's time). Shap Pocket 1.11.3 at
 `701211e`.
+
+### The five reviews of 1.33 and Shap Pocket 1.11.4 (the forecast, budgets, bank formats and rules, Home, CIPC and the Fund; before release)
+
+A 13-week cash-flow forecast and budgets against actual; bank statements as OFX and QIF, and rules
+that fill a line in; the phone's camera for barcodes; Home's cash, debtor and creditor days and
+gross margin; CIPC's annual return and the Compensation Fund's return of earnings on Home and the
+practice's list (056 for what a linked practice is sent). Five separate agents reviewed
+`594f935`, each on its own database, with made-up books through the API. None said it was ready.
+
+- Security and privacy, with the penetration test (0 to fix, 51 OK): an OFX file made to hold the
+  server up (a backtracking pattern): read in one pass, and held to a CSV's limits; a file of two
+  accounts read as one: one account a file; fingerprints longer than the index allows; rules
+  without end: 500, under a lock; a linked practice was sent the date of incorporation and the Fund
+  registration without its owner being told they go: only the fields on the list the link was made
+  under (`accountant_links.what_goes`, 056); the camera was asked for again after closing.
+- IFRS for SMEs: Home's cash was the payment sources' accounts, not the statements' cash (7.2);
+  gross margin and gross profit by account type, not the income statement's lines: both by
+  statement line. Budgets set before a change of year end didn't open; they do.
+- SARS: the forecast put a run's EMP201 twice, all VAT on one return, no DTR01, nothing for wages
+  or dividends owed: by pay date, by period, on its date, owed now; the Fund's season test fails
+  from 1 May, with CI in May.
+- Accounting: debtor days against all income (interest too) over a year whatever the business's
+  age: against invoices (and bills) over the days covered; budgets compared months not yet ended,
+  and rounded a percentage wrong.
+- Words: Home's reminders didn't say whose return each was (SARS, CIPC, the Fund); setup promised a
+  reminder each year that Shap can't always give; COIDA named the Fund only (a mutual association
+  such as FEM too, and a labour practitioner); the forecast's note, the bank and till words.
+
+The second round (`ea0430e`): still to fix, and fixed: payments booked ahead counted again as owed
+(wages, dividends, VAT), and monthly costs captured ahead projected again; a bill's monthly cost on
+its terms; Home's first figure was all income (interest too): revenue, and the tiles add up; a bank
+or cash account added with a payment source wasn't cash (later changed, below); last year in the
+budgets was the last financial year, not the twelve months before; the parser counted only the
+transactions it read against the limit, read a ledger balance after a ß as the available one,
+decoded entities twice, read an unsigned file's debits as money in, dropped a repeated id that was
+another transaction, and read a QIF account list as transactions; a rule for a cost type no longer
+in use was applied; the link's list version could be left out. The penetration test: 0 to fix, 53 OK.
+
+The third round (`d25969f`): still to fix, and fixed: the forecast's VAT left out costs paid from
+the bank and VAT paid personally, and counted a payment ahead twice: a period's VAT is everything
+that moves the VAT account in it, a payment only VAT against money; dividends paid ahead cancelled
+older ones, one worker's advance another's wages, a refund a month's cost: each on its own; someone
+new on the payroll at a third of their pay: at their own; a pay date a month off was refused (a
+December run paid in January): only before the month before or six months after, checked after
+"final"; Home's net profit put finance costs and income tax in running costs, and the year ran to
+the month's end: apart, and to today. Words: no promised update anywhere, the undated Fund note.
+
+The fourth round (`7748b56`): security (the penetration test: 0 to fix, 54 OK) found nothing to
+exploit. Still to fix, and fixed:
+
+- IFRS: the move of a new bank account onto the cash line (round 2) took a used source's history
+  off cash when it was moved to a new account, overrode a line chosen on purpose, and put a
+  liability on the overdraft line, which is cash only when repayable on demand and part of
+  day-to-day cash management (7.2). Shap and Pocket no longer move a line: Shap's Home and forecast
+  say how much is in such an account and that it isn't counted (`offCashNote`), and the books
+  audit names it with the test for an asset and for an overdraft, an inactive one too while it has
+  entries since the comparative year began (one emptied this year still shapes last year's cash).
+  "Income tax as captured in the books", and "before income tax" when none is.
+- SARS: a trial balance brought in counted as its period's VAT (the VAT owed vanished on category
+  D): a balance, owed for periods gone by; a VAT payment with SARS's interest on the journal counted
+  as VAT: a payment, with an expense smaller than the VAT beside it; a refund SARS owes was netted
+  against this period: only payments are; someone who had left was still paid: only those a run
+  would take. Noted and done: journals typed in with VAT aren't on Shap's VAT201 (output VAT could
+  be left out): the VAT201 screen and the books audit say by how much (`handVat`); a run paid more
+  than a month late says which EMP201 is the accountant's to check (`latePayNote`).
+- Accounting: wages and dividends owed in the books beyond Shap's records (a journal, balances
+  brought in) were left out of the forecast: on their own line.
+- Security: the forecast's VAT looked up each line's entry in the ledger view, 20 seconds on 4 000
+  costs just put in (before the planner's counts caught up) and minutes with JIT on: one scan with
+  a window over each entry's day. Tests for round 3's move-only check and the final pay run's
+  words; Pocket's ports each with a test that fails without them.
+- Words: the import preview named balance lines for every format (a QIF's opening balance came in
+  as money in, now left out as a CSV's are); a rule not applied said "switch it back on" when its
+  cost type had become stock; Pocket's audit named a Home figure Pocket hasn't; the docs still
+  promised the Fund's season; smaller words in the forecast, budgets, pay dates and the website.
+
+The fifth round (`a07f7da`): still to fix, and fixed:
+
+- Security (the penetration test: 0 to fix, 55 OK): one journal of thousands of lines made the
+  VAT201 screen and the books audit take tens of seconds (`handVat` read the journal again for
+  each VAT line): each journal is read once, and a journal takes up to 1 000 lines. The forecast's
+  salaries dropped in the month after a leaving date set ahead, which told someone with the
+  reports but not payroll who was going: for them, as if no one leaves who hasn't yet, and said.
+- IFRS: moving a used payment source onto another account carried its history on or off the cash
+  line, last year's figures too: refused, the new account's line is set first; a change of an
+  account's line or type, or of the account a source or cost type posts to, is in the audit log
+  (3.12); the deposit words follow 7.2 (on demand; about three months from when made).
+- SARS: paying last period's VAT on time let a refund SARS owes come off this period's: only what
+  was paid beyond what the ended periods owed counts as paid ahead; a trial balance's VAT brought in
+  this period is said as such.
+- Accounting: wages and dividends owed beyond Shap's records went out again when a journal had
+  paid them: kept signed; a refund paid with interest counted as this period's VAT; moving in put
+  PAYE, UIF and SDL on wages owed, and VAT payable on creditors: on SARS's own accounts.
+- Words: Home's "before income tax" for a sole proprietor or partners (their own tax isn't the
+  business's), turnover tax and an approved PBO; typed-in VAT added and taken off, apart; a VAT
+  payment by card is a payment; the audit's plurals; the late pay note across 1 March.
+
+The sixth round (`45ddb29`): still to fix, and fixed:
+
+- Security (the penetration test: 0 to fix, 55 OK): a Shap Pocket share still brought in a journal
+  of any length (its lines go in as rows, each checking the whole journal: 16 000 lines about half a
+  minute): a share with one over 1 000 lines is turned away, and Pocket says so before it offers
+  one; moving a payment account took FOR UPDATE on its row, and deadlocked with a capture against
+  it: no key update, and counted only when the move crosses the cash line; a change of an account's
+  line was logged outside its transaction.
+- IFRS: a company file brought in moved a used payment account (a closed year's entries too) with
+  none of Settings' checks or logs: one check for both (`moveToAccount`), with both accounts' codes,
+  names and lines logged; the refusal said "last year's figures too" when nothing from last year
+  moved, and its advice could take a used account off cash; 7.2's test in full (a known amount,
+  little risk of change: not shares or unit trusts); a company's turnover tax, and a sole
+  proprietor's or partners' on it, now said.
+- SARS: a refund SARS owes for an older period was netted off last period's VAT201 (s191 sets off
+  only against a debt already overdue); VAT paid in one journal with PAYE, or a refund set off
+  against it, counted as VAT again: SARS's other tax accounts count as money; move-in took an SDL or
+  UIF expense as owed, and dividends tax payable as a creditor.
+- Accounting: VAT paid ahead during the last period wasn't taken off this one's; PAYE, UIF and SDL
+  brought in on SARS's own accounts (round 5's move-in change) dropped out of the forecast: owed
+  beyond the pay runs, this week; a cost type on the cash line could move its history off it: the
+  same check; three tests didn't end with the books audit.
+- Words: the site said all VAT on journals typed in is shown apart (not what looks like a payment);
+  "your accountant works it out"; the audit log's new rows had no words; the off-cash note sent
+  staff to Settings; the leaving note showed with no salaries; "added R0.00"; "besides"; lists
+  without "and"; the late pay note's wording, and a March run paid in February.
+- Noted, not changed: the forecast nets workers' advances against other amounts on the wages
+  account; SARS's interest is compared with each VAT line, not the journal's VAT; a move between two
+  lines off cash (or from cash to the overdraft line) isn't refused; a moved-in journal of more than
+  1 000 lines can't be saved again by hand.
+
+The seventh round (`aa09d96`): still to fix, and fixed:
+
+- Security (the penetration test: 0 to fix, 55 OK): a share's journal written with its id in
+  another case, or with braces or no hyphens, got round the 1 000-line check: counted as the
+  database reads it; renaming and moving a payment account at once still deadlocked with a capture
+  (a new name takes the row's full lock): tried once more, then said; a company file's names
+  without Settings' limits.
+- IFRS: a company file giving an account no line reset it to its type's default (the bank off cash:
+  the line trigger fills the proposed row before the conflict), and could put a trust on turnover
+  tax: kept as Settings keeps them; a move logged no amounts (3.12): this year, last year and before;
+  7.2's words (a known amount with its interest; on notice too; most unit trusts).
+- SARS: a refund SARS paid net of its set-off against VAT already overdue left that VAT forecast as
+  owed (TAA s191(1)); move-in took UIF payable named "employer" or "company" as a creditor; import
+  VAT was said only where typed-in VAT was: under the boxes, with fields 14A and 15A.
+- Accounting: an EMP201 paid by a journal (or a refund set off against it) was still forecast:
+  what the books show paid comes off it; this period's own refund booked ahead showed as VAT going
+  out; an unused payment account on an account with a closed year couldn't move: only what moves
+  is checked; two suites didn't end with the books audit.
+- Words: the audit log's new "by" hid older rows' details (a lock's date); a company file's refusal
+  gave Settings' advice; "payment account" for what the screens call Paid from / into; the leaving
+  note, the share refusal and the forecast's line, plainer.
+- Noted, not changed: a share within the cap still costs up to rows × 1 000 to check; the
+  forecast and the books audit take seconds on ten years of busy books (before this round too);
+  dividends tax brought in isn't forecast; a move between two lines off cash isn't refused.
+
+Tests: `review-1.33/*` (bank, link, home, forecast and its rounds, budgets, words, sars,
+words-round4, security-round5, round6, acc-round6, security-round6-lock and -share, round7-ifrs,
+acc-round7, sars-round7, sars-round7-movein, words-round7, security-round7-lock and -share), `forecast-budgets`, `dashboard-money`, `cipc-coida`,
+`bank-formats-rules`, and Pocket's `review-shap-1.33.test.ts`,
+`review-shap-1.33-security.test.ts`, `review-shap-1.33-round6.test.ts` and
+`review-shap-1.33-round7.test.ts`, each failing without its fix.
 
 ### Code scanning (CodeQL), first run
 

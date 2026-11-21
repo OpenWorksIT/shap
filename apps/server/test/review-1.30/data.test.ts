@@ -10,7 +10,7 @@ import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ACCOUNTANT_TERMS_VERSION, deadlinesFor } from '@shap/shared';
+import { ACCOUNTANT_TERMS_VERSION, deadlinesFor, LINK_WHAT_GOES_VERSION } from '@shap/shared';
 import { auditBooks } from '../../src/audit/books.js';
 import { today } from '../../src/lib/books.js';
 import { healthForLink, healthOf, migrateClients } from '../../src/lib/practice.js';
@@ -68,8 +68,8 @@ describe('a linked client, through a restart and a wipe, and with long findings'
     expect(h.deadlineInputs).toEqual(direct.deadlineInputs);
     expect(h.stale).toBeUndefined();
     // What the client's Shap sends is cut there too, and only what's named.
-    expect(Object.keys(healthForLink(direct)).sort()).toEqual(['at', 'audit', 'company', 'deadlineInputs', 'lockedThrough', 'setupDone', 'statements', 'vatRegistered']);
-    expect(healthForLink(direct).audit.items.every((i) => i.text.length <= 500)).toBe(true);
+    expect(Object.keys(healthForLink(direct, LINK_WHAT_GOES_VERSION)).sort()).toEqual(['at', 'audit', 'company', 'deadlineInputs', 'lockedThrough', 'setupDone', 'statements', 'vatRegistered']);
+    expect(healthForLink(direct, LINK_WHAT_GOES_VERSION).audit.items.every((i) => i.text.length <= 500)).toBe(true);
   });
 
   it('a dividend journalled by hand lists its dividends tax return, as one recorded under Dividends does (SARS 3)', async () => {

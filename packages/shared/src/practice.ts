@@ -15,16 +15,19 @@
  * - a company's ITR14 at 12 months after its year end (GN 7422 para 4(a)), an approved PBO's IT12EI
  *   on the same day;
  * - dividends tax (DTR01) by the end of the month after a dividend is paid (dwtDue);
- * - the filing season's own dates (ITR12, ITR12T, IT3(t), the EMP501 interim) from the table.
+ * - the filing season's own dates (ITR12, ITR12T, IT3(t), the EMP501 interim) from the table;
+ * - the CIPC annual return of a company or close corporation, from its date of incorporation when
+ *   Settings has it (tax.ts cipcAnnualReturns);
+ * - the Compensation Fund's return of earnings, for an employer registered with the Fund, once the
+ *   Fund has announced the season (tax.ts ROE_SEASONS).
  *
- * Not here: the CIPC annual return (Shap doesn't keep the date of incorporation), the Compensation
- * Fund's return of earnings, an individual's TT03 (SARS's two pages give different dates), and a
- * filing season SARS hasn't announced yet.
+ * Not here: a co-operative's annual return to CIPC, an individual's TT03 (SARS's two pages give
+ * different dates), and a filing season SARS (or the Fund) hasn't announced yet.
  */
 import { addDays, addMonths, businessDayOnOrBefore, financialYear } from './dates.js';
 import { ENTITIES, type BusinessType } from './entities.js';
 import { dwtDue, emp201Due } from './payroll.js';
-import { FILING_SEASON_DATES, lastBusinessDay, vat201Due, vat201Label, vatPeriod, type VatCategory } from './tax.js';
+import { cipcAnnualReturns, FILING_SEASON_DATES, lastBusinessDay, ROE_SEASONS, vat201Due, vat201Label, vatPeriod, type VatCategory } from './tax.js';
 
 /** The practice's people's two ways into a client: writing the books up, or reading them and compiling the statements. */
 export const LEVELS = ['books', 'compile'] as const;
@@ -50,7 +53,14 @@ export interface DeadlineInputs {
   approvedPbo?: boolean;
   /** The days dividends were paid, lately (a DTR01 each month one was). */
   dividendsPaid?: string[];
+  /** The date of incorporation (a company's or CC's registration certificate): its CIPC annual returns. */
+  incorporatedOn?: string | null;
+  /** Registered with the Compensation Fund (COIDA): a return of earnings each year. */
+  coidaRegistered?: boolean | null;
 }
+
+/** Whose annual return CIPC takes, and on which rule: companies (Pty, Inc, NPC) or close corporations. */
+export const cipcKind = (t: BusinessType): 'company' | 'cc' | null => (t === 'cc' ? 'cc' : t === 'company' || t === 'inc' || t === 'npc' ? 'company' : null);
 
 export interface Deadline {
   key: string;
@@ -123,6 +133,9 @@ export function deadlinesFor(c: DeadlineInputs, now: string, days = 45): (Deadli
   if (company || pbo) {
     for (const paid of c.dividendsPaid ?? []) add({ key: `dtr01-${paid.slice(0, 7)}`, label: `Dividends tax return (DTR01) for dividends paid in ${monthName(paid.slice(0, 7))}`, due: dwtDue(paid) });
   }
+  const cipc = cipcKind(c.businessType);
+  if (cipc && c.incorporatedOn) for (const d of cipcAnnualReturns(cipc, c.incorporatedOn, from, until)) add(d);
+  if (c.coidaRegistered) for (const d of ROE_SEASONS) add({ key: d.key, label: d.label, due: d.due });
   for (const d of FILING_SEASON_DATES) {
     const theirs =
       (d.who === 'individual' && rules.taxedAs === 'individual' && !c.turnoverTax) ||

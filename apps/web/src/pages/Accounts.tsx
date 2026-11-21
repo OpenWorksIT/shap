@@ -16,11 +16,13 @@ import { FinancialStatements } from './FinancialStatements';
 import { sharePdf } from '../lib/share-pdf';
 import { TurnoverTax, Vat201 } from '../components/TaxForms';
 import BooksImport from './BooksImport';
+import { CashForecast } from './Forecast';
+import { Budgets } from './Budgets';
 
 /** A typed value in a download's address: encoded, so it can only ever be a value. */
 const enc = (v: string | null | undefined) => encodeURIComponent(String(v ?? ''));
 
-type Tab = 'income' | 'balance' | 'trial' | 'ledger' | 'journals' | 'assets' | 'bank' | 'files' | 'checks' | 'locks' | 'yearend' | 'statements' | 'tax' | 'vat201' | 'export' | 'import';
+type Tab = 'income' | 'balance' | 'forecast' | 'budgets' | 'trial' | 'ledger' | 'journals' | 'assets' | 'bank' | 'files' | 'checks' | 'locks' | 'yearend' | 'statements' | 'tax' | 'vat201' | 'export' | 'import';
 
 export default function AccountsPage() {
   const [params, setParams] = useSearchParams();
@@ -37,6 +39,8 @@ export default function AccountsPage() {
           tabs={[
             { value: 'income', label: 'Income statement' },
             { value: 'balance', label: 'Balance sheet' },
+            { value: 'forecast', label: 'Cash-flow forecast' },
+            { value: 'budgets', label: 'Budgets' },
             { value: 'trial', label: 'Trial balance' },
             { value: 'ledger', label: 'Ledger' },
             { value: 'journals', label: 'Journals' },
@@ -55,6 +59,8 @@ export default function AccountsPage() {
       </div>
       {tab === 'income' && <IncomeStatement />}
       {tab === 'balance' && <BalanceSheet onAccount={(id) => go('ledger', { account: id })} />}
+      {tab === 'forecast' && <CashForecast />}
+      {tab === 'budgets' && <Budgets />}
       {tab === 'trial' && <TrialBalance onAccount={(id) => go('ledger', { account: id })} />}
       {tab === 'ledger' && <Ledger />}
       {tab === 'journals' && <Journals />}
