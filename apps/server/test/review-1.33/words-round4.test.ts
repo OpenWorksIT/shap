@@ -96,3 +96,22 @@ describe('a run paid late (SARS, fourth round)', () => {
     expect(read('apps/web/src/pages/Payroll.tsx')).toMatch(/<Field label="Pay date" hint=\{latePayNote\(run\.period, run\.payDate\) \?\? undefined\}>/);
   });
 });
+
+describe('moving in: SARS’s payroll taxes on their own accounts (accounting, fifth round)', () => {
+  it('guesses PAYE, UIF and SDL owed as SARS’s, and VAT payable or receivable as VAT, not wages or a supplier', async () => {
+    const { suggestAccount } = await import('../../src/modules/movein.js');
+    const acc = (systemKey: string, type: 'asset' | 'liability' | 'expense' = 'liability') => ({ id: systemKey, code: '', name: `Made-up ${systemKey}`, type, systemKey });
+    const accounts = ['paye_payable', 'uif_payable', 'sdl_payable', 'wages_payable', 'payables', 'vat', 'income_tax_payable'].map((k) => acc(k)).concat([acc('receivables', 'asset'), acc('general_labour', 'expense')]);
+    const guess = (name: string) => suggestAccount({ code: '', name, cents: 0 } as never, accounts);
+    expect(guess('PAYE payable')).toBe('paye_payable');
+    expect(guess('UIF control')).toBe('uif_payable');
+    expect(guess('SDL payable')).toBe('sdl_payable');
+    expect(guess('Accrued wages')).toBe('wages_payable');
+    expect(guess('Salaries payable')).toBe('wages_payable');
+    expect(guess('VAT payable')).toBe('vat');
+    expect(guess('VAT receivable')).toBe('vat');
+    expect(guess('Income tax payable')).toBe('income_tax_payable');
+    expect(guess('Trade payables')).toBe('payables');
+    expect(guess('Trade receivables')).toBe('receivables');
+  });
+});

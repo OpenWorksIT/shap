@@ -97,8 +97,8 @@ due. Each is an estimate, said so on screen with who OpenWorks IT are:
   VAT account in it (invoices, costs and assets however they were paid, journals by hand with an
   income or cost line, a ledger brought in), except payments and refunds (an entry of VAT against
   money: the bank, cash, an overdraft, a card or any account paid from, or the owner's loan, with
-  at most an expense smaller than
-  the VAT beside it, SARS's interest or a penalty) and balances brought in (opening balances, and a
+  at most expense or income smaller than the VAT beside it: SARS's interest or a penalty, or
+  interest on a refund) and balances brought in (opening balances, and a
   trial balance brought in: its VAT is the balance on its date, not that period's own). What's
   owed for periods that have ended (the VAT account today, less this period's VAT and payments
   already booked ahead): the last period's own on its `vat201Due` (this week when that's past),

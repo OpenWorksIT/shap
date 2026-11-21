@@ -189,12 +189,108 @@ describe('wages and dividends owed in the books beyond Shap’s own records', ()
 
   it('puts them out this week, as if paid now', async () => {
     const f = await cashForecast(env.sql, now);
-    expect(out(f.items.filter((x) => x.kind === 'wages_owed'))).toBe(45_000 + 30_000);
+    // The books owe R250 in all (R450 + R300 − B's R500 advance, which may have paid the R300): A's
+    // own R450 still goes out (round 3), and the R300 is taken as paid by the advance (fifth round).
+    expect(out(f.items.filter((x) => x.kind === 'wages_owed'))).toBe(45_000);
     expect(out(f.items.filter((x) => x.kind === 'dividends'))).toBe(5_000_000 + 100_000);
     expect(f.items.filter((x) => x.kind === 'wages_owed' || x.kind === 'dividends').every((x) => x.date === now)).toBe(true);
     expect(f.items.find((x) => x.label.startsWith('Other dividends owed in the books'))!.cents).toBe(-5_000_000);
-    // Named for the account, as a move-in may put PAYE or UIF owed on it (words review, fifth round).
-    expect(f.items.find((x) => x.label.startsWith('Other amounts owed on the wages account'))).toMatchObject({ cents: -30_000, label: 'Other amounts owed on the wages account (from a journal or balances brought in, which may include PAYE or UIF), as if paid now' });
+  });
+
+  it('counts each worker’s wages with casual workers switched off too', async () => {
+    const owner = await login(env.app, 'owner@example.co.za');
+    const { settings: s } = await owner.get('/api/reference');
+    await owner.post('/api/settings', { ...s, features: { ...s.features, workers: false } }, 'PUT');
+    expect(out((await cashForecast(env.sql, now)).items.filter((x) => x.kind === 'wages_owed'))).toBe(45_000);
+    await owner.post('/api/settings', { ...s, features: { ...s.features, workers: true } }, 'PUT');
+  });
+});
+
+/** Made-up company books with casual workers on, for one scenario each. */
+async function payoutBooks() {
+  const env = await setup();
+  const owner = await login(env.app, 'owner@example.co.za');
+  const r = await ref(env.sql);
+  const bank = await r.src('Business bank');
+  const { settings: s } = await owner.get('/api/reference');
+  await owner.post('/api/settings', { ...s, businessType: 'company', features: { ...s.features, workers: true } }, 'PUT');
+  return { env, owner, r, bank };
+}
+
+describe('owed beyond Shap’s records, nothing counted twice (accounting, fifth round)', () => {
+  it('names the wages account’s other amounts for the account', async () => {
+    const b = await payoutBooks();
+    try {
+      await b.owner.post('/api/journals', { date: addDays(now, -1), description: 'Made-up wages accrued', lines: [{ accountId: await b.r.acc('general_labour'), debitCents: 30_000 }, { accountId: await b.r.acc('wages_payable'), creditCents: 30_000 }] });
+      const f = await cashForecast(b.env.sql, now);
+      // Named for the account, as a move-in may put PAYE or UIF owed on it (words review, fifth round).
+      expect(f.items.filter((x) => x.kind === 'wages_owed')).toEqual([expect.objectContaining({ cents: -30_000, label: 'Other amounts owed on the wages account (from a journal or balances brought in, which may include PAYE or UIF), as if paid now' })]);
+      await expectCleanAudit(b.env.sql);
+    } finally {
+      await b.env.close();
+    }
+  });
+
+  it('takes a dividend declared in Shap and paid by a journal (ahead or already) as paid', async () => {
+    const b = await payoutBooks();
+    try {
+      for (const sh of ['Made-up Paid Ahead', 'Made-up Paid Yesterday']) await b.owner.post('/api/dividends', { declaredOn: addDays(now, -5), shareholder: sh, grossCents: 1_000_000, exempt: true });
+      await b.owner.post('/api/journals', { date: addDays(now, 5), description: 'Made-up dividend paid ahead', lines: [{ accountId: await b.r.acc('dividends_payable'), debitCents: 1_000_000 }, { accountId: await b.r.acc('bank'), creditCents: 1_000_000 }] });
+      await b.owner.post('/api/journals', { date: addDays(now, -1), description: 'Made-up dividend paid yesterday', lines: [{ accountId: await b.r.acc('dividends_payable'), debitCents: 1_000_000 }, { accountId: await b.r.acc('bank'), creditCents: 1_000_000 }] });
+      const f = await cashForecast(b.env.sql, now);
+      expect(f.items.filter((x) => x.kind === 'dividends')).toEqual([]);
+      expect(out(f.items.filter((x) => x.kind === 'booked'))).toBe(1_000_000);
+    } finally {
+      await b.env.close();
+    }
+  });
+
+  it('takes a day’s wages paid by a journal dated ahead as paid', async () => {
+    const b = await payoutBooks();
+    try {
+      const w = await b.owner.post('/api/workers', { name: 'Made-up Worker C', dayRateCents: 40_000, allowanceCents: 5_000 });
+      await b.owner.post('/api/labour', { date: addDays(now, -1), entries: [{ workerId: w.id, days: 1, wageCents: 40_000, allowanceCents: 5_000 }] });
+      await b.owner.post('/api/journals', { date: addDays(now, 3), description: 'Made-up wages paid ahead', lines: [{ accountId: await b.r.acc('wages_payable'), debitCents: 45_000 }, { accountId: await b.r.acc('bank'), creditCents: 45_000 }] });
+      const f = await cashForecast(b.env.sql, now);
+      expect(f.items.filter((x) => x.kind === 'wages_owed')).toEqual([]);
+      expect(out(f.items.filter((x) => x.kind === 'booked'))).toBe(45_000);
+    } finally {
+      await b.env.close();
+    }
+  });
+
+  it('takes wages brought in and then paid to the worker as paid', async () => {
+    const b = await payoutBooks();
+    try {
+      await b.owner.post('/api/journals', { date: addDays(now, -10), description: 'Made-up wages brought in', lines: [{ accountId: await b.r.acc('retained_earnings'), debitCents: 30_000 }, { accountId: await b.r.acc('wages_payable'), creditCents: 30_000 }] });
+      const w = await b.owner.post('/api/workers', { name: 'Made-up Worker D', dayRateCents: 40_000, allowanceCents: 5_000 });
+      await b.owner.post('/api/wage-payments', { date: addDays(now, -2), workerId: w.id, amountCents: 30_000, sourceId: b.bank });
+      const f = await cashForecast(b.env.sql, now);
+      expect(f.items.filter((x) => x.kind === 'wages_owed')).toEqual([]);
+      expect((await b.owner.get('/api/dashboard')).owedToWorkersCents).toBe(0);
+    } finally {
+      await b.env.close();
+    }
+  });
+});
+
+describe('VAT: a refund SARS paid with interest (accounting, fifth round)', () => {
+  let b: Awaited<ReturnType<typeof vatBooks>>;
+  beforeAll(async () => {
+    b = await vatBooks();
+  });
+  afterAll(async () => {
+    await expectCleanAudit(b.env.sql);
+    await b.env.close();
+  });
+
+  it('is a refund, not this period’s VAT, and not typed-in VAT on the VAT201', async () => {
+    // Last period: R750 input VAT (a refund). Received at this period's start with R30 interest. This period: R900 invoiced.
+    await b.owner.post('/api/costs', { date: b.last.start, description: 'Made-up parts', supplier: 'Made-up Supplies', amountCents: 575_000, vatCents: 75_000, categoryId: await b.r.cat('Parts'), sourceId: b.bank });
+    await b.owner.post('/api/journals', { date: b.current.start, description: 'Made-up VAT refund with interest', lines: [{ accountId: await b.r.acc('bank'), debitCents: 78_000 }, { accountId: await b.r.acc('vat'), creditCents: 75_000 }, { accountId: await b.r.acc('interest_income'), creditCents: 3_000 }] });
+    await b.invoice(b.current.start, 600_000);
+    expect(vatOf(await cashForecast(b.env.sql, now))).toEqual([{ date: vat201Due(b.current.end), cents: -90_000 }]);
+    expect(await b.owner.get(`/api/vat/return?on=${b.current.start}`)).toMatchObject({ handVatLines: 0 });
   });
 });
 

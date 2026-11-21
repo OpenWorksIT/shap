@@ -13,7 +13,8 @@ entries newer than the version you're running before you update.
   dated ahead: not counted again), salaries and the EMP201 for everyone in the last pay run at
   their usual pay while a run would still take them (not someone who has left), on the usual day
   (the EMP201 by the month paid), dividends tax on its date, wages and dividends owed now (those
-  owed in the books by a journal or balances brought in too), day wages at the last eight weeks'
+  owed in the books by a journal or balances brought in too; one paid by a journal not counted
+  again), day wages at the last eight weeks'
   average, the VAT as invoiced on each VAT201 (an older one this week; a trial balance brought in
   counts as owed for periods gone by, and a refund SARS owes isn't netted off), and the costs you usually
   pay each month (as last paid: not those paid personally or on a card; one that comes as a
@@ -38,6 +39,10 @@ entries newer than the version you're running before you update.
   until you tick it, as before. Amounts written -.50 or 1.234,56 are read right (before, -.50 was
   left out and 1.234,56 read as R1.23: if your bank writes amounts this way, check statements you
   brought in before), and a very long description no longer stops an import.
+- **Moving in.** A trial balance's PAYE, UIF and SDL owed are suggested on their own SARS accounts
+  (as books from another package are), not on wages owed to workers; and VAT, PAYE or income tax
+  "payable" (or VAT "receivable") is suggested as SARS's, not as creditors (or debtors). You still
+  confirm each account before it goes in.
 - **Barcodes with the phone's camera.** At the counter and on an item's code, the camera button
   scans a barcode (Chrome on Android: the browser reads it on the phone, and Shap sends the picture
   nowhere). A barcode scanner, or typing the code and Enter, works everywhere: an exact code adds

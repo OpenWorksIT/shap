@@ -161,8 +161,8 @@ export async function importedVat(db: Db, start: string, end: string): Promise<{
 /**
  * VAT on journals by hand (typed in, or an adjustment) in a period, other than what Shap can tell
  * is a payment to or refund from SARS: VAT against money (the bank, cash, a card or any account you
- * pay from, or your own money), with at most an expense smaller than it beside it (SARS's
- * interest). Shap's VAT201 boxes are worked out from documents, so these aren't in them; where
+ * pay from, or your own money), with at most expense or income smaller than it beside it (SARS's
+ * interest, or interest on a refund). Shap's VAT201 boxes are worked out from documents, so these aren't in them; where
  * they go on the return (a cash sale journalled, a correction) is the business's or their
  * accountant's to say. What was added to the VAT owed (credits) and taken off it (debits), apart.
  */
@@ -178,9 +178,9 @@ export async function handVat(db: Db, start: string, end: string): Promise<{ lin
       and not (
         exists (select 1 from journal_lines m where m.journal_id = j.id and m.account_id in (select id from money))
         and not exists (select 1 from journal_lines o join accounts oa on oa.id = o.account_id
-                        where o.journal_id = j.id and oa.type <> 'expense' and coalesce(oa.system_key, '') <> 'vat' and o.account_id not in (select id from money))
+                        where o.journal_id = j.id and oa.type not in ('expense', 'income') and coalesce(oa.system_key, '') <> 'vat' and o.account_id not in (select id from money))
         and coalesce((select sum(o.debit_cents + o.credit_cents) from journal_lines o join accounts oa on oa.id = o.account_id
-                      where o.journal_id = j.id and oa.type = 'expense' and o.account_id not in (select id from money)), 0)
+                      where o.journal_id = j.id and oa.type in ('expense', 'income') and o.account_id not in (select id from money)), 0)
             < abs(jl.credit_cents - jl.debit_cents))`;
   return { lines: r?.n ?? 0, addedCents: Number(r?.added ?? 0), offCents: Number(r?.off ?? 0) };
 }

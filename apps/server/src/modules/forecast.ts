@@ -113,27 +113,32 @@ export async function cashForecast(db: Db, now = today()): Promise<Forecast> {
   // them beyond what they'll earn ahead), and dividends (a CC's or trust's distributions) declared
   // by today and not paid by the forecast's end, in full this week, as if paid now. And what the
   // books owe on those accounts beyond Shap's own records of them (a journal by hand, balances
-  // brought in, a year-end adjustment), less what's booked to pay it ahead: also this week.
+  // brought in, a year-end adjustment), less what's booked to pay it ahead, signed: what's owed
+  // beyond goes out this week too (less workers' advances, which may have paid it); a journal that
+  // paid what Shap's records still show owed comes off them (never below nothing).
   const beyond = async (rows: Promise<{ owed: number; paidAhead: number }[]>) => {
     const [b] = await rows;
-    return Math.max(0, Number(b!.owed) - Number(b!.paidAhead));
+    return Number(b!.owed) - Number(b!.paidAhead);
   };
   {
-    const [w] = await db<{ owed: number }[]>`
-      select coalesce(sum(greatest(0, owed - greatest(0, paid_ahead - earned_ahead))), 0)::bigint as owed from (
+    const [w] = await db<{ owed: number; advances: number }[]>`
+      select coalesce(sum(greatest(0, owed - greatest(0, paid_ahead - earned_ahead))), 0)::bigint as owed,
+        coalesce(sum(greatest(0, -owed)), 0)::bigint as advances from (
         select w.id,
           coalesce((select sum(wage_cents + allowance_cents) from labour_entries where worker_id = w.id and date <= ${now}::date), 0)
             - coalesce((select sum(amount_cents) from wage_payments where worker_id = w.id and date <= ${now}::date), 0) as owed,
           coalesce((select sum(amount_cents) from wage_payments where worker_id = w.id and date > ${now}::date and date <= ${end}::date), 0) as paid_ahead,
           coalesce((select sum(wage_cents + allowance_cents) from labour_entries where worker_id = w.id and date > ${now}::date and date <= ${end}::date), 0) as earned_ahead
         from workers w) x`;
-    if (Number(w!.owed) > 0) add(now, 'Wages owed to casual workers now', -Number(w!.owed), 'wages_owed');
     const other = await beyond(db<{ owed: number; paidAhead: number }[]>`
       select coalesce(-sum(l.amount_cents) filter (where l.date <= ${now}::date), 0)::bigint as owed,
         coalesce(sum(l.amount_cents) filter (where l.date > ${now}::date and l.date <= ${end}::date and l.amount_cents > 0), 0)::bigint as paid_ahead
       from ledger l join accounts a on a.id = l.account_id
       where a.system_key = 'wages_payable' and l.source not in ('labour', 'wage_payment')`);
-    if (other > 0) add(now, 'Other amounts owed on the wages account (from a journal or balances brought in, which may include PAYE or UIF), as if paid now', -other, 'wages_owed');
+    const own = other < 0 ? Math.max(0, Number(w!.owed) + other) : Number(w!.owed);
+    if (own > 0) add(now, 'Wages owed to casual workers now', -own, 'wages_owed');
+    const otherOut = Math.max(0, other - Number(w!.advances));
+    if (otherOut > 0) add(now, 'Other amounts owed on the wages account (from a journal or balances brought in, which may include PAYE or UIF), as if paid now', -otherOut, 'wages_owed');
   }
   const [dv] = await db<{ owed: number }[]>`
     select coalesce(sum(gross_cents), 0)::bigint as owed from dividends
@@ -143,13 +148,14 @@ export async function cashForecast(db: Db, now = today()): Promise<Forecast> {
   const [later] = await db<{ owed: number }[]>`select coalesce(sum(gross_cents), 0)::bigint as owed from dividends where declared_on <= ${now}::date and paid_on > ${end}::date`;
   const dividendsOwed = unpaid - Number(later!.owed);
   const Payouts = payoutWord(settings.businessType) === 'dividend' ? 'Dividends' : 'Distributions';
-  if (dividendsOwed > 0) add(now, `${Payouts} declared and not paid yet (as if paid in full now)`, -dividendsOwed, 'dividends');
   const otherDividends = await beyond(db<{ owed: number; paidAhead: number }[]>`
     select coalesce(-sum(l.amount_cents) filter (where l.date <= ${now}::date), 0)::bigint as owed,
       coalesce(sum(l.amount_cents) filter (where l.date > ${now}::date and l.date <= ${end}::date and l.amount_cents > 0), 0)::bigint as paid_ahead
     from ledger l join accounts a on a.id = l.account_id
     left join journals j on l.source = 'journal' and j.id = l.source_id
     where a.system_key = 'dividends_payable' and (j.id is null or j.kind <> 'dividend')`);
+  const ownDividends = otherDividends < 0 ? Math.max(0, dividendsOwed + otherDividends) : dividendsOwed;
+  if (ownDividends > 0) add(now, `${Payouts} declared and not paid yet (as if paid in full now)`, -ownDividends, 'dividends');
   if (otherDividends > 0) add(now, `Other ${Payouts.toLowerCase()} owed in the books (a journal, or balances brought in), as if paid in full now`, -otherDividends, 'dividends');
 
   // SARS: each EMP201 and DTR01 owed, on its due date (or this week, when it's past).
@@ -226,9 +232,9 @@ export async function cashForecast(db: Db, now = today()): Promise<Forecast> {
   if (settings.vatRegistered || vatOwedNow !== 0) {
     const current = vatPeriod(now, settings.vatCategory, settings.fyEndMonth);
     const last = vatPeriod(addMonths(current.start, -1), settings.vatCategory, settings.fyEndMonth);
-    // Each entry's VAT, and whether it's a payment (VAT and money: the bank, cash, a card or any
-    // account paid from, or the owner's; with nothing else in it but an expense smaller than the
-    // VAT: SARS's interest or a penalty paid with it). One pass over the books from the last period's start to whichever is later, this period's
+    // Each entry's VAT, and whether it's a payment or refund (VAT and money: the bank, cash, a card
+    // or any account paid from, or the owner's; with nothing else in it but expense or income
+    // smaller than the VAT: SARS's interest or a penalty paid with it, or interest on a refund). One pass over the books from the last period's start to whichever is later, this period's
     // end or the forecast's: each VAT line, with what else its entry has on that day (one scan of
     // the ledger, however many lines: no look-up per line, nothing the planner can turn into one).
     const upTo = current.end > end ? current.end : end;
@@ -237,8 +243,8 @@ export async function cashForecast(db: Db, now = today()): Promise<Forecast> {
       from (
         select l.source, l.source_id, l.date, l.amount_cents::bigint as t, a.system_key,
           bool_or(m.is_money) over w as money,
-          bool_or(a.type <> 'expense' and coalesce(a.system_key, '') <> 'vat' and not m.is_money) over w as other,
-          coalesce(sum(abs(l.amount_cents)) filter (where a.type = 'expense' and not m.is_money) over w, 0) as expense
+          bool_or(a.type not in ('expense', 'income') and coalesce(a.system_key, '') <> 'vat' and not m.is_money) over w as other,
+          coalesce(sum(abs(l.amount_cents)) filter (where a.type in ('expense', 'income') and not m.is_money) over w, 0) as expense
         from ledger l join accounts a on a.id = l.account_id
         cross join lateral (select coalesce(a.statement_line, '') in ('cash', 'bank_overdraft') or a.system_key is not distinct from 'owner_loan'
           or exists (select 1 from payment_sources ps where ps.account_id = a.id and ps.kind in ('bank', 'cash', 'card', 'owner')) as is_money) m
