@@ -34,6 +34,7 @@ export function createDb(url: string, opts: { max?: number; idleSeconds?: number
 /** Postgres error codes we handle explicitly. */
 export const PG = {
   uniqueViolation: '23505',
+  deadlock: '40P01',
   exclusionViolation: '23P01',
   foreignKeyViolation: '23503',
   divisionByZero: '22012',

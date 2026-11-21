@@ -165,15 +165,24 @@ export async function cashForecast(db: Db, now = today(), opts: { people?: boole
 
   // SARS: each EMP201 and DTR01 owed, on its due date (or this week, when it's past).
   const owed = await payrollAttention(db, now);
-  for (const d of owed) add(d.dueOn, d.kind === 'emp201' ? `EMP201 for ${monthWords(d.period)}` : `Dividends tax (DTR01) for ${monthWords(d.period)}`, -Number(d.owingCents), d.kind === 'emp201' ? 'emp201' : 'dwt');
-  // PAYE, UIF and SDL owed in the books beyond the EMP201s Shap's pay runs leave owing (brought in
-  // when moving in, or a journal by hand): this week, as if paid now.
-  {
-    const [t] = await db<{ owed: number }[]>`select coalesce(-sum(l.amount_cents), 0)::bigint as owed from ledger_totals l join accounts a on a.id = l.account_id where a.system_key in ('paye_payable', 'uif_payable', 'sdl_payable')`;
-    const listed = owed.filter((d) => d.kind === 'emp201').reduce((s, d) => s + Number(d.owingCents), 0);
-    const beyondRuns = Number(t!.owed) - listed;
-    if (beyondRuns > 0) add(now, 'PAYE, UIF and SDL owed in the books beyond your pay runs (brought in, or a journal), as if paid now', -beyondRuns, 'emp201');
+  // PAYE, UIF and SDL as the books have them, against the EMP201s Shap's pay runs leave owing:
+  // owed beyond them (brought in when moving in, or a journal by hand) goes out this week, as if
+  // paid now; less owed (an EMP201 paid by a journal, or a refund SARS set off against it) comes
+  // off them, oldest first, as the wages and dividends owed do.
+  const [sarsPayroll] = await db<{ owed: number }[]>`select coalesce(-sum(l.amount_cents), 0)::bigint as owed from ledger_totals l join accounts a on a.id = l.account_id where a.system_key in ('paye_payable', 'uif_payable', 'sdl_payable')`;
+  const listed = owed.filter((d) => d.kind === 'emp201').reduce((s, d) => s + Number(d.owingCents), 0);
+  const beyondRuns = Number(sarsPayroll!.owed) - listed;
+  let paidByHand = Math.max(0, -beyondRuns);
+  for (const d of [...owed].sort((a, b) => a.period.localeCompare(b.period))) {
+    let cents = Number(d.owingCents);
+    if (d.kind === 'emp201' && paidByHand > 0) {
+      const off = Math.min(paidByHand, cents);
+      cents -= off;
+      paidByHand -= off;
+    }
+    if (cents > 0) add(d.dueOn, d.kind === 'emp201' ? `EMP201 for ${monthWords(d.period)}` : `Dividends tax (DTR01) for ${monthWords(d.period)}`, -cents, d.kind === 'emp201' ? 'emp201' : 'dwt');
   }
+  if (beyondRuns > 0) add(now, 'Other PAYE, UIF and SDL owed in the books (a journal, or balances brought in), as if paid now', -beyondRuns, 'emp201');
 
   // Salaries: each employee in the last pay run at the middle of their last three pay lines (so a
   // bonus month isn't repeated, and someone new counts in full), while a run for the month would
@@ -277,8 +286,18 @@ export async function cashForecast(db: Db, now = today(), opts: { people?: boole
     // sets off only an authorised refund, against a debt already overdue: TAA ss190(2), 191).
     const atLastStart = -(await balanceOf('vat', addDays(last.start, -1)));
     const refundsIn = -within(last.start, end).filter((e) => e.payment && Number(e.t) < 0).reduce((t, e) => t + Number(e.t), 0);
-    const refundsOwed = Math.max(0, Math.max(0, -atLastStart) + Math.max(0, -(await accrued(last.start, last.end))) - refundsIn);
-    let ended = vatOwedNow - toNow - paidAhead + refundsOwed;
+    const lastNet = await accrued(last.start, last.end);
+    const refundsDue = Math.max(0, -atLastStart) + Math.max(0, -lastNet);
+    // SARS must set a refund off against VAT already overdue before it pays the rest (TAA
+    // s191(1)): once one has come in, VAT overdue for an ended period (older periods', last
+    // period's once its VAT201 is past due) is taken as cleared by it, up to the refund still owed.
+    const overdue = Math.max(0, atLastStart) + (vat201Due(last.end) < now ? Math.max(0, lastNet) : 0);
+    const setOff = refundsIn > 0 ? Math.min(Math.max(0, refundsDue - refundsIn), overdue) : 0;
+    const refundsOwed = Math.max(0, refundsDue - refundsIn - setOff);
+    // A refund received (booked ahead) beyond what the ended periods were owed is this period's own,
+    // when this period is a refund: not owed for an ended one.
+    const thisRefundIn = Math.min(Math.max(0, refundsIn - refundsDue), Math.max(0, -thisPeriod));
+    let ended = vatOwedNow - toNow - paidAhead + refundsOwed - thisRefundIn;
     if (ended < 0) {
       // Paid to SARS since this period began (payments, not refunds received), beyond what the
       // ended periods owed when it began (a refund owed counted as nothing): what was paid ahead

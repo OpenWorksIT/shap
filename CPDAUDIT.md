@@ -1477,11 +1477,37 @@ The sixth round (`45ddb29`): still to fix, and fixed:
   lines off cash (or from cash to the overdraft line) isn't refused; a moved-in journal of more than
   1 000 lines can't be saved again by hand.
 
+The seventh round (`aa09d96`): still to fix, and fixed:
+
+- Security (the penetration test: 0 to fix, 55 OK): a share's journal written with its id in
+  another case, or with braces or no hyphens, got round the 1 000-line check: counted as the
+  database reads it; renaming and moving a payment account at once still deadlocked with a capture
+  (a new name takes the row's full lock): tried once more, then said; a company file's names
+  without Settings' limits.
+- IFRS: a company file giving an account no line reset it to its type's default (the bank off cash:
+  the line trigger fills the proposed row before the conflict), and could put a trust on turnover
+  tax: kept as Settings keeps them; a move logged no amounts (3.12): this year, last year and before;
+  7.2's words (a known amount with its interest; on notice too; most unit trusts).
+- SARS: a refund SARS paid net of its set-off against VAT already overdue left that VAT forecast as
+  owed (TAA s191(1)); move-in took UIF payable named "employer" or "company" as a creditor; import
+  VAT was said only where typed-in VAT was: under the boxes, with fields 14A and 15A.
+- Accounting: an EMP201 paid by a journal (or a refund set off against it) was still forecast:
+  what the books show paid comes off it; this period's own refund booked ahead showed as VAT going
+  out; an unused payment account on an account with a closed year couldn't move: only what moves
+  is checked; two suites didn't end with the books audit.
+- Words: the audit log's new "by" hid older rows' details (a lock's date); a company file's refusal
+  gave Settings' advice; "payment account" for what the screens call Paid from / into; the leaving
+  note, the share refusal and the forecast's line, plainer.
+- Noted, not changed: a share within the cap still costs up to rows × 1 000 to check; the
+  forecast and the books audit take seconds on ten years of busy books (before this round too);
+  dividends tax brought in isn't forecast; a move between two lines off cash isn't refused.
+
 Tests: `review-1.33/*` (bank, link, home, forecast and its rounds, budgets, words, sars,
-words-round4, security-round5, round6, acc-round6, security-round6-lock and -share), `forecast-budgets`, `dashboard-money`, `cipc-coida`,
+words-round4, security-round5, round6, acc-round6, security-round6-lock and -share, round7-ifrs,
+acc-round7, sars-round7, sars-round7-movein, words-round7, security-round7-lock and -share), `forecast-budgets`, `dashboard-money`, `cipc-coida`,
 `bank-formats-rules`, and Pocket's `review-shap-1.33.test.ts`,
-`review-shap-1.33-security.test.ts` and `review-shap-1.33-round6.test.ts`, each failing without its
-fix.
+`review-shap-1.33-security.test.ts`, `review-shap-1.33-round6.test.ts` and
+`review-shap-1.33-round7.test.ts`, each failing without its fix.
 
 ### Code scanning (CodeQL), first run
 

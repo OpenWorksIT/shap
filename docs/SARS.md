@@ -106,20 +106,26 @@ due. Each is an estimate, said so on screen with who OpenWorks IT are:
   last period began: Shap can't put that balance in a SARS period). A payment beyond them comes off
   this period's, up to what was paid since the period began beyond what the ended periods owed
   when it began (a refund owed counted as nothing): one made ahead for it. A refund SARS owes isn't
-  netted off what's owed for another period, whether last period's or an older one, paid on time or not (SARS pays a refund after its
+  netted off what's owed for another period, whether last period's or an older one, paid on time or not, until one comes in: then
+  VAT already overdue for an ended period is taken as set off against it first, up to what's still owed of it, as SARS must
+  ([TAA s191(1)](https://www.acts.co.za/tax/191__refunds_subject_to_set_off_and_deferral)) (SARS pays a refund after its
   checks, and sets refunds off against debts itself: [VAT refunds for
   vendors](https://www.sars.gov.za/types-of-tax/value-added-tax/vat-refunds-for-vendors/), [TAA
-  s191](https://www.acts.co.za/tax/191__refunds_subject_to_set_off_and_deferral): only against a
+  s191](https://www.acts.co.za/tax/191__refunds_subject_to_set_off_and_deferral), only against a
   debt already overdue), nor forecast as money in. SARS's other tax accounts (PAYE, UIF, SDL, income
-  tax and dividends tax owed) count as money in this test, so VAT paid in one journal with PAYE is
+  tax and dividends tax owed) count as money for this test, so VAT paid in one journal with PAYE is
   a payment, and a refund SARS set off against PAYE a refund. Import VAT journalled against the bank
   looks the same as a payment to SARS, so it's taken as one (and isn't on the VAT201's typed-in note
-  either: the note says so). Which period a
+  either: the VAT201 screen says so under the boxes, where it always shows: as input tax it goes in
+  field 14A or 15A, which Shap doesn't fill). Which period a
   payment was for is SARS's to say (by its reference, which Shap doesn't keep): the split is an
   estimate. This period's, documents dated ahead in it included, on its own `vat201Due`. Always
   eFiling's date (the last business day), never the 25th. A vendor on the payments basis would owe
   less, sooner or later. A business no longer registered still has what's in its VAT account forecast.
-- **EMP201**: those owed (`payrollAttention`) on their `emp201Due`; then, for each month after the
+- **EMP201**: those owed (`payrollAttention`) on their `emp201Due`, less what the books show paid
+  beyond them (PAYE, UIF and SDL owed in the books less than they list: an EMP201 paid by a journal,
+  or a VAT refund SARS set off against it), oldest first; what the books owe beyond them (brought
+  in when moving in, or a journal) this week, as if paid now; then, for each month after the
   last run's period, each employee in that run whom a run for that month would still take (active,
   started, not left: as `POST /api/pay-runs` chooses) at the middle of their last three pay lines, paid as
   far into the month as the recent runs were (a December run paid on 2 January isn't January's), and
@@ -127,8 +133,8 @@ due. Each is an estimate, said so on screen with who OpenWorks IT are:
   employment tax incentive isn't taken off. A pay date before the month before its run's month, or
   more than six months after it, is refused as a likely slip of the year or month (it could be
   taxed on the wrong year's tables or go on the wrong EMP201); pay really that early or late is the
-  accountant's to record. A run paid more than a month after its month, or in the next tax year (a
-  February run paid in March), says, by its pay date, that which EMP201 it belongs on (and across
+  accountant's to record. A run paid more than a month after its month, or in another tax year (a
+  February run paid in March, or a March run paid in February), says, by its pay date, that which EMP201 it belongs on (and across
   1 March which year's tables) is the accountant's to check: employees' tax arises when
   the employer pays or becomes liable to pay ([Fourth Schedule para
   2](https://www.acts.co.za/income-tax/sch4_2__employers_to_deduct_tax)), and Shap puts it on the

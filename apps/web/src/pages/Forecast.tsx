@@ -28,7 +28,7 @@ export const FORECAST_NOTE =
   'An estimate from what’s in your books today: the cash as your statements count it; invoices on their due dates (overdue ones this week, as if paid now); supplier bills on theirs; what’s already in the books for a day to come; salaries and the EMP201 as your recent pay runs (the employment tax incentive isn’t taken off); wages owed now, and PAYE, UIF and SDL owed in the books beyond your pay runs; dividends (or distributions) declared and not paid yet, all this week, as if paid in full now (any dividends tax on them included); dividends tax already withheld, on its DTR01 date; day wages at their recent average; VAT as invoiced (the invoice basis) on each VAT201; and the costs you usually pay each month. Sales you haven’t made or invoiced yet aren’t in it, nor are provisional or turnover tax, drawings, or card and loan repayments; and clients pay late and new costs come. An aid to plan with, not advice: OpenWorks IT, who make Shap, aren’t accountants or tax practitioners.';
 
 /** For someone who doesn't see payroll: the salaries aren't cut for leaving dates still to come. */
-export const LEAVING_NOTE = 'Salaries and the EMP201 here go on for everyone who hasn’t left yet: a leaving date still to come is counted only for people who see payroll.';
+export const LEAVING_NOTE = 'Salaries and the EMP201 here go on for everyone who hasn’t left yet: only someone who sees payroll gets a forecast that counts leaving dates still to come.';
 
 /**
  * The next 13 weeks of money in and out, week by week, from what's in the books (forecast.ts on

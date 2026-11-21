@@ -325,7 +325,7 @@ describe('moving payment sources and cost types: what the cash-line count catche
     const before = await cash();
     const res = await put('categories', cat.id, { name: 'Made-up petty cash top-up', kind: 'overhead', accountId: await r.acc('sundry') });
     expect(res.statusCode).toBe(400);
-    expect(res.json().error).toMatch(/otherwise make a new cost type for what’s coming\.$/);
+    expect(res.json().error).toMatch(/otherwise add a new one under Cost types for what’s coming\.$/);
     expect(await cash()).toBe(before);
   });
 });

@@ -52,7 +52,7 @@ const RECORDS: Record<string, string> = {
   audit_log: 'Audit log',
   attachment: 'Attachment',
   account: 'Account',
-  payment_source: 'Payment account',
+  payment_source: 'Paid from / into',
   cost_category: 'Cost type',
 };
 const ACTIONS: Record<string, string> = {
@@ -128,8 +128,9 @@ function detailText(d: Record<string, unknown>): string {
   if (typeof d.version === 'string') bits.push(`version ${d.version}`);
   if (typeof d.name === 'string') bits.push(d.name);
   if (typeof d.reason === 'string' && d.reason) bits.push(d.reason);
-  if (d.from && typeof d.from === 'object' && d.to && typeof d.to === 'object') bits.push(`from ${accountWords(d.from)} to ${accountWords(d.to)}`);
-  if (typeof d.by === 'string') bits.push(`by ${d.by}`);
+  // A move or a change of line names both sides, and what did it (a company file): only there, as
+  // other rows' "by" (a lock's, an import's ids) reads badly alone, and would hide their details.
+  if (d.from && typeof d.from === 'object' && d.to && typeof d.to === 'object') bits.push(`from ${accountWords(d.from)} to ${accountWords(d.to)}${typeof d.by === 'string' ? ` · by ${d.by}` : ''}`);
   if (!bits.length) {
     const keys = Object.keys(d).filter((k) => !['ip', 'url'].includes(k));
     if (keys.length) bits.push(keys.slice(0, 4).map((k) => `${k}: ${typeof d[k] === 'object' ? '…' : String(d[k])}`).join(', '));

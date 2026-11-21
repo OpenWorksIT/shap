@@ -9,6 +9,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { makeShare, practiceAndPhone } from '../accountant/phone.js';
+import { expectCleanAudit } from '../helpers.js';
 
 const BOOKS = '4a6c8e0b-2d4f-4a6b-8c0d-1e2f3a4b5c6d';
 
@@ -29,8 +30,9 @@ describe('a Pocket share holding one very long journal', () => {
     id = await t.client('Made-up Long Lines (Pty) Ltd');
   });
   afterAll(async () => {
+    await expectCleanAudit(t.phone.sql);
     await t.close();
-  });
+  }, 120_000);
 
   it('is turned away plainly, in good time, as a journal typed in would be', async () => {
     const share = await makeShare(t.phone.sql, { number: 1, madeAt: '2026-11-10T08:00:00.000Z', through: '2026-11-10', books: BOOKS });

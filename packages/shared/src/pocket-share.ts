@@ -242,11 +242,14 @@ export function shareProblem(s: PocketShare): { kind: 'column' | 'too_big' | 'ro
   }
   // A journal takes up to 1 000 lines (journalInput): one from before the cap, or a file made so,
   // would cost the receiving Shap the square of its length to check, line by line.
+  // Counted by the id as the database reads it: a uuid in either case, with or without braces or
+  // hyphens, is the same journal.
   const perJournal = new Map<unknown, number>();
   for (const l of s.records.journal_lines ?? []) {
-    const n = (perJournal.get(l.journal_id) ?? 0) + 1;
+    const id = typeof l.journal_id === 'string' ? l.journal_id.toLowerCase().replace(/[{}-]/g, '') : l.journal_id;
+    const n = (perJournal.get(id) ?? 0) + 1;
     if (n > MAX_JOURNAL_LINES) return { kind: 'long_journal', table: 'journal_lines' };
-    perJournal.set(l.journal_id, n);
+    perJournal.set(id, n);
   }
   return null;
 }

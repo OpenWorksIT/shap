@@ -95,7 +95,7 @@ describe('VAT: a payment with SARS’s interest beside it', () => {
     // Not in the boxes: R1 500 on the invoice only.
     expect(v.fields.field20).toBe(150_000);
     const items = await expectCleanAudit(b.env.sql);
-    expect(items.some((i) => i.level === 'warn' && /^journals by hand moved the VAT account in \S+ to \S+ \(R\s?150\.00 added to the VAT owed, R\s?40\.00 taken off it\), apart from what Shap can tell is a payment to or refund from SARS \(VAT against money or SARS’s other taxes; import VAT journalled against the bank looks the same, so it’s left out too\): Shap’s VAT201 is worked out from invoices, costs and assets, so it leaves them out/.test(i.text))).toBe(true);
+    expect(items.some((i) => i.level === 'warn' && /^journals by hand moved the VAT account in \S+ to \S+ \(R\s?150\.00 added to the VAT owed and R\s?40\.00 taken off it\), apart from what Shap can tell is a payment to or refund from SARS \(VAT against money or SARS’s other taxes; import VAT journalled against the bank looks the same, so it’s left out too\): Shap’s VAT201 is worked out from invoices, costs and assets, so it leaves them out/.test(i.text))).toBe(true);
     const screen = readFileSync(join(__dirname, '..', '..', '..', 'web', 'src', 'components', 'TaxForms.tsx'), 'utf8');
     expect(screen).toMatch(/added <Money cents=\{data\.handVatAddedCents!\} \/> to the VAT owed/);
     expect(screen).toMatch(/and took <Money cents=\{data\.handVatOffCents!\} \/> off it/);

@@ -132,20 +132,20 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
     order by 1`;
   const after = (many: boolean) =>
     many
-      ? `: Home, the forecast and the cash flow statement leave them out of cash. Check each with your accountant before changing their lines (Settings → Lists → Chart of accounts): moving one also moves last year's figures, which your accountant may need to explain in the statements`
-      : `: Home, the forecast and the cash flow statement leave it out of cash. Check it with your accountant before changing its line (Settings → Lists → Chart of accounts): moving it also moves last year's figures, which your accountant may need to explain in the statements`;
+      ? `: Home, the forecast and the cash flow statement leave them out of cash. Check each with your accountant before changing their lines (Settings → Lists → Chart of accounts): moving one also moves last year’s figures, which your accountant may need to explain in the statements`
+      : `: Home, the forecast and the cash flow statement leave it out of cash. Check it with your accountant before changing its line (Settings → Lists → Chart of accounts): moving it also moves last year’s figures, which your accountant may need to explain in the statements`;
   const assetsOff = offCash.filter((a) => a.type === 'asset').map((a) => a.name);
   if (assetsOff.length) {
     const many = assetsOff.length > 1;
     warn(
-      `${few(assetsOff)} ${many ? 'are bank or cash accounts' : 'is a bank or cash account'} you pay (or paid) from, but not on the statements' cash line. Whether ${many ? 'each is' : "it's"} cash is a judgement (money you can draw on demand is; a deposit fixed for about three months or less when it was made, for an amount that won't change, kept to pay what's coming, usually counts too; one fixed for longer, or whose value goes up and down (shares, unit trusts), usually doesn't)${after(many)}`,
+      `${few(assetsOff)} ${many ? 'are bank or cash accounts' : 'is a bank or cash account'} you pay (or paid) from, but not on the statements’ cash line. Whether ${many ? 'each is' : "it’s"} cash is a judgement (money you can draw on demand is; a deposit fixed (or on notice) for about three months or less when it was made, for a known amount with its interest and little risk of its value changing, kept to pay what’s coming, usually counts too; one fixed for longer, or whose value goes up and down (shares, most unit trusts), usually doesn’t)${after(many)}`,
     );
   }
   const owingOff = offCash.filter((a) => a.type === 'liability').map((a) => a.name);
   if (owingOff.length) {
     const many = owingOff.length > 1;
     warn(
-      `${few(owingOff)} ${many ? 'are liabilities' : 'is a liability'} you pay (or paid) from as a bank or cash account, but not on the statements' cash or bank overdraft line. A bank overdraft counts as cash only when it's repayable on demand and part of day-to-day cash management (otherwise it's borrowing, as a loan is)${after(many)}`,
+      `${few(owingOff)} ${many ? 'are liabilities' : 'is a liability'} you pay (or paid) from as a bank or cash account, but not on the statements’ cash or bank overdraft line. A bank overdraft counts as cash only when it’s repayable on demand and part of day-to-day cash management (otherwise it’s borrowing, as a loan is)${after(many)}`,
     );
   }
 
@@ -192,7 +192,7 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
         continue;
       }
       const hand = await handVat(db, p.start, p.end);
-      if (hand.lines) typedIn.push(`${p.start} to ${p.end} (${[hand.addedCents ? `${rand(hand.addedCents)} added to the VAT owed` : '', hand.offCents ? `${rand(hand.offCents)} taken off it` : ''].filter(Boolean).join(', ')})`);
+      if (hand.lines) typedIn.push(`${p.start} to ${p.end} (${[hand.addedCents ? `${rand(hand.addedCents)} added to the VAT owed` : '', hand.offCents ? `${rand(hand.offCents)} taken off it` : ''].filter(Boolean).join(' and ')})`);
       const f = await vat201(db, p.start, p.end);
       const [mv] = await db<{ t: number }[]>`
         select coalesce(sum(l.amount_cents), 0)::bigint as t from ledger_totals l join accounts a on a.id = l.account_id

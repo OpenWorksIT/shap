@@ -375,8 +375,10 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     app.put(`/api/${path}/:id`, { preHandler: requireRole('owner') }, async (req) => {
       const { id } = parse(idParam, req.params);
       const input = parse(schema, req.body) as Record<string, unknown>;
-      try {
-        return await sql.begin(async (tx) => {
+      // A rename takes the row's full lock (its name is unique), so a capture against it at the same
+      // moment can deadlock with it: tried once more, then said.
+      const attempt = () =>
+        sql.begin(async (tx) => {
           const change = async () => {
             const [row] = await tx`update ${tx(table)} set ${tx(input)} where id = ${id} returning *`;
             if (!row) throw notFound();
@@ -388,8 +390,16 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
             return moveToAccount(tx, { table, id, to: input.accountId as string, userId: userOrThrow(req).id, ip: req.ip }, change);
           return change();
         });
+      try {
+        try {
+          return await attempt();
+        } catch (err) {
+          if (pgCode(err) !== PG.deadlock) throw err;
+          return await attempt();
+        }
       } catch (err) {
         if (pgCode(err) === PG.uniqueViolation) throw conflict('That name is already used');
+        if (pgCode(err) === PG.deadlock) throw conflict('Someone was saving something against this at the same moment: try again.');
         throw err;
       }
     });

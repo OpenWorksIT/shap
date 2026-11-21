@@ -120,7 +120,7 @@ describe('moving a used payment account: what the refusal says (IFRS, words)', (
     const move = async () => (await owner.call({ method: 'PUT', url: `/api/sources/${bank}`, payload: { name: 'Business bank', kind: 'bank', accountId: acc.id } })).json().error as string;
     const thisYear = await move();
     expect(thisYear).toMatch(/^What’s already captured with this would move on or off the statements’ cash line with it\. If the account it’s on now is on the wrong line, change that account’s line instead/);
-    expect(thisYear).not.toMatch(/last year’s figures/);
+    expect(thisYear).not.toMatch(/cash line with it, last year’s figures too/);
     expect(thisYear).not.toMatch(/Put the new account on the same line first/);
     // With something from last year too: said.
     await owner.post('/api/costs', { date: addDays(fy.start, -10), description: 'Made-up fuel last year', supplier: 'Made-up Garage', amountCents: 20_000, categoryId: await r.cat('Petrol'), sourceId: bank });
@@ -148,7 +148,7 @@ describe('a company file brought in over books with history (IFRS)', () => {
     const bring = (file: unknown) => owner.call({ method: 'POST', url: '/api/company-file', payload: { password: 'test-password-1', file } });
     const res = await bring({ format: 'shap-company/1', accounts: [{ code: '1079', name: 'Made-up Holding', type: 'asset', statementLine: 'other_current_assets' }], sources: [{ name: 'Business bank', kind: 'bank', account: '1079' }] });
     expect(res.statusCode).toBe(400);
-    expect(res.json().error).toMatch(/^The company file puts the payment account “Business bank” on another account\. What’s already captured with this would move on or off the statements’ cash line with it/);
+    expect(res.json().error).toMatch(/^The company file puts “Business bank” \(Paid from \/ into\) on another account\. What’s already captured with this would move on or off the statements’ cash line with it\. Change the file \(give it a new name there, or leave it out\) and load it again\. Or give the new account the same line in the file, after checking with your accountant\.$/);
     expect(await cash()).toBe(before);
     expect((await env.sql<{ n: number }[]>`select count(*)::int as n from audit_log where action = 'moved_to_account'`)[0]!.n).toBe(0);
 
@@ -189,8 +189,9 @@ describe('a company file brought in over books with history (IFRS)', () => {
 describe('the sixth round’s words', () => {
   it('net profit’s words by who pays the tax, on turnover tax too (IFRS, words)', () => {
     expect(noIncomeTaxWords({ businessType: 'company' })).toBe('; before income tax (none captured in the books)');
-    expect(noIncomeTaxWords({ businessType: 'sole_prop', turnoverTax: true })).toBe('; the owner’s own tax isn’t in the business’s books');
-    expect(noIncomeTaxWords({ businessType: 'partnership', turnoverTax: true })).toBe('; the partners’ own tax isn’t in the business’s books');
+    expect(noIncomeTaxWords({ businessType: 'sole_prop', turnoverTax: true })).toBe('; the owner’s turnover tax is their own, not the business’s');
+    expect(noIncomeTaxWords({ businessType: 'trust', turnoverTax: true })).toBe('; before income tax (none captured in the books)');
+    expect(noIncomeTaxWords({ businessType: 'partnership', turnoverTax: true })).toBe('; the partners’ turnover tax is their own, not the business’s');
     expect(noIncomeTaxWords({ businessType: 'company', turnoverTax: true })).toBe('; turnover tax is in it only as far as it’s captured in the books');
     expect(noIncomeTaxWords({ businessType: 'npc', approvedPbo: true })).toBe('; before any income tax on trading beyond the PBO exemption (none captured in the books)');
   });
@@ -199,20 +200,20 @@ describe('the sixth round’s words', () => {
     const off = [{ name: 'Made-up Savings', cents: 400_000 }];
     const fmt = (c: number) => formatZar(c, { cents: false });
     expect(offCashNote(off, fmt)).toMatch(/the books audit \(Settings → Updates & backups\) says more\.$/);
-    expect(offCashNote(off, fmt, { owner: false })).toMatch(/the books audit \(the owner’s, under Settings → Updates & backups\) says more\.$/);
+    expect(offCashNote(off, fmt, { owner: false })).toMatch(/the owner’s books audit \(Settings → Updates & backups\) says more\.$/);
     expect(read('apps/web/src/pages/Forecast.tsx')).toMatch(/offCashNote\(data\.offCash, \(c\) => formatZar\(c, \{ cents: false \}\), \{ owner: isOwner \}\)/);
   });
 
   it('the leaving note shows only with salaries, and names the EMP201 (words, SARS)', () => {
     const forecast = read('apps/web/src/pages/Forecast.tsx');
     expect(forecast).toMatch(/data\.leavingAhead === false && data\.items\.some\(\(i\) => i\.kind === 'payroll'\) && <p className="xs muted">\{LEAVING_NOTE\}<\/p>/);
-    expect(forecast).toMatch(/LEAVING_NOTE = 'Salaries and the EMP201 here go on for everyone who hasn’t left yet: a leaving date still to come is counted only for people who see payroll\.'/);
+    expect(forecast).toMatch(/LEAVING_NOTE = 'Salaries and the EMP201 here go on for everyone who hasn’t left yet: only someone who sees payroll gets a forecast that counts leaving dates still to come\.'/);
   });
 
   it('the audit log names the new entries, and the accounts either side (words, IFRS)', () => {
     const log = read('apps/web/src/components/AuditLog.tsx');
-    for (const key of ["account: 'Account'", "payment_source: 'Payment account'", "cost_category: 'Cost type'", "account_line_changed: 'line or type changed'", "moved_to_account: 'moved onto another account'"]) expect(log).toContain(`  ${key}`);
-    expect(log).toMatch(/bits\.push\(`from \$\{accountWords\(d\.from\)\} to \$\{accountWords\(d\.to\)\}`\)/);
+    for (const key of ["account: 'Account'", "payment_source: 'Paid from / into'", "cost_category: 'Cost type'", "account_line_changed: 'line or type changed'", "moved_to_account: 'moved onto another account'"]) expect(log).toContain(`  ${key}`);
+    expect(log).toMatch(/bits\.push\(`from \$\{accountWords\(d\.from\)\} to \$\{accountWords\(d\.to\)\}\$\{typeof d\.by === 'string' \? ` · by \$\{d\.by\}` : ''\}`\)/);
   });
 
   it('the VAT201 note says only the parts that are there (words)', () => {
@@ -224,7 +225,7 @@ describe('the sixth round’s words', () => {
   it('the books audit lists names with "and", and its deposit words follow 7.2 (words, IFRS)', () => {
     const audit = read('apps/server/src/audit/books.ts');
     expect(audit).toMatch(/xs\.length > 1 \? `\$\{xs\.slice\(0, -1\)\.join\(', '\)\} and \$\{xs\[xs\.length - 1\]\}`/);
-    expect(audit).toMatch(/a deposit fixed for about three months or less when it was made, for an amount that won't change, kept to pay what's coming, usually counts too; one fixed for longer, or whose value goes up and down \(shares, unit trusts\), usually doesn't/);
-    expect(read('docs/IFRS.md')).toMatch(/a deposit fixed for about three months or less when it was made, readily turned into a known amount of cash with little risk of its value changing/);
+    expect(audit).toMatch(/a deposit fixed \(or on notice\) for about three months or less when it was made, for a known amount with its interest and little risk of its value changing, kept to pay what’s coming, usually counts too; one fixed for longer, or whose value goes up and down \(shares, most unit trusts\), usually doesn’t/);
+    expect(read('docs/IFRS.md')).toMatch(/a deposit fixed \(or on notice\) for about three months or less when it was made, for a known amount with its interest and little risk of its value changing/);
   });
 });

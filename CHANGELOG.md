@@ -16,7 +16,7 @@ entries newer than the version you're running before you update.
   (the EMP201 by the month paid), dividends tax on its date, wages and dividends owed now (those
   owed in the books by a journal or balances brought in too; one paid by a journal not counted
   again), PAYE, UIF and SDL owed in the books beyond your pay runs (brought in when moving in, say)
-  this week, day wages at the last eight weeks'
+  this week (and an EMP201 the books show paid by a journal not counted again), day wages at the last eight weeks'
   average, the VAT as invoiced on each VAT201 (an older one this week; a trial balance brought in
   counts as owed for periods gone by, and a refund SARS owes isn't netted off another period's VAT), and the costs you usually
   pay each month (as last paid: not those paid personally or on a card; one that comes as a
@@ -55,23 +55,25 @@ entries newer than the version you're running before you update.
   Home's first figure is now revenue (it was all income, interest included), gross profit is
   revenue less cost of sales, net profit says the running costs, finance costs, income tax and
   other income between them (and, when none is captured, says it's before a company's income tax,
-  or that an owner's or partners' own tax isn't in the books; on turnover tax, that a company's is
-  in it only as captured; for an approved PBO, before any tax on trading beyond its exemption), and the year
+  or that an owner's or partners' tax is their own, not the business's; on turnover tax, that a company's is
+  in it only as captured; for an approved PBO, before any income tax on trading beyond its exemption), and the year
   to date runs to today. What's in a bank or cash account you pay from that isn't on the
   statements' cash line is said under the money in the bank (and on the forecast), not counted:
   Shap doesn't move its line, and the books audit points it out, with what usually decides it (for
   a deposit, and for an overdraft), for you and your accountant to judge. Moving a payment account (or a cost
   type) that's been used onto another account is refused when its history would move on or off the cash
-  line with it (change the line of the account that's wrong, with your accountant), from a company
-  file brought in too, and a change of an account's line, or of the account behind a payment
-  account or cost type, is in the audit log, with both accounts' names and lines.
+  line with it (change the line of the account that's wrong, with your accountant), or would move
+  anything in a closed year, from a company file brought in too (where an account the file gives no
+  line keeps its own, and turnover tax stays to the businesses that can have it), and a change of an
+  account's line, or of the account behind a payment account or cost type, is in the audit log,
+  with both accounts' names and lines and the amounts that moved.
 - **VAT201.** When journals typed in (a cash sale journalled, a correction) moved the VAT account in
   a period, other than as payments to or refunds from SARS (VAT against the bank, cash, a card, your
   own money or SARS's other taxes), the VAT201 screen says what they added to the VAT owed and what
   they took off it, and so does the books audit: the boxes are worked out from invoices, costs and
   assets, so they leave those out, and where they go on the return is yours or your accountant's to
   decide. Import VAT journalled against the bank looks like a payment, so it isn't counted there
-  either (the screen says so).
+  either: the screen says so under the boxes.
 - **Journals.** A journal takes up to 1 000 lines: split a longer one into journals that each
   balance. (One very long journal could make the VAT201 screen and the books audit take minutes:
   they now read each journal once.) A Shap Pocket share holding a longer one is turned away, saying
