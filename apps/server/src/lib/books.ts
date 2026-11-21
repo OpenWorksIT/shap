@@ -171,17 +171,20 @@ export async function handVat(db: Db, start: string, end: string): Promise<{ lin
     with money as (
       select id from accounts where statement_line in ('cash', 'bank_overdraft') or system_key = 'owner_loan'
       union select account_id from payment_sources where kind in ('bank', 'cash', 'card', 'owner')
+    ), per as (
+      -- Each journal's lines read once (not once for each of its VAT lines): whether money is on it,
+      -- anything other than expense, income, VAT or money, and how much expense or income.
+      select jl.journal_id, bool_or(m.id is not null) as money,
+        bool_or(a.type not in ('expense', 'income') and coalesce(a.system_key, '') <> 'vat' and m.id is null) as other,
+        coalesce(sum(jl.debit_cents + jl.credit_cents) filter (where a.type in ('expense', 'income') and m.id is null), 0) as expense
+      from journal_lines jl join journals j on j.id = jl.journal_id join accounts a on a.id = jl.account_id
+      left join money m on m.id = jl.account_id
+      where j.kind in ('manual', 'adjustment') and j.date between ${start}::date and ${end}::date
+      group by jl.journal_id
     )
     select count(*)::int as n, coalesce(sum(jl.credit_cents), 0)::bigint as added, coalesce(sum(jl.debit_cents), 0)::bigint as off
-    from journal_lines jl join journals j on j.id = jl.journal_id join accounts a on a.id = jl.account_id
-    where a.system_key = 'vat' and j.kind in ('manual', 'adjustment') and j.date between ${start}::date and ${end}::date
-      and not (
-        exists (select 1 from journal_lines m where m.journal_id = j.id and m.account_id in (select id from money))
-        and not exists (select 1 from journal_lines o join accounts oa on oa.id = o.account_id
-                        where o.journal_id = j.id and oa.type not in ('expense', 'income') and coalesce(oa.system_key, '') <> 'vat' and o.account_id not in (select id from money))
-        and coalesce((select sum(o.debit_cents + o.credit_cents) from journal_lines o join accounts oa on oa.id = o.account_id
-                      where o.journal_id = j.id and oa.type in ('expense', 'income') and o.account_id not in (select id from money)), 0)
-            < abs(jl.credit_cents - jl.debit_cents))`;
+    from journal_lines jl join per p on p.journal_id = jl.journal_id join accounts a on a.id = jl.account_id
+    where a.system_key = 'vat' and not (p.money and not p.other and p.expense < abs(jl.credit_cents - jl.debit_cents))`;
   return { lines: r?.n ?? 0, addedCents: Number(r?.added ?? 0), offCents: Number(r?.off ?? 0) };
 }
 

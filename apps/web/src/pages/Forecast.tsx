@@ -19,11 +19,15 @@ interface Forecast {
   items: ForecastItem[];
   lowest: { week: number; closingCents: number } | null;
   longOverdue: { count: number; cents: number; days: number };
+  leavingAhead?: boolean;
 }
 
 /** What the forecast is, and isn't: said where it's shown. */
 export const FORECAST_NOTE =
   'An estimate from what’s in your books today: the cash as your statements count it; invoices on their due dates (overdue ones this week, as if paid now); supplier bills on theirs; what’s already in the books for a day to come; salaries and the EMP201 as your recent pay runs (the employment tax incentive isn’t taken off); wages owed now; dividends (or distributions) declared and not paid yet, all this week, as if paid in full now (any dividends tax on them included); dividends tax already withheld, on its DTR01 date; day wages at their recent average; VAT as invoiced (the invoice basis) on each VAT201; and the costs you usually pay each month. Sales you haven’t made or invoiced yet aren’t in it, nor are provisional or turnover tax, drawings, or card and loan repayments; and clients pay late and new costs come. An aid to plan with, not advice: OpenWorks IT, who make Shap, aren’t accountants or tax practitioners.';
+
+/** For someone who doesn't see payroll: the salaries aren't cut for leaving dates still to come. */
+export const LEAVING_NOTE = 'The salaries here are as if no one leaves who hasn’t left yet: leaving dates still to come are for those who see payroll.';
 
 /**
  * The next 13 weeks of money in and out, week by week, from what's in the books (forecast.ts on
@@ -56,6 +60,7 @@ export function CashForecast() {
         </p>
       )}
       {offCashNote(data.offCash, (c) => formatZar(c, { cents: false })) && <p className="small warn-text">{offCashNote(data.offCash, (c) => formatZar(c, { cents: false }))}</p>}
+      {data.leavingAhead === false && <p className="xs muted">{LEAVING_NOTE}</p>}
       <p className="xs muted">{FORECAST_NOTE}</p>
       <div className="panel table-wrap">
         <table className="table">

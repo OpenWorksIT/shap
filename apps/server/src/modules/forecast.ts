@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { addDays, addMonths, emp201Due, featureOn, formatDate, monthEnd, payoutWord, vat201Due, vatPeriod } from '@shap/shared';
-import { requireAccess } from '../auth.js';
+import { can, requireAccess, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { freshTotals, getSettings, today } from '../lib/books.js';
 import { bills } from './bills.js';
@@ -37,6 +37,8 @@ export interface Forecast {
   lowest: { week: number; closingCents: number } | null;
   /** Invoices more than LONG_OVERDUE_DAYS overdue: not counted as coming in. */
   longOverdue: { count: number; cents: number; days: number };
+  /** Whether leaving dates still to come are counted in the salaries: only for someone who sees payroll. */
+  leavingAhead: boolean;
 }
 
 /** A month (YYYY-MM) as words: "December 2026". */
@@ -54,7 +56,10 @@ const dayOf = (m: string, day: number) => `${m.slice(0, 8)}${String(Math.min(day
  * card and loan repayments aren't either. Overdue invoices and bills are put in this week, as if
  * settled now, except invoices more than 90 days overdue, which are shown apart.
  */
-export async function cashForecast(db: Db, now = today()): Promise<Forecast> {
+export async function cashForecast(db: Db, now = today(), opts: { people?: boolean } = {}): Promise<Forecast> {
+  // Leaving dates still to come are for those who see payroll: for anyone else the salaries go on
+  // as if no one leaves who hasn't yet (a month's total dropping would say who's going, and when).
+  const leavingAhead = opts.people !== false;
   const settings = await getSettings(db);
   const on = (k: Parameters<typeof featureOn>[1]) => featureOn(settings.features, k);
   const end = addDays(now, FORECAST_WEEKS * 7 - 1);
@@ -190,7 +195,7 @@ export async function cashForecast(db: Db, now = today()): Promise<Forecast> {
       const emps = await db<{ id: string; active: boolean; startDate: string; endDate: string | null }[]>`
         select id, active, start_date::text, end_date::text from employees where id = any(${ids})`;
       const paidFor = (m: string) => {
-        const taken = emps.filter((e) => e.active && e.startDate <= monthEnd(m) && (!e.endDate || e.endDate >= m));
+        const taken = emps.filter((e) => e.active && e.startDate <= monthEnd(m) && (!e.endDate || e.endDate >= m || (!leavingAhead && e.endDate > now)));
         return { net: taken.reduce((t, e) => t + usualPay.get(e.id)!.net, 0), sars: taken.reduce((t, e) => t + usualPay.get(e.id)!.sars, 0) };
       };
       // When in relation to its month a run is paid, as the middle of the recent runs had it: the
@@ -340,9 +345,9 @@ export async function cashForecast(db: Db, now = today()): Promise<Forecast> {
     return { start: addDays(now, i * 7), end: addDays(now, i * 7 + 6), inCents, outCents, closingCents: running };
   });
   const lowest = weeks.reduce<{ week: number; closingCents: number } | null>((lo, w, i) => (!lo || w.closingCents < lo.closingCents ? { week: i, closingCents: w.closingCents } : lo), null);
-  return { asOf: now, openingCents, cardsOweCents, offCash, weeks, items, lowest, longOverdue };
+  return { asOf: now, openingCents, cardsOweCents, offCash, weeks, items, lowest, longOverdue, leavingAhead };
 }
 
 export function registerForecastRoutes(app: FastifyInstance, ctx: Ctx): void {
-  app.get('/api/forecast', { preHandler: requireAccess('reports.view') }, async () => cashForecast(ctx.sql));
+  app.get('/api/forecast', { preHandler: requireAccess('reports.view') }, async (req) => cashForecast(ctx.sql, today(), { people: can(userOrThrow(req), 'payroll.view') }));
 }

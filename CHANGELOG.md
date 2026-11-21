@@ -11,7 +11,8 @@ entries newer than the version you're running before you update.
   week, as if paid now; those more than 90 days overdue shown apart, not counted), supplier bills
   on theirs, what's already in the books for a day to come (a pay run paid on its pay day, a payment
   dated ahead: not counted again), salaries and the EMP201 for everyone in the last pay run at
-  their usual pay while a run would still take them (not someone who has left), on the usual day
+  their usual pay while a run would still take them (not someone who has left; to someone who
+  doesn't see payroll, as if no one leaves who hasn't yet), on the usual day
   (the EMP201 by the month paid), dividends tax on its date, wages and dividends owed now (those
   owed in the books by a journal or balances brought in too; one paid by a journal not counted
   again), day wages at the last eight weeks'
@@ -65,6 +66,9 @@ entries newer than the version you're running before you update.
   a period, other than as payments to SARS, the VAT201 screen says by how much, and so does the books
   audit: the boxes are worked out from invoices, costs and assets, so they leave those out, and
   where they go on the return is yours or your accountant's to decide.
+- **Journals.** A journal takes up to 1 000 lines: split a longer one into journals that each
+  balance. (One very long journal could make the VAT201 screen and the books audit take minutes:
+  they now read each journal once.)
 - **Payroll.** A pay date before the month before its run's month, or more than six months after
   it, is refused as a likely slip of the year or month (it could be taxed on the wrong year's tables or go on the wrong EMP201). A
   run paid more than a month after its month says that which EMP201 it goes on is your
