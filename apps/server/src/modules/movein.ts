@@ -684,7 +684,7 @@ export function suggestAccount(line: InTbLine, accounts: { id: string; code: str
     // Named as owed comes first: "Employer UIF payable" is SARS's, whatever else it says.
     [/\buif\b|unemployment insurance/, () => (/expense/.test(n) || (!owedWord.test(n) && (/contrib|company|employer/.test(n) || line.cents > 0)) ? null : byKey('uif_payable'))],
     [/\bsdl\b|skills development/, () => (/expense/.test(n) || (line.cents > 0 && !owedWord.test(n)) ? null : byKey('sdl_payable'))],
-    [/dividends? (withholding )?tax|withholding tax on dividends|dividends? w\/?h\/?t\b|\bdwt\b/, () => byKey('dwt_payable')],
+    [/dividends? (withholding )?tax|withholding tax on dividends|dividends? w\/?h\/?t\b|dividends? w\/h tax|\bwht on dividends|\bdwt\b/, () => byKey('dwt_payable')],
     [/salar.*(owed|payable)|wages payable|accrued wages/, () => byKey('wages_payable')],
     [/income tax|provisional tax|sars/, () => (/expense/.test(n) ? byKey('income_tax') : byKey('income_tax_payable'))],
     // After the taxes and wages owed: "VAT payable" or "PAYE payable" is SARS's, not a supplier's

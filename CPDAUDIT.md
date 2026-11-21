@@ -1527,14 +1527,32 @@ The eighth round (`0c02c9e`): still to fix, and fixed:
   ten years of books); when SARS keeps a whole refund as a set-off, the forecast shows the debt
   until the refund is older than last period.
 
+The ninth round (`0ac7dd3`, must-fix only): IFRS found nothing to fix. Still to fix, and fixed:
+
+- SARS and accounting: the overdue VAT a set-off clears was taken before what had been paid on it,
+  and a refund that came in before the debt fell due could be taken as net of a set-off against
+  it: what's overdue is less what was paid since, and a set-off needs some of the refund to have
+  come after the debt fell due. An EMP201 or DTR01 paid on Payroll → SARS on a day after the 13
+  weeks dropped out of them (or read as a journal's): still due within them.
+- Security: the new closed-period check made every save of a big cost type slow (seconds, and a
+  company file could repeat it): only when its account or kind changes and it has a closed cost,
+  and a file naming one twice is refused; a share value that can't be written as text gave a 500:
+  too big; the tracker's long names refused the company file it made: named as Settings takes them.
+- Words: a company file changing only a cost type's kind was said to move it; the SARS register's
+  set-off sentence; the changelog said Settings refuses a change of type (it's the file that does);
+  the audit log's moved amounts say debit or credit; the guide's import VAT; "closed period".
+- Noted, not changed: a kind change moving open work in progress into an expense isn't logged; a
+  company file's change of year end is logged now, but an agreed year's figures stay as agreed.
+
 Tests: `review-1.33/*` (bank, link, home, forecast and its rounds, budgets, words, sars,
 words-round4, security-round5, round6, acc-round6, security-round6-lock and -share, round7-ifrs,
 acc-round7, sars-round7, sars-round7-movein, words-round7, security-round7-lock and -share,
-round8-ifrs, acc-round8, sars-round8, words-round8, security-round8-share and -company-file), `forecast-budgets`, `dashboard-money`, `cipc-coida`,
+round8-ifrs, acc-round8, sars-round8, words-round8, security-round8-share and -company-file,
+sars-round9, sars-round9-pay, acc-round9, words-round9, security-round9), `forecast-budgets`, `dashboard-money`, `cipc-coida`,
 `bank-formats-rules`, and Pocket's `review-shap-1.33.test.ts`,
 `review-shap-1.33-security.test.ts`, `review-shap-1.33-round6.test.ts`,
-`review-shap-1.33-round7.test.ts` and the `review-shap-1.33-round8-*` files, each failing without
-its fix.
+`review-shap-1.33-round7.test.ts`, and the `review-shap-1.33-round8-*` and `-round9-*` files, each
+failing without its fix.
 
 ### Code scanning (CodeQL), first run
 

@@ -207,7 +207,7 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
       ok(brought ? `the VAT account moved by what Shap’s VAT201 shows for the ${periods.size - brought} of the last year’s ${periods.size} periods it works out${notOurs}` : `the VAT account moved by what Shap’s VAT201 shows for each period of the last year (${periods.size} periods)`);
     else fail(`the VAT201 and the VAT account disagree for ${few(off, 3)}`);
     if (typedIn.length)
-      warn(`journals by hand moved the VAT account in ${few(typedIn, 3)}, apart from what Shap can tell is a payment to or refund from SARS (VAT against money or SARS’s other taxes; import VAT journalled against the bank looks the same, so it’s left out too): Shap’s VAT201 is worked out from invoices, costs and assets, so it leaves them out. Whether and where they go on the return is the business’s or their accountant’s to decide`);
+      warn(`journals by hand moved the VAT account in ${few(typedIn, 3)}, apart from what Shap can tell is a payment to or refund from SARS (VAT against money or SARS’s other taxes; import VAT journalled against the bank, cash, a card or your own money looks the same, so it’s left out too): Shap’s VAT201 is worked out from invoices, costs and assets, so it leaves them out. Whether and where they go on the return is the business’s or their accountant’s to decide`);
   } else ok('not registered for VAT: no VAT201s to check');
 
   const sars = await db<{ owed: number }[]>`

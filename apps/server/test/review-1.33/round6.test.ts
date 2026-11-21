@@ -226,6 +226,6 @@ describe('the sixth round’s words', () => {
     const audit = read('apps/server/src/audit/books.ts');
     expect(audit).toMatch(/xs\.length > 1 \? `\$\{xs\.slice\(0, -1\)\.join\(', '\)\} and \$\{xs\[xs\.length - 1\]\}`/);
     expect(audit).toMatch(/a fixed or notice deposit of about three months or less when it was made, for a known amount with its interest and little risk of its value changing, kept to pay what’s coming, usually counts too; one for longer, or whose value goes up and down, such as shares or most unit trusts, usually doesn’t/);
-    expect(read('docs/IFRS.md')).toMatch(/a fixed or notice deposit of about three months or less when it was made, readily convertible to a known amount of cash \(with its interest\) with little risk of its value changing/);
+    expect(read('docs/IFRS.md')).toMatch(/a fixed or notice deposit of about three months or less when it was made, readily convertible to a known amount of cash, interest included, with little risk of its value changing/);
   });
 });

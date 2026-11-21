@@ -109,7 +109,7 @@ export async function restoreCompanyFile(tx: Tx, raw: unknown, by: { userId?: st
   const count = (k: string) => (done[k] = (done[k] ?? 0) + 1);
   // An agreed year's figures don't go into a year already closed here (or signed): reopen it first.
   // The same year at the same figures (the file loaded back into the books it came from) is left be.
-  const [before] = await tx<{ lockDate: string | null }[]>`select lock_date::text as lock_date from settings where id`;
+  const [before] = await tx<{ lockDate: string | null; fyEndMonth: number }[]>`select lock_date::text as lock_date, fy_end_month from settings where id`;
   // How the books close before the file's settings come in: a change to it locks nothing at once.
   const closing = await lockSettingsNow(tx);
   const asAgreed = new Set<string>();
@@ -152,11 +152,19 @@ export async function restoreCompanyFile(tx: Tx, raw: unknown, by: { userId?: st
     // SARS: a company on turnover tax has its year end on the last day of February (Settings' rule).
     const [t] = await tx<{ tt: boolean; m: number }[]>`select turnover_tax as tt, fy_end_month as m from settings where id`;
     if (t?.tt && (entity(s.businessType).febYearEnd ? 2 : t.m) !== 2)
-      throw badRequest('The company file puts the business on turnover tax with a year end that isn’t February: turnover tax needs the year to end in February (SARS’s rule for companies on turnover tax). Change the file and load it again.');
+      throw badRequest('With the company file’s settings the business would be on turnover tax with a year end that isn’t February: turnover tax needs the year to end in February (SARS’s rule for companies on turnover tax). Change the file and load it again.');
   }
   // A trust's, a sole proprietor's and a partnership's year of assessment ends in February: their
   // books' year too, as Settings keeps it (so the VAT201s, Home and the practice's list agree).
   if (entity((await getSettings(tx)).businessType).febYearEnd) await tx`update settings set fy_end_month = 2 where id and fy_end_month <> 2`;
+
+  // A change of the year end (the file's, or February as the business type needs) in the log, as
+  // Settings logs one: the accountant may need to disclose it (IFRS for SMEs 3.10).
+  {
+    const [y] = await tx<{ m: number }[]>`select fy_end_month as m from settings where id`;
+    if (before && y && y.m !== before.fyEndMonth)
+      await audit(tx, { userId: by.userId ?? null, actor: by.userId ? 'user' : 'system', action: 'update', entity: 'settings', ip: by.ip, details: { fyEndMonth: { was: before.fyEndMonth, now: y.m }, by: 'the company file' } });
+  }
 
   // Trading names
   for (const b of file.brands) {
@@ -215,6 +223,11 @@ export async function restoreCompanyFile(tx: Tx, raw: unknown, by: { userId?: st
   // A payment account or cost type already here, on another account: moved as Settings → Lists
   // moves one (what's captured with it goes too), so refused where that would reach a closed year
   // or carry entries on or off the cash line, and logged.
+  // Each named once (a name twice would be moved, and checked, twice over).
+  const twice = (names: string[]) => names.find((n, i) => names.indexOf(n) !== i);
+  const twiceSource = twice(file.sources.map((x) => x.name));
+  const twiceCategory = twice(file.categories.map((x) => x.name));
+  if (twiceSource || twiceCategory) throw badRequest(`The company file names “${twiceSource ?? twiceCategory}” twice. Change the file and load it again.`);
   for (const s of file.sources) {
     const to = await acc(s.account);
     const [here] = await tx<{ id: string; accountId: string }[]>`select id, account_id from payment_sources where name = ${s.name}`;
@@ -227,7 +240,7 @@ export async function restoreCompanyFile(tx: Tx, raw: unknown, by: { userId?: st
     const to = await acc(c.account);
     const [here] = await tx<{ id: string; accountId: string }[]>`select id, account_id from cost_categories where name = ${c.name}`;
     if (here)
-      await moveToAccount(tx, { table: 'cost_categories', id: here.id, to, file: c.name, fromAs: asWas.get(here.accountId), ...by }, () =>
+      await moveToAccount(tx, { table: 'cost_categories', id: here.id, to, kind: c.kind, file: c.name, fromAs: asWas.get(here.accountId), ...by }, () =>
         tx`update cost_categories set kind = ${c.kind}, account_id = ${to}, active = ${c.active} where id = ${here.id}`);
     else await tx`insert into cost_categories (name, kind, account_id, active, sort) values (${c.name}, ${c.kind}, ${to}, ${c.active}, (select coalesce(max(sort), 0) + 1 from cost_categories))`;
   }

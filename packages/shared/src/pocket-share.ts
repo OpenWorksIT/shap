@@ -222,6 +222,15 @@ export const MAX_SHARE_FIGURE = 1e13;
  * What's wrong with a share, past its schema, if anything: the limits Shap holds a file to when it
  * reads one, and Pocket checks before it offers one (so a file Shap would refuse is never offered).
  */
+/** A value's length as text, the longer of its JSON and its String() (Infinity: it can't be written). */
+function textLength(v: unknown): number {
+  try {
+    return Math.max(JSON.stringify(v)?.length ?? 0, String(v).length);
+  } catch {
+    return Infinity;
+  }
+}
+
 export function shareProblem(s: PocketShare): { kind: 'column' | 'too_big' | 'rows' | 'settings' | 'twice' | 'long_journal'; table?: string } | null {
   let rows = 0;
   for (const [table, list] of Object.entries(s.records)) {
@@ -231,8 +240,9 @@ export function shareProblem(s: PocketShare): { kind: 'column' | 'too_big' | 'ro
       for (const [col, v] of Object.entries(row)) {
         if (!/^[a-z_][a-z0-9_]*$/.test(col)) return { kind: 'column', table };
         if ((typeof v === 'string' && v.length > MAX_SHARE_TEXT) || (typeof v === 'number' && (!Number.isFinite(v) || Math.abs(v) > MAX_SHARE_FIGURE))) return { kind: 'too_big', table };
-        // An array or object goes in as its text: measured so.
-        if (v !== null && typeof v === 'object' && JSON.stringify(v).length > MAX_SHARE_TEXT) return { kind: 'too_big', table };
+        // An array or object goes in as its text (JSON, or as the driver writes it): measured so,
+        // and one that can't be written as text at all is too big.
+        if (v !== null && typeof v === 'object' && textLength(v) > MAX_SHARE_TEXT) return { kind: 'too_big', table };
       }
   }
   if (rows > MAX_SHARE_ROWS) return { kind: 'rows' };
@@ -249,7 +259,12 @@ export function shareProblem(s: PocketShare): { kind: 'column' | 'too_big' | 'ro
   const perJournal = new Map<unknown, number>();
   for (const l of s.records.journal_lines ?? []) {
     // (As the driver sends it: an array or anything else becomes its text.)
-    const id = l.journal_id == null ? null : String(l.journal_id).toLowerCase().replace(/[{}-]/g, '');
+    let id: string | null;
+    try {
+      id = l.journal_id == null ? null : String(l.journal_id).toLowerCase().replace(/[{}-]/g, '');
+    } catch {
+      return { kind: 'too_big', table: 'journal_lines' };
+    }
     const n = (perJournal.get(id) ?? 0) + 1;
     if (n > MAX_JOURNAL_LINES) return { kind: 'long_journal', table: 'journal_lines' };
     perJournal.set(id, n);

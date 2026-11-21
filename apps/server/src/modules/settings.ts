@@ -339,7 +339,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (existing.systemKey && existing.type !== input.type) throw badRequest('Shap posts to this account automatically, so its type can’t change. You can rename it.');
     // Its type decides where its postings land (profit or the balance sheet): not for a closed year's.
     if (existing.type !== input.type && (await postedInClosedYear(sql, () => sql`select 1 from ledger l where l.account_id = ${id} and l.date <= (select lock_date from settings where id) limit 1`)))
-      throw badRequest('This account has postings in a closed year, so its type can’t change. Make a new account for what’s coming instead.');
+      throw badRequest('This account has postings in a closed period, so its type can’t change. Make a new account for what’s coming instead.');
     try {
       return await sql.begin(async (tx) => {
         // The line stays as it was unless one is given (or the type changed to one it doesn't fit).
@@ -387,7 +387,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
           // Moving a cost type or a payment account to another account in the books moves
           // everything already captured with it: checked, and logged (lib/books.ts moveToAccount).
           if (input.accountId && (table === 'payment_sources' || table === 'cost_categories'))
-            return moveToAccount(tx, { table, id, to: input.accountId as string, userId: userOrThrow(req).id, ip: req.ip }, change);
+            return moveToAccount(tx, { table, id, to: input.accountId as string, kind: input.kind as string | undefined, userId: userOrThrow(req).id, ip: req.ip }, change);
           return change();
         });
       try {

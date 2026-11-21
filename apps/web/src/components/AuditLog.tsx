@@ -118,10 +118,10 @@ function accountWords(x: unknown): string {
   return `${o.type ? `${(ACCOUNT_TYPE_LABELS as Record<string, string | undefined>)[o.type] ?? o.type}, ` : ''}${line}`;
 }
 
-/** What moved with a payment account or cost type (what left the old account, net), by financial year. */
+/** What moved with a payment account or cost type (what left the old account, net: debit, or credit), by financial year. */
 function movedWords(x: unknown): string {
   const years = Array.isArray(x) ? (x as { fyEnd?: string; cents?: number }[]).filter((y) => y.fyEnd && y.cents) : [];
-  return years.length ? `, with ${years.map((y) => `${formatZar(Math.abs(y.cents!))} of the year to ${formatDate(y.fyEnd!, 'long')}`).join(', ')}` : '';
+  return years.length ? `, with ${years.map((y) => `${formatZar(Math.abs(y.cents!))} ${y.cents! > 0 ? 'debit' : 'credit'} of the year to ${formatDate(y.fyEnd!, 'long')}`).join(', ')}` : '';
 }
 
 /** The few details worth reading in a row; the rest are in the export. */

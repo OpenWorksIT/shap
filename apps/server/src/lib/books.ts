@@ -206,28 +206,32 @@ async function accountWords(db: Db, id: string) {
  */
 export async function moveToAccount<T>(
   tx: Db,
-  o: { table: 'payment_sources' | 'cost_categories'; id: string; to: string; userId?: string | null; ip?: string; file?: string; fromAs?: { code: string; name: string; line: string | null } },
+  o: { table: 'payment_sources' | 'cost_categories'; id: string; to: string; kind?: string; userId?: string | null; ip?: string; file?: string; fromAs?: { code: string; name: string; line: string | null } },
   update: () => Promise<T>,
 ): Promise<T> {
   // No key update: a capture against it (its foreign key) isn't held up by this.
-  const [was] = await tx<{ accountId: string; name: string }[]>`select account_id, name from ${tx(o.table)} where id = ${o.id} for no key update`;
+  const [was] = await tx<{ accountId: string; name: string; kind: string }[]>`select account_id, name, kind from ${tx(o.table)} where id = ${o.id} for no key update`;
   if (!was) return update();
   const costType = o.table === 'cost_categories';
   const moving = was.accountId !== o.to;
-  if (!moving && !costType) return update();
+  // A cost type's kind decides where its costs post (work in progress): a change of it alone can move them.
+  const kindChanges = costType && o.kind !== undefined && o.kind !== was.kind;
+  if (!moving && !kindChanges) return update();
   const what = costType ? 'Cost type' : 'Paid from / into';
   const changeFile = 'Change the file (give it a new name there, or leave it out) and load it again.';
   const refuse = (words: string, settingsFix: string, fileFix = changeFile) =>
-    badRequest(o.file ? `The company file puts “${o.file}” (${what}) on another account. ${words} ${fileFix}` : `${words} ${settingsFix}`);
+    badRequest(o.file ? `The company file ${moving ? 'puts' : 'gives'} “${o.file}” (${what}) ${moving ? 'on another account' : 'another kind'}. ${words} ${fileFix}` : `${words} ${settingsFix}`);
   const [s] = await tx<{ lockDate: string | null; fyEndMonth: number }[]>`select lock_date::text as lock_date, fy_end_month from settings where id`;
   const fyEndMonth = s?.fyEndMonth ?? 2;
   const year = financialYear(today(), fyEndMonth);
   const closedWords = () => `Some of what’s already captured with this is in a closed period (to ${formatDate(s!.lockDate!, 'long')}), so its ${costType ? 'account or kind' : 'account'} can’t change.`;
   // A cost type's own costs in a closed period, wherever they post: its kind decides where (work
   // in progress), so a change of kind alone can move them.
+  // (Only when it has a cost in a closed period at all: an indexed look first.)
+  const hasClosed = costType && s?.lockDate ? (await tx`select 1 from costs where category_id = ${o.id} and date <= ${s.lockDate}::date limit 1`).length > 0 : false;
   const closedOwn = async () =>
-    costType && s?.lockDate
-      ? JSON.stringify(await tx`select l.account_id, l.date::text, sum(l.amount_cents)::bigint as t from ledger_detail l where l.source = 'cost' and l.source_id in (select id from costs where category_id = ${o.id}) and l.date <= ${s.lockDate}::date group by 1, 2 order by 1, 2`)
+    hasClosed
+      ? JSON.stringify(await tx`select l.account_id, l.date::text, sum(l.amount_cents)::bigint as t from ledger_detail l where l.source = 'cost' and l.source_id in (select id from costs where category_id = ${o.id}) and l.date <= ${s!.lockDate}::date group by 1, 2 order by 1, 2`)
       : '';
   const ownBefore = await closedOwn();
   if (!moving) {

@@ -207,6 +207,7 @@ describe('EMP201s less what the books show paid', () => {
       const f = await cashForecast(b.env.sql, now);
       weeksAddUp(f);
       expect(b.listed(f)).toBe(0);
+      await expectCleanAudit(b.env.sql);
     } finally {
       await b.env.close();
     }

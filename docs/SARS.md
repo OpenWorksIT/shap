@@ -109,15 +109,18 @@ due. Each is an estimate, said so on screen with who OpenWorks IT are:
   netted off what's owed for another period (last period's or an older one, paid on time or not),
   nor forecast as money in: SARS pays a refund after its checks ([VAT refunds for
   vendors](https://www.sars.gov.za/types-of-tax/value-added-tax/vat-refunds-for-vendors/)). Once one
-  has come in, VAT already overdue for an ended period is taken as set off against it first, up to
-  what's still owed of the refund, as SARS must ([TAA
-  s191(1)](https://www.acts.co.za/tax/191__refunds_subject_to_set_off_and_deferral), only against a
-  debt already overdue). SARS's other tax accounts (PAYE, UIF, SDL, income
+  has come in (by today: one booked ahead hasn't), VAT already overdue for an ended period is taken
+  as set off in full when that debt and what came in together are no more than the refund (SARS
+  clears the whole overdue debt before paying any of it, and only a debt already overdue: [TAA
+  s191(1)](https://www.acts.co.za/tax/191__refunds_subject_to_set_off_and_deferral)); otherwise
+  none is. SARS's other tax accounts (PAYE, UIF, SDL, income
   tax and dividends tax owed) count as money for this test, so VAT paid in one journal with PAYE is
   a payment, and a refund SARS set off against PAYE a refund. Import VAT journalled against the bank
   (or cash, a card or the owner's own money) looks the same as a payment to SARS, so it's taken as one (and isn't on the VAT201's typed-in note
   either: the VAT201 screen says so under the boxes, where it always shows: as input tax it goes in
-  field 14A or 15A, which Shap doesn't fill). Which period a
+  field 14A or 15A, which Shap doesn't fill). Import VAT captured as a cost is in box 14 or 15, as
+  all costs' VAT is; on eFiling it goes in 14A or 15A instead, moved, not added again (the screen
+  and the VAT201 guide say so). Which period a
   payment was for is SARS's to say (by its reference, which Shap doesn't keep): the split is an
   estimate. This period's, documents dated ahead in it included, on its own `vat201Due`. Always
   eFiling's date (the last business day), never the 25th. A vendor on the payments basis would owe
@@ -139,7 +142,9 @@ due. Each is an estimate, said so on screen with who OpenWorks IT are:
   the employer pays or becomes liable to pay ([Fourth Schedule para
   2](https://www.acts.co.za/income-tax/sch4_2__employers_to_deduct_tax)), and Shap puts it on the
   month paid (`latePayNote`).
-- **DTR01**: dividends tax owed, on its due date (`dwtDue`, from the day paid).
+- **DTR01**: dividends tax owed, on its due date (`dwtDue`, from the day paid), less what the books
+  show paid beyond it (a journal by hand), oldest first. Payments dated after the forecast's weeks
+  aren't taken as paid within them (EMP201s, DTR01s, and PAYE, UIF and SDL beyond the pay runs).
 - Not in it: provisional tax and turnover tax (said on screen).
 
 Home's debtor days are now measured against invoices as issued (their VAT in them), not grossed up

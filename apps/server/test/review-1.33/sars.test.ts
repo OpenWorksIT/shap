@@ -24,7 +24,7 @@ describe('the SARS register for 1.33', () => {
     expect(register).toMatch(/SARS's other tax accounts \(PAYE, UIF, SDL, income\s+tax and dividends tax owed\) count as money for this test/);
     expect(register).toMatch(/A refund SARS owes isn't\s+netted off what's owed for another period \(last period's or an older one, paid on time or not\),\s+nor forecast as money in/);
     // Seventh and eighth rounds: once one has come in, overdue VAT is taken as set off first (s191(1)).
-    expect(register).toMatch(/Once one\s+has come in, VAT already overdue for an ended period is taken as set off against it first/);
+    expect(register).toMatch(/Once one\s+has come in \(by today: one booked ahead hasn't\), VAT already overdue for an ended period is taken\s+as set off in full when that debt and what came in together are no more than the refund/);
     expect(register).not.toMatch(/only the timing is off/);
     expect(register).not.toMatch(/A VAT payment by card/);
     expect(register).toMatch(/the split is an\s+estimate/);

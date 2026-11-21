@@ -101,7 +101,8 @@ export async function applyTracker(sql: Sql, plan: TrackerPlan, opts: ImportOpti
         postsTo = 'Bank';
       } else {
         // Cards and accounts in the owner's name: the company owes the owner for these.
-        id = await ensureSource(acc, /cc|card|miles|credit/i.test(acc) ? 'card' : 'owner', loanAcc);
+        // (Named as Settings takes a name: 80 characters at most.)
+        id = await ensureSource(acc.slice(0, 80).trim(), /cc|card|miles|credit/i.test(acc) ? 'card' : 'owner', loanAcc);
         postsTo = 'Owner’s loan';
       }
       sourceFor.set(acc, id);
@@ -119,7 +120,8 @@ export async function applyTracker(sql: Sql, plan: TrackerPlan, opts: ImportOpti
       const key = aliases[type.trim().toLowerCase()] ?? type.trim().toLowerCase();
       const hit = byName.get(key);
       if (hit) return hit;
-      const name = type.trim().toLowerCase() === stockName ? `${type.trim()} (from the tracker)` : type.trim();
+      // (Named as Settings takes a name: 80 characters at most.)
+      const name = (type.trim().toLowerCase() === stockName ? `${type.trim().slice(0, 60)} (from the tracker)` : type.trim().slice(0, 80)).trim();
       const [row] = await tx<{ id: string }[]>`
         insert into cost_categories (name, kind, account_id, sort) values (${name}, 'overhead', ${sundryAcc}, (select coalesce(max(sort), 0) + 1 from cost_categories)) returning id`;
       byName.set(key, row!.id);

@@ -57,7 +57,7 @@ describe('MUST: a refund paid net of SARS’s set-off against VAT already overdu
     // pays the R150 rest. The books' VAT for ended periods is now nil.
     await b.cost(b.before.start, 75_000);
     await b.invoice(b.last.start, 400_000);
-    await b.sars(b.current.start, -15_000);
+    await b.sars(now, -15_000); // after the debt fell due: a refund paid before it can’t be net of a set-off (ninth round)
     await b.invoice(b.current.start, 600_000);
     try {
       const vatBalance = (await b.env.sql<{ b: string }[]>`select coalesce(sum(l.amount_cents), 0)::bigint as b from ledger l join accounts a on a.id = l.account_id where a.system_key = 'vat' and l.date < ${b.current.start}::date`)[0]!.b;
@@ -74,7 +74,7 @@ describe('MUST: a refund paid net of SARS’s set-off against VAT already overdu
     // Before last: R600 output VAT, overdue, not paid. Last: R750 refund. SARS sets off R600 and pays R150.
     await b.invoice(b.before.start, 400_000);
     await b.cost(b.last.start, 75_000);
-    await b.sars(b.current.start, -15_000);
+    await b.sars(now, -15_000); // after the debt fell due: a refund paid before it can’t be net of a set-off (ninth round)
     await b.invoice(b.current.start, 600_000);
     try {
       expect(vatOf(await cashForecast(b.env.sql, now))).toEqual([{ date: vat201Due(b.current.end), cents: -90_000 }]);
