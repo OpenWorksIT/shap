@@ -102,12 +102,17 @@ due. Each is an estimate, said so on screen with who OpenWorks IT are:
   trial balance brought in: its VAT is the balance on its date, not that period's own). What's
   owed for periods that have ended (the VAT account today, less this period's VAT and payments
   already booked ahead): the last period's own on its `vat201Due` (this week when that's past),
-  anything older this week. A payment beyond them comes off this period's, up to what was paid
-  since the period began (one made ahead for it); a refund SARS owes isn't netted off (SARS pays a
-  refund after its checks, and sets refunds off against debts itself: [VAT refunds for
-  vendors](https://www.sars.gov.za/types-of-tax/value-added-tax/vat-refunds-for-vendors/)), nor
-  forecast as money in. A VAT payment in one journal with PAYE is taken as that period's VAT: only
-  its timing is off. Which period a
+  anything older this week (said as brought in with a trial balance when one came in since the
+  last period began: Shap can't put that balance in a SARS period). A payment beyond them comes off
+  this period's, up to what was paid since the period began beyond what the ended periods owed
+  when it began (a refund owed counted as nothing): one made ahead for it. A refund SARS owes isn't
+  netted off, whether or not last period's VAT was paid on time (SARS pays a refund after its
+  checks, and sets refunds off against debts itself: [VAT refunds for
+  vendors](https://www.sars.gov.za/types-of-tax/value-added-tax/vat-refunds-for-vendors/), [TAA
+  s191](https://www.acts.co.za/tax/191__refunds_subject_to_set_off_and_deferral)), nor forecast as
+  money in. A VAT payment in one journal with PAYE is taken as that period's VAT, and import VAT
+  journalled against the bank as a payment to SARS (it looks the same, so it isn't on the VAT201's
+  typed-in note either): only the timing is off. Which period a
   payment was for is SARS's to say (by its reference, which Shap doesn't keep): the split is an
   estimate. This period's, documents dated ahead in it included, on its own `vat201Due`. Always
   eFiling's date (the last business day), never the 25th. A vendor on the payments basis would owe

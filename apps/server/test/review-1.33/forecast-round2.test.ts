@@ -161,7 +161,7 @@ describe('salaries paid early, VAT journals and older returns, and a business no
     const lastEnd = monthEnd(addMonths(thisMonth, -1));
     const lastDue = vat201Due(lastEnd);
     expect(vat).toEqual([
-      expect.objectContaining({ date: now, cents: -60_000, label: `VAT owing for periods before ${formatDate(addMonths(thisMonth, -1))} (VAT201, an estimate)` }),
+      expect.objectContaining({ date: now, cents: -60_000, label: `VAT owing for periods before ${formatDate(addMonths(thisMonth, -1))} (VAT201, an estimate, as if paid now)` }),
       expect.objectContaining({ date: lastDue < now ? now : lastDue, cents: -30_000 }),
       expect.objectContaining({ date: vat201Due(monthEnd(thisMonth)), cents: -15_000, label: `VAT so far on the period to ${formatDate(monthEnd(thisMonth))} (VAT201)` }),
     ]);

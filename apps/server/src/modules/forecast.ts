@@ -262,15 +262,27 @@ export async function cashForecast(db: Db, now = today()): Promise<Forecast> {
     let thisPeriod = toNow + (await accrued(addDays(now, 1), current.end));
     let ended = vatOwedNow - toNow - paidAhead;
     if (ended < 0) {
-      // Paid to SARS since this period began (payments, not refunds received).
+      // Paid to SARS since this period began (payments, not refunds received), beyond what the
+      // ended periods owed when it began (a refund owed counted as nothing): what was paid ahead
+      // for this one. Paying last period's on time doesn't let a refund SARS owes come off it.
       const paidSince = within(current.start, end).filter((e) => e.payment && Number(e.t) > 0).reduce((t, e) => t + Number(e.t), 0);
-      thisPeriod = Math.max(0, thisPeriod - Math.min(-ended, paidSince));
+      const lastRaw = await accrued(last.start, last.end);
+      const atStart = -(await balanceOf('vat', addDays(current.start, -1)));
+      const owedAtStart = Math.max(0, lastRaw) + Math.max(0, atStart - lastRaw);
+      thisPeriod = Math.max(0, thisPeriod - Math.min(-ended, Math.max(0, paidSince - owedAtStart)));
       ended = 0;
     }
     const lastOwn = Math.max(0, await accrued(last.start, last.end));
     const forLast = Math.min(ended, lastOwn);
     const older = ended - forLast;
-    if (older > 0) add(now, `VAT owing for periods before ${formatDate(last.start)} (VAT201, an estimate)`, -older, 'vat');
+    // A trial balance brought in since the last period began: its VAT is a balance on its date,
+    // which Shap can't put in a SARS period, so it's said, and taken as due now.
+    const [tb] = await db<{ n: number }[]>`
+      select count(*)::int as n from ledger l join accounts a on a.id = l.account_id
+      join journals j on l.source = 'journal' and j.id = l.source_id join ledger_imports li on li.id = j.ledger_import_id
+      where a.system_key = 'vat' and li.kind = 'trialBalance' and l.date between ${last.start}::date and ${now}::date`;
+    if (older > 0)
+      add(now, `VAT owing for periods before ${formatDate(last.start)}${tb!.n ? ', or brought in with a trial balance' : ''} (VAT201, an estimate, as if paid now)`, -older, 'vat');
     if (forLast > 0) add(vat201Due(last.end), `VAT for the period to ${formatDate(last.end)} (VAT201)`, -forLast, 'vat');
     if (thisPeriod > 0) add(vat201Due(current.end), `VAT so far on the period to ${formatDate(current.end)} (VAT201)`, -thisPeriod, 'vat');
   }

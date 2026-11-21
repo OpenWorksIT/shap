@@ -16,7 +16,7 @@ const thisMonth = `${now.slice(0, 8)}01`;
 const out = (items: { cents: number }[]) => -items.reduce((t, x) => t + Math.min(0, x.cents), 0);
 const vatOf = (f: Awaited<ReturnType<typeof cashForecast>>) => f.items.filter((x) => x.kind === 'vat').map((x) => ({ date: x.date, cents: x.cents }));
 
-/** Made-up books on VAT category C (two-monthly), this period and the last. */
+/** Made-up books on VAT category C (monthly), this period and the last. */
 async function vatBooks() {
   const env = await setup();
   const owner = await login(env.app, 'owner@example.co.za');
@@ -51,7 +51,8 @@ describe('VAT: a trial balance brought in', () => {
     await b.env.sql`update journals set kind = 'import', ledger_import_id = ${imp!.id} where id = ${j.id}`;
     const f = await cashForecast(b.env.sql, now);
     expect(vatOf(f)).toEqual([{ date: now, cents: -3_000_000 }]);
-    expect(f.items.find((x) => x.kind === 'vat')!.label).toMatch(/^VAT owing for periods before/);
+    // Said for what it is: Shap can't put a trial balance's VAT in a SARS period (SARS, fifth round).
+    expect(f.items.find((x) => x.kind === 'vat')!.label).toMatch(/^VAT owing for periods before .+, or brought in with a trial balance \(VAT201, an estimate, as if paid now\)$/);
   });
 });
 
@@ -271,6 +272,28 @@ describe('owed beyond Shap’s records, nothing counted twice (accounting, fifth
     } finally {
       await b.env.close();
     }
+  });
+});
+
+describe('VAT: a refund SARS owes, with last period paid on time (SARS, fifth round)', () => {
+  let b: Awaited<ReturnType<typeof vatBooks>>;
+  beforeAll(async () => {
+    b = await vatBooks();
+  });
+  afterAll(async () => {
+    await expectCleanAudit(b.env.sql);
+    await b.env.close();
+  });
+
+  it('isn’t taken off this period’s VAT by paying last period’s', async () => {
+    // The period before last: a R750 refund SARS hasn't paid. Last: R3 000, paid at this period's
+    // start. This period: R900. VAT201 field 20: −R750, R3 000, R900.
+    const before = vatPeriod(addMonths(b.last.start, -1), 'C', (await b.owner.get('/api/reference')).settings.fyEndMonth);
+    await b.owner.post('/api/costs', { date: before.start, description: 'Made-up parts', supplier: 'Made-up Supplies', amountCents: 575_000, vatCents: 75_000, categoryId: await b.r.cat('Parts'), sourceId: b.bank });
+    await b.invoice(b.last.start, 2_000_000);
+    await b.owner.post('/api/journals', { date: b.current.start, description: 'Made-up VAT paid on time', lines: [{ accountId: await b.r.acc('vat'), debitCents: 300_000 }, { accountId: await b.r.acc('bank'), creditCents: 300_000 }] });
+    await b.invoice(b.current.start, 600_000);
+    expect(vatOf(await cashForecast(b.env.sql, now))).toEqual([{ date: vat201Due(b.current.end), cents: -90_000 }]);
   });
 });
 
