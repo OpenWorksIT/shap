@@ -490,7 +490,7 @@ async function healthNow(db: Sql, now: string, log: { warn: (o: object, m: strin
       lockedThrough: await effectiveLock(tx),
       pocket: await lastShare(tx),
       deadlineInputs: s.setupDone
-        ? { businessType: s.businessType, vatRegistered: s.vatRegistered, vatCategory: s.vatCategory, fyEndMonth: s.fyEndMonth, turnoverTax: s.turnoverTax, employer, approvedPbo: Boolean(s.approvedPbo), dividendsPaid: paid.map((p) => p.d) }
+        ? { businessType: s.businessType, vatRegistered: s.vatRegistered, vatCategory: s.vatCategory, fyEndMonth: s.fyEndMonth, turnoverTax: s.turnoverTax, employer, approvedPbo: Boolean(s.approvedPbo), dividendsPaid: paid.map((p) => p.d), incorporatedOn: s.incorporatedOn ?? null, coidaRegistered: s.coidaRegistered ?? null }
         : null,
       tb,
     };

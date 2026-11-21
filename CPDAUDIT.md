@@ -87,6 +87,10 @@ so in docs/SARS.md, and check them again once the Act is promulgated.
 5. From 1 March each year, the national minimum wage too (`NATIONAL_MINIMUM_WAGE`,
    `packages/shared/src/labour.ts`, docs/CASUAL_LABOUR.md): the tests fail until the tax year
    `SARS_CHECKED_TO` ends has its rate.
+6. Each autumn, the Compensation Fund's return of earnings season (`ROE_SEASONS`,
+   `packages/shared/src/tax.ts`), from the Fund's notice in the Government Gazette (usually March or
+   April). From 1 June of the year after the last season's, the tests fail until the next one is in
+   (`test/cipc-coida.test.ts`).
 
 ## 3. Every change (CI, `.github/workflows/ci.yml`)
 

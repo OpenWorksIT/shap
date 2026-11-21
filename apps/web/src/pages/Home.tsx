@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { addDays, formatDate, formatPercent, formatZar, monthLabel, todayIso } from '@shap/shared';
 import { MonthChart } from '../components/MonthChart';
+import { MarginChart } from '../components/MarginChart';
 import { PageHead } from '../components/Shell';
 import { DocChip, Empty, ErrorBox, Icon, Kpi, Loading, Money, ProjectChip, useToast } from '../components/ui';
 import { stopClock, useMinuteTick, type Running } from '../components/TimeTracker';
@@ -47,6 +48,11 @@ interface Dashboard {
   sdlLine?: { payrollCents: number; dayWagesCents: number; sdlOn?: boolean } | null;
   periods?: { monthDue: string | null; closes?: 'month' | 'vat' | 'year'; next?: { on: string; through: string; closesYears?: string[] } | null; reopened: { relockDate: string; reason: string } | null; lockDate: string | null } | null;
   bankCents: number;
+  /** The bank and cash accounts the business pays from, and what its cards owe. */
+  cash?: { inBankCents: number; cardsOweCents: number };
+  /** About how many days clients take to pay, and the business takes to pay suppliers (null: can't tell). */
+  debtorDays?: number | null;
+  creditorDays?: number | null;
   ownerLoanCents: number;
   projects: ProjectRow[];
 }
@@ -410,6 +416,31 @@ function OwnerHome() {
           sub={data.owedToWorkersCents < 0 ? 'paid ahead of days worked' : 'earned, not yet paid'}
         />}
       </div>
+      {data.cash && (
+        <div className="kpis">
+          <Kpi
+            label="Money in the bank and till"
+            value={<Money cents={data.cash.inBankCents} whole />}
+            sub={data.cash.cardsOweCents > 0 ? `cards owe ${formatZar(data.cash.cardsOweCents, { cents: false })}: ${formatZar(data.cash.inBankCents - data.cash.cardsOweCents, { cents: false })} after them` : 'as the books have it today'}
+            tone={data.cash.inBankCents - data.cash.cardsOweCents < 0 ? 'bad' : undefined}
+          />
+          {data.debtorDays !== undefined && (
+            <Kpi
+              label="Clients pay in"
+              value={data.debtorDays == null ? '–' : data.debtorDays === 0 ? 'Nothing owed now' : `about ${data.debtorDays} day${data.debtorDays === 1 ? '' : 's'}`}
+              sub={data.debtorDays == null ? 'nothing invoiced in the last 12 months' : data.debtorDays === 0 ? 'clients owe you nothing today' : 'on average: what they owe now against 12 months of invoices'}
+              tone={data.debtorDays != null && data.debtorDays > 60 ? 'warn' : undefined}
+            />
+          )}
+          {data.creditorDays != null && (
+            <Kpi
+              label="You pay suppliers in"
+              value={data.creditorDays === 0 ? 'Nothing owed now' : `about ${data.creditorDays} day${data.creditorDays === 1 ? '' : 's'}`}
+              sub={data.creditorDays === 0 ? 'no supplier bills owed today' : 'on average: bills owed now against 12 months of costs'}
+            />
+          )}
+        </div>
+      )}
 
       {!testServer?.on && <MarketNote />}
       {needs.length > 0 && <div className="stack" style={{ gap: 8 }}>{needs}</div>}
@@ -455,6 +486,12 @@ function OwnerHome() {
           )}
         </section>
       </div>
+
+      {data.months.some((m) => m.incomeCents > 0) && (
+        <section className="panel panel-pad">
+          <MarginChart data={data.months} />
+        </section>
+      )}
 
       {has('jobs') && (
       <section className="panel">

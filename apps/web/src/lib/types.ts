@@ -48,6 +48,8 @@ export interface Settings {
   taxNumber: string;
   payeRegistered: boolean | null;
   payeRef: string;
+  incorporatedOn?: string | null;
+  coidaRegistered?: boolean | null;
   uifRegistered: boolean | null;
   uifRef: string;
   termsVersion: string;

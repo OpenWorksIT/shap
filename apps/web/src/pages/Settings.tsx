@@ -14,6 +14,7 @@ import {
   CATEGORY_KIND_LABELS,
   CATEGORY_KINDS,
   BUSINESS_TYPES,
+  cipcKind,
   ENTITIES,
   entity,
   formatDate,
@@ -178,6 +179,11 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
                   {(p) => <input {...p} className="input" value={f.regNumber} onChange={(e) => set('regNumber', e.target.value)} placeholder={kind.regPlaceholder} />}
                 </Field>
               )}
+              {cipcKind(f.businessType) && (
+                <Field label="Date of incorporation" hint="On the registration certificate: Shap reminds you of CIPC’s annual return each year">
+                  {(p) => <input {...p} className="input" type="date" max={todayIso()} value={f.incorporatedOn ?? ''} onChange={(e) => set('incorporatedOn', e.target.value || null)} />}
+                </Field>
+              )}
               <Field label="VAT number" hint={f.vatRegistered ? '10 digits starting with 4' : 'Once you’re registered for VAT'} error={(f.vatNumber !== settings.vatNumber ? vatNumberProblem(f.vatNumber) : null) ?? (f.vatRegistered && !f.vatNumber.trim() ? 'Needed while registered for VAT (Invoicing & books)' : undefined) ?? undefined}>
                 {(p) => <input {...p} className="input" inputMode="numeric" value={f.vatNumber} onChange={(e) => set('vatNumber', e.target.value)} />}
               </Field>
@@ -216,6 +222,12 @@ function SettingsForm({ section }: { section: 'company' | 'invoicing' }) {
                   </p>
                 )}
               </div>
+            )}
+            {(has('payroll') || has('workers')) && (
+              <label className="check">
+                <input type="checkbox" checked={Boolean(f.coidaRegistered)} onChange={(e) => set('coidaRegistered', e.target.checked)} />
+                <span>Registered with the Compensation Fund (COIDA): remind me of the return of earnings each year, once the Fund announces its dates</span>
+              </label>
             )}
             {ref.brands.length > 1 && (
               <Field label="Default trading name" hint="For new jobs and documents when the job or client doesn’t say">

@@ -8,11 +8,11 @@ import { applyMonthLock, assertOpen, q, freshTotals } from '../../lib/books.js';
 import { badRequest, notFound } from '../../lib/errors.js';
 import { parse } from '../../lib/validate.js';
 import { depositDueSql, syncProjectOfDocument } from '../documents.js';
-import { guessCategory, guessIncome, similar, suggestionKey, suggestMatches, supplierFrom, type Suggestion } from './match.js';
+import { guessCategory, guessIncome, ruleFor, similar, suggestionKey, suggestMatches, supplierFrom, type BankRule, type Suggestion } from './match.js';
 
 /** By hand, a match may be out by up to R1 (a supplier's or bank's rounding); the largest item takes the difference. */
 const HAND_ROUNDING_CENTS = 100;
-import { fingerprints, parseStatementCsv } from './parse.js';
+import { fingerprints, parseStatement } from './parse.js';
 
 const uuid = z.string().uuid();
 const KINDS = ['cost', 'receipt', 'wage_payment', 'journal', 'bill_payment'] as const;
@@ -312,7 +312,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   const read = (csv: string, flip: boolean) => {
     try {
-      return parseStatementCsv(csv, { flip });
+      return parseStatement(csv, { flip });
     } catch (err) {
       throw badRequest((err as Error).message);
     }
@@ -576,6 +576,11 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
       select supplier, category_id from costs where supplier <> '' order by date desc limit 3000`;
     const [src] = await sql<{ name: string; accountId: string }[]>`select name, account_id from payment_sources where id = ${sourceId}`;
     const incomeAccounts = await sql<{ id: string; code: string; name: string; systemKey: string | null }[]>`select id, code, name, system_key from accounts where type = 'income' and active`;
+    // Your rules first (only those whose cost type or income account is still in use), then Shap's guess.
+    const rules = await sql<BankRule[]>`
+      select r.id, r.match_text, r.direction, r.category_id, r.income_account_id, r.supplier from bank_rules r
+      left join cost_categories c on c.id = r.category_id left join accounts a on a.id = r.income_account_id
+      where (r.category_id is null or (c.active and c.kind <> 'stock')) and (r.income_account_id is null or (a.active and a.type = 'income'))`;
     // What the books say this account held at the last statement balance, to compare.
     const lastBal = [...lines].reverse().find((l) => l.balanceCents != null);
     let booksCents: number | null = null;
@@ -591,6 +596,19 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
       lines: lines.map((l) => {
         const m = matched.get(l.id) ?? null;
         const s = m || l.ignored ? null : (suggestions.get(l.id) ?? null);
+        const rule = m ? null : ruleFor(l.description, l.amountCents, rules);
+        if (rule)
+          return {
+            ...l,
+            state: l.ignored ? 'ignored' : s ? 'suggested' : 'open',
+            matches: [],
+            suggestion: s,
+            rejected: rejectedCount.get(l.id) ?? 0,
+            supplier: rule.supplier || supplierFrom(l.description),
+            categoryId: rule.categoryId,
+            incomeAccountId: rule.incomeAccountId,
+            rule: { id: rule.id, matchText: rule.matchText },
+          };
         return {
           ...l,
           state: m ? 'matched' : l.ignored ? 'ignored' : s ? 'suggested' : 'open',
@@ -601,9 +619,60 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
           supplier: supplierFrom(l.description),
           categoryId: m ? null : l.amountCents < 0 ? guessCategory(l.description, categories, history) : guessCategory(l.description, categories, history, { fallback: false }),
           incomeAccountId: !m && l.amountCents > 0 ? guessIncome(l.description, incomeAccounts) : null,
+          rule: null,
         };
       }),
     };
+  });
+
+  // ---------------------------------------------------------------- rules
+  /** "A line that says X is this": Shap fills in the cost type (or income) and supplier from it. */
+  app.get('/api/bank/rules', { preHandler: requireAccess('bank.reconcile') }, async () => {
+    return sql`
+      select r.id, r.match_text, r.direction, r.category_id, c.name as category_name, r.income_account_id, a.name as income_account_name, r.supplier, r.created_at
+      from bank_rules r left join cost_categories c on c.id = r.category_id left join accounts a on a.id = r.income_account_id
+      order by lower(r.match_text)`;
+  });
+
+  const ruleInput = z
+    .object({
+      matchText: z.string().trim().min(3, 'A rule needs at least three letters to look for').max(60),
+      direction: z.enum(['out', 'in']),
+      categoryId: uuid.nullable().default(null),
+      incomeAccountId: uuid.nullable().default(null),
+      supplier: z.string().trim().max(120).default(''),
+    })
+    .refine((r) => Boolean(r.categoryId) !== Boolean(r.incomeAccountId), 'Choose a cost type or an income account')
+    .refine((r) => !r.incomeAccountId || r.direction === 'in', 'Money out can’t be income');
+
+  app.post('/api/bank/rules', { preHandler: requireAccess('bank.reconcile') }, async (req) => {
+    const user = userOrThrow(req);
+    const r = parse(ruleInput, req.body);
+    if (r.categoryId) {
+      const [c] = await sql<{ kind: string; active: boolean }[]>`select kind, active from cost_categories where id = ${r.categoryId}`;
+      if (!c?.active) throw badRequest('Choose a cost type that’s in use');
+      if (c.kind === 'stock') throw badRequest('Stock is bought in under Inventory (a supplier invoice), so a rule can’t add it');
+    }
+    if (r.incomeAccountId) {
+      const [a] = await sql<{ type: string; active: boolean }[]>`select type, active from accounts where id = ${r.incomeAccountId}`;
+      if (a?.type !== 'income' || !a.active) throw badRequest('Choose an income account');
+    }
+    const [row] = await sql<{ id: string }[]>`
+      insert into bank_rules (match_text, direction, category_id, income_account_id, supplier, created_by)
+      values (${r.matchText}, ${r.direction}, ${r.categoryId}, ${r.incomeAccountId}, ${r.supplier}, ${user.id})
+      on conflict (lower(match_text), direction) do update set match_text = excluded.match_text, category_id = excluded.category_id, income_account_id = excluded.income_account_id, supplier = excluded.supplier
+      returning id`;
+    await audit(sql, { userId: user.id, action: 'save_bank_rule', entity: 'bank_rule', entityId: row!.id, ip: req.ip, details: { matchText: r.matchText, direction: r.direction } });
+    return { id: row!.id };
+  });
+
+  app.delete('/api/bank/rules/:id', { preHandler: requireAccess('bank.reconcile') }, async (req) => {
+    const user = userOrThrow(req);
+    const { id } = parse(z.object({ id: uuid }), req.params);
+    const [gone] = await sql<{ matchText: string }[]>`delete from bank_rules where id = ${id} returning match_text`;
+    if (!gone) throw notFound('Rule');
+    await audit(sql, { userId: user.id, action: 'delete_bank_rule', entity: 'bank_rule', entityId: id, ip: req.ip, details: { matchText: gone.matchText } });
+    return { ok: true };
   });
 
   /** "Not this": the suggestion is wrong for this line and isn't offered again (the next best is). */

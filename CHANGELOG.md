@@ -3,6 +3,41 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## 1.33.0 (21 November 2026)
+
+- **A cash-flow forecast.** Accounts → Cash-flow forecast: the next 13 weeks of money in and out,
+  week by week, from what's in the books. It starts from the bank and till today (what the cards
+  owe is shown beside it), with invoices on their due dates (overdue ones this week, as if paid
+  now), supplier bills on theirs, salaries and the EMP201 as last month, day wages at the last
+  eight weeks' average, the VAT owing on the next VAT201, and the costs you usually pay each month
+  (not those paid personally or on a card). Tap a week for what's in it. Clients pay late and new
+  costs come, and provisional tax, card and loan repayments aren't in it: an estimate to plan with,
+  not advice.
+- **Budgets.** Accounts → Budgets: each income and cost account's twelve months for a financial
+  year, against what the books show to date and the difference. Type in the months, spread a
+  year's total evenly, copy last year's, or start every account without a budget from last year's
+  figures, up or down by a percentage. The owner sets the budget; anyone who reads the reports
+  sees it. A plan, not the books: nothing is posted from it.
+- **More bank statement formats, and rules.** Bank statements come in as OFX (or QFX, as most banks'
+  internet banking exports) and QIF as well as CSV. *Always this* on a line saves a rule: lines
+  that say what you choose get the same cost type or income account, and supplier, every time
+  they come in. Bank → Rules lists them. Nothing posts until you tick it, as before.
+- **Barcodes with the phone's camera.** At the counter and on an item's code, the camera button
+  scans a barcode with the phone (Chrome on Android: the browser does it on the phone, and nothing
+  is sent anywhere). A barcode scanner, or typing the code and Enter, works everywhere: an exact
+  code adds the item.
+- **Home.** The money in the bank and till (and what the cards owe), how many days clients take to
+  pay, how many you take to pay suppliers (with supplier bills on), and the gross margin month by
+  month.
+- **CIPC and the Compensation Fund.** The date of incorporation (Settings → Company, and in the
+  first-run questions, both optional) gives a company's or close corporation's CIPC annual return
+  on Home and the practice's list. An employer (casual workers too) is asked whether it's
+  registered with the Compensation Fund (COIDA): if it is, the return of earnings shows once the
+  Fund has gazetted the season (for March 2025 to February 2026, 1 April to 30 June 2026). Only
+  announced seasons are shown, and each year's standard update adds the next. Shap files nothing
+  with CIPC or the Fund. A client on its own Shap sends these to its practice from 1.33.
+- docs/GOALPOSTS.md: what's being worked on, how hard it looks and why (also on the website).
+
 ## 1.32.0 (18 November 2026)
 
 - **Shap Accountant from the first-run questions.** Choose *Accounting, bookkeeping or tax practice*

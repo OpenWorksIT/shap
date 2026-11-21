@@ -61,15 +61,15 @@ the sales to be seen): ticking one ticks the other.
 | | Log trips in the travel logbook | |
 | Payroll | See payroll and payslips | |
 | | Run payroll (employees, pay runs, SARS payments) | See payroll |
-| Accounts & reports | Reports, VAT201 and the ledger (every report and the books, read only, and the statements; the ledger names each worker's days and wages) | See days worked and wages |
-| | Bank statements (bring them in, tick off what's captured, and capture what isn't: costs, payments received; so it also lets them delete or merge costs and write off invoices) | Reports, Capture and change any cost, Record what's paid |
+| Accounts & reports | Reports, VAT201 and the ledger (every report and the books, read only, and the statements; the ledger names each worker's days and wages; the cash-flow forecast and the budgets) | See days worked and wages |
+| | Bank statements (bring them in, tick off what's captured, and capture what isn't: costs, payments received; so it also lets them delete or merge costs and write off invoices; and the rules that fill in a line) | Reports, Capture and change any cost, Record what's paid |
 | | Journals, assets and balance checks | Reports |
 | | Close and reopen months and years (month end, the year's lock; reopening takes a reason, kept with the books: docs/LOCKS.md) | Reports |
 | Shap Accountant (with the feature on) | Open the clients they're given (each as given: writing up the books, as their owner in Shap, reopening closed periods and recording the client's approval of the statements included; or reading them and compiling the statements, as their accountant: docs/ACCOUNTANT.md) | |
 | | Add clients and choose who opens each (every client, themselves included) | Open the clients they're given |
 
 **Always the owner's**: the settings, the people who sign in and their profiles, the year end, tax
-estimates, dividends and profit shares, sending, approving and reopening the financial
+estimates, setting the budgets, dividends and profit shares, sending, approving and reopening the financial
 statements, moving in from another package, backups and the system. Closing and reopening months
 and years is the owner's unless given (above). The audit log is the owner's
 and the accountant's.

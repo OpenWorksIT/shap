@@ -61,14 +61,30 @@ The name is the shaka: thumb and pinky out, *shap, all good*.
   years; reopening with a reason, by whoever is allowed: see [docs/LOCKS.md](docs/LOCKS.md)), and
   CSV exports for your accountant. An
   *accountant* login can read and export everything but change nothing.
-- **Bank statements.** Import a bank or card statement as CSV and Shap reconciles it: each line
+- **Cash-flow forecast and budgets.** The next 13 weeks of money in and out, week by week, from
+  what's in the books: invoices and supplier bills on their due dates, salaries and the EMP201 as
+  last month, day wages at their recent average, the VAT owing on the next VAT201, and the costs
+  that come every month. An estimate to plan with, not advice. Budgets: each income and cost
+  account's twelve months for a financial year (typed in, spread from a year's total, or started
+  from last year's figures up or down by a percentage) against what the books show to date. The
+  owner sets the budget; anyone who reads the books sees it.
+- **Home.** What's owed and owing, the money in the bank and till (and what the cards owe), how
+  many days clients take to pay and you take to pay suppliers, the gross margin month by month,
+  and the returns coming up: VAT201, EMP201, provisional tax, CIPC's annual return (from the date
+  of incorporation) and the Compensation Fund's return of earnings, once the Fund has announced
+  its dates.
+- **Bank statements.** Import a bank or card statement as CSV, OFX (OFX or QFX, as most South
+  African banks' internet banking exports) or QIF, and Shap reconciles it: each line
   is matched to what you captured, including a slip captured item by item against the one total
   on the statement, and costs not yet matched to a payment take the statement's account. Bank
   fees and debit orders you never captured become costs in one click (the cost type guessed from
   how you captured that supplier before); client payments are recorded against their invoice;
-  transfers between your own accounts are booked; and anything unticked is left off.
+  transfers between your own accounts are booked; and anything unticked is left off. **Rules**
+  remember what you do with a line ("lines that say ENGEN are Petrol"), so next time it comes
+  ready; nothing posts until you tick it.
 - **Sales and inventory** (optional). A Sales tab for selling over the counter: a quick item
-  list, the money into the till or bank, every sale a tax invoice in the same numbers as the
+  list (a barcode scanner, or the phone's camera on Chrome for Android, finds an item by its
+  code), the money into the till or bank, every sale a tax invoice in the same numbers as the
   rest (a walk-in's the abridged one), VAT by line, refunds, and a business customer's details
   added afterwards. With inventory: stock at weighted average cost, supplier
   invoices (short supplied claimed back), returns and credit notes, stock takes with reasons, and

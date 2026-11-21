@@ -1,7 +1,8 @@
 /**
- * Reads a bank or card statement exported as CSV. South African banks each have their own
- * layout (FNB, Standard Bank, Absa, Nedbank, Capitec…), and some exports have no header row,
- * so the columns are found by name where there is a header and by their contents where not.
+ * Reads a bank or card statement exported as CSV, OFX (QFX) or QIF. South African banks each
+ * have their own CSV layout (FNB, Standard Bank, Absa, Nedbank, Capitec…), and some exports have
+ * no header row, so the columns are found by name where there is a header and by their contents
+ * where not. OFX and QIF are the same everywhere, so they're read by their tags.
  */
 import { parseCsv } from '../clients.js';
 
@@ -226,4 +227,107 @@ export function fingerprints(rows: StatementRow[]): string[] {
     seen.set(base, n);
     return `${base}|${n}`;
   });
+}
+
+/** Which kind of file a statement is, from what's in it (not its name). */
+export function statementFormat(text: string): 'ofx' | 'qif' | 'csv' {
+  const head = text.slice(0, 4000);
+  if (/OFXHEADER|<OFX>|<STMTTRN>/i.test(head) || /<STMTTRN>/i.test(text.slice(0, 200_000))) return 'ofx';
+  if (/^\s*!(Type|Account|Option)\b/im.test(head) || /^\^\s*$/m.test(head)) return 'qif';
+  return 'csv';
+}
+
+/** A statement in any of the formats Shap reads. */
+export function parseStatement(text: string, opts: { flip?: boolean } = {}): ParsedStatement {
+  const f = statementFormat(text);
+  return f === 'ofx' ? parseStatementOfx(text, opts) : f === 'qif' ? parseStatementQif(text, opts) : parseStatementCsv(text, opts);
+}
+
+const finish = (rows: StatementRow[], opts: { flip?: boolean }, dateOrder: DateOrder, columns: ParsedStatement['columns'], skipped: number): ParsedStatement => {
+  if (!rows.length) throw new Error('No transactions found in this file');
+  const out = rows.map((r) => ({ ...r, amountCents: opts.flip ? -r.amountCents : r.amountCents }));
+  // Stable: transactions on the same day keep the file's order.
+  out.sort((a, b) => a.date.localeCompare(b.date));
+  return { rows: out, skipped, pending: 0, dateOrder, columns };
+};
+
+/** An OFX element's text: <TAG>value (OFX 1, no closing tag) or <TAG>value</TAG> (OFX 2). */
+const ofxTag = (block: string, tag: string): string | null => {
+  const m = new RegExp(`<${tag}>([^<\\r\\n]*)`, 'i').exec(block);
+  return m ? m[1]!.trim().replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>') : null;
+};
+
+/**
+ * OFX (QFX is the same): each <STMTTRN> is a transaction with its posted date (YYYYMMDD…), a
+ * signed amount (money in positive) and a name and memo. The ledger balance, when given, is the
+ * balance at the end of the statement, so it goes on the last transaction up to that date.
+ */
+export function parseStatementOfx(text: string, opts: { flip?: boolean } = {}): ParsedStatement {
+  const rows: StatementRow[] = [];
+  let skipped = 0;
+  const re = /<STMTTRN>([\s\S]*?)(?=<\/STMTTRN>|<STMTTRN>|<\/BANKTRANLIST>)/gi;
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    const b = m[1]!;
+    const date = parseStatementDate((ofxTag(b, 'DTPOSTED') ?? '').slice(0, 8));
+    const amount = parseStatementAmount(ofxTag(b, 'TRNAMT') ?? '');
+    const description = [ofxTag(b, 'NAME'), ofxTag(b, 'MEMO')].filter((x): x is string => Boolean(x))
+      .filter((x, i, a) => a.indexOf(x) === i)
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!date || amount == null || amount === 0) {
+      skipped++;
+      continue;
+    }
+    rows.push({ date, description: description || '(no description)', amountCents: amount, balanceCents: null });
+  }
+  const ledger = /<LEDGERBAL>([\s\S]*?)(?:<\/LEDGERBAL>|<AVAILBAL>|<\/STMTRS>|<\/CCSTMTRS>)/i.exec(text)?.[1];
+  const parsed = finish(rows, opts, 'dmy', { date: 'DTPOSTED', description: 'NAME and MEMO', amount: 'TRNAMT', balance: ledger ? 'LEDGERBAL' : null }, skipped);
+  if (ledger) {
+    const bal = parseStatementAmount(ofxTag(ledger, 'BALAMT') ?? '');
+    const asOf = parseStatementDate((ofxTag(ledger, 'DTASOF') ?? '').slice(0, 8));
+    const last = [...parsed.rows].reverse().find((r) => !asOf || r.date <= asOf);
+    // A card's balance owed is money out, so it flips with the amounts.
+    if (bal != null && last) last.balanceCents = opts.flip ? -bal : bal;
+  }
+  return parsed;
+}
+
+/**
+ * QIF: one field a line (D date, T or U amount, P payee, M memo), each transaction ended by "^".
+ * Quicken writes some dates as 1/ 2'26 (2026); numeric dates are read day first unless every one
+ * only makes sense month first.
+ */
+export function parseStatementQif(text: string, opts: { flip?: boolean } = {}): ParsedStatement {
+  const recs: { d: string; t: string; p: string; m: string }[] = [];
+  let cur = { d: '', t: '', p: '', m: '' };
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trimEnd();
+    if (!line || line.startsWith('!')) continue;
+    if (line.startsWith('^')) {
+      if (cur.d || cur.t) recs.push(cur);
+      cur = { d: '', t: '', p: '', m: '' };
+      continue;
+    }
+    const v = line.slice(1).trim();
+    if (line[0] === 'D') cur.d = v.replace(/'\s*(\d{2})$/, '/20$1').replace(/\s+/g, '');
+    else if (line[0] === 'T' || (line[0] === 'U' && !cur.t)) cur.t = v;
+    else if (line[0] === 'P') cur.p = v;
+    else if (line[0] === 'M') cur.m = v;
+  }
+  if (cur.d || cur.t) recs.push(cur);
+  const order = detectDateOrder(recs.map((r) => r.d).filter((d) => /^\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}$/.test(d)));
+  const rows: StatementRow[] = [];
+  let skipped = 0;
+  for (const r of recs) {
+    const date = parseStatementDate(r.d, order);
+    const amount = parseStatementAmount(r.t);
+    if (!date || amount == null || amount === 0) {
+      skipped++;
+      continue;
+    }
+    const description = [r.p, r.m].filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).join(' ').replace(/\s+/g, ' ').trim();
+    rows.push({ date, description: description || '(no description)', amountCents: amount, balanceCents: null });
+  }
+  return finish(rows, opts, order, { date: 'D (date)', description: 'P and M (payee and memo)', amount: 'T (amount)', balance: null }, skipped);
 }

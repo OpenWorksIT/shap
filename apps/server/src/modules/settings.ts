@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { ACCOUNTANT_TERMS_URL, ACCOUNTANT_TERMS_VERSION, accountInput, INDUSTRIES, SHAP_REVENUE_NAMES, attachmentInput, brandInput, categoryInput, entity, featureOn, industryProfile, isTask, profileInput, settingsInput, settingsNumberProblem, sourceInput, TERMS_URL, tidyNumbers, tweaksFor, userInput, vatRateOn, withNeeds, workTypeInput, type Role } from '@shap/shared';
+import { ACCOUNTANT_TERMS_URL, ACCOUNTANT_TERMS_VERSION, accountInput, cipcKind, INDUSTRIES, SHAP_REVENUE_NAMES, attachmentInput, brandInput, categoryInput, entity, featureOn, industryProfile, isTask, profileInput, settingsInput, settingsNumberProblem, sourceInput, TERMS_URL, tidyNumbers, tweaksFor, userInput, vatRateOn, withNeeds, workTypeInput, type Role } from '@shap/shared';
 import { z } from 'zod';
 import { accessOf, canAny, checkNewPassword, confirmPassword, createUser, endOtherSessions, hashPassword, requireAccess, requireRole, seesBooks, sessionToken, userOrThrow, type AuthUser } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -171,6 +171,9 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     // SARS: a company (CC, co-op) on turnover tax must have its year end on the last day of February
     // (TT01 FAQ). The 2026 Budget proposed dropping this; until the law changes, it stays.
     if (input.turnoverTax && input.fyEndMonth !== 2) throw badRequest('Turnover tax needs the year to end in February: change the financial year end first (SARS’s rule for companies on turnover tax).');
+    if (input.incorporatedOn && input.incorporatedOn > today()) throw badRequest('The date of incorporation can’t be in the future: it’s the date on the registration certificate.');
+    // Only a company or CC files CIPC's annual return: anyone else's date is left off.
+    if (input.incorporatedOn !== undefined && !cipcKind(input.businessType)) input.incorporatedOn = null;
     const before = await getSettings(sql);
     // VAT, registration, tax and employer numbers: the right shape, and a VAT number to be registered for VAT.
     const numberProblem = settingsNumberProblem(input, before);

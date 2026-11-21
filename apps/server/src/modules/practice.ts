@@ -110,6 +110,9 @@ const deadlineInputs = z
       .max(10_000)
       .transform((a) => [...new Set(a)].sort().slice(-100))
       .optional(),
+    // From a client's Shap 1.33 or later: its CIPC annual returns and the return of earnings.
+    incorporatedOn: date.nullable().optional(),
+    coidaRegistered: z.boolean().nullable().optional(),
   })
   .nullable();
 const linkedHealth = z.object({

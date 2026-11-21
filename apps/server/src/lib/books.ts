@@ -46,6 +46,10 @@ export interface SettingsRow {
   taxNumber: string;
   payeRegistered: boolean | null;
   payeRef: string;
+  /** A company's or CC's date of incorporation (CIPC's annual return dates), when the owner gave it. */
+  incorporatedOn: string | null;
+  /** Registered with the Compensation Fund (a return of earnings each year), when the owner said. */
+  coidaRegistered: boolean | null;
   uifRegistered: boolean | null;
   uifRef: string;
   /** The terms of use accepted (terms.ts TERMS_VERSION), and when. */

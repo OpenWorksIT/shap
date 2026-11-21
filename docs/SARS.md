@@ -62,7 +62,8 @@ year-end month, turnover tax, whether it employs people, PBO approval and those 
 refresh on leaving the books, as there is for a kept client.
 The dates the law fixes are in code there; the filing season's, which SARS sets each year, are in
 `tax.ts` `FILING_SEASON_DATES`; a public holiday the President declares for one year is in
-`dates.ts` `DECLARED_HOLIDAYS`. Each standard update checks all three.
+`dates.ts` `DECLARED_HOLIDAYS`; the Compensation Fund's return of earnings season, which the Fund
+gazettes each year, is in `tax.ts` `ROE_SEASONS`. Each standard update checks all four.
 
 | Return | Rule | Where | Source |
 | --- | --- | --- | --- |
@@ -74,9 +75,15 @@ The dates the law fixes are in code there; the filing season's, which SARS sets 
 | DTR01 | The end of the month after a dividend is paid | `dwtDue` | [SARS: dividends tax](https://www.sars.gov.za/types-of-tax/dividends-tax/) |
 | ITR12 (provisional taxpayers, each partner's), ITR12T, IT3(t), EMP501 interim | 22 January 2027, 22 January 2027, 30 September 2026, 30 October 2026 (31 October a Saturday) | `FILING_SEASON_DATES` | [SARS: tax season 2026](https://www.sars.gov.za/types-of-tax/personal-income-tax/tax-season/), [trust filing season](https://www.sars.gov.za/media-release/trust-filing-season-set-to-open/), [PAYE interim season](https://www.sars.gov.za/latest-news/paye-interim-filing-season-opens-today-21-september-2026/) |
 | A declared public holiday | 4 November 2026 (the local government elections) | `DECLARED_HOLIDAYS` | [SAnews](https://www.sanews.gov.za/node/84344) |
+| CIPC annual return (not SARS's: on the list and Home since 1.33) | A company (Pty, Inc, NPC): within 30 business days after each anniversary of its incorporation. A close corporation: by the end of the month after its anniversary month. The first a year after incorporation; from the date of incorporation in Settings → Company (optional); no other kind of business files one | `tax.ts` `cipcAnnualReturns`, `addBusinessDays`; `practice.ts` `cipcKind` | [Companies Regulations, 2011, reg 30(1)(c)](https://www.acts.co.za/companies-act-2008/r351_30__company_annual_returns), [CIPC's reminder (SA Accounting Academy)](https://accountingacademy.co.za/news/read/cipc-reminder-to-companies-and-close-corporations-to-file-annual-returns) |
+| Return of earnings, Compensation Fund (COIDA; not SARS's: since 1.33) | The season the Fund announces each year for the assessment year just ended: for March 2025 to February 2026, 1 April to 30 June 2026. Only for an employer that says it's registered with the Fund (setup and Settings) | `tax.ts` `ROE_SEASONS` | [Notice 3894 of 2026 (GG 54524)](https://www.gov.za/sites/default/files/gcis_document/202604/54524gen3894.pdf) |
 
-Not shown: the CIPC annual return (Shap doesn't keep the date of incorporation), the Compensation
-Fund's return of earnings, and a filing season SARS hasn't announced yet.
+Home shows the same CIPC and return of earnings dates, five weeks ahead (`dashboard.ts` `taxDue`).
+The return of earnings is shown only for a season that's in `ROE_SEASONS`: none is guessed. Each
+standard update adds the Fund's next season once it's in the Gazette (usually in March or April).
+
+Not shown: a filing season SARS hasn't announced yet, and a return of earnings season the Fund
+hasn't announced yet.
 
 ## VAT
 

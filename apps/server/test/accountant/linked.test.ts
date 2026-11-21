@@ -268,9 +268,11 @@ describe('a client’s Shap that says what it shouldn’t, or isn’t where a cl
     for (const h of heard) expect(h.body).not.toMatch(/Canarybird|canary@client/);
     expect(heard.filter((h) => h.url !== '/api/link/redeem').every((h) => h.auth === `Bearer link.${'c'.repeat(43)}`)).toBe(true);
     // Checks the list can read come in.
-    health = { at: '2026-11-17T08:00:00.000Z', company: 'Made-up Odd Books', setupDone: true, vatRegistered: false, audit: { fail: 0, warn: 1, items: [{ level: 'warn', section: 'Made-up', text: 'Made-up' }] }, statements: null, lockedThrough: null, deadlineInputs: { businessType: 'company', vatRegistered: false, vatCategory: 'A', fyEndMonth: 2, turnoverTax: false, employer: false }, extra: '<script>' };
+    health = { at: '2026-11-17T08:00:00.000Z', company: 'Made-up Odd Books', setupDone: true, vatRegistered: false, audit: { fail: 0, warn: 1, items: [{ level: 'warn', section: 'Made-up', text: 'Made-up' }] }, statements: null, lockedThrough: null, deadlineInputs: { businessType: 'company', vatRegistered: false, vatCategory: 'A', fyEndMonth: 2, turnoverTax: false, employer: false, incorporatedOn: '2020-07-01', coidaRegistered: true }, extra: '<script>' };
     const ok = await owner.post<{ health: Record<string, unknown> }>(`/api/practice/clients/${r.id}/checks`, {});
     expect(ok.health).not.toHaveProperty('extra');
+    // The date of incorporation and the Compensation Fund come through, for CIPC's return and the return of earnings.
+    expect(ok.health.deadlineInputs).toMatchObject({ incorporatedOn: '2020-07-01', coidaRegistered: true });
     expect(ok.health.company).toBe('Made-up Odd Books');
   });
 
