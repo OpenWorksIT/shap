@@ -81,7 +81,7 @@ describe('reading OFX and QIF statements', () => {
       // The memo that only repeats the name isn't said twice.
       { date: '2026-04-07', description: 'MONTHLY ACCOUNT FEE', amountCents: -6900, balanceCents: 878100 },
     ]);
-    expect(p.columns.balance).toBe('LEDGERBAL');
+    expect(p.columns.balance).toBe('the ledger balance');
   });
 
   it('reads OFX 2 (XML), and a card statement flips with its balance', () => {

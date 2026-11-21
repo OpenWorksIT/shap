@@ -13,8 +13,9 @@ describe('CIPC’s annual return, from the date of incorporation', () => {
     // 1 July 2027 is a Thursday; Women's Day (9 August, a Monday) isn't counted.
     expect(addBusinessDays('2027-07-01', 30)).toBe('2027-08-13');
     expect(cipcAnnualReturns('company', '2020-07-01', '2027-07-01', '2027-09-30')).toEqual([
-      { key: 'cipc-2027', label: 'CIPC annual return (2027, within 30 business days after the anniversary of incorporation)', due: '2027-08-13' },
+      { key: 'cipc-2027', label: 'CIPC annual return for the anniversary of incorporation on 1 July 2027 (due within 30 business days after it)', due: '2027-08-13' },
     ]);
+    expect(cipcAnnualReturns('cc', '2015-02-10', '2027-01-01', '2027-05-31')[0]!.label).toBe('CIPC annual return for the anniversary of incorporation on 10 February 2027 (a close corporation’s: due by the end of the month after it)');
   });
 
   it('a close corporation: by the end of the month after its anniversary month', () => {
@@ -39,8 +40,11 @@ describe('CIPC’s annual return, from the date of incorporation', () => {
     expect(deadlinesFor({ ...base, businessType: 'sole_prop', incorporatedOn: '2020-07-01' }, '2027-07-20').some((x) => x.key.startsWith('cipc'))).toBe(false);
     expect(deadlinesFor({ ...base }, '2027-07-20').some((x) => x.key.startsWith('cipc'))).toBe(false);
     const home = taxDue({ vatRegistered: false, vatCategory: 'B', turnoverTax: false, fyEndMonth: 2, businessType: 'company', incorporatedOn: '2020-07-01' }, '2027-07-20');
-    expect(home).toContainEqual(expect.objectContaining({ key: 'cipc-2027', due: '2027-08-13', to: '/settings?tab=company' }));
+    expect(home).toContainEqual(expect.objectContaining({ key: 'cipc-2027', body: 'CIPC', due: '2027-08-13', past: false, to: '/settings?tab=company', action: 'Settings' }));
     expect(taxDue({ vatRegistered: false, vatCategory: 'B', turnoverTax: false, fyEndMonth: 2, businessType: 'company', incorporatedOn: '2020-07-01' }, '2027-05-01')).toEqual([]);
+    // For a month after it's due, it stays, as one that was due (Shap can't tell whether it was filed).
+    expect(taxDue({ vatRegistered: false, vatCategory: 'B', turnoverTax: false, fyEndMonth: 2, businessType: 'company', incorporatedOn: '2020-07-01' }, '2027-09-01')).toContainEqual(expect.objectContaining({ key: 'cipc-2027', past: true }));
+    expect(taxDue({ vatRegistered: false, vatCategory: 'B', turnoverTax: false, fyEndMonth: 2, businessType: 'company', incorporatedOn: '2020-07-01' }, '2027-09-20')).toEqual([]);
   });
 });
 
@@ -49,18 +53,29 @@ describe('the Compensation Fund’s return of earnings', () => {
     expect(ROE_SEASONS).toContainEqual({ key: 'roe-2025', label: 'Return of earnings to the Compensation Fund (March 2025 to February 2026)', opens: '2026-04-01', due: '2026-06-30' });
   });
 
-  it('has the next season in by 1 June of the year after the last (the standard update, CPDAUDIT.md section 2)', () => {
+  it('has the next season in by 1 May of the year after the last (the standard update, CPDAUDIT.md section 2)', () => {
     const last = [...ROE_SEASONS].sort((a, b) => a.opens.localeCompare(b.opens)).pop()!;
-    // The Fund gazettes each season in March or April: by June, it's time it was in Shap.
-    expect(today() < addMonths(last.opens, 14), `the Compensation Fund's season after ${last.key} isn't in ROE_SEASONS yet`).toBe(true);
+    // The Fund gazettes each season in March or April: by May, it's time it was in Shap (CI runs
+    // on 1 May and each Monday in May even with nothing pushed).
+    expect(today() < addMonths(last.opens, 13), `the Compensation Fund's season after ${last.key} isn't in ROE_SEASONS yet`).toBe(true);
+    expect(readFileSync(join(__dirname, '..', '..', '..', '.github', 'workflows', 'ci.yml'), 'utf8')).toMatch(/- cron: '0 5 1 5 \*'\n\s+- cron: '0 5 \* 5 1'/);
   });
 
   it('for an employer registered with the Fund only, on the list and on Home', () => {
     expect(deadlinesFor({ ...base, coidaRegistered: true }, '2026-06-10').find((x) => x.key === 'roe-2025')).toMatchObject({ due: '2026-06-30' });
     expect(deadlinesFor({ ...base, coidaRegistered: false }, '2026-06-10').some((x) => x.key.startsWith('roe'))).toBe(false);
-    expect(taxDue({ vatRegistered: false, vatCategory: 'B', turnoverTax: false, fyEndMonth: 2, coidaRegistered: true }, '2026-06-01')).toContainEqual(expect.objectContaining({ key: 'roe-2025', to: '/payroll' }));
+    expect(taxDue({ vatRegistered: false, vatCategory: 'B', turnoverTax: false, fyEndMonth: 2, coidaRegistered: true, features: { payroll: true } }, '2026-06-01')).toContainEqual(
+      expect.objectContaining({ key: 'roe-2025', body: 'Compensation Fund', to: '/payroll', action: 'Payroll' }),
+    );
+    // Casual workers only, no payroll: Workers.
+    expect(taxDue({ vatRegistered: false, vatCategory: 'B', turnoverTax: false, fyEndMonth: 2, coidaRegistered: true, features: { workers: true } }, '2026-06-01')).toContainEqual(expect.objectContaining({ key: 'roe-2025', to: '/workers', action: 'Workers' }));
     // A season long past, and none announced since: nothing is guessed.
     expect(taxDue({ vatRegistered: false, vatCategory: 'B', turnoverTax: false, fyEndMonth: 2, coidaRegistered: true }, '2026-11-21')).toEqual([]);
+    // April to July with no season in Shap's tables: said so, with no date.
+    expect(taxDue({ vatRegistered: false, vatCategory: 'B', turnoverTax: false, fyEndMonth: 2, coidaRegistered: true }, '2027-04-15')).toEqual([
+      expect.objectContaining({ key: 'roe-2026-unknown', body: 'Compensation Fund', due: null, label: expect.stringMatching(/aren’t in this version of Shap yet/) }),
+    ]);
+    expect(taxDue({ vatRegistered: false, vatCategory: 'B', turnoverTax: false, fyEndMonth: 2, coidaRegistered: false }, '2027-04-15')).toEqual([]);
   });
 });
 
@@ -98,6 +113,6 @@ describe('the date of incorporation and the Fund in Settings and setup', () => {
     expect(welcome).toMatch(/\{\(employees \|\| casual\) && \(\s+<div className="panel panel-pad stack" style=\{\{ gap: 12 \}\}>\s+<Answer q="Are you registered with the Compensation Fund \(COIDA\)\?"/);
     expect(welcome).toMatch(/coidaRegistered: employees \|\| casual \? coida === 'yes' : null/);
     const settingsPage = readFileSync(join(__dirname, '..', '..', 'web', 'src', 'pages', 'Settings.tsx'), 'utf8');
-    expect(settingsPage).toMatch(/Registered with the Compensation Fund \(COIDA\): remind me of the return of earnings each year, once the Fund announces its dates/);
+    expect(settingsPage).toMatch(/Registered with the Compensation Fund \(COIDA, cover for injuries at work\)\s+<span className="xs muted" style=\{\{ display: 'block' \}\}>\{COIDA_REMINDER\}<\/span>/);
   });
 });

@@ -264,6 +264,13 @@ export interface BankRule {
 }
 
 const squash = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+/** Each rule's words tidied once, not once a statement line. */
+const squashed = new WeakMap<BankRule, string>();
+const wordsOf = (r: BankRule) => {
+  let w = squashed.get(r);
+  if (w === undefined) squashed.set(r, (w = squash(r.matchText)));
+  return w;
+};
 
 /** The rule a statement line fits (its description contains the rule's words): the longest wins. */
 export function ruleFor(description: string, amountCents: number, rules: BankRule[]): BankRule | null {
@@ -271,7 +278,7 @@ export function ruleFor(description: string, amountCents: number, rules: BankRul
   const dir = amountCents < 0 ? 'out' : 'in';
   let best: BankRule | null = null;
   for (const r of rules) {
-    if (r.direction !== dir || !d.includes(squash(r.matchText))) continue;
+    if (r.direction !== dir || !d.includes(wordsOf(r))) continue;
     if (!best || r.matchText.length > best.matchText.length) best = r;
   }
   return best;

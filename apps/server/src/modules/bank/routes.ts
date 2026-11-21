@@ -14,6 +14,9 @@ import { guessCategory, guessIncome, ruleFor, similar, suggestionKey, suggestMat
 const HAND_ROUNDING_CENTS = 100;
 import { fingerprints, parseStatement } from './parse.js';
 
+/** The most rules Shap keeps: each statement line is checked against every one, each time the screen opens. */
+export const MAX_BANK_RULES = 500;
+
 const uuid = z.string().uuid();
 const KINDS = ['cost', 'receipt', 'wage_payment', 'journal', 'bill_payment'] as const;
 type Kind = (typeof KINDS)[number];
@@ -645,7 +648,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
     .refine((r) => Boolean(r.categoryId) !== Boolean(r.incomeAccountId), 'Choose a cost type or an income account')
     .refine((r) => !r.incomeAccountId || r.direction === 'in', 'Money out can’t be income');
 
-  app.post('/api/bank/rules', { preHandler: requireAccess('bank.reconcile') }, async (req) => {
+  app.post('/api/bank/rules', { preHandler: requireAccess('bank.reconcile'), config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req) => {
     const user = userOrThrow(req);
     const r = parse(ruleInput, req.body);
     if (r.categoryId) {
@@ -657,12 +660,19 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
       const [a] = await sql<{ type: string; active: boolean }[]>`select type, active from accounts where id = ${r.incomeAccountId}`;
       if (a?.type !== 'income' || !a.active) throw badRequest('Choose an income account');
     }
+    // The rule this one replaces (the same words, the same way), kept in the audit log.
+    const [before] = await sql<{ categoryId: string | null; incomeAccountId: string | null; supplier: string }[]>`
+      select category_id, income_account_id, supplier from bank_rules where lower(match_text) = lower(${r.matchText}) and direction = ${r.direction}`;
+    if (!before) {
+      const [count] = await sql<{ n: number }[]>`select count(*)::int as n from bank_rules`;
+      if (count!.n >= MAX_BANK_RULES) throw badRequest(`There are ${MAX_BANK_RULES} rules already, the most Shap keeps: take one away first`);
+    }
     const [row] = await sql<{ id: string }[]>`
       insert into bank_rules (match_text, direction, category_id, income_account_id, supplier, created_by)
       values (${r.matchText}, ${r.direction}, ${r.categoryId}, ${r.incomeAccountId}, ${r.supplier}, ${user.id})
       on conflict (lower(match_text), direction) do update set match_text = excluded.match_text, category_id = excluded.category_id, income_account_id = excluded.income_account_id, supplier = excluded.supplier
       returning id`;
-    await audit(sql, { userId: user.id, action: 'save_bank_rule', entity: 'bank_rule', entityId: row!.id, ip: req.ip, details: { matchText: r.matchText, direction: r.direction } });
+    await audit(sql, { userId: user.id, action: 'save_bank_rule', entity: 'bank_rule', entityId: row!.id, ip: req.ip, details: { matchText: r.matchText, direction: r.direction, categoryId: r.categoryId, incomeAccountId: r.incomeAccountId, supplier: r.supplier, ...(before ? { replaced: before } : {}) } });
     return { id: row!.id };
   });
 

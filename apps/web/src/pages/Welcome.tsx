@@ -4,7 +4,7 @@
  */
 import { useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ACCOUNTANT_TERMS_VERSION, BUSINESS_TYPES, cipcKind, todayIso, ENTITIES, entity, extrasFor, featureOn, featuresFor, INDUSTRIES, paysOutProfit, PRACTICE_CAUTION, PRACTICE_OWN_SERVER, PRACTICE_PROFILES, PROFESSIONAL_SERVICE_INDUSTRIES, TURNOVER_TAX_PROFESSIONAL, withNeeds, payoutWord, payeRefProblem, regNumberProblem, sdlRefFor, setupCautions, TERMS_VERSION, PRACTICE_TERMS_TICK, TURNOVER_TAX_LIMIT_CENTS, formatZar, uifRefProblem, vatNumberProblem, vatThresholds, WORKFLOWS, type EmployerAnswer, type IndustryKey, type SetupExtras, type Workflow, PAYMENT_DAYS, dayLabel, withPaymentTerm } from '@shap/shared';
+import { ACCOUNTANT_TERMS_VERSION, BUSINESS_TYPES, CIPC_HINT, cipcKind, COIDA_NOTE, COIDA_REMINDER, COOP_CIPC, todayIso, ENTITIES, entity, extrasFor, featureOn, featuresFor, INDUSTRIES, paysOutProfit, PRACTICE_CAUTION, PRACTICE_OWN_SERVER, PRACTICE_PROFILES, PROFESSIONAL_SERVICE_INDUSTRIES, TURNOVER_TAX_PROFESSIONAL, withNeeds, payoutWord, payeRefProblem, regNumberProblem, sdlRefFor, setupCautions, TERMS_VERSION, PRACTICE_TERMS_TICK, TURNOVER_TAX_LIMIT_CENTS, formatZar, uifRefProblem, vatNumberProblem, vatThresholds, WORKFLOWS, type EmployerAnswer, type IndustryKey, type SetupExtras, type Workflow, PAYMENT_DAYS, dayLabel, withPaymentTerm } from '@shap/shared';
 import { TermsReview } from '../components/Terms';
 import { AccountantTermsTick } from '../components/AccountantTerms';
 import { askServerIfNeeded, PracticeServer, PracticeTeam, teamBody, teamProblem, type ServerState, type Team } from '../components/PracticeSetup';
@@ -373,12 +373,8 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
             {(employees || casual) && (
               <div className="panel panel-pad stack" style={{ gap: 12 }}>
                 <Answer q="Are you registered with the Compensation Fund (COIDA)?" value={coida} onChange={setCoida} />
-                {coida === 'yes' && <p className="xs muted">Shap reminds you of the return of earnings each year, once the Fund announces its dates.</p>}
-                {coida && coida !== 'yes' && (
-                  <p className="xs banner">
-                    An employer with one or more employees, casual workers included, registers with the Compensation Fund and sends it a return of earnings each year. Registering and filing are yours to do; switch the reminder on in Settings once you’re registered.
-                  </p>
-                )}
+                {coida === 'yes' && <p className="xs muted">{COIDA_REMINDER}</p>}
+                {coida && coida !== 'yes' && <p className="xs banner">{COIDA_NOTE}</p>}
               </div>
             )}
             {paysOut && dividendsAlways && (
@@ -519,10 +515,11 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
                 </Field>
               )}
               {cipcKind(f.businessType) && (
-                <Field label="Date of incorporation (optional)" hint="On the registration certificate. Shap reminds you of CIPC’s annual return each year.">
+                <Field label="Date of incorporation (optional)" hint={CIPC_HINT}>
                   {(p) => <input {...p} className="input" type="date" max={todayIso()} value={f.incorporatedOn ?? ''} onChange={(e) => set('incorporatedOn', e.target.value || null)} />}
                 </Field>
               )}
+              {f.businessType === 'coop' && <p className="xs muted">{COOP_CIPC}</p>}
             </div>
             <Field label="Payment terms (on invoices)">{(p) => <textarea {...p} className="textarea" rows={2} value={f.invoiceTerms} onChange={(e) => set('invoiceTerms', e.target.value)} />}</Field>
             {nav(!regProblem)}
@@ -540,7 +537,7 @@ export default function WelcomePage({ canRestore = true }: { canRestore?: boolea
         {step === 'terms' && (
           <Q title="Last step: the terms of use" sub={practiceOn ? 'Shap is free, and it’s yours to run. These are the few things that come with that, and the Shap Accountant terms, for your practice.' : 'Shap is free, and it’s yours to run. These are the few things that come with that.'}>
             <TermsReview
-              cautions={setupCautions({ vatRegistered: f.vatRegistered, employees: Boolean(employees), casual: Boolean(casual), payeRegistered: paye, uifRegistered: uif, sdl, turnoverTax: kind.turnoverTax && f.turnoverTax, paysDividends: dividendsAlways || Boolean(dividends) })}
+              cautions={setupCautions({ vatRegistered: f.vatRegistered, employees: Boolean(employees), casual: Boolean(casual), payeRegistered: paye, uifRegistered: uif, sdl, turnoverTax: kind.turnoverTax && f.turnoverTax, paysDividends: dividendsAlways || Boolean(dividends), coidaRegistered: employees || casual ? coida : null, cipc: Boolean(cipcKind(f.businessType)), incorporatedOn: f.incorporatedOn, coop: f.businessType === 'coop' })}
               accepted={accepted}
               onAccepted={setAccepted}
               tick={client ? PRACTICE_TERMS_TICK : undefined}

@@ -106,7 +106,8 @@ describe('the 13-week cash-flow forecast', () => {
   it('says on screen that it’s an estimate, not advice', () => {
     const page = readFileSync(join(__dirname, '..', '..', 'web', 'src', 'pages', 'Forecast.tsx'), 'utf8');
     expect(page).toMatch(/An estimate from what’s in your books today/);
-    expect(page).toMatch(/provisional tax, card and loan repayments aren’t in it\. An aid to plan with, not advice\./);
+    expect(page).toMatch(/nor are provisional or turnover tax, drawings, or card and loan repayments/);
+    expect(page).toMatch(/An aid to plan with, not advice/);
     expect(page).toMatch(/<p className="xs muted">\{FORECAST_NOTE\}<\/p>/);
   });
 });
@@ -147,7 +148,8 @@ describe('budgets against actual', () => {
     expect(r.fy).toEqual(fy);
     expect(r.months).toHaveLength(12);
     expect(r.months[0]).toBe(fy.start.slice(0, 7));
-    expect(r.monthsDone).toBe(month + 1);
+    // The months that have ended: this one isn't yet.
+    expect(r.monthsDone).toBe(month);
     expect(r.years).toContain(fy.end);
     const types = new Set((r.lines as { type: string }[]).map((l) => l.type));
     expect([...types].sort()).toEqual(['cost_of_sales', 'expense', 'income']);

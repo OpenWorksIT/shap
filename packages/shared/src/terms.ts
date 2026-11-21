@@ -108,7 +108,7 @@ export function termsPoints(app: 'shap' | 'pocket'): { title: string; body: stri
     },
     {
       title: 'You are responsible for what you file and pay',
-      body: 'Your returns, declarations and payments to SARS and the Department of Employment and Labour (VAT201, EMP201, EMP501, IRP6, ITR14, ITR12, DTR01, UIF and others), your registrations, and meeting their deadlines are your responsibility, as are the accuracy and completeness of what you capture.',
+      body: 'Your returns, declarations and payments to SARS, the Department of Employment and Labour, CIPC and the Compensation Fund (VAT201, EMP201, EMP501, IRP6, ITR14, ITR12, DTR01, UIF, annual returns, the return of earnings and others), your registrations, and meeting their deadlines are your responsibility, as are the accuracy and completeness of what you capture.',
     },
     {
       title: 'Your data is yours, and so are its backups',
@@ -131,6 +131,18 @@ export function termsPoints(app: 'shap' | 'pocket'): { title: string; body: stri
 
 export type EmployerAnswer = 'yes' | 'no' | 'unsure';
 
+/** Beside the date of incorporation (setup and Settings): what Shap does with it, and doesn't. */
+export const CIPC_HINT =
+  'On the registration certificate. Shap shows CIPC’s annual return on Home from five weeks before it’s due, worked out from this date: filing it, with what goes with it, is yours or your accountant’s.';
+/** For a co-operative, where a company's date of incorporation would be asked. */
+export const COOP_CIPC = 'A co-operative files an annual return with CIPC too. Shap doesn’t work out its date: ask your accountant.';
+/** Registered with the Compensation Fund: what Shap shows, and when it can't. */
+export const COIDA_REMINDER =
+  'Shap shows the return of earnings on Home only for a season in its tables: each year’s update adds the Fund’s dates from the Government Gazette (usually in March or April). If there’s no reminder, the dates may not be in Shap yet: watch for the Fund’s notice, or ask your accountant.';
+/** Not (or not sure if) registered with the Compensation Fund. */
+export const COIDA_NOTE =
+  'Most employers, casual workers included, must register under COIDA (cover for injuries at work) with the Compensation Fund, or with a licensed mutual association such as FEM, and send a return of earnings each year. Registering and filing are yours: check with your accountant or a labour practitioner. Once you’re registered with the Fund, tick it in Settings → Company.';
+
 /** What the owner told setup that they should know the consequences of, said back before agreeing. */
 export function setupCautions(a: {
   vatRegistered: boolean;
@@ -142,6 +154,13 @@ export function setupCautions(a: {
   sdl?: EmployerAnswer | null;
   turnoverTax?: boolean;
   paysDividends?: boolean;
+  /** Registered with the Compensation Fund (asked of an employer, casual workers included). */
+  coidaRegistered?: EmployerAnswer | null;
+  /** A company or close corporation (CIPC's annual return), and the date of incorporation given. */
+  cipc?: boolean;
+  incorporatedOn?: string | null;
+  /** A co-operative: an annual return to CIPC too, whose date Shap doesn't work out. */
+  coop?: boolean;
 }): string[] {
   const out: string[] = [];
   if (a.vatRegistered) out.push('You’re registered for VAT: Shap prepares your VAT201 figures, but you (or your accountant) check and submit them, and pay, by the due date.');
@@ -157,6 +176,9 @@ export function setupCautions(a: {
     out.push('You use casual labour: Shap records their days and pay, but doesn’t work out, deduct or pay PAYE, UIF or the Compensation Fund on day wages, or register you with anyone. Someone you pay by the day is usually your employee in the law, so these may apply: the national minimum wage to every worker, PAYE and the Compensation Fund to employees’ pay, and UIF and the Basic Conditions of Employment Act’s rules on hours and leave from 24 hours a month. Keeping to them is up to you: check with your accountant or a labour practitioner.');
     if (!a.employees) out.push('SDL: once everything you pay employees (day wages included) is expected to pass R500 000 over the next 12 months, SDL (1% of it) is usually due, registered with SARS (some employers, such as qualifying public benefit organisations, are exempt). Shap doesn’t work out SDL on day wages: check with your accountant.');
   }
+  if ((a.employees || a.casual) && a.coidaRegistered != null && a.coidaRegistered !== 'yes') out.push(COIDA_NOTE);
+  if (a.cipc && !a.incorporatedOn) out.push('You didn’t give the date of incorporation, so Shap won’t show CIPC’s annual return on Home. Filing it each year, with what goes with it, is yours or your accountant’s; add the date in Settings → Company to see it coming.');
+  if (a.coop) out.push(COOP_CIPC);
   if (a.turnoverTax) out.push(`You’re on turnover tax: Shap estimates it from your turnover, but the TT01 registration and the TT03 return are yours to file. ${TURNOVER_TAX_PROFESSIONAL}`);
   if (a.paysDividends) out.push('Dividends: each dividend paid is declared to SARS on the DTR01 and DTR02 by the last day of the next month (an exemption is claimed on the DTR01, so exempt dividends are declared too: confirm with your accountant). Shap records them and reminds you; declaring and paying is up to you.');
   return out;

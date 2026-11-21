@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { addDays, addMonths, cipcAnnualReturns, cipcKind, featureOn, financialYear, lastBusinessDay, monthEnd, monthLabel, monthStart, monthsBetween, ROE_SEASONS, vat201Due, vat201Label, vatPeriod, vatRateOn, SARS_CHECKED_TO, taxYearEnd, type BusinessType, type VatCategory } from '@shap/shared';
+import { addDays, addMonths, cipcAnnualReturns, cipcKind, featureOn, financialYear, lastBusinessDay, monthEnd, monthLabel, monthStart, monthsBetween, ROE_SEASONS, vat201Due, vat201Label, vatPeriod, SARS_CHECKED_TO, taxYearEnd, type BusinessType, type VatCategory } from '@shap/shared';
 import { can, requireRole, seesBooks, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { getSettings, today, freshTotals } from '../lib/books.js';
@@ -15,11 +15,47 @@ import { monthlyAttention } from './monthly.js';
 import { projectSummarySql, totals, type ProjectSummary } from './projects.js';
 
 /**
- * Debtor or creditor days: what's owed now against a year of invoices (or costs), in days. 0 only
- * when nothing is owed (a little owed is at least a day); null when something's owed but there's
- * nothing in the year to measure it against.
+ * Debtor or creditor days: what's owed now against what was invoiced (or billed) over `over` days,
+ * in days. 0 only when nothing is owed (a little owed is at least a day); null when something's
+ * owed but there's nothing in the period to measure it against.
  */
-export const daysOf = (owed: number, perYear: number): number | null => (owed <= 0 ? 0 : perYear > 0 ? Math.max(1, Math.round((owed / perYear) * 365)) : null);
+export const daysOf = (owed: number, total: number, over = 365): number | null => (owed <= 0 ? 0 : total > 0 ? Math.max(1, Math.round((owed / total) * over)) : null);
+
+/**
+ * The money on hand: cash and cash equivalents as the statements have them (the accounts on the
+ * cash and bank overdraft lines, IFRS for SMEs 7.2), and what the business's cards owe (the card
+ * sources' accounts that aren't on those lines: a liability, negative when something's owed). The
+ * owner's loan, a card in the owner's own name, isn't the business's.
+ */
+export async function cashPosition(db: Ctx['sql'], now: string): Promise<{ inBankCents: number; cardsOweCents: number }> {
+  const [c] = await db<{ cash: number }[]>`
+    select coalesce(sum(l.amount_cents), 0)::bigint as cash from ledger_totals l join accounts a on a.id = l.account_id
+    where a.statement_line in ('cash', 'bank_overdraft') and l.date <= ${now}::date`;
+  const [k] = await db<{ owed: number }[]>`
+    select coalesce(sum(l.amount_cents), 0)::bigint as owed from ledger_totals l
+    where l.date <= ${now}::date and l.account_id in (
+      select ps.account_id from payment_sources ps join accounts a on a.id = ps.account_id
+      where ps.kind = 'card' and a.statement_line not in ('cash', 'bank_overdraft') and a.system_key is distinct from 'owner_loan')`;
+  return { inBankCents: Number(c!.cash), cardsOweCents: -Number(k!.owed) };
+}
+
+/**
+ * What was invoiced (less credit notes; counter sales are paid there and then, so aren't counted)
+ * and billed by suppliers, with their VAT, over the last 12 months, and over how many days: a
+ * business younger than a year is measured over the days since its first invoice (or bill).
+ */
+async function creditTurnover(db: Ctx['sql'], now: string) {
+  const from = addDays(now, -364);
+  const [i] = await db<{ total: number; first: string | null }[]>`
+    select coalesce(sum(case when kind = 'invoice' then total_cents else -total_cents end) filter (where issue_date >= ${from}::date and issue_date <= ${now}::date), 0)::bigint as total,
+      min(issue_date) filter (where kind = 'invoice')::text as first
+    from documents where status = 'issued' and ((kind = 'invoice' and not counter) or kind = 'credit_note')`;
+  const [b] = await db<{ total: number; first: string | null }[]>`
+    select coalesce(sum(c.amount_cents) filter (where c.date >= ${from}::date and c.date <= ${now}::date), 0)::bigint as total, min(c.date)::text as first
+    from costs c join payment_sources s on s.id = c.source_id and s.role = 'bills'`;
+  const over = (first: string | null) => (first ? Math.min(365, Math.max(1, Math.round((Date.parse(now) - Date.parse(first)) / 86_400_000) + 1)) : 365);
+  return { invoicedCents: Number(i!.total), invoiceDays: over(i!.first), billedCents: Number(b!.total), billDays: over(b!.first) };
+}
 
 export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
@@ -45,11 +81,15 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
     await freshTotals(sql);
     const [series, owing, workers, unallocated, materialsNoJob, balances, projects, uncaptured] = await Promise.all([
       // Last 12 months: invoiced, cost of sales, running costs
-      sql<{ month: string; income: number; cos: number; expenses: number }[]>`
+      sql<{ month: string; income: number; cos: number; expenses: number; revenue: number; cosLine: number }[]>`
         select to_char(l.date, 'YYYY-MM') as month,
           (-sum(l.amount_cents) filter (where a.type = 'income'))::bigint as income,
           (sum(l.amount_cents) filter (where a.type = 'cost_of_sales'))::bigint as cos,
-          (sum(l.amount_cents) filter (where a.type = 'expense'))::bigint as expenses
+          (sum(l.amount_cents) filter (where a.type = 'expense'))::bigint as expenses,
+          -- Revenue and cost of sales as the statements have them (their lines, not the accounts'
+          -- types): the gross margin, as the income statement's gross profit.
+          (-sum(l.amount_cents) filter (where a.statement_line = 'revenue'))::bigint as revenue,
+          (sum(l.amount_cents) filter (where a.statement_line = 'cost_of_sales'))::bigint as cos_line
         from ledger_totals l join accounts a on a.id = l.account_id
         where l.date between ${firstMonth}::date and ${monthEnd(now)}::date and a.type in ('income', 'cost_of_sales', 'expense')
         group by 1 order by 1`,
@@ -82,35 +122,20 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
         where p.status in ('active', 'invoiced', 'quoted') order by p.number desc limit 12`),
       sql<{ n: number; total: number }[]>`select count(*)::int as n, coalesce(sum(amount_cents), 0)::bigint as total from costs where source_id is null`,
     ]);
-    // The money on hand: every bank and cash account the business pays from, and what its cards owe
-    // (a card's account is a liability, so its balance is negative when something's owed). An account
-    // in the owner's own name (the owner's loan) isn't the business's cash.
-    const cashRows = await sql<{ kind: string; balance: number }[]>`
-      select s.kind, coalesce(sum(l.amount_cents), 0)::bigint as balance
-      from (select distinct on (ps.account_id) ps.account_id, ps.kind from payment_sources ps join accounts a on a.id = ps.account_id
-            where ps.active and ps.kind in ('bank', 'cash', 'card') and a.system_key is distinct from 'owner_loan' and a.type in ('asset', 'liability')
-            order by ps.account_id, ps.sort) s
-      left join ledger_totals l on l.account_id = s.account_id and l.date <= ${now}::date
-      group by s.kind`;
+    const cash = await cashPosition(sql, now);
+    const turnover = await creditTurnover(sql, now);
 
     const months = monthsBetween(firstMonth, now).map((m) => {
       const r = series.find((x) => x.month === m);
       const income = r?.income ?? 0;
       const cos = r?.cos ?? 0;
       const expenses = r?.expenses ?? 0;
-      return { key: m, label: monthLabel(m), incomeCents: income, costOfSalesCents: cos, expensesCents: expenses, profitCents: income - cos - expenses };
+      return { key: m, label: monthLabel(m), incomeCents: income, costOfSalesCents: cos, expensesCents: expenses, profitCents: income - cos - expenses, revenueCents: Number(r?.revenue ?? 0), grossCostCents: Number(r?.cosLine ?? 0) };
     });
     const fyMonths = months.filter((m) => `${m.key}-01` >= fy.start);
-    const sumOf = (xs: typeof months, k: 'incomeCents' | 'costOfSalesCents' | 'expensesCents' | 'profitCents') => xs.reduce((s, m) => s + m[k], 0);
+    const sumOf = (xs: typeof months, k: 'incomeCents' | 'costOfSalesCents' | 'expensesCents' | 'profitCents' | 'revenueCents' | 'grossCostCents') => xs.reduce((s, m) => s + m[k], 0);
     const bal = (k: string) => balances.find((b) => b.key === k)?.balance ?? 0;
     const thisMonth = months[months.length - 1]!;
-    // How long clients take to pay, and the business takes to pay its suppliers, on average: what's
-    // owed now over the last 12 months' sales (with VAT, as invoices carry it) or costs, in days.
-    // Rough by nature (a year's average, today's balance): "about".
-    const income12 = sumOf(months, 'incomeCents');
-    const costs12 = sumOf(months, 'costOfSalesCents') + sumOf(months, 'expensesCents');
-    const withVat = settings.vatRegistered ? 1 + vatRateOn(now) / 10_000 : 1;
-    const days = daysOf;
 
     return {
       role: user.role,
@@ -119,7 +144,9 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
       thisMonth,
       yearToDate: {
         incomeCents: sumOf(fyMonths, 'incomeCents'),
-        grossProfitCents: sumOf(fyMonths, 'incomeCents') - sumOf(fyMonths, 'costOfSalesCents'),
+        // Revenue less cost of sales, as the income statement's gross profit.
+        revenueCents: sumOf(fyMonths, 'revenueCents'),
+        grossProfitCents: sumOf(fyMonths, 'revenueCents') - sumOf(fyMonths, 'grossCostCents'),
         expensesCents: sumOf(fyMonths, 'expensesCents'),
         profitCents: sumOf(fyMonths, 'profitCents'),
       },
@@ -160,14 +187,13 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
       // Month end due (last month still open) or the books reopened: for whoever may lock them.
       periods: can(user, 'books.lock') ? await (async () => { const p = await lockState(sql); return { monthDue: p.monthDue, closes: p.closes, reopened: p.reopened, lockDate: p.lockDate, next: p.monthEnd.next }; })() : null,
       bankCents: bal('bank'),
-      cash: {
-        inBankCents: cashRows.filter((r) => r.kind !== 'card').reduce((t, r) => t + Number(r.balance), 0),
-        // What the cards owe (a positive number), when they owe something.
-        cardsOweCents: -cashRows.filter((r) => r.kind === 'card').reduce((t, r) => t + Number(r.balance), 0),
-      },
-      debtorDays: days(bal('receivables'), income12 * withVat),
+      cash,
+      // How long clients take to pay, and the business takes to pay its supplier bills, on average:
+      // what's owed now against the invoices (or bills) of the last 12 months, or of the days since
+      // the first, with their VAT. Rough by nature (a year's average, today's balance): "about".
+      debtorDays: daysOf(bal('receivables'), turnover.invoicedCents, turnover.invoiceDays),
       // Supplier bills are what puts anything in creditors: without them, there's nothing to say.
-      creditorDays: on('bills') ? days(-bal('payables'), costs12 * withVat) : null,
+      creditorDays: on('bills') ? daysOf(-bal('payables'), turnover.billedCents, turnover.billDays) : null,
       ownerLoanCents: -bal('owner_loan'),
       projects: projects.map((p) => ({ ...p, ...totals(p as unknown as ProjectSummary) })),
     };
@@ -181,27 +207,56 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
  * once the Fund has announced the season. (Payroll's EMP201 is in sarsDue.) Reminders: Shap files
  * nothing with SARS, CIPC or the Fund.
  */
+/**
+ * A return coming up, for Home: whose it is (SARS, CIPC or the Compensation Fund), what, when, and
+ * where in Shap to look. `due` is null for a reminder with no date Shap knows (the Fund's season
+ * not in Shap's tables yet); `past` for one whose date has gone by (Shap can't tell whether it was
+ * filed).
+ */
+export interface TaxDue {
+  key: string;
+  body: 'SARS' | 'CIPC' | 'Compensation Fund';
+  label: string;
+  due: string | null;
+  past?: boolean;
+  to: string;
+  action: string;
+}
+
 export function taxDue(
-  settings: { vatRegistered: boolean; vatCategory: VatCategory; turnoverTax: boolean; fyEndMonth: number; businessType?: string; incorporatedOn?: string | null; coidaRegistered?: boolean | null },
+  settings: { vatRegistered: boolean; vatCategory: VatCategory; turnoverTax: boolean; fyEndMonth: number; businessType?: string; incorporatedOn?: string | null; coidaRegistered?: boolean | null; features?: Record<string, boolean> },
   now: string,
-) {
+): TaxDue[] {
   const soon = addDays(now, 35);
-  const out: { key: string; label: string; due: string; to: string }[] = [];
+  const out: TaxDue[] = [];
   if (settings.vatRegistered) {
     const current = vatPeriod(now, settings.vatCategory, settings.fyEndMonth);
     const last = vatPeriod(addMonths(current.start, -1), settings.vatCategory, settings.fyEndMonth);
     const due = vat201Due(last.end);
-    if (due >= now && due <= soon) out.push({ key: `vat201-${last.end}`, label: vat201Label(last), due, to: '/accounts?tab=vat201' });
+    if (due >= now && due <= soon) out.push({ key: `vat201-${last.end}`, body: 'SARS', label: vat201Label(last), due, to: '/accounts?tab=vat201', action: 'Figures' });
   }
   if (settings.turnoverTax) {
     const fy = financialYear(now, settings.fyEndMonth);
     const [y1, m1] = addMonths(fy.start, 5).split('-').map(Number) as [number, number];
     const [y2, m2] = fy.end.split('-').map(Number) as [number, number];
     for (const [label, due] of [['First turnover tax payment', lastBusinessDay(y1, m1)], ['Second turnover tax payment', lastBusinessDay(y2, m2)]] as const)
-      if (due >= now && due <= soon) out.push({ key: `tt-${due}`, label, due, to: '/accounts?tab=tax' });
+      if (due >= now && due <= soon) out.push({ key: `tt-${due}`, body: 'SARS', label, due, to: '/accounts?tab=tax', action: 'Figures' });
   }
   const cipc = settings.businessType ? cipcKind(settings.businessType as BusinessType) : null;
-  if (cipc && settings.incorporatedOn) for (const d of cipcAnnualReturns(cipc, settings.incorporatedOn, now, soon)) out.push({ ...d, to: '/settings?tab=company' });
-  if (settings.coidaRegistered) for (const d of ROE_SEASONS) if (d.due >= now && d.due <= soon) out.push({ key: d.key, label: d.label, due: d.due, to: '/payroll' });
+  // CIPC's annual return, from five weeks before it's due to a month after (not filing for long can
+  // end in the company being deregistered: Companies Act s82(3)).
+  if (cipc && settings.incorporatedOn)
+    for (const d of cipcAnnualReturns(cipc, settings.incorporatedOn, addDays(now, -30), soon)) out.push({ ...d, body: 'CIPC', past: d.due < now, to: '/settings?tab=company', action: 'Settings' });
+  if (settings.coidaRegistered) {
+    const payroll = featureOn(settings.features ?? {}, 'payroll');
+    const where = { to: payroll ? '/payroll' : '/workers', action: payroll ? 'Payroll' : 'Workers' };
+    for (const d of ROE_SEASONS) if (d.due >= now && d.due <= soon) out.push({ key: d.key, body: 'Compensation Fund', label: d.label, due: d.due, ...where });
+    // From April to July, the season for the assessment year just ended, if it isn't in Shap's
+    // tables yet: said, so that no reminder isn't read as nothing due.
+    const y = Number(now.slice(0, 4));
+    const m = Number(now.slice(5, 7));
+    if (m >= 4 && m <= 7 && !ROE_SEASONS.some((s) => s.opens.startsWith(String(y))))
+      out.push({ key: `roe-${y - 1}-unknown`, body: 'Compensation Fund', label: `Return of earnings (March ${y - 1} to February ${y}): the Fund’s dates for it aren’t in this version of Shap yet. It usually opens in April; watch for its notice, or ask your accountant`, due: null, ...where });
+  }
   return out;
 }

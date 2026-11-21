@@ -21,8 +21,8 @@ interface Dashboard {
   today: string;
   financialYear: { start: string; end: string; label: string };
   thisMonth: { label: string; incomeCents: number; costOfSalesCents: number; expensesCents: number; profitCents: number };
-  yearToDate: { incomeCents: number; grossProfitCents: number; expensesCents: number; profitCents: number };
-  months: { key: string; label: string; incomeCents: number; costOfSalesCents: number; expensesCents: number }[];
+  yearToDate: { incomeCents: number; revenueCents: number; grossProfitCents: number; expensesCents: number; profitCents: number };
+  months: { key: string; label: string; incomeCents: number; costOfSalesCents: number; expensesCents: number; revenueCents: number; grossCostCents: number }[];
   owing: { totalCents: number; overdue: number; invoices: { id: string; number: string; issueDate: string; totalCents: number; paidCents: number; clientName: string | null; projectName: string | null; paymentState: string }[] };
   workers: { id: string; name: string; balanceCents: number }[];
   owedToWorkersCents: number;
@@ -41,7 +41,7 @@ interface Dashboard {
   overdue?: (Remindable & { issueDate: string; remindedAt: string | null; clientPhone: string | null; projectName: string | null })[];
   billsDue?: { id: string; supplier: string; description: string; dueDate: string | null; date: string; owingCents: number }[];
   timer?: Running | null;
-  taxDue?: { key: string; label: string; due: string; to: string }[];
+  taxDue?: { key: string; body: 'SARS' | 'CIPC' | 'Compensation Fund'; label: string; due: string | null; past?: boolean; to: string; action: string }[];
   /** This version's SARS tables were checked up to this year end, before the tax year we're in. */
   sarsCheckedTo?: string | null;
   /** For whoever may lock the books: month end due (last month still open), or the books reopened. */
@@ -60,6 +60,15 @@ interface Dashboard {
 interface CaptureDashboard {
   recentLabour: { date: string; workerName: string; job: string; days: number }[];
 }
+
+/** Under Home's money figures and the margin chart: what they are. */
+export const MONEY_NOTE = 'Worked out from what’s captured in the books: the bank and till as the statements count cash, and averages over the last 12 months. Rough guides to plan with, not advice.';
+
+/** Beside a CIPC or Compensation Fund reminder: where the date comes from, and that filing is theirs. */
+export const RETURN_NOTE = {
+  CIPC: 'worked out from the date of incorporation in Settings, not advice. Shap files nothing with CIPC: you or your accountant file it, with what CIPC asks for with it.',
+  'Compensation Fund': 'from the Fund’s dates in Shap’s tables, not advice. Shap files nothing with the Fund: you or your accountant file it.',
+} as const;
 
 export default function HomePage() {
   const { seesBooks, user } = useAuthed();
@@ -127,7 +136,8 @@ function OwnerHome() {
   useMinuteTick();
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   if (!data) return <Loading />;
-  const ytdMargin = data.yearToDate.incomeCents ? data.yearToDate.grossProfitCents / data.yearToDate.incomeCents : null;
+  // Gross profit as the income statement has it: revenue less cost of sales, as a share of revenue.
+  const ytdMargin = data.yearToDate.revenueCents > 0 ? data.yearToDate.grossProfitCents / data.yearToDate.revenueCents : null;
   const billsLate = (data.billsDue ?? []).filter((b) => (b.dueDate ?? b.date) < data.today);
   const billsOwing = (data.billsDue ?? []).reduce((s, b) => s + Number(b.owingCents), 0);
   const needs = [
@@ -222,9 +232,12 @@ function OwnerHome() {
       <Link key={t.key} to={t.to} className="attention">
         <Icon name="calendar" size={18} />
         <span className="grow">
-          <strong>SARS: {t.label}</strong> due by {formatDate(t.due)}
+          {/* Whose return it is: SARS's are named; CIPC's and the Fund's labels name them. */}
+          <strong>{t.body === 'SARS' ? `SARS: ${t.label}` : t.label}</strong>
+          {t.due && (t.past ? <> was due by {formatDate(t.due)}: Shap can’t tell whether it’s been filed</> : <> due by {formatDate(t.due)}</>)}
+          {t.body !== 'SARS' && <span className="xs muted"> · {RETURN_NOTE[t.body]}</span>}
         </span>
-        Figures
+        {t.action}
         <Icon name="chevronRight" size={16} />
       </Link>
     )),
@@ -407,7 +420,7 @@ function OwnerHome() {
       <TestServerPanel />
       <div className="kpis">
         <Kpi label={`Invoiced ${data.financialYear.label} to date`} value={<Money cents={data.yearToDate.incomeCents} whole />} sub={`${data.thisMonth.label}: ${formatZar(data.thisMonth.incomeCents, { cents: false })}`} />
-        <Kpi label="Gross profit" value={<Money cents={data.yearToDate.grossProfitCents} whole />} sub={`${formatPercent(ytdMargin)} of invoiced`} />
+        <Kpi label="Gross profit" value={<Money cents={data.yearToDate.grossProfitCents} whole />} sub={ytdMargin == null ? 'no revenue yet this year' : `${formatPercent(ytdMargin)} of revenue`} />
         <Kpi label="Net profit to date" value={<Money cents={data.yearToDate.profitCents} whole />} sub={`after ${formatZar(data.yearToDate.expensesCents, { cents: false })} running costs`} tone={data.yearToDate.profitCents < 0 ? 'bad' : undefined} />
         <Kpi label="Clients owe you" value={<Money cents={data.owing.totalCents} whole />} sub={data.owing.overdue ? `${data.owing.overdue} overdue` : 'nothing overdue'} tone={data.owing.overdue ? 'warn' : undefined} />
         {has('workers') && <Kpi
@@ -426,21 +439,22 @@ function OwnerHome() {
           />
           {data.debtorDays !== undefined && (
             <Kpi
-              label="Clients pay in"
+              label="Clients take to pay"
               value={data.debtorDays == null ? '–' : data.debtorDays === 0 ? 'Nothing owed now' : `about ${data.debtorDays} day${data.debtorDays === 1 ? '' : 's'}`}
-              sub={data.debtorDays == null ? 'nothing invoiced in the last 12 months' : data.debtorDays === 0 ? 'clients owe you nothing today' : 'on average: what they owe now against 12 months of invoices'}
+              sub={data.debtorDays == null ? 'nothing invoiced in the last 12 months' : data.debtorDays === 0 ? 'no invoices owing in the books' : 'on average: what’s owed now against your invoices of the last 12 months'}
               tone={data.debtorDays != null && data.debtorDays > 60 ? 'warn' : undefined}
             />
           )}
           {data.creditorDays != null && (
             <Kpi
-              label="You pay suppliers in"
+              label="You take to pay bills"
               value={data.creditorDays === 0 ? 'Nothing owed now' : `about ${data.creditorDays} day${data.creditorDays === 1 ? '' : 's'}`}
-              sub={data.creditorDays === 0 ? 'no supplier bills owed today' : 'on average: bills owed now against 12 months of costs'}
+              sub={data.creditorDays === 0 ? 'no supplier bills owing in the books' : 'on average: unpaid supplier bills against the bills of the last 12 months'}
             />
           )}
         </div>
       )}
+      {data.cash && <p className="xs muted">{MONEY_NOTE}</p>}
 
       {!testServer?.on && <MarketNote />}
       {needs.length > 0 && <div className="stack" style={{ gap: 8 }}>{needs}</div>}
@@ -489,7 +503,7 @@ function OwnerHome() {
 
       {data.months.some((m) => m.incomeCents > 0) && (
         <section className="panel panel-pad">
-          <MarginChart data={data.months} />
+          <MarginChart data={data.months.map((m) => ({ key: m.key, label: m.label, incomeCents: m.revenueCents, costOfSalesCents: m.grossCostCents }))} />
         </section>
       )}
 

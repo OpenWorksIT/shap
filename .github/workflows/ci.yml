@@ -18,10 +18,13 @@ on:
   workflow_dispatch:
   # A new tax year starts on 1 March: the tests fail until its SARS figures are checked and in
   # (SARS_CHECKED_TO, CPDAUDIT.md section 2), so the run on 1 March (and each Monday in March)
-  # says so even if nothing was pushed. A scheduled run never moves stable.
+  # says so even if nothing was pushed. Likewise from 1 May for the Compensation Fund's return of
+  # earnings season (ROE_SEASONS, CPDAUDIT.md section 2). A scheduled run never moves stable.
   schedule:
     - cron: '0 5 1 3 *'
     - cron: '0 5 * 3 1'
+    - cron: '0 5 1 5 *'
+    - cron: '0 5 * 5 1'
 permissions:
   contents: read
 # bash with pipefail: a step like `pentest | tee pentest.txt` fails when the pentest fails, not

@@ -20,7 +20,7 @@ const WANTED = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf
 export const canScan = (): boolean => Boolean(detectorClass() && typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia);
 
 /**
- * Reads one barcode with the device's camera. It's read on the device: nothing is sent anywhere,
+ * Reads one barcode with the device's camera. The browser reads it on the device: Shap sends the picture nowhere,
  * and the camera stops as soon as a code is read or the drawer closes.
  */
 export function BarcodeScanner({ onCode, onClose }: { onCode: (code: string) => void; onClose: () => void }) {
@@ -45,6 +45,8 @@ export function BarcodeScanner({ onCode, onClose }: { onCode: (code: string) => 
         const supported = (await Det.getSupportedFormats?.()) ?? [];
         const formats = WANTED.filter((f) => supported.includes(f));
         const det = new Det(formats.length ? { formats } : undefined);
+        // Closed while the formats were being looked up: don't ask for the camera at all.
+        if (stopped) return;
         stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
         if (stopped || !video.current) return stop();
         video.current.srcObject = stream;
@@ -77,7 +79,7 @@ export function BarcodeScanner({ onCode, onClose }: { onCode: (code: string) => 
   }, []);
 
   return (
-    <Drawer title="Scan a barcode" sub="Hold the barcode in the middle of the picture. It’s read on this device: nothing is sent anywhere." onClose={onClose}>
+    <Drawer title="Scan a barcode" sub="Hold the barcode in the middle of the picture. Shap doesn’t send the camera’s picture anywhere: the browser reads the code on this device." onClose={onClose}>
       {error ? <div className="banner alert small">{error}</div> : <video ref={video} className="scan-video" playsInline muted aria-label="The camera’s picture" />}
     </Drawer>
   );

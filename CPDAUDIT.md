@@ -89,8 +89,10 @@ so in docs/SARS.md, and check them again once the Act is promulgated.
    `SARS_CHECKED_TO` ends has its rate.
 6. Each autumn, the Compensation Fund's return of earnings season (`ROE_SEASONS`,
    `packages/shared/src/tax.ts`), from the Fund's notice in the Government Gazette (usually March or
-   April). From 1 June of the year after the last season's, the tests fail until the next one is in
-   (`test/cipc-coida.test.ts`).
+   April), and any later notice that extends a season or sets a final date for outstanding returns
+   (docs/SARS.md). From 1 May of the year after the last season's, the tests fail until the next one
+   is in (`test/cipc-coida.test.ts`); CI runs on 1 May and each Monday in May even with nothing
+   pushed.
 
 ## 3. Every change (CI, `.github/workflows/ci.yml`)
 

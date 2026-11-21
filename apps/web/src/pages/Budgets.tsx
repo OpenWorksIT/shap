@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { formatDate, formatPercent, formatZar, monthLabel } from '@shap/shared';
+import { formatDate, formatPercent, formatZar } from '@shap/shared';
 import { Drawer, Empty, ErrorBox, Field, Kpi, Loading, Money, MoneyInput, useToast } from '../components/ui';
 import { api, ApiError } from '../lib/api';
 import { useApi } from '../lib/hooks';
@@ -30,6 +30,8 @@ const GROUPS: { type: Kind; label: string }[] = [
   { type: 'expense', label: 'Running costs' },
 ];
 const sum = (xs: number[], n = 12) => xs.slice(0, n).reduce((t, x) => t + x, 0);
+/** A month (YYYY-MM) as words: "October 2026". */
+const monthWords = (ym: string) => formatDate(`${ym}-01`, 'long').replace(/^1 /, '');
 
 /**
  * Budgets: what each income statement account is expected to come to, month by month, in a
@@ -67,9 +69,10 @@ export function Budgets() {
     setBusy(true);
     try {
       const r = await api<{ filled: number }>('/api/budgets/from-last-year', { body: { fyEnd: data.fy.end, percent: Number(percent) || 0 } });
-      toast(r.filled ? `${r.filled} accounts started from last year’s figures` : 'Nothing to start from: last year has no figures for accounts without a budget');
+      toast(r.filled ? `${r.filled} account${r.filled === 1 ? '' : 's'} started from last year’s figures` : 'Nothing to start from: last year has no figures for accounts without a budget');
       await reload();
     } catch (err) {
+      if (!(err instanceof ApiError)) console.error(err);
       toast(err instanceof ApiError ? err.message : UNEXPECTED, 'error');
     } finally {
       setBusy(false);
@@ -94,23 +97,25 @@ export function Budgets() {
               </button>
               <label className="row small" style={{ gap: 4 }}>
                 changed by
-                <input className="input small-input" type="number" min={-90} max={500} value={percent} onChange={(e) => setPercent(e.target.value)} style={{ width: 72 }} aria-label="Percent up or down" />%
+                <input className="input small-input" type="number" min={-90} max={500} step={1} value={percent} onChange={(e) => setPercent(e.target.value)} style={{ width: 72 }} aria-label="Percent up or down" />% (a minus to go down)
               </label>
             </span>
           )}
         </div>
         <p className="xs muted">
-          What you expect each account to come to, month by month, against what the books show. A plan for you, not the books: nothing is posted from it.
-          {isOwner ? ' Tap an account to set its months.' : ' The owner sets the budget.'} Starting from last year fills only accounts without a budget yet.
+          {isOwner
+            ? 'What you expect each account to come to, month by month, against what the books show. A plan for you, not the books: nothing is posted from it. Tap an account to set its months; starting from last year’s figures fills only accounts without a budget yet.'
+            : 'What the owner expects each account to come to, month by month, against what the books show. A plan, not the books: nothing is posted from it. The owner sets the budget.'}{' '}
+          {done > 0 && done < 12 ? `So far: the months that have ended, to the end of ${monthWords(data.months[done - 1]!)}.` : ''} Budgets are for twelve months: a year of another length is your accountant’s to plan.
         </p>
       </section>
 
       {hasBudget && (
         <div className="kpis">
           <Kpi label={`Profit budgeted for the year`} value={<Money cents={totals.budgetYear} whole />} />
-          <Kpi label={done ? `Budget to ${monthLabel(data.months[done - 1]!)}` : 'Budget to date'} value={<Money cents={totals.budgetToDate} whole />} sub={done ? `income ${formatZar(totals.incomeBudget, { cents: false })}` : 'the year hasn’t started'} />
+          <Kpi label="Budget so far" value={<Money cents={totals.budgetToDate} whole />} sub={done ? `income ${formatZar(totals.incomeBudget, { cents: false })}, to the end of ${monthWords(data.months[done - 1]!)}` : 'no month of the year has ended yet'} />
           <Kpi
-            label="Actual to date"
+            label="Actual so far"
             value={<Money cents={totals.actualToDate} whole />}
             sub={done ? `income ${formatZar(totals.incomeActual, { cents: false })}` : undefined}
             tone={done && totals.actualToDate < totals.budgetToDate ? 'warn' : undefined}
@@ -128,8 +133,8 @@ export function Budgets() {
                 <tr>
                   <th>{g.label}</th>
                   <th className="num hide-sm">Budget, year</th>
-                  <th className="num hide-sm">Budget to date</th>
-                  <th className="num">Actual to date</th>
+                  <th className="num hide-sm">Budget so far</th>
+                  <th className="num">Actual so far</th>
                   <th className="num">Difference</th>
                 </tr>
               </thead>
@@ -147,7 +152,7 @@ export function Budgets() {
                         {l.budget && (
                           <span className="show-sm xs muted">
                             <br />
-                            budget to date <span className="nowrap">{formatZar(b, { cents: false })}</span> of <span className="nowrap">{formatZar(sum(l.budget), { cents: false })}</span>
+                            budget so far <span className="nowrap">{formatZar(b, { cents: false })}</span> of <span className="nowrap">{formatZar(sum(l.budget), { cents: false })}</span>
                           </span>
                         )}
                       </td>
@@ -204,6 +209,7 @@ function BudgetDrawer({ line, report, onClose, onSaved }: { line: Line; report: 
       toast(values.every((v) => v === 0) ? 'Budget cleared' : 'Budget saved');
       onSaved();
     } catch (err) {
+      if (!(err instanceof ApiError)) console.error(err);
       toast(err instanceof ApiError ? err.message : UNEXPECTED, 'error');
     } finally {
       setBusy(false);
@@ -242,7 +248,7 @@ function BudgetDrawer({ line, report, onClose, onSaved }: { line: Line; report: 
         </div>
         <div className="form-grid budget-grid">
           {report.months.map((m, i) => (
-            <Field key={m} label={monthLabel(m)} hint={line.lastYear[i] ? `last year ${formatZar(line.lastYear[i]!, { cents: false })}` : undefined}>
+            <Field key={m} label={monthWords(m)} hint={line.lastYear[i] ? `last year ${formatZar(line.lastYear[i]!, { cents: false })}` : undefined}>
               {(p) => <MoneyInput {...p} value={months[i] ?? null} onChange={(c) => setMonths((xs) => xs.map((x, j) => (j === i ? c : x)))} />}
             </Field>
           ))}

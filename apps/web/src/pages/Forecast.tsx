@@ -17,11 +17,12 @@ interface Forecast {
   weeks: { start: string; end: string; inCents: number; outCents: number; closingCents: number }[];
   items: ForecastItem[];
   lowest: { week: number; closingCents: number } | null;
+  longOverdue: { count: number; cents: number; days: number };
 }
 
 /** What the forecast is, and isn't: said where it's shown. */
 export const FORECAST_NOTE =
-  'An estimate from what’s in your books today: invoices on their due dates (overdue ones this week, as if paid now), supplier bills on theirs, salaries and the EMP201 as last month, day wages at their recent average, the VAT owing now on the next VAT201, and the costs you usually pay each month. Clients pay late and new costs come, and provisional tax, card and loan repayments aren’t in it. An aid to plan with, not advice.';
+  'An estimate from what’s in your books today: the cash as your statements count it; invoices on their due dates (overdue ones this week, as if paid now); supplier bills on theirs; what’s already in the books for a day to come; salaries and the EMP201 as the last pay run (the employment tax incentive isn’t taken off); wages and dividends owed now; day wages at their recent average; VAT as invoiced (the invoice basis) on each VAT201; and the costs you usually pay each month. Sales you haven’t made or invoiced yet aren’t in it, nor are provisional or turnover tax, drawings, or card and loan repayments; and clients pay late and new costs come. An aid to plan with, not advice: OpenWorks IT, who make Shap, aren’t accountants or tax practitioners.';
 
 /**
  * The next 13 weeks of money in and out, week by week, from what's in the books (forecast.ts on
@@ -38,7 +39,7 @@ export function CashForecast() {
     <div className="stack-lg">
       <div className="kpis">
         <Kpi label="In the bank and till now" value={<Money cents={data.openingCents} whole />} sub={data.cardsOweCents > 0 ? `cards owe ${formatZar(data.cardsOweCents, { cents: false })} (not in the weeks below)` : formatDate(data.asOf)} />
-        <Kpi label="In 13 weeks" value={<Money cents={data.weeks[data.weeks.length - 1]?.closingCents ?? data.openingCents} whole />} sub="if everything goes as the books say" />
+        <Kpi label="In 13 weeks" value={<Money cents={data.weeks[data.weeks.length - 1]?.closingCents ?? data.openingCents} whole />} sub="an estimate, if clients pay what they owe now and costs run as usual" />
         {low && (
           <Kpi
             label="Lowest point"
@@ -48,6 +49,11 @@ export function CashForecast() {
           />
         )}
       </div>
+      {data.longOverdue.count > 0 && (
+        <p className="small">
+          Not counted as coming in: {data.longOverdue.count} invoice{data.longOverdue.count === 1 ? '' : 's'} more than {data.longOverdue.days} days overdue ({formatZar(data.longOverdue.cents, { cents: false })}). Whether they’ll be paid is yours to judge.
+        </p>
+      )}
       <p className="xs muted">{FORECAST_NOTE}</p>
       <div className="panel table-wrap">
         <table className="table">

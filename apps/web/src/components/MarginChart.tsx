@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { formatPercent } from '@shap/shared';
 
-/** A month's gross margin: what's left of each rand invoiced after the cost of the sales. */
+/** A month's gross margin: what's left of each rand of revenue after the cost of the sales (the income statement's gross profit). */
 export interface MarginPoint {
   key: string;
   label: string;
@@ -27,7 +27,9 @@ export function MarginChart({ data, title = 'Gross margin, month by month' }: { 
   const y = (v: number) => pad.t + plotH - Math.min(1, Math.max(0, v)) * plotH;
   const margins = data.map(marginOf);
   const known = margins.filter((m): m is number => m != null);
-  const average = known.length ? data.reduce((t, d) => t + d.incomeCents - d.costOfSalesCents, 0) / Math.max(1, data.reduce((t, d) => t + d.incomeCents, 0)) : null;
+  const revenue = data.reduce((t, d) => t + d.incomeCents, 0);
+  // Over the 12 months: none when there was no revenue to measure against.
+  const average = known.length && revenue > 0 ? data.reduce((t, d) => t + d.incomeCents - d.costOfSalesCents, 0) / revenue : null;
 
   return (
     <figure className="chart">
@@ -88,6 +90,7 @@ export function MarginChart({ data, title = 'Gross margin, month by month' }: { 
           })}
         </svg>
       )}
+      <p className="xs muted">Revenue less cost of sales, as a share of revenue, from what’s captured: the income statement’s gross profit, month by month.</p>
     </figure>
   );
 }

@@ -113,7 +113,8 @@ export async function findRecurring(db: Db, todayDate = todayIso('Africa/Johanne
       description: last.description,
       categoryId: last.categoryId,
       categoryName: last.categoryName,
-      sourceId: mostCommon(list.map((r) => r.sourceId ?? '')) || null,
+      // The way it was paid last: a cost moved from a card to the bank is the bank's now.
+      sourceId: last.sourceId ?? null,
       usualCents,
       usualDay,
       lastSeen,

@@ -4,7 +4,7 @@
  * no header row, so the columns are found by name where there is a header and by their contents
  * where not. OFX and QIF are the same everywhere, so they're read by their tags.
  */
-import { parseCsv } from '../clients.js';
+import { MAX_CSV_CELL, MAX_CSV_ROWS, parseCsv } from '../clients.js';
 
 export interface StatementRow {
   date: string; // YYYY-MM-DD
@@ -76,10 +76,11 @@ export function parseStatementAmount(raw: string): number | null {
   if (s.endsWith('-')) (sign = -sign), (s = s.slice(0, -1));
   if (s.startsWith('-')) (sign = -sign), (s = s.slice(1));
   else if (s.startsWith('+')) s = s.slice(1);
-  if (s.includes(',') && s.includes('.')) s = s.replace(/,/g, '');
+  // With both, the last one is the decimal point: 1,234.56 or 1.234,56.
+  if (s.includes(',') && s.includes('.')) s = s.lastIndexOf(',') > s.lastIndexOf('.') ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
   else if (/,\d{2}$/.test(s) && (s.match(/,/g) ?? []).length === 1) s = s.replace(',', '.');
   else s = s.replace(/,/g, '');
-  if (!/^\d+(\.\d+)?$/.test(s)) return null;
+  if (!/^(\d+(\.\d+)?|\.\d+)$/.test(s)) return null;
   return sign * Math.round(Number(s) * 100);
 }
 
@@ -218,11 +219,15 @@ export function parseStatementCsv(text: string, opts: { flip?: boolean } = {}): 
   };
 }
 
+const FINGERPRINT_TEXT = 2000;
+
 /** A stable key for a transaction, so a re-uploaded or overlapping statement doesn't double up. */
 export function fingerprints(rows: StatementRow[]): string[] {
   const seen = new Map<string, number>();
   return rows.map((r) => {
-    const base = `${r.date}|${r.amountCents}|${r.description.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+    // The description's first 2 000 letters and digits: enough to tell lines apart, and short
+    // enough for the database's index (a longer key can't be stored).
+    const base = `${r.date}|${r.amountCents}|${r.description.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, FINGERPRINT_TEXT)}`;
     const n = (seen.get(base) ?? 0) + 1;
     seen.set(base, n);
     return `${base}|${n}`;
@@ -243,6 +248,13 @@ export function parseStatement(text: string, opts: { flip?: boolean } = {}): Par
   return f === 'ofx' ? parseStatementOfx(text, opts) : f === 'qif' ? parseStatementQif(text, opts) : parseStatementCsv(text, opts);
 }
 
+/** The same limits as a CSV's: a description as long as a cell, and as many lines as rows. */
+const cap = (description: string) => (description.length > MAX_CSV_CELL ? description.slice(0, MAX_CSV_CELL) : description);
+const tooMany = (n: number) => {
+  if (n > MAX_CSV_ROWS) throw new Error(`That file has too many transactions (${MAX_CSV_ROWS.toLocaleString('en-ZA')} at most)`);
+};
+const ONE_ACCOUNT = 'This file has more than one account’s statement in it. Export one account at a time from your bank and bring each in on its own account.';
+
 const finish = (rows: StatementRow[], opts: { flip?: boolean }, dateOrder: DateOrder, columns: ParsedStatement['columns'], skipped: number): ParsedStatement => {
   if (!rows.length) throw new Error('No transactions found in this file');
   const out = rows.map((r) => ({ ...r, amountCents: opts.flip ? -r.amountCents : r.amountCents }));
@@ -251,10 +263,35 @@ const finish = (rows: StatementRow[], opts: { flip?: boolean }, dateOrder: DateO
   return { rows: out, skipped, pending: 0, dateOrder, columns };
 };
 
+/** Characters written as entities: &amp; last, so "&amp;lt;" stays "&lt;". */
+const decodeEntities = (s: string) =>
+  s
+    .replace(/&#(\d{1,7});/g, (e, n: string) => (Number(n) > 0 && Number(n) <= 0x10ffff ? String.fromCodePoint(Number(n)) : e))
+    .replace(/&#x([0-9a-f]{1,6});/gi, (e, n: string) => (parseInt(n, 16) > 0 && parseInt(n, 16) <= 0x10ffff ? String.fromCodePoint(parseInt(n, 16)) : e))
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
+
 /** An OFX element's text: <TAG>value (OFX 1, no closing tag) or <TAG>value</TAG> (OFX 2). */
 const ofxTag = (block: string, tag: string): string | null => {
   const m = new RegExp(`<${tag}>([^<\\r\\n]*)`, 'i').exec(block);
-  return m ? m[1]!.trim().replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>') : null;
+  return m ? decodeEntities(m[1]!.trim()) : null;
+};
+
+/**
+ * The next place `tag` is found at or after `from`, remembered between calls so that a tag that
+ * isn't there (or is far off) is looked for once, not once a transaction: a file is read in one
+ * pass however it's made.
+ */
+const finder = (upper: string, tag: string) => {
+  let at = -2;
+  return (from: number) => {
+    if (at === -1) return Infinity;
+    if (at < from) at = upper.indexOf(tag, from);
+    return at === -1 ? Infinity : at;
+  };
 };
 
 /**
@@ -263,26 +300,61 @@ const ofxTag = (block: string, tag: string): string | null => {
  * balance at the end of the statement, so it goes on the last transaction up to that date.
  */
 export function parseStatementOfx(text: string, opts: { flip?: boolean } = {}): ParsedStatement {
+  // Upper case for finding tags, letter for letter (toUpperCase can lengthen some letters, which
+  // would put the places found out of step with the text).
+  const upper = text.replace(/[a-z]+/g, (w) => w.toUpperCase());
+  const statements = (upper.match(/<STMTRS>|<CCSTMTRS>/g) ?? []).length;
+  if (statements > 1) throw new Error(ONE_ACCOUNT);
   const rows: StatementRow[] = [];
   let skipped = 0;
-  const re = /<STMTTRN>([\s\S]*?)(?=<\/STMTTRN>|<STMTTRN>|<\/BANKTRANLIST>)/gi;
-  for (let m = re.exec(text); m; m = re.exec(text)) {
-    const b = m[1]!;
+  const seen = new Set<string>();
+  const close = finder(upper, '</STMTTRN>');
+  const list = finder(upper, '</BANKTRANLIST>');
+  const next = finder(upper, '<STMTTRN>');
+  for (let start = next(0); start !== Infinity; ) {
+    const from = start + '<STMTTRN>'.length;
+    const following = next(from);
+    const end = Math.min(close(from), following, list(from), upper.length);
+    start = following;
+    const b = text.slice(from, end);
+    // The same transaction twice in one file (its bank's id repeated) is brought in once.
+    const fitid = ofxTag(b, 'FITID');
+    if (fitid && seen.has(fitid)) {
+      skipped++;
+      continue;
+    }
+    if (fitid) seen.add(fitid);
     const date = parseStatementDate((ofxTag(b, 'DTPOSTED') ?? '').slice(0, 8));
-    const amount = parseStatementAmount(ofxTag(b, 'TRNAMT') ?? '');
-    const description = [ofxTag(b, 'NAME'), ofxTag(b, 'MEMO')].filter((x): x is string => Boolean(x))
-      .filter((x, i, a) => a.indexOf(x) === i)
-      .join(' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+    let amount = parseStatementAmount(ofxTag(b, 'TRNAMT') ?? '');
+    // The amount's sign says which way the money went; a bank that writes a debit as a positive
+    // amount still marks it DEBIT (and a credit CREDIT).
+    const type = (ofxTag(b, 'TRNTYPE') ?? '').toUpperCase();
+    if (amount != null && ((type === 'DEBIT' && amount > 0) || (type === 'CREDIT' && amount < 0))) amount = -amount;
+    const description = cap(
+      [ofxTag(b, 'NAME'), ofxTag(b, 'MEMO')]
+        .filter((x): x is string => Boolean(x))
+        .filter((x, i, a) => a.indexOf(x) === i)
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim(),
+    );
     if (!date || amount == null || amount === 0) {
       skipped++;
       continue;
     }
     rows.push({ date, description: description || '(no description)', amountCents: amount, balanceCents: null });
+    tooMany(rows.length);
   }
-  const ledger = /<LEDGERBAL>([\s\S]*?)(?:<\/LEDGERBAL>|<AVAILBAL>|<\/STMTRS>|<\/CCSTMTRS>)/i.exec(text)?.[1];
-  const parsed = finish(rows, opts, 'dmy', { date: 'DTPOSTED', description: 'NAME and MEMO', amount: 'TRNAMT', balance: ledger ? 'LEDGERBAL' : null }, skipped);
+  // The ledger balance: the first <LEDGERBAL>, read from the little that follows it.
+  const at = upper.indexOf('<LEDGERBAL>');
+  let ledger: string | null = null;
+  if (at >= 0) {
+    const window = text.slice(at + '<LEDGERBAL>'.length, at + '<LEDGERBAL>'.length + 2000);
+    const w = window.toUpperCase();
+    const ends = ['</LEDGERBAL>', '<AVAILBAL>', '</STMTRS>', '</CCSTMTRS>'].map((t) => w.indexOf(t)).filter((i) => i >= 0);
+    ledger = window.slice(0, ends.length ? Math.min(...ends) : window.length);
+  }
+  const parsed = finish(rows, opts, 'dmy', { date: 'the date posted', description: 'the name and memo', amount: 'the amount', balance: ledger ? 'the ledger balance' : null }, skipped);
   if (ledger) {
     const bal = parseStatementAmount(ofxTag(ledger, 'BALAMT') ?? '');
     const asOf = parseStatementDate((ofxTag(ledger, 'DTASOF') ?? '').slice(0, 8));
@@ -301,19 +373,30 @@ export function parseStatementOfx(text: string, opts: { flip?: boolean } = {}): 
 export function parseStatementQif(text: string, opts: { flip?: boolean } = {}): ParsedStatement {
   const recs: { d: string; t: string; p: string; m: string }[] = [];
   let cur = { d: '', t: '', p: '', m: '' };
+  // An !Account block describes an account (its name and type), not a transaction.
+  let accounts = 0;
+  let inAccount = false;
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trimEnd();
-    if (!line || line.startsWith('!')) continue;
-    if (line.startsWith('^')) {
-      if (cur.d || cur.t) recs.push(cur);
-      cur = { d: '', t: '', p: '', m: '' };
+    if (!line) continue;
+    if (line.startsWith('!')) {
+      inAccount = /^!Account\b/i.test(line);
+      if (inAccount && ++accounts > 1) throw new Error(ONE_ACCOUNT);
       continue;
     }
+    if (line.startsWith('^')) {
+      if (!inAccount && (cur.d || cur.t)) recs.push(cur);
+      inAccount = false;
+      cur = { d: '', t: '', p: '', m: '' };
+      tooMany(recs.length);
+      continue;
+    }
+    if (inAccount) continue;
     const v = line.slice(1).trim();
     if (line[0] === 'D') cur.d = v.replace(/'\s*(\d{2})$/, '/20$1').replace(/\s+/g, '');
     else if (line[0] === 'T' || (line[0] === 'U' && !cur.t)) cur.t = v;
-    else if (line[0] === 'P') cur.p = v;
-    else if (line[0] === 'M') cur.m = v;
+    else if (line[0] === 'P') cur.p = cap(v);
+    else if (line[0] === 'M') cur.m = cap(v);
   }
   if (cur.d || cur.t) recs.push(cur);
   const order = detectDateOrder(recs.map((r) => r.d).filter((d) => /^\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}$/.test(d)));
@@ -326,8 +409,8 @@ export function parseStatementQif(text: string, opts: { flip?: boolean } = {}): 
       skipped++;
       continue;
     }
-    const description = [r.p, r.m].filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).join(' ').replace(/\s+/g, ' ').trim();
+    const description = cap([r.p, r.m].filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).join(' ').replace(/\s+/g, ' ').trim());
     rows.push({ date, description: description || '(no description)', amountCents: amount, balanceCents: null });
   }
-  return finish(rows, opts, order, { date: 'D (date)', description: 'P and M (payee and memo)', amount: 'T (amount)', balance: null }, skipped);
+  return finish(rows, opts, order, { date: 'the date', description: 'the payee and memo', amount: 'the amount', balance: null }, skipped);
 }

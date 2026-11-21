@@ -14,15 +14,14 @@ How hard, roughly:
 - **High**: changes how the books, stock or the apps are built underneath; weeks, and it touches
   most of the CPD reviews.
 
-Started from the gaps people and chatbots (ChatGPT, Gemini) named in November 2026, less what Shap
-already does.
+Started in November 2026 from the gaps people named, less what Shap already does.
 
 ## Done
 
 | What | Version | How hard it was |
 | --- | --- | --- |
 | Bank statements as OFX (and QFX) and QIF as well as CSV; rules that fill in a line ("lines that say ENGEN are Petrol") | 1.33 | Low: the reconciliation was there; two parsers and a table of rules |
-| Scanning barcodes with the phone's camera (Chrome for Android; a scanner or typing works everywhere) | 1.33 | Low: the browser's own BarcodeDetector, on the phone, nothing sent anywhere |
+| Scanning barcodes with the phone's camera (Chrome for Android; a scanner or typing works everywhere) | 1.33 | Low: the browser's own BarcodeDetector reads it on the phone; Shap sends the picture nowhere |
 | Home: money in the bank and till, what the cards owe, debtor and creditor days, the gross margin month by month | 1.33 | Low: figures the books already had |
 | CIPC annual return and the Compensation Fund's return of earnings on Home and the practice's list | 1.33 | Low: a date and a yes/no in setup and Settings; the Fund's season added each year (CPDAUDIT.md section 2) |
 | A 13-week cash-flow forecast | 1.33 | Medium: from invoices, bills, payroll, day wages, VAT and the monthly costs already found |
@@ -56,4 +55,4 @@ already does.
 | What | Why |
 | --- | --- |
 | Live bank feeds | They usually go through paid third parties or an agreement with each bank, and the bank data would pass through someone else. That goes against Shap being free and the books being in the owner's hands. Importing the statement file does the same job |
-| Filing returns on SARS eFiling for the business | Shap prepares the figures and exports; the owner or their tax practitioner files them. Filing on someone's behalf would make OpenWorks IT part of their tax affairs, which a free tool shouldn't be (and the wording rule: OpenWorks are not accountants or tax practitioners) |
+| Filing returns on SARS eFiling for the business | Shap prepares the figures and exports; the owner or their tax practitioner files them. Filing on someone's behalf would make OpenWorks IT part of their tax affairs, which a free tool shouldn't be: OpenWorks IT aren't accountants or tax practitioners |

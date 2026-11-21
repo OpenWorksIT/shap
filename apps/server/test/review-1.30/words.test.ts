@@ -44,7 +44,7 @@ describe('what the owner is told before linking (words 1, 2, 7, 11; security 4; 
       audit: /what Shap’s checks find in your books \(which can name your customers and suppliers\)/,
       statements: /where your statements stand/,
       lockedThrough: /how far your books are closed/,
-      deadlineInputs: /the kind of business, VAT registration and category, the year-end month, turnover tax, whether you employ people, public benefit organisation approval, and the days dividends were paid lately/,
+      deadlineInputs: /the kind of business, VAT registration and category, the year-end month, turnover tax, whether you employ people, public benefit organisation approval, the days dividends were paid lately, the date of incorporation, and whether you’re registered with the Compensation Fund/,
     };
     const h: ClientHealth = { at: '2026-11-17T08:00:00.000Z', company: 'Made-up', setupDone: true, vatRegistered: false, audit: { fail: 0, warn: 0, items: [] }, statements: null, lockedThrough: null, pocket: null, deadlineInputs: null };
     for (const k of Object.keys(healthForLink(h))) expect(goes, k).toMatch(named[k]!);

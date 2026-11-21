@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { addMonths, financialYear } from '@shap/shared';
+import { addDays, addMonths, financialYear, monthEnd } from '@shap/shared';
 import { requireAccess, requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { audit } from '../lib/audit.js';
@@ -47,11 +47,25 @@ async function actuals(db: Db, start: string, end: string): Promise<Map<string, 
   return out;
 }
 
+/**
+ * The financial year ending on `fyEnd`: one under the year end in Settings, or one a budget was set
+ * for before the year end changed (twelve months, as it was budgeted). Budgets are for twelve
+ * months: a year of another length (a first year, or one a change of year end makes longer or
+ * shorter) is the accountant's to plan.
+ */
+async function budgetYear(db: Db, fyEndMonth: number, fyEnd?: string) {
+  const fy = financialYear(fyEnd ?? today(), fyEndMonth);
+  if (!fyEnd || fy.end === fyEnd) return fy;
+  const [kept] = await db<{ n: number }[]>`select count(*)::int as n from budgets where fy_end = ${fyEnd}::date`;
+  if (!kept!.n || monthEnd(fyEnd) !== fyEnd) throw badRequest('That isn’t the last day of a financial year');
+  const start = addDays(monthEnd(addMonths(fyEnd, -12)), 1);
+  return { start, end: fyEnd, label: `year to ${fyEnd}` };
+}
+
 /** A financial year's budget against what the books show, account by account. */
 export async function budgetReport(db: Db, fyEnd?: string) {
   const settings = await getSettings(db);
-  const fy = financialYear(fyEnd ?? today(), settings.fyEndMonth);
-  if (fyEnd && fy.end !== fyEnd) throw badRequest('That isn’t the last day of a financial year');
+  const fy = await budgetYear(db, settings.fyEndMonth, fyEnd);
   const before = financialYear(addMonths(fy.start, -1), settings.fyEndMonth);
   const [now, prev] = await Promise.all([actuals(db, fy.start, fy.end), actuals(db, before.start, before.end)]);
   const budgets = await db<{ accountId: string; months: string[] }[]>`select account_id, months::text[] as months from budgets where fy_end = ${fy.end}::date`;
@@ -62,9 +76,10 @@ export async function budgetReport(db: Db, fyEnd?: string) {
   const lines: BudgetLine[] = accounts
     .filter((a) => a.active || now.has(a.id) || prev.has(a.id) || byAccount.has(a.id))
     .map((a) => ({ id: a.id, code: a.code, name: a.name, type: a.type, budget: byAccount.get(a.id) ?? null, actual: now.get(a.id) ?? zero(), lastYear: prev.get(a.id) ?? zero() }));
-  // The months that have happened (all twelve for a year gone by, none for one to come).
+  // The months that have ended (all twelve for a year gone by, none for one to come): budget and
+  // actual are compared over whole months, not a month part-way through.
   const t = today();
-  const monthsDone = t > fy.end ? 12 : t < fy.start ? 0 : (Number(t.slice(0, 4)) - Number(fy.start.slice(0, 4))) * 12 + Number(t.slice(5, 7)) - Number(fy.start.slice(5, 7)) + 1;
+  const monthsDone = t > fy.end ? 12 : t < fy.start ? 0 : (Number(t.slice(0, 4)) - Number(fy.start.slice(0, 4))) * 12 + Number(t.slice(5, 7)) - Number(fy.start.slice(5, 7));
   const months = Array.from({ length: 12 }, (_, i) => addMonths(fy.start, i).slice(0, 7));
   const others = await db<{ fyEnd: string }[]>`select distinct fy_end::text from budgets order by 1`;
   const next = financialYear(addMonths(fy.end, 1), settings.fyEndMonth).end;
@@ -88,7 +103,7 @@ export function registerBudgetRoutes(app: FastifyInstance, ctx: Ctx): void {
     const user = userOrThrow(req);
     const input = parse(z.object({ fyEnd: fyEndParam, lines: z.array(z.object({ accountId: z.string().uuid(), months: monthsInput })).min(1).max(500) }), req.body);
     const settings = await getSettings(sql);
-    if (financialYear(input.fyEnd, settings.fyEndMonth).end !== input.fyEnd) throw badRequest('That isn’t the last day of a financial year');
+    await budgetYear(sql, settings.fyEndMonth, input.fyEnd);
     const ids = [...new Set(input.lines.map((l) => l.accountId))];
     const ok = await sql<{ id: string }[]>`select id from accounts where id = any(${ids}) and type in ('income', 'cost_of_sales', 'expense')`;
     if (ok.length !== ids.length) throw badRequest('A budget is for income and cost accounts (the income statement’s)');
@@ -105,7 +120,7 @@ export function registerBudgetRoutes(app: FastifyInstance, ctx: Ctx): void {
           on conflict (account_id, fy_end) do update set months = excluded.months, updated_by = excluded.updated_by, updated_at = now()`;
         saved++;
       }
-      await audit(tx, { userId: user.id, action: 'save_budget', entity: 'budget', ip: req.ip, details: { fyEnd: input.fyEnd, saved, cleared } });
+      await audit(tx, { userId: user.id, action: 'save_budget', entity: 'budget', ip: req.ip, details: { fyEnd: input.fyEnd, saved, cleared, accounts: ids.slice(0, 100) } });
     });
     return { saved, cleared };
   });
@@ -117,13 +132,17 @@ export function registerBudgetRoutes(app: FastifyInstance, ctx: Ctx): void {
    */
   app.post('/api/budgets/from-last-year', { preHandler: requireRole('owner') }, async (req) => {
     const user = userOrThrow(req);
-    const input = parse(z.object({ fyEnd: fyEndParam, percent: z.number().min(-90).max(500).default(0) }), req.body);
+    const input = parse(z.object({ fyEnd: fyEndParam, percent: z.number().int().min(-90).max(500).default(0) }), req.body);
     const report = await budgetReport(sql, input.fyEnd);
     let filled = 0;
     await sql.begin(async (tx) => {
       for (const l of report.lines) {
         if (l.budget || l.lastYear.every((m) => m === 0)) continue;
-        const months = l.lastYear.map((m) => Math.round(m * (1 + input.percent / 100)));
+        // In whole cents, a half cent away from nothing (up for income and costs alike).
+        const months = l.lastYear.map((m) => {
+          const q = m * (100 + input.percent);
+          return Math.sign(q) * Math.floor((Math.abs(q) + 50) / 100);
+        });
         await tx`insert into budgets (account_id, fy_end, months, updated_by) values (${l.id}, ${input.fyEnd}::date, ${months.map(String)}::bigint[], ${user.id}) on conflict do nothing`;
         filled++;
       }

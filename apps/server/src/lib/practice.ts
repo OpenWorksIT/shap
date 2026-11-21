@@ -10,7 +10,7 @@
  * client's database, migrating them all at start, putting the practice's people into them, and the
  * checks the client list shows.
  */
-import { addDays, featureOn, financialYear, LEVELS, type DeadlineInputs, type Level } from '@shap/shared';
+import { addDays, featureOn, financialYear, LEVELS, LINK_WHAT_GOES_VERSION, type DeadlineInputs, type Level } from '@shap/shared';
 import { auditBooks } from '../audit/books.js';
 import { createDb, type Sql } from '../db/index.js';
 import { HttpError } from './errors.js';
@@ -382,8 +382,9 @@ export const cutWords = (s: string, n = 500): string => (s.length > n ? `${s.sli
  * nothing else: the same as a kept client's, each text cut to what the practice's list reads, and
  * without anything from Shap Pocket. (Everything named here is in LINK_WHAT_GOES, link.ts.)
  */
-export function healthForLink(h: ClientHealth): ClientHealth {
+export function healthForLink(h: ClientHealth, whatGoes = LINK_WHAT_GOES_VERSION): ClientHealth {
   const st = h.statements;
+  const d = h.deadlineInputs;
   return {
     at: h.at,
     company: cutWords(h.company, 200),
@@ -395,7 +396,18 @@ export function healthForLink(h: ClientHealth): ClientHealth {
         ? st
         : { yearEnd: st.yearEnd, status: st.status, changedSince: st.changedSince, failing: st.failing.slice(0, 50).map((w) => cutWords(w)), look: st.look.slice(0, 50).map((w) => cutWords(w)), assurance: st.assurance === null ? null : cutWords(st.assurance), unapprovedEarlier: st.unapprovedEarlier },
     lockedThrough: h.lockedThrough,
-    deadlineInputs: h.deadlineInputs && { ...h.deadlineInputs, dividendsPaid: [...new Set(h.deadlineInputs.dividendsPaid ?? [])].sort().slice(-100) },
+    // Only what the owner was told goes (LINK_WHAT_GOES), field by field.
+    deadlineInputs: d && {
+      businessType: d.businessType,
+      vatRegistered: d.vatRegistered,
+      vatCategory: d.vatCategory,
+      fyEndMonth: d.fyEndMonth,
+      turnoverTax: d.turnoverTax,
+      employer: d.employer,
+      approvedPbo: d.approvedPbo,
+      dividendsPaid: [...new Set(d.dividendsPaid ?? [])].sort().slice(-100),
+      ...(whatGoes >= 2 ? { incorporatedOn: d.incorporatedOn ?? null, coidaRegistered: d.coidaRegistered ?? null } : {}),
+    },
   };
 }
 

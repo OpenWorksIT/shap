@@ -17,7 +17,7 @@
  * Each of these routes reads a small body only, and is in LINK_PATHS (the guards let only those by).
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { LINK_API, LINK_DAYS, LINK_SESSION_HOURS, LINK_SIGN_IN_SECONDS, LINKED_BOOKS_TASKS, LEVELS, linkText, plainName, type Level } from '@shap/shared';
+import { LINK_API, LINK_DAYS, LINK_SESSION_HOURS, LINK_SIGN_IN_SECONDS, LINK_WHAT_GOES_VERSION, LINKED_BOOKS_TASKS, LEVELS, linkText, plainName, type Level } from '@shap/shared';
 import { z } from 'zod';
 import { browserName, CLIENT_COOKIE, CLIENT_SESSION_COOKIE, confirmPassword, requireRole, SESSION_COOKIE, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -95,8 +95,8 @@ export function registerLinkRoutes(app: FastifyInstance, ctx: Ctx): void {
     await confirmPassword(real, user.id, password, req.ip);
     const code = newToken();
     const [row] = await real<{ id: string; codeExpiresAt: Date }[]>`
-      insert into accountant_links (level, code_hash, code_expires_at, created_by)
-      values (${level}, ${sha256(code)}, now() + make_interval(days => ${LINK_DAYS}), ${user.id}) returning id, code_expires_at`;
+      insert into accountant_links (level, code_hash, code_expires_at, created_by, what_goes)
+      values (${level}, ${sha256(code)}, now() + make_interval(days => ${LINK_DAYS}), ${user.id}, ${LINK_WHAT_GOES_VERSION}) returning id, code_expires_at`;
     await audit(real, { userId: user.id, action: 'make_accountant_link', entity: 'accountant_link', entityId: row!.id, ip: req.ip, details: { level } });
     return { id: row!.id, level, link: linkText(config.PUBLIC_URL, code), expiresAt: row!.codeExpiresAt };
   });
@@ -119,9 +119,9 @@ export function registerLinkRoutes(app: FastifyInstance, ctx: Ctx): void {
     const header = req.headers.authorization ?? '';
     const credential = header.startsWith(`Bearer ${LINK_BEARER}`) ? header.slice(7 + LINK_BEARER.length) : '';
     if (credential.length < 20 || credential.length > 200) throw new HttpError(401, GONE, 'link_gone');
-    const [l] = await real<{ id: string; level: Level; practiceName: string }[]>`
+    const [l] = await real<{ id: string; level: Level; practiceName: string; whatGoes: number }[]>`
       update accountant_links set last_used_at = now() where credential_hash = ${sha256(credential)} and revoked_at is null
-      returning id, level, practice_name`;
+      returning id, level, practice_name, what_goes`;
     if (!l) throw new HttpError(401, GONE, 'link_gone');
     return l;
   };
@@ -206,7 +206,7 @@ export function registerLinkRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/link/health', { ...small, config: limit(10) }, async (req) => {
     const l = await linkOf(req);
     await audit(real, { actor: 'system', action: 'link_checks', entity: 'accountant_link', entityId: l.id, ip: req.ip, details: { practice: l.practiceName } });
-    return answer({ health: healthForLink(await healthOf(real, undefined, req.log)), level: l.level });
+    return answer({ health: healthForLink(await healthOf(real, undefined, req.log), l.whatGoes), level: l.level });
   });
 
   /** One of the practice's people no longer opens these books (their access went or changed). */

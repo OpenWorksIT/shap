@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { formatDate, formatZar } from '@shap/shared';
+import { formatDate, formatZar, ruleWord } from '@shap/shared';
 import { Drawer, Empty, ErrorBox, Field, Icon, Loading, Money, Segmented, useToast } from '../components/ui';
 import { api, ApiError } from '../lib/api';
 import { useApi } from '../lib/hooks';
@@ -320,7 +320,8 @@ export function BankRecon() {
                                   supplier: edits[l.id]?.supplier ?? l.supplier,
                                 },
                               });
-                              return `Saved: from now on, lines that say “${matchText}” are filled in like this`;
+                              const supplier = edits[l.id]?.supplier ?? l.supplier;
+                              return `Saved: from now on, lines that say “${matchText}” are filled in like this${supplier ? `, with the supplier “${supplier}”` : ''}`;
                             })
                           }
                         />
@@ -437,7 +438,7 @@ function LineAction(p: {
         <button
           className="btn quiet small"
           disabled={p.busy || !targetOf(l, p.edit)}
-          onClick={() => setRuling(p.edit.supplier ?? l.supplier)}
+          onClick={() => setRuling(ruleWord(l.description))}
           title="Fill in this cost type and supplier for every line that says this, from now on"
         >
           Always this
@@ -540,13 +541,14 @@ function BankRules({ onClose, onChanged }: { onClose: () => void; onChanged: () 
       await reload();
       onChanged();
     } catch (err) {
+      if (!(err instanceof ApiError)) console.error(err);
       toast(err instanceof ApiError ? err.message : UNEXPECTED, 'error');
     } finally {
       setBusy(false);
     }
   };
   return (
-    <Drawer title="Rules" sub="A statement line that says this is filled in like this. Nothing is captured until you tick it." onClose={onClose}>
+    <Drawer title="Rules" sub="A statement line that says this is filled in like this. Nothing is captured until you tick it and tap Capture ticked." onClose={onClose}>
       <ErrorBox error={error} onRetry={reload} />
       {loading && !data ? (
         <Loading />
@@ -565,7 +567,7 @@ function BankRules({ onClose, onChanged }: { onClose: () => void; onChanged: () 
           ))}
         </ul>
       ) : (
-        <Empty title="No rules yet">On a line that isn’t captured, choose its cost type and tap Always this.</Empty>
+        <Empty title="No rules yet">On a line that isn’t captured, choose what it is (a cost type, or income) and tap Always this.</Empty>
       )}
     </Drawer>
   );
@@ -637,7 +639,7 @@ function ImportStatement({ sourceId, sourceName, onDone }: { sourceId: string; s
             {preview.pending > 0 && ` ${preview.pending} pending (not yet cleared) left out: they come in with a later statement.`}
             <br />
             <span className="xs muted">
-              Read from columns: {preview.columns.date} · {preview.columns.description} · {preview.columns.amount}
+              Read from: {preview.columns.date} · {preview.columns.description} · {preview.columns.amount}
               {preview.columns.balance ? ` · ${preview.columns.balance}` : ''}
             </span>
           </p>

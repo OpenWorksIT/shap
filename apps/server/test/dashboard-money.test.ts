@@ -36,8 +36,8 @@ describe('Home: the money on hand, debtor and creditor days', () => {
   it('shows the bank and till, what the cards owe, and how long clients take to pay', async () => {
     const d = await owner.get('/api/dashboard');
     expect(d.cash).toEqual({ inBankCents: 500_000, cardsOweCents: 100_000 });
-    // R5 000 still owed on R10 000 invoiced in the last 12 months: about half a year.
-    expect(d.debtorDays).toBe(183);
+    // R5 000 still owed on R10 000 invoiced over the 11 days since the first invoice.
+    expect(d.debtorDays).toBe(Math.round((500_000 / 1_000_000) * 11));
     // No supplier bills: nothing to say about paying suppliers.
     expect(d.creditorDays).toBeNull();
   });
@@ -50,8 +50,8 @@ describe('Home: the money on hand, debtor and creditor days', () => {
     // A R2 000 bill from a supplier, not paid yet (a running cost, so off the job's cost of sales).
     await owner.post('/api/costs', { date: day, description: 'Insurance', amountCents: 200_000, supplier: 'Made-up Insurer', categoryId: await (await ref(env.sql)).cat('Insurance'), sourceId: billsSource!.id, billNumber: 'MADE-UP-1', dueDate: addDays(day, 30) });
     const d = await owner.get('/api/dashboard');
-    // R2 000 owed against R3 000 of costs in the last 12 months (the fuel and the bill).
-    expect(d.creditorDays).toBe(Math.round((200_000 / 300_000) * 365));
+    // R2 000 owed against R2 000 of bills over the 11 days since the first (the fuel wasn't a bill).
+    expect(d.creditorDays).toBe(11);
   });
 
   it('says a little owed is at least a day, so 0 days means nothing is owed', () => {
@@ -59,6 +59,7 @@ describe('Home: the money on hand, debtor and creditor days', () => {
     expect(daysOf(0, 100_000_000)).toBe(0);
     expect(daysOf(50, 0)).toBeNull();
     expect(daysOf(500_000, 1_000_000)).toBe(183);
+    expect(daysOf(500_000, 1_000_000, 11)).toBe(6);
   });
 
   it('gives only someone who reads the books these figures', async () => {
@@ -74,7 +75,7 @@ describe('Home: the money on hand, debtor and creditor days', () => {
   it('draws the gross margin month by month on Home', () => {
     const home = readFileSync(join(__dirname, '..', '..', 'web', 'src', 'pages', 'Home.tsx'), 'utf8');
     const chart = readFileSync(join(__dirname, '..', '..', 'web', 'src', 'components', 'MarginChart.tsx'), 'utf8');
-    expect(home).toMatch(/<MarginChart data=\{data\.months\} \/>/);
+    expect(home).toMatch(/<MarginChart data=\{data\.months\.map\(/);
     // Nothing owed says so, rather than "about 0 days".
     expect(home).toMatch(/data\.creditorDays === 0 \? 'Nothing owed now'/);
     expect(home).toMatch(/data\.debtorDays === 0 \? 'Nothing owed now'/);

@@ -167,7 +167,7 @@ function Till({ onSold }: { onSold: (id: string) => void }) {
       toast(`${it.description} added`);
     } else {
       setSearch(raw.trim());
-      if ((items.data ?? []).every((x) => !x.sku.toLowerCase().includes(code) && !x.description.toLowerCase().includes(code))) toast(`No item has the code ${raw.trim()}: add it under Items`, 'error');
+      if ((items.data ?? []).every((x) => !x.sku.toLowerCase().includes(code) && !x.description.toLowerCase().includes(code))) toast(`No item has the code ${raw.trim()}: sell it as something not on the list, or ask whoever looks after the items to add it`, 'error');
     }
   };
   const add = (it: Item) => {

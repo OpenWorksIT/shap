@@ -503,7 +503,8 @@ IT3(t) and EMP501 interim dates, and (since 1.33) CIPC's annual return for a com
 corporation whose date of incorporation is in Settings → Company, and the Compensation Fund's
 return of earnings for an employer that says it's registered with the Fund, once the Fund has
 announced the season (only announced seasons are shown). A client on its own Shap sends these from
-1.33. Returns due in the last few weeks show as "was due": Shap can't tell whether they were
+1.33, for a link its owner made from 1.33 on (the owner is told so before linking; an older link
+isn't sent them). Returns due in the last few weeks show as "was due": Shap can't tell whether they were
 filed.
 
 docs/SARS.md lists each rule and its source; they're checked with the standard SARS update
