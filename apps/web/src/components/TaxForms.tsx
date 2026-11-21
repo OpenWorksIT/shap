@@ -126,8 +126,8 @@ export function Vat201() {
         </div>
       </section>
       <p className="xs muted">
-        Invoice basis: issued invoices and credit notes by their dates, and the VAT on costs by the slip’s date. Exports, exempt supplies and imports aren’t split out:
-        add those yourself. Import VAT journalled against the bank looks like a payment to SARS, so it isn’t in the boxes or counted with journals typed in: as input tax it goes in field 14A or 15A, which Shap doesn’t fill, for you or your accountant to add. Box 4 is worked out from box 1 on eFiling; check it matches.{' '}
+        Invoice basis: issued invoices and credit notes by their dates, and the VAT on costs by the slip’s date. Exports and exempt supplies aren’t split out:
+        add those yourself. Import VAT captured as a cost is in box 14 or 15 here; on eFiling it goes in 14A or 15A instead (move it, don’t add it again). Import VAT journalled against the bank, cash, a card or your own money looks like a payment to SARS, so it isn’t in the boxes or in the note on journals typed in: it goes in 14A or 15A too, which Shap doesn’t fill, for you or your accountant to add. Box 4 is worked out from box 1 on eFiling; check it matches.{' '}
         {has('guides') && <Link to="/guides/vat201">How to file it, step by step →</Link>}
       </p>
     </div>

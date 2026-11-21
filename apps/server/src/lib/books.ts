@@ -1,5 +1,5 @@
 import type { FastifyRequest } from 'fastify';
-import { addDays, assessedLossCarried, closesBy, entity, featureOn, financialYear, periodLockDue, safeText, standardNames, todayIso, type BusinessType, type TaxEstimateFigures, type VatCategory } from '@shap/shared';
+import { addDays, assessedLossCarried, formatDate, closesBy, entity, featureOn, financialYear, periodLockDue, safeText, standardNames, todayIso, type BusinessType, type TaxEstimateFigures, type VatCategory } from '@shap/shared';
 import type { Db } from '../db/index.js';
 import { audit } from './audit.js';
 import { badRequest } from './errors.js';
@@ -195,14 +195,14 @@ async function accountWords(db: Db, id: string) {
 }
 
 /**
- * Moving a payment account or a cost type onto another account in the books, within a
- * transaction (the list PUT, a company file brought in): everything already captured with it moves
- * too. Refused when that moves anything in a closed year, or carries entries on or off the
- * statements' cash lines; otherwise done by `update`, and in the audit log with both accounts'
- * codes, names and lines and the amounts that moved, this year, last year and before (IFRS for
- * SMEs 3.12). `file`: a company file's name for it, said in a refusal, which then says to change
- * the file (Settings' advice doesn't get it in); `fromAs`: the old account as it was before the
- * file changed it; `by`: who for the log.
+ * Moving a payment account or a cost type onto another account in the books (or a cost type to
+ * another kind), within a transaction (the list PUT, a company file brought in): everything
+ * already captured with it moves too. Refused when that moves anything in a closed period, or
+ * carries entries on or off the statements' cash lines; otherwise done by `update`, and in the
+ * audit log with both accounts' codes, names and lines and the amounts that moved, by financial
+ * year (IFRS for SMEs 3.12). The entries themselves are read (`ledger_detail`), not an agreed
+ * year's adjustments to them. `file`: a company file's name for it, said in a refusal, which then
+ * says to change the file; `fromAs`: the old account as it was before the file changed it.
  */
 export async function moveToAccount<T>(
   tx: Db,
@@ -211,23 +211,37 @@ export async function moveToAccount<T>(
 ): Promise<T> {
   // No key update: a capture against it (its foreign key) isn't held up by this.
   const [was] = await tx<{ accountId: string; name: string }[]>`select account_id, name from ${tx(o.table)} where id = ${o.id} for no key update`;
-  if (!was || was.accountId === o.to) return update();
-  const what = o.table === 'payment_sources' ? 'Paid from / into' : 'Cost type';
-  const refuse = (words: string, settingsFix: string, fileFix: string) =>
+  if (!was) return update();
+  const costType = o.table === 'cost_categories';
+  const moving = was.accountId !== o.to;
+  if (!moving && !costType) return update();
+  const what = costType ? 'Cost type' : 'Paid from / into';
+  const changeFile = 'Change the file (give it a new name there, or leave it out) and load it again.';
+  const refuse = (words: string, settingsFix: string, fileFix = changeFile) =>
     badRequest(o.file ? `The company file puts “${o.file}” (${what}) on another account. ${words} ${fileFix}` : `${words} ${settingsFix}`);
   const [s] = await tx<{ lockDate: string | null; fyEndMonth: number }[]>`select lock_date::text as lock_date, fy_end_month from settings where id`;
-  const year = financialYear(today(), s?.fyEndMonth ?? 2);
-  const lastYearStart = financialYear(addDays(year.start, -1), s?.fyEndMonth ?? 2).start;
-  // What's on the old account, before and after: what moves is what leaves it (a journal's lines
-  // on it stay). Anything leaving a closed year is refused; the amounts go in the log.
+  const fyEndMonth = s?.fyEndMonth ?? 2;
+  const year = financialYear(today(), fyEndMonth);
+  const closedWords = () => `Some of what’s already captured with this is in a closed period (to ${formatDate(s!.lockDate!, 'long')}), so its ${costType ? 'account or kind' : 'account'} can’t change.`;
+  // A cost type's own costs in a closed period, wherever they post: its kind decides where (work
+  // in progress), so a change of kind alone can move them.
+  const closedOwn = async () =>
+    costType && s?.lockDate
+      ? JSON.stringify(await tx`select l.account_id, l.date::text, sum(l.amount_cents)::bigint as t from ledger_detail l where l.source = 'cost' and l.source_id in (select id from costs where category_id = ${o.id}) and l.date <= ${s.lockDate}::date group by 1, 2 order by 1, 2`)
+      : '';
+  const ownBefore = await closedOwn();
+  if (!moving) {
+    const row = await update();
+    if ((await closedOwn()) !== ownBefore) throw refuse(closedWords(), 'Make a new one for what’s coming instead.');
+    return row;
+  }
+  // What's on the old account, before and after (its entries, not an agreed year's adjustments):
+  // what moves is what leaves it (a journal's lines on it stay). Anything leaving a closed period
+  // is refused; the amounts go in the log, by financial year.
   const onOld = async () => {
-    const [n] = await tx<{ closed: string; earlier: string; lastYear: string; thisYear: string }[]>`
-      select count(*) filter (where l.date <= ${s?.lockDate ?? null}::date)::bigint as closed,
-        coalesce(sum(l.amount_cents) filter (where l.date < ${lastYearStart}::date), 0)::bigint as earlier,
-        coalesce(sum(l.amount_cents) filter (where l.date >= ${lastYearStart}::date and l.date < ${year.start}::date), 0)::bigint as last_year,
-        coalesce(sum(l.amount_cents) filter (where l.date >= ${year.start}::date), 0)::bigint as this_year
-      from ledger l where l.account_id = ${was.accountId}`;
-    return { closed: Number(n!.closed), earlier: Number(n!.earlier), lastYear: Number(n!.lastYear), thisYear: Number(n!.thisYear) };
+    const [c] = await tx<{ closed: string }[]>`select count(*) filter (where l.date <= ${s?.lockDate ?? null}::date)::bigint as closed from ledger_detail l where l.account_id = ${was.accountId}`;
+    const months = await tx<{ m: string; t: string }[]>`select to_char(l.date, 'YYYY-MM') as m, sum(l.amount_cents)::bigint as t from ledger_detail l where l.account_id = ${was.accountId} group by 1`;
+    return { closed: Number(c!.closed), months: new Map(months.map((r) => [r.m, Number(r.t)])) };
   };
   // Its history goes with it to its new account: not on or off the statements' cash lines by the
   // way (that's a judgement, made on the account's line). Only when one account is on them and the
@@ -238,7 +252,7 @@ export async function moveToAccount<T>(
   const onCash = async () => {
     const [n] = await tx<{ total: string; lastYear: string }[]>`
       select count(*)::bigint as total, count(*) filter (where l.date < ${year.start}::date)::bigint as last_year
-      from ledger l join accounts a on a.id = l.account_id where l.account_id in ${tx([was.accountId, o.to])} and a.statement_line in ('cash', 'bank_overdraft')`;
+      from ledger_detail l join accounts a on a.id = l.account_id where l.account_id in ${tx([was.accountId, o.to])} and a.statement_line in ('cash', 'bank_overdraft')`;
     return { all: Number(n!.total), before: Number(n!.lastYear) };
   };
   const fromWords = o.fromAs ? { id: was.accountId, ...o.fromAs } : await accountWords(tx, was.accountId);
@@ -246,30 +260,36 @@ export async function moveToAccount<T>(
   const before = crossing ? await onCash() : null;
   const row = await update();
   const oldAfter = await onOld();
-  const changeFile = 'Change the file (give it a new name there, or leave it out) and load it again.';
-  if (oldAfter.closed !== oldBefore.closed)
-    throw refuse('What’s already captured with this goes to its account in a closed year, so the account can’t change.', 'Make a new one for what’s coming instead.', changeFile);
+  if (oldAfter.closed !== oldBefore.closed || (await closedOwn()) !== ownBefore) throw refuse(closedWords(), 'Make a new one for what’s coming instead.');
   if (before) {
     const after = await onCash();
     if (after.all !== before.all)
       throw refuse(
         `What’s already captured with this would move on or off the statements’ cash line with it${after.before !== before.before ? ', last year’s figures too' : ''}.`,
-        `If the account it’s on now is on the wrong line, change that account’s line instead (Settings → Lists → Chart of accounts: that moves everything in it, last year’s figures too), after checking with your accountant; if the new account has nothing in it yet, put it on the same line first; otherwise add a new one under ${o.table === 'payment_sources' ? 'Paid from / into' : 'Cost types'} for what’s coming.`,
-        `${changeFile} Or give the new account the same line in the file, after checking with your accountant.`,
+        `If the account it’s on now is on the wrong line, change that account’s line instead (Settings → Lists → Chart of accounts: that moves everything in it, last year’s figures too), after checking with your accountant; if the new account has nothing in it yet, put it on the same line first; otherwise add a new one under ${costType ? 'Cost types' : 'Paid from / into'} for what’s coming.`,
+        `${changeFile} Or, if the new account has nothing in it yet, put it on the same line in the file, after checking with your accountant.`,
       );
+  }
+  // What left the old account, by the financial year it's in (each year's figures it changes).
+  const byYear = new Map<string, number>();
+  for (const m of new Set([...oldBefore.months.keys(), ...oldAfter.months.keys()])) {
+    const left = (oldBefore.months.get(m) ?? 0) - (oldAfter.months.get(m) ?? 0);
+    if (!left) continue;
+    const fyEnd = financialYear(`${m}-01`, fyEndMonth).end;
+    byYear.set(fyEnd, (byYear.get(fyEnd) ?? 0) + left);
   }
   await audit(tx, {
     userId: o.userId ?? null,
     actor: o.userId ? 'user' : 'system',
     action: 'moved_to_account',
-    entity: o.table === 'payment_sources' ? 'payment_source' : 'cost_category',
+    entity: costType ? 'cost_category' : 'payment_source',
     entityId: o.id,
     ip: o.ip,
     details: {
       name: was.name,
       from: fromWords,
       to: await accountWords(tx, o.to),
-      moved: { thisYearCents: oldBefore.thisYear - oldAfter.thisYear, lastYearCents: oldBefore.lastYear - oldAfter.lastYear, earlierCents: oldBefore.earlier - oldAfter.earlier },
+      moved: [...byYear].filter(([, c]) => c !== 0).sort(([x], [y]) => y.localeCompare(x)).map(([fyEnd, cents]) => ({ fyEnd, cents })),
       ...(o.file ? { by: 'the company file' } : {}),
     },
   });

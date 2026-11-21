@@ -1502,12 +1502,39 @@ The seventh round (`aa09d96`): still to fix, and fixed:
   forecast and the books audit take seconds on ten years of busy books (before this round too);
   dividends tax brought in isn't forecast; a move between two lines off cash isn't refused.
 
+The eighth round (`0c02c9e`): still to fix, and fixed:
+
+- Security (the penetration test: 0 to fix, 55 OK): a share's journal id held in a JSON array got
+  round the count (the driver sends it as the id): counted by its text, and an array's size
+  measured; the company file's new name limits refused a file Shap itself made (a partner's
+  accounts): room for those.
+- IFRS: a move out of an agreed, closed year got through when the year-end adjustment row made up
+  the count: the entries themselves are counted (`ledger_detail`); a company file's line that
+  doesn't fit an account's type, a change of type, and turnover tax without a February year end
+  went in: refused, as Settings refuses them; Pocket's company file didn't keep a sole proprietor's
+  year to February; the amounts moved are logged by financial year.
+- SARS: a refund only booked ahead counted as come in, so a set-off SARS hadn't made was assumed;
+  an EMP201 paid by a journal dated after the 13 weeks dropped out of them; the import VAT footer
+  read as adding VAT already in box 14 or 15.
+- Accounting: SARS clears the whole overdue debt before paying a refund, so a set-off is taken only
+  when what came in and the debt together are no more than the refund; moving a cost type and
+  changing its kind at once moved a closed year's work in progress; a DTR01 paid by a journal was
+  still forecast.
+- Words: the company file's advice dropped Settings' "only if it's empty"; "a closed year" for a
+  closed month; import VAT against cash, a card or own money; brackets inside brackets; the SARS
+  register's set-off sentence.
+- Noted, not changed: a move on a big account reads it twice while the books are held (seconds on
+  ten years of books); when SARS keeps a whole refund as a set-off, the forecast shows the debt
+  until the refund is older than last period.
+
 Tests: `review-1.33/*` (bank, link, home, forecast and its rounds, budgets, words, sars,
 words-round4, security-round5, round6, acc-round6, security-round6-lock and -share, round7-ifrs,
-acc-round7, sars-round7, sars-round7-movein, words-round7, security-round7-lock and -share), `forecast-budgets`, `dashboard-money`, `cipc-coida`,
+acc-round7, sars-round7, sars-round7-movein, words-round7, security-round7-lock and -share,
+round8-ifrs, acc-round8, sars-round8, words-round8, security-round8-share and -company-file), `forecast-budgets`, `dashboard-money`, `cipc-coida`,
 `bank-formats-rules`, and Pocket's `review-shap-1.33.test.ts`,
-`review-shap-1.33-security.test.ts`, `review-shap-1.33-round6.test.ts` and
-`review-shap-1.33-round7.test.ts`, each failing without its fix.
+`review-shap-1.33-security.test.ts`, `review-shap-1.33-round6.test.ts`,
+`review-shap-1.33-round7.test.ts` and the `review-shap-1.33-round8-*` files, each failing without
+its fix.
 
 ### Code scanning (CodeQL), first run
 

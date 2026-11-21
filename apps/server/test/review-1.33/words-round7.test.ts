@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import ts from 'typescript';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ACCOUNT_TYPE_LABELS, formatZar, latePayNote, STATEMENT_LINES, vatPeriod } from '@shap/shared';
+import { ACCOUNT_TYPE_LABELS, formatDate, formatZar, latePayNote, STATEMENT_LINES, vatPeriod } from '@shap/shared';
 import { today } from '../../src/lib/books.js';
 import { expectCleanAudit, login, ref, setup, type TestEnv } from '../helpers.js';
 
@@ -19,7 +19,7 @@ function auditDetail(): (d: Record<string, unknown>) => string {
   const from = src.indexOf('function accountWords');
   const to = src.indexOf('export function AuditLog');
   const js = ts.transpileModule(src.slice(from, to), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-  return new Function('STATEMENT_LINES', 'ACCOUNT_TYPE_LABELS', 'formatZar', `${js}; return detailText;`)(STATEMENT_LINES, ACCOUNT_TYPE_LABELS, formatZar);
+  return new Function('STATEMENT_LINES', 'ACCOUNT_TYPE_LABELS', 'formatZar', 'formatDate', `${js}; return detailText;`)(STATEMENT_LINES, ACCOUNT_TYPE_LABELS, formatZar, formatDate);
 }
 
 describe('the audit log’s new "by" detail (words)', () => {
@@ -71,7 +71,7 @@ describe('a company file’s refusal says what to do with the file (words)', () 
     // doesn't get the file in: it should say to change the file, or leave the account out of it.
     expect(tail).toMatch(/\bthe file\b/);
     expect(tail).not.toMatch(/Make a new one|add a new one under/);
-    expect(tail).toMatch(/Or give the new account the same line in the file/);
+    expect(tail).toMatch(/Or, if the new account has nothing in it yet, put it on the same line in the file/);
   });
 });
 
@@ -108,7 +108,7 @@ describe('import VAT journalled against the bank (words, SARS)', () => {
 describe('the books audit’s new deposit words (words)', () => {
   it('have curly apostrophes, as the typed-in VAT line beside them now does', () => {
     const audit = read('apps/server/src/audit/books.ts');
-    const line = audit.split('\n').find((l) => l.includes('a deposit fixed (or on notice) for about three months'))!;
+    const line = audit.split('\n').find((l) => l.includes('a fixed or notice deposit of about three months'))!;
     expect(line).not.toMatch(/[a-z]'[a-z]/);
   });
 });

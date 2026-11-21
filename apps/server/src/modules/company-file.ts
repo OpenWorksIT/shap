@@ -8,7 +8,7 @@
  * and updated; nothing is deleted.
  */
 import type { FastifyInstance } from 'fastify';
-import { brandInput, clientInput, entity, settingsInput } from '@shap/shared';
+import { brandInput, clientInput, entity, lineFits, settingsInput, STATEMENT_LINE_KEYS, type AccountType, type StatementLineKey } from '@shap/shared';
 import { z } from 'zod';
 import { confirmPassword, requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
@@ -31,11 +31,12 @@ const fileSchema = z.object({
     // The same limits as typing them into Settings (lengths, an accent that's a colour).
     .array(brandInput.omit({ logoLayout: true }).extend({ logo }))
     .default([]),
-  // Names as Settings takes them (a refusal and the audit log name them).
-  accounts: z.array(z.object({ code: z.string().trim().min(1).max(10), name: z.string().trim().min(1).max(120), type: z.enum(['asset', 'liability', 'equity', 'income', 'cost_of_sales', 'expense']), statementLine: z.string().max(40).optional(), active: z.boolean().default(true) })).default([]),
-  sources: z.array(z.object({ name: z.string().trim().min(1).max(80), kind: z.enum(['bank', 'card', 'cash', 'owner', 'other']), account: z.string(), active: z.boolean().default(true) })).default([]),
-  categories: z.array(z.object({ name: z.string().trim().min(1).max(80), kind: z.enum(['materials', 'demo', 'overhead', 'asset', 'personal']), account: z.string(), active: z.boolean().default(true) })).default([]),
-  workTypes: z.array(z.object({ name: z.string().trim().min(1).max(80), active: z.boolean().default(true) })).default([]),
+  // Names bounded (a refusal and the audit log name them), with room for those Shap makes itself
+  // (a partner's accounts and lists, the tracker's cost types).
+  accounts: z.array(z.object({ code: z.string().trim().min(1).max(10), name: z.string().trim().min(1).max(200), type: z.enum(['asset', 'liability', 'equity', 'income', 'cost_of_sales', 'expense']), statementLine: z.enum(STATEMENT_LINE_KEYS).optional(), active: z.boolean().default(true) })).default([]),
+  sources: z.array(z.object({ name: z.string().trim().min(1).max(200), kind: z.enum(['bank', 'card', 'cash', 'owner', 'other']), account: z.string(), active: z.boolean().default(true) })).default([]),
+  categories: z.array(z.object({ name: z.string().trim().min(1).max(200), kind: z.enum(['materials', 'demo', 'overhead', 'asset', 'personal']), account: z.string(), active: z.boolean().default(true) })).default([]),
+  workTypes: z.array(z.object({ name: z.string().trim().min(1).max(200), active: z.boolean().default(true) })).default([]),
   clients: z
     .array(clientInput.omit({ brandId: true, code: true }).extend({ code: z.string().trim().max(30).nullable().default(null), vatNumber: z.string().trim().max(30).default(''), brand: z.string().max(80).nullable().default(null) }))
     .default([]),
@@ -65,7 +66,7 @@ export async function exportCompanyFile(tx: Tx | import('../db/index.js').Sql): 
   const settings = await getSettings(tx);
   const brands = await tx<{ id: string; name: string; legalLine: string; email: string; phone: string; website: string; address: string; bankDetails: string; accent: string; active: boolean; logoMime: string | null; logoBytes: Buffer | null }[]>`
     select b.*, a.mime as logo_mime, a.bytes as logo_bytes from brands b left join attachments a on a.id = b.logo_id order by b.sort`;
-  const accounts = await tx<{ code: string; name: string; type: 'asset'; statementLine: string; active: boolean }[]>`select code, name, type, statement_line, active from accounts order by code`;
+  const accounts = await tx<{ code: string; name: string; type: 'asset'; statementLine: StatementLineKey; active: boolean }[]>`select code, name, type, statement_line, active from accounts order by code`;
   const sources = await tx<{ name: string; kind: 'bank'; account: string; active: boolean }[]>`select s.name, s.kind, a.code as account, s.active from payment_sources s join accounts a on a.id = s.account_id order by s.sort`;
   const categories = await tx<{ name: string; kind: 'overhead'; account: string; active: boolean }[]>`select c.name, c.kind, a.code as account, c.active from cost_categories c join accounts a on a.id = c.account_id where c.kind <> 'stock' order by c.sort`; // (Stock purchases is Shap's own, in every install)
   const workTypes = await tx<{ name: string; active: boolean }[]>`select name, active from work_types order by sort`;
@@ -148,6 +149,10 @@ export async function restoreCompanyFile(tx: Tx, raw: unknown, by: { userId?: st
     const s = await getSettings(tx);
     if (!entity(s.businessType).turnoverTax) await tx`update settings set turnover_tax = false where id and turnover_tax`;
     if (s.businessType !== 'npc') await tx`update settings set approved_pbo = false where id and approved_pbo`;
+    // SARS: a company on turnover tax has its year end on the last day of February (Settings' rule).
+    const [t] = await tx<{ tt: boolean; m: number }[]>`select turnover_tax as tt, fy_end_month as m from settings where id`;
+    if (t?.tt && (entity(s.businessType).febYearEnd ? 2 : t.m) !== 2)
+      throw badRequest('The company file puts the business on turnover tax with a year end that isn’t February: turnover tax needs the year to end in February (SARS’s rule for companies on turnover tax). Change the file and load it again.');
   }
   // A trust's, a sole proprietor's and a partnership's year of assessment ends in February: their
   // books' year too, as Settings keeps it (so the VAT201s, Home and the practice's list agree).
@@ -184,8 +189,15 @@ export async function restoreCompanyFile(tx: Tx, raw: unknown, by: { userId?: st
   // The accounts as they were, for the log of a payment account or cost type moved below.
   const asWas = new Map((await tx<{ id: string; code: string; name: string; statementLine: string | null }[]>`select id, code, name, statement_line from accounts`).map((a) => [a.id, { code: a.code, name: a.name, line: a.statementLine }]));
   for (const a of file.accounts) {
-    // (A line that doesn't fit the type is set by the database's own rules; none given keeps the
-    // line it has, as Settings does: the line trigger has filled the proposed row's by then.) A change of
+    // As Settings takes them: a line that doesn't fit the account's type, or a type of its own, is
+    // refused (a change of type is made in Settings, where Shap checks what it moves).
+    const [had] = await tx<{ type: AccountType }[]>`select type from accounts where code = ${a.code}`;
+    if (had && had.type !== a.type)
+      throw badRequest(`The company file gives account ${a.code} (${a.name}) another type. Change it in Settings → Lists → Chart of accounts, where Shap checks what that moves, or change the file, then load it again.`);
+    if (a.statementLine && !lineFits(a.statementLine, a.type))
+      throw badRequest(`The company file puts account ${a.code} (${a.name}) on a line of the financial statements that doesn’t fit its kind of account. Change the file and load it again.`);
+    // (None given keeps the line it has, as Settings does: the line trigger has filled the
+    // proposed row's by then.) A change of
     // an account's line moves what's in it, last year's figures too: in the audit log, as an
     // account's PUT logs it (IFRS for SMEs 3.12).
     const [was] = await tx<{ id: string; name: string; type: string; statementLine: string | null }[]>`select id, name, type, statement_line from accounts where code = ${a.code}`;

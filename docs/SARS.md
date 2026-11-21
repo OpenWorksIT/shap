@@ -106,16 +106,16 @@ due. Each is an estimate, said so on screen with who OpenWorks IT are:
   last period began: Shap can't put that balance in a SARS period). A payment beyond them comes off
   this period's, up to what was paid since the period began beyond what the ended periods owed
   when it began (a refund owed counted as nothing): one made ahead for it. A refund SARS owes isn't
-  netted off what's owed for another period, whether last period's or an older one, paid on time or not, until one comes in: then
-  VAT already overdue for an ended period is taken as set off against it first, up to what's still owed of it, as SARS must
-  ([TAA s191(1)](https://www.acts.co.za/tax/191__refunds_subject_to_set_off_and_deferral)) (SARS pays a refund after its
-  checks, and sets refunds off against debts itself: [VAT refunds for
-  vendors](https://www.sars.gov.za/types-of-tax/value-added-tax/vat-refunds-for-vendors/), [TAA
-  s191](https://www.acts.co.za/tax/191__refunds_subject_to_set_off_and_deferral), only against a
-  debt already overdue), nor forecast as money in. SARS's other tax accounts (PAYE, UIF, SDL, income
+  netted off what's owed for another period (last period's or an older one, paid on time or not),
+  nor forecast as money in: SARS pays a refund after its checks ([VAT refunds for
+  vendors](https://www.sars.gov.za/types-of-tax/value-added-tax/vat-refunds-for-vendors/)). Once one
+  has come in, VAT already overdue for an ended period is taken as set off against it first, up to
+  what's still owed of the refund, as SARS must ([TAA
+  s191(1)](https://www.acts.co.za/tax/191__refunds_subject_to_set_off_and_deferral), only against a
+  debt already overdue). SARS's other tax accounts (PAYE, UIF, SDL, income
   tax and dividends tax owed) count as money for this test, so VAT paid in one journal with PAYE is
   a payment, and a refund SARS set off against PAYE a refund. Import VAT journalled against the bank
-  looks the same as a payment to SARS, so it's taken as one (and isn't on the VAT201's typed-in note
+  (or cash, a card or the owner's own money) looks the same as a payment to SARS, so it's taken as one (and isn't on the VAT201's typed-in note
   either: the VAT201 screen says so under the boxes, where it always shows: as input tax it goes in
   field 14A or 15A, which Shap doesn't fill). Which period a
   payment was for is SARS's to say (by its reference, which Shap doesn't keep): the split is an

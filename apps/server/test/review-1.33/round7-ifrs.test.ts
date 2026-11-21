@@ -76,6 +76,6 @@ describe('moving a cost type from an expense onto an asset (IFRS 3.12)', () => {
     const res = await owner.call({ method: 'PUT', url: `/api/categories/${petrol}`, payload: { name: cat.name, kind: cat.kind, accountId: prepaid.id } });
     expect(res.statusCode).toBe(200);
     const [log] = await env.sql<{ details: Record<string, unknown> }[]>`select details from audit_log where action = 'moved_to_account'`;
-    expect(log!.details.moved).toEqual({ thisYearCents: 50_000, lastYearCents: 30_000, earlierCents: 0 });
+    expect(log!.details.moved).toEqual([{ fyEnd: fy.end, cents: 50_000 }, { fyEnd: financialYear(addDays(fy.start, -1), settings.fyEndMonth).end, cents: 30_000 }]);
   });
 });

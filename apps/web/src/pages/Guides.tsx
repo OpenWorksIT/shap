@@ -49,7 +49,7 @@ const GUIDES: Guide[] = [
       'In Shap, open Accounts → VAT201 and choose the period. Check the invoices, credit notes and costs behind it are all captured (slips with VAT on them, bills not yet paid).',
       'Log in to SARS eFiling (sarsefiling.co.za) and open your VAT return for that period (under Returns, the returns SARS has issued to you).',
       'Type each box from Shap into the same box on the form: supplies and output tax at the top, input tax (capital goods, other goods and services, bad debts) below.',
-      'Check the VAT payable (or refund) matches Shap\'s box 20, then submit.',
+      'Check the VAT payable (or refund) matches Shap\'s box 20, apart from what you added or moved yourself, then submit.',
       'Pay by the due date with the payment reference number (PRN) eFiling gives you, using eFiling or your bank.',
     ],
     tips: [

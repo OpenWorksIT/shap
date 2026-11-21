@@ -148,7 +148,7 @@ describe('a company file brought in over books with history (IFRS)', () => {
     const bring = (file: unknown) => owner.call({ method: 'POST', url: '/api/company-file', payload: { password: 'test-password-1', file } });
     const res = await bring({ format: 'shap-company/1', accounts: [{ code: '1079', name: 'Made-up Holding', type: 'asset', statementLine: 'other_current_assets' }], sources: [{ name: 'Business bank', kind: 'bank', account: '1079' }] });
     expect(res.statusCode).toBe(400);
-    expect(res.json().error).toMatch(/^The company file puts “Business bank” \(Paid from \/ into\) on another account\. What’s already captured with this would move on or off the statements’ cash line with it\. Change the file \(give it a new name there, or leave it out\) and load it again\. Or give the new account the same line in the file, after checking with your accountant\.$/);
+    expect(res.json().error).toMatch(/^The company file puts “Business bank” \(Paid from \/ into\) on another account\. What’s already captured with this would move on or off the statements’ cash line with it\. Change the file \(give it a new name there, or leave it out\) and load it again\. Or, if the new account has nothing in it yet, put it on the same line in the file, after checking with your accountant\.$/);
     expect(await cash()).toBe(before);
     expect((await env.sql<{ n: number }[]>`select count(*)::int as n from audit_log where action = 'moved_to_account'`)[0]!.n).toBe(0);
 
@@ -161,7 +161,7 @@ describe('a company file brought in over books with history (IFRS)', () => {
     await env.sql`update settings set lock_date = ${addDays(fy.start, -1)}::date where id`;
     const closed = await bring({ format: 'shap-company/1', sources: [{ name: 'Made-up till', kind: 'cash', account: '1079' }] });
     expect(closed.statusCode).toBe(400);
-    expect(closed.json().error).toMatch(/goes to its account in a closed year, so the account can’t change/);
+    expect(closed.json().error).toMatch(/is in a closed period \(to \d+ \w+ \d{4}\), so its account can’t change/);
     const [on] = await env.sql<{ code: string }[]>`select a.code from payment_sources s join accounts a on a.id = s.account_id where s.id = ${till.id}`;
     expect(on!.code).toBe('1000');
     await env.sql`update settings set lock_date = null where id`;
@@ -213,7 +213,7 @@ describe('the sixth round’s words', () => {
   it('the audit log names the new entries, and the accounts either side (words, IFRS)', () => {
     const log = read('apps/web/src/components/AuditLog.tsx');
     for (const key of ["account: 'Account'", "payment_source: 'Paid from / into'", "cost_category: 'Cost type'", "account_line_changed: 'line or type changed'", "moved_to_account: 'moved onto another account'"]) expect(log).toContain(`  ${key}`);
-    expect(log).toMatch(/bits\.push\(`from \$\{accountWords\(d\.from\)\} to \$\{accountWords\(d\.to\)\}\$\{typeof d\.by === 'string' \? ` · by \$\{d\.by\}` : ''\}`\)/);
+    expect(log).toMatch(/bits\.push\(`from \$\{accountWords\(d\.from\)\} to \$\{accountWords\(d\.to\)\}\$\{movedWords\(d\.moved\)\}\$\{typeof d\.by === 'string' \? ` · by \$\{d\.by\}` : ''\}`\)/);
   });
 
   it('the VAT201 note says only the parts that are there (words)', () => {
@@ -225,7 +225,7 @@ describe('the sixth round’s words', () => {
   it('the books audit lists names with "and", and its deposit words follow 7.2 (words, IFRS)', () => {
     const audit = read('apps/server/src/audit/books.ts');
     expect(audit).toMatch(/xs\.length > 1 \? `\$\{xs\.slice\(0, -1\)\.join\(', '\)\} and \$\{xs\[xs\.length - 1\]\}`/);
-    expect(audit).toMatch(/a deposit fixed \(or on notice\) for about three months or less when it was made, for a known amount with its interest and little risk of its value changing, kept to pay what’s coming, usually counts too; one fixed for longer, or whose value goes up and down \(shares, most unit trusts\), usually doesn’t/);
-    expect(read('docs/IFRS.md')).toMatch(/a deposit fixed \(or on notice\) for about three months or less when it was made, for a known amount with its interest and little risk of its value changing/);
+    expect(audit).toMatch(/a fixed or notice deposit of about three months or less when it was made, for a known amount with its interest and little risk of its value changing, kept to pay what’s coming, usually counts too; one for longer, or whose value goes up and down, such as shares or most unit trusts, usually doesn’t/);
+    expect(read('docs/IFRS.md')).toMatch(/a fixed or notice deposit of about three months or less when it was made, readily convertible to a known amount of cash \(with its interest\) with little risk of its value changing/);
   });
 });

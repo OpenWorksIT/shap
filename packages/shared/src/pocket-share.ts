@@ -231,6 +231,8 @@ export function shareProblem(s: PocketShare): { kind: 'column' | 'too_big' | 'ro
       for (const [col, v] of Object.entries(row)) {
         if (!/^[a-z_][a-z0-9_]*$/.test(col)) return { kind: 'column', table };
         if ((typeof v === 'string' && v.length > MAX_SHARE_TEXT) || (typeof v === 'number' && (!Number.isFinite(v) || Math.abs(v) > MAX_SHARE_FIGURE))) return { kind: 'too_big', table };
+        // An array or object goes in as its text: measured so.
+        if (v !== null && typeof v === 'object' && JSON.stringify(v).length > MAX_SHARE_TEXT) return { kind: 'too_big', table };
       }
   }
   if (rows > MAX_SHARE_ROWS) return { kind: 'rows' };
@@ -246,7 +248,8 @@ export function shareProblem(s: PocketShare): { kind: 'column' | 'too_big' | 'ro
   // hyphens, is the same journal.
   const perJournal = new Map<unknown, number>();
   for (const l of s.records.journal_lines ?? []) {
-    const id = typeof l.journal_id === 'string' ? l.journal_id.toLowerCase().replace(/[{}-]/g, '') : l.journal_id;
+    // (As the driver sends it: an array or anything else becomes its text.)
+    const id = l.journal_id == null ? null : String(l.journal_id).toLowerCase().replace(/[{}-]/g, '');
     const n = (perJournal.get(id) ?? 0) + 1;
     if (n > MAX_JOURNAL_LINES) return { kind: 'long_journal', table: 'journal_lines' };
     perJournal.set(id, n);

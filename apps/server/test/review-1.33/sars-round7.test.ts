@@ -168,6 +168,7 @@ describe('NOTE: VAT overpaid during the last period', () => {
     try {
       // Shown in full: conservative (SARS holds the R300 as a credit on the VAT account).
       expect(vatOf(await cashForecast(b.env.sql, now))).toEqual([{ date: vat201Due(b.current.end), cents: -90_000 }]);
+      await expectCleanAudit(b.env.sql);
     } finally {
       await b.env.close();
     }

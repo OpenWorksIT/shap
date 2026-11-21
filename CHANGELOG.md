@@ -16,7 +16,7 @@ entries newer than the version you're running before you update.
   (the EMP201 by the month paid), dividends tax on its date, wages and dividends owed now (those
   owed in the books by a journal or balances brought in too; one paid by a journal not counted
   again), PAYE, UIF and SDL owed in the books beyond your pay runs (brought in when moving in, say)
-  this week (and an EMP201 the books show paid by a journal not counted again), day wages at the last eight weeks'
+  this week (and an EMP201 or DTR01 the books show paid by a journal not counted again), day wages at the last eight weeks'
   average, the VAT as invoiced on each VAT201 (an older one this week; a trial balance brought in
   counts as owed for periods gone by, and a refund SARS owes isn't netted off another period's VAT), and the costs you usually
   pay each month (as last paid: not those paid personally or on a card; one that comes as a
@@ -63,10 +63,11 @@ entries newer than the version you're running before you update.
   a deposit, and for an overdraft), for you and your accountant to judge. Moving a payment account (or a cost
   type) that's been used onto another account is refused when its history would move on or off the cash
   line with it (change the line of the account that's wrong, with your accountant), or would move
-  anything in a closed year, from a company file brought in too (where an account the file gives no
-  line keeps its own, and turnover tax stays to the businesses that can have it), and a change of an
-  account's line, or of the account behind a payment account or cost type, is in the audit log,
-  with both accounts' names and lines and the amounts that moved.
+  anything in a closed period, from a company file brought in too, and a change of an account's line, or of the account behind a payment account or cost type, is in the audit log,
+  with both accounts' names and lines and the amounts that moved, by financial year. A company file
+  that gives an account no line leaves its line as it is; one that gives it a line that doesn't fit
+  its type, or another type, or turnover tax without a February year end, is refused, as Settings
+  refuses them; and it turns turnover tax (and PBO approval) off for a business that can't have it.
 - **VAT201.** When journals typed in (a cash sale journalled, a correction) moved the VAT account in
   a period, other than as payments to or refunds from SARS (VAT against the bank, cash, a card, your
   own money or SARS's other taxes), the VAT201 screen says what they added to the VAT owed and what

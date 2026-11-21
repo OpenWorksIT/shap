@@ -3,7 +3,7 @@
  * deleted from the app, and it's part of every backup, so the history goes wherever the books go.
  */
 import { useEffect, useState } from 'react';
-import { ACCOUNT_TYPE_LABELS, formatZar, STATEMENT_LINES } from '@shap/shared';
+import { ACCOUNT_TYPE_LABELS, formatDate, formatZar, STATEMENT_LINES } from '@shap/shared';
 import { api, ApiError, apiUrl } from '../lib/api';
 import { Field, Loading } from './ui';
 
@@ -118,6 +118,12 @@ function accountWords(x: unknown): string {
   return `${o.type ? `${(ACCOUNT_TYPE_LABELS as Record<string, string | undefined>)[o.type] ?? o.type}, ` : ''}${line}`;
 }
 
+/** What moved with a payment account or cost type (what left the old account, net), by financial year. */
+function movedWords(x: unknown): string {
+  const years = Array.isArray(x) ? (x as { fyEnd?: string; cents?: number }[]).filter((y) => y.fyEnd && y.cents) : [];
+  return years.length ? `, with ${years.map((y) => `${formatZar(Math.abs(y.cents!))} of the year to ${formatDate(y.fyEnd!, 'long')}`).join(', ')}` : '';
+}
+
 /** The few details worth reading in a row; the rest are in the export. */
 function detailText(d: Record<string, unknown>): string {
   const bits: string[] = [];
@@ -130,7 +136,7 @@ function detailText(d: Record<string, unknown>): string {
   if (typeof d.reason === 'string' && d.reason) bits.push(d.reason);
   // A move or a change of line names both sides, and what did it (a company file): only there, as
   // other rows' "by" (a lock's, an import's ids) reads badly alone, and would hide their details.
-  if (d.from && typeof d.from === 'object' && d.to && typeof d.to === 'object') bits.push(`from ${accountWords(d.from)} to ${accountWords(d.to)}${typeof d.by === 'string' ? ` · by ${d.by}` : ''}`);
+  if (d.from && typeof d.from === 'object' && d.to && typeof d.to === 'object') bits.push(`from ${accountWords(d.from)} to ${accountWords(d.to)}${movedWords(d.moved)}${typeof d.by === 'string' ? ` · by ${d.by}` : ''}`);
   if (!bits.length) {
     const keys = Object.keys(d).filter((k) => !['ip', 'url'].includes(k));
     if (keys.length) bits.push(keys.slice(0, 4).map((k) => `${k}: ${typeof d[k] === 'object' ? '…' : String(d[k])}`).join(', '));
