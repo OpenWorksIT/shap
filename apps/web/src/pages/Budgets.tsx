@@ -52,9 +52,13 @@ export function Budgets() {
   const totals = useMemo(() => {
     if (!data) return null;
     const done = data.monthsDone;
-    const by = (t: Kind, k: 'budget' | 'actual', n: number) => data.lines.filter((l) => l.type === t).reduce((s, l) => s + sum((k === 'budget' ? l.budget : l.actual) ?? [], n), 0);
+    // Budget and actual over the same accounts: those with a budget.
+    const budgeted = data.lines.filter((l) => l.budget);
+    const by = (t: Kind, k: 'budget' | 'actual', n: number) => budgeted.filter((l) => l.type === t).reduce((s, l) => s + sum((k === 'budget' ? l.budget : l.actual) ?? [], n), 0);
     const profit = (k: 'budget' | 'actual', n: number) => by('income', k, n) - by('cost_of_sales', k, n) - by('expense', k, n);
-    return { budgetYear: profit('budget', 12), budgetToDate: profit('budget', done), actualToDate: profit('actual', done), incomeBudget: by('income', 'budget', done), incomeActual: by('income', 'actual', done) };
+    // Accounts with figures in the books this year but no budget: not in the comparison.
+    const left = data.lines.filter((l) => !l.budget && l.actual.some(Boolean)).length;
+    return { budgetYear: profit('budget', 12), budgetToDate: profit('budget', done), actualToDate: profit('actual', done), incomeBudget: by('income', 'budget', done), incomeActual: by('income', 'actual', done), budgeted: budgeted.length, left };
   }, [data]);
 
   if (error) return <ErrorBox error={error} onRetry={reload} />;
@@ -97,7 +101,7 @@ export function Budgets() {
               </button>
               <label className="row small" style={{ gap: 4 }}>
                 changed by
-                <input className="input small-input" type="number" min={-90} max={500} step={1} value={percent} onChange={(e) => setPercent(e.target.value)} style={{ width: 72 }} aria-label="Percent up or down" />% (a minus to go down)
+                <input className="input small-input" type="number" min={-90} max={500} step={0.1} value={percent} onChange={(e) => setPercent(e.target.value)} style={{ width: 72 }} aria-label="Percent up or down" />% (a minus to go down)
               </label>
             </span>
           )}
@@ -106,23 +110,28 @@ export function Budgets() {
           {isOwner
             ? 'What you expect each account to come to, month by month, against what the books show. A plan for you, not the books: nothing is posted from it. Tap an account to set its months; starting from last year’s figures fills only accounts without a budget yet.'
             : 'What the owner expects each account to come to, month by month, against what the books show. A plan, not the books: nothing is posted from it. The owner sets the budget.'}{' '}
-          {done > 0 && done < 12 ? `So far: the months that have ended, to the end of ${monthWords(data.months[done - 1]!)}.` : ''} Budgets are for twelve months: a year of another length is your accountant’s to plan.
+          {done > 0 && done < 12 ? `So far: the months that have ended, to the end of ${monthWords(data.months[done - 1]!)}.` : ''}
         </p>
       </section>
 
       {hasBudget && (
         <div className="kpis">
-          <Kpi label={`Profit budgeted for the year`} value={<Money cents={totals.budgetYear} whole />} />
+          <Kpi label="Profit budgeted for the year" value={<Money cents={totals.budgetYear} whole />} sub={`on the ${totals.budgeted} account${totals.budgeted === 1 ? '' : 's'} with a budget`} />
           <Kpi label="Budget so far" value={<Money cents={totals.budgetToDate} whole />} sub={done ? `income ${formatZar(totals.incomeBudget, { cents: false })}, to the end of ${monthWords(data.months[done - 1]!)}` : 'no month of the year has ended yet'} />
           <Kpi
             label="Actual so far"
             value={<Money cents={totals.actualToDate} whole />}
-            sub={done ? `income ${formatZar(totals.incomeActual, { cents: false })}` : undefined}
+            sub={done ? `income ${formatZar(totals.incomeActual, { cents: false })}, the same accounts` : 'the same accounts'}
             tone={done && totals.actualToDate < totals.budgetToDate ? 'warn' : undefined}
           />
         </div>
       )}
 
+      {hasBudget && totals.left > 0 && (
+        <p className="small muted">
+          {totals.left} account{totals.left === 1 ? ' has' : 's have'} figures in the books this year and no budget: {totals.left === 1 ? 'it isn’t' : 'they aren’t'} in the figures above, so actual profit for the whole business differs.
+        </p>
+      )}
       {GROUPS.map((g) => {
         const lines = data.lines.filter((l) => l.type === g.type && (every || hasFigures(l)));
         if (!lines.length) return null;

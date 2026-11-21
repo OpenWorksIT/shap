@@ -33,6 +33,8 @@ interface BankRule {
   categoryName: string | null;
   incomeAccountName: string | null;
   supplier: string;
+  /** Its cost type (or income account) is still in use: a rule whose isn't is kept but not applied. */
+  usable: boolean;
 }
 
 /** What a line becomes when captured: "cat:<cost type>" (a cost, or a refund for money in) or "inc:<income account>". */
@@ -548,7 +550,7 @@ function BankRules({ onClose, onChanged }: { onClose: () => void; onChanged: () 
     }
   };
   return (
-    <Drawer title="Rules" sub="A statement line that says this is filled in like this. Nothing is captured until you tick it and tap Capture ticked." onClose={onClose}>
+    <Drawer title="Rules" sub="A statement line whose description has a rule’s words in it comes filled in with the rule’s cost type (or income) and supplier. Nothing is captured until you tick it and tap Capture ticked." onClose={onClose}>
       <ErrorBox error={error} onRetry={reload} />
       {loading && !data ? (
         <Loading />
@@ -558,6 +560,7 @@ function BankRules({ onClose, onChanged }: { onClose: () => void; onChanged: () 
             <li key={r.id} className="list-row">
               <span className="grow small">
                 <strong>“{r.matchText}”</strong> ({r.direction === 'out' ? 'money out' : 'money in'}) → {r.categoryName ? `${r.categoryName}${r.direction === 'in' ? ' (refund)' : ''}` : r.incomeAccountName}
+                {!r.usable && <span className="xs muted"> · not applied: its {r.categoryName ? 'cost type' : 'income account'} isn’t in use</span>}
                 {r.supplier ? `, supplier ${r.supplier}` : ''}
               </span>
               <button className="btn quiet small" disabled={busy} onClick={() => void remove(r)}>
@@ -637,6 +640,7 @@ function ImportStatement({ sourceId, sourceName, onDone }: { sourceId: string; s
             <strong>{preview.count}</strong> transactions, {formatDate(preview.from)} to {formatDate(preview.to)}: money in {formatZar(preview.inCents)}, money out{' '}
             {formatZar(preview.outCents)}.{preview.duplicates > 0 && ` ${preview.duplicates} are already imported and will be skipped.`}
             {preview.pending > 0 && ` ${preview.pending} pending (not yet cleared) left out: they come in with a later statement.`}
+            {preview.skipped > 0 && ` ${preview.skipped} line${preview.skipped === 1 ? '' : 's'} left out: balance lines, lines with no date or amount Shap could read, or the same transaction twice in the file. Check them against the statement.`}
             <br />
             <span className="xs muted">
               Read from: {preview.columns.date} · {preview.columns.description} · {preview.columns.amount}

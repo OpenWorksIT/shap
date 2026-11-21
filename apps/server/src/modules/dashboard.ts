@@ -149,6 +149,11 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: Ctx): void {
         grossProfitCents: sumOf(fyMonths, 'revenueCents') - sumOf(fyMonths, 'grossCostCents'),
         expensesCents: sumOf(fyMonths, 'expensesCents'),
         profitCents: sumOf(fyMonths, 'profitCents'),
+        // Below gross profit, so the tiles add up: income that isn't revenue (interest, other
+        // income), and every cost that isn't cost of sales (running costs, finance costs, tax).
+        // Gross profit + other income − running costs = profit.
+        otherIncomeCents: sumOf(fyMonths, 'incomeCents') - sumOf(fyMonths, 'revenueCents'),
+        runningCostsCents: sumOf(fyMonths, 'revenueCents') - sumOf(fyMonths, 'grossCostCents') + (sumOf(fyMonths, 'incomeCents') - sumOf(fyMonths, 'revenueCents')) - sumOf(fyMonths, 'profitCents'),
       },
       months,
       owing: {
@@ -256,7 +261,7 @@ export function taxDue(
     const y = Number(now.slice(0, 4));
     const m = Number(now.slice(5, 7));
     if (m >= 4 && m <= 7 && !ROE_SEASONS.some((s) => s.opens.startsWith(String(y))))
-      out.push({ key: `roe-${y - 1}-unknown`, body: 'Compensation Fund', label: `Return of earnings (March ${y - 1} to February ${y}): the Fund’s dates for it aren’t in this version of Shap yet. It usually opens in April; watch for its notice, or ask your accountant`, due: null, ...where });
+      out.push({ key: `roe-${y - 1}-unknown`, body: 'Compensation Fund', label: `Return of earnings to the Compensation Fund (March ${y - 1} to February ${y}): its dates aren’t in this version of Shap yet. The season usually opens in April: watch for the Fund’s notice, or ask your accountant`, due: null, ...where });
   }
   return out;
 }

@@ -9,40 +9,50 @@ entries newer than the version you're running before you update.
   week by week, from what's in the books. It starts from the cash as your statements count it
   (what the cards owe is shown beside it), with invoices on their due dates (overdue ones this
   week, as if paid now; those more than 90 days overdue shown apart, not counted), supplier bills
-  on theirs, what's already in the books for a day to come (a pay run paid on its pay day), salaries
-  and the EMP201 as the last pay run (by the month paid), wages and dividends owed now, day wages
-  at the last eight weeks' average, the VAT as invoiced on each VAT201, and the costs you usually
+  on theirs, what's already in the books for a day to come (a pay run paid on its pay day, a payment
+  dated ahead: not counted again), salaries and the EMP201 as your recent pay runs (by the month
+  paid), dividends tax on its date, wages and dividends owed now, day wages at the last eight weeks'
+  average, the VAT as invoiced on each VAT201 (an older one this week), and the costs you usually
   pay each month (as last paid: not those paid personally or on a card; one that comes as a
-  supplier bill on the bill's terms). Tap a week for what's in it. Sales not made or invoiced yet
+  supplier bill on the bill's terms; not a month already captured ahead). Tap a week for what's in it. Sales not made or invoiced yet
   aren't in it, nor are provisional or turnover tax, drawings, or card and loan repayments: an
   estimate to plan with, not advice.
 - **Budgets.** Accounts → Budgets: each income and cost account's twelve months for a financial
-  year, against what the books show for the months that have ended, and the difference. Type in
-  the months, spread a year's total evenly, copy last year's, or start every account without a
-  budget from last year's figures, up or down by a whole percentage. The owner sets the budget;
+  year, against what the books show for the months that have ended, and the difference (the
+  totals over the accounts with a budget). Type in the months, spread a year's total evenly, copy
+  last year's, or start every account without a budget from last year's figures (the twelve months
+  before), up or down by a percentage to one decimal place. The owner sets the budget;
   anyone who reads the reports sees it. A budget set before the year end changed still opens. A
   plan, not the books: nothing is posted from it.
 - **More bank statement formats, and rules.** Bank statements come in as OFX (or QFX, as most banks'
-  internet banking exports) and QIF as well as CSV, one account a file. *Always this* on a line
+  internet banking exports) and QIF as well as CSV, one account a file (a file whose amounts are
+  all positive is read by its transaction types; the preview says how many lines were left out). *Always this* on a line
   saves a rule: lines that say what you choose get the same cost type or income account, and
   supplier, every time they come in (500 rules at most). Bank → Rules lists them. Nothing posts
-  until you tick it, as before. Amounts written -.50 or 1.234,56 are read right, and a very long
-  description no longer stops an import.
+  until you tick it, as before. Amounts written -.50 or 1.234,56 are read right (before, -.50 was
+  left out and 1.234,56 read as R1.23: if your bank writes amounts this way, check statements you
+  brought in before), and a very long description no longer stops an import.
 - **Barcodes with the phone's camera.** At the counter and on an item's code, the camera button
   scans a barcode (Chrome on Android: the browser reads it on the phone, and Shap sends the picture
   nowhere). A barcode scanner, or typing the code and Enter, works everywhere: an exact code adds
   the item.
 - **Home.** The money in the bank and till as the statements count cash (and what the cards owe),
   how many days clients take to pay against your invoices, how many you take to pay supplier bills
-  (with bills on), and the gross margin month by month, as the income statement's gross profit
-  (revenue less cost of sales: Home's gross profit is now worked out the same way).
+  (with bills on), and the gross margin month by month, as the income statement's gross profit.
+  Home's first figure is now revenue (it was all income, interest included), gross profit is
+  revenue less cost of sales, and net profit says the running costs and other income between
+  them. A bank or cash account added with a payment source goes on the statements' cash line; the
+  books audit points out one that isn't.
+- **Payroll.** A pay date more than a month from its run's month is refused (a slip of the year
+  would be taxed on the wrong tables).
 - **CIPC and the Compensation Fund.** The date of incorporation (Settings → Company, and in the
   first-run questions, both optional) gives a company's or close corporation's CIPC annual return
   on Home and the practice's list, from five weeks before it's due to a month after. An employer
   (casual workers too) is asked whether it's registered with the Compensation Fund (COIDA): if it
   is, the return of earnings shows for a season in Shap's tables (for March 2025 to February 2026,
   1 April to 30 June 2026), and from April to July Home says when the next season's dates aren't in
-  Shap yet. Each year's standard update adds them. Shap files nothing with CIPC or the Fund. A
+  Shap yet: an update adds them once the Fund publishes them. No reminder doesn't mean nothing is
+  due. Shap files nothing with CIPC or the Fund. A
   client on its own Shap sends these to its practice from 1.33, for a link made from 1.33 on (the
   owner is told so before linking).
 - docs/GOALPOSTS.md: what's being worked on, how hard it looks and why (also on the website).

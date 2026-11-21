@@ -32,6 +32,9 @@ const mostCommon = (xs: string[]) => {
   return [...n.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '';
 };
 
+/** Which monthly cost a cost belongs to: its cost type and the first word of its supplier (or description). */
+export const recurringKey = (c: { categoryId: string; supplier: string; description: string }) => `${c.categoryId}|${tokens(c.supplier || c.description)[0] ?? ''}`;
+
 export interface Recurring {
   key: string;
   label: string;
@@ -65,8 +68,7 @@ export async function findRecurring(db: Db, todayDate = todayIso('Africa/Johanne
 
   const groups = new Map<string, Row[]>();
   for (const r of rows) {
-    const word = tokens(r.supplier || r.description)[0] ?? '';
-    const key = `${r.categoryId}|${word}`;
+    const key = recurringKey(r);
     groups.set(key, [...(groups.get(key) ?? []), r]);
   }
 

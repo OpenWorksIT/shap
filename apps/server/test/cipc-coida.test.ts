@@ -13,9 +13,9 @@ describe('CIPC’s annual return, from the date of incorporation', () => {
     // 1 July 2027 is a Thursday; Women's Day (9 August, a Monday) isn't counted.
     expect(addBusinessDays('2027-07-01', 30)).toBe('2027-08-13');
     expect(cipcAnnualReturns('company', '2020-07-01', '2027-07-01', '2027-09-30')).toEqual([
-      { key: 'cipc-2027', label: 'CIPC annual return for the anniversary of incorporation on 1 July 2027 (due within 30 business days after it)', due: '2027-08-13' },
+      { key: 'cipc-2027', label: 'CIPC annual return for the anniversary of incorporation on 1 July 2027 (30 business days after it)', due: '2027-08-13' },
     ]);
-    expect(cipcAnnualReturns('cc', '2015-02-10', '2027-01-01', '2027-05-31')[0]!.label).toBe('CIPC annual return for the anniversary of incorporation on 10 February 2027 (a close corporation’s: due by the end of the month after it)');
+    expect(cipcAnnualReturns('cc', '2015-02-10', '2027-01-01', '2027-05-31')[0]!.label).toBe('CIPC annual return for the anniversary of incorporation on 10 February 2027 (a close corporation’s: by the end of the month after it)');
   });
 
   it('a close corporation: by the end of the month after its anniversary month', () => {
@@ -73,7 +73,7 @@ describe('the Compensation Fund’s return of earnings', () => {
     expect(taxDue({ vatRegistered: false, vatCategory: 'B', turnoverTax: false, fyEndMonth: 2, coidaRegistered: true }, '2026-11-21')).toEqual([]);
     // April to July with no season in Shap's tables: said so, with no date.
     expect(taxDue({ vatRegistered: false, vatCategory: 'B', turnoverTax: false, fyEndMonth: 2, coidaRegistered: true }, '2027-04-15')).toEqual([
-      expect.objectContaining({ key: 'roe-2026-unknown', body: 'Compensation Fund', due: null, label: expect.stringMatching(/aren’t in this version of Shap yet/) }),
+      expect.objectContaining({ key: 'roe-2026-unknown', body: 'Compensation Fund', due: null, label: expect.stringMatching(/^Return of earnings to the Compensation Fund \(March 2026 to February 2027\): its dates aren’t in this version of Shap yet/) }),
     ]);
     expect(taxDue({ vatRegistered: false, vatCategory: 'B', turnoverTax: false, fyEndMonth: 2, coidaRegistered: false }, '2027-04-15')).toEqual([]);
   });

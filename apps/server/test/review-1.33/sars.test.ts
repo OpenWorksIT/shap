@@ -16,7 +16,11 @@ describe('the SARS register for 1.33', () => {
   it('has the forecast’s tax figures, and says what’s Shap only', () => {
     expect(register).toMatch(/### The cash-flow forecast's tax figures \(Shap only, estimates\)/);
     expect(register).toMatch(/The employment tax incentive isn't taken off/);
-    expect(register).toMatch(/Always\s+eFiling's date \(the last business day\), never the 25th/);
+    expect(register).toMatch(/Always\s+eFiling's date\s+\(the last business day\), never the 25th/);
+    // Second round: journals count in their period, an older return is this week's, a business no longer registered.
+    expect(register).toMatch(/journals\s+by hand and books brought in count in their own period/);
+    expect(register).toMatch(/anything older this week/);
+    expect(register).toMatch(/A business no longer registered still has what's in its VAT account forecast/);
     expect(register).toMatch(/except what's marked\s+\*Shap only\*/);
     expect(register).toMatch(/CIPC, the Compensation Fund and the forecast's tax figures on 21 November 2026 \(1\.33\)/);
   });

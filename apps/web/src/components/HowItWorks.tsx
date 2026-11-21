@@ -13,7 +13,7 @@ import { Icon } from './ui';
 export type ClipKey = 'home' | 'clients' | 'quotes' | 'invoices' | 'costs' | 'jobs' | 'payroll' | 'accounts' | 'settings' | 'backup';
 
 export const CLIPS: Record<ClipKey, { title: string; text: string }> = {
-  home: { title: 'Home: what needs you today', text: 'What’s owed to you, what’s due to SARS, and what’s running. Tap anything to open it.' },
+  home: { title: 'Home: what needs you today', text: 'What’s owed to you, what’s due to SARS and others, and what’s running. Tap anything to open it.' },
   clients: { title: 'Clients', text: 'Add a client once, with their address and VAT number if they have one: it fills in every quote and invoice for them.' },
   quotes: { title: 'Quotes', text: 'Add the items, check the VAT on each, preview the PDF, then send it. An accepted quote becomes the invoice in one tap.' },
   invoices: { title: 'Invoices', text: 'Issue the invoice to put it in the books, send the PDF, and record payments as they come in.' },

@@ -263,20 +263,22 @@ const finish = (rows: StatementRow[], opts: { flip?: boolean }, dateOrder: DateO
   return { rows: out, skipped, pending: 0, dateOrder, columns };
 };
 
-/** Characters written as entities: &amp; last, so "&amp;lt;" stays "&lt;". */
+/** Characters written as entities, decoded in one pass: "&amp;lt;" is "&lt;", never "<". */
+const NAMED: Record<string, string> = { lt: '<', gt: '>', quot: '"', apos: "'", amp: '&' };
 const decodeEntities = (s: string) =>
-  s
-    .replace(/&#(\d{1,7});/g, (e, n: string) => (Number(n) > 0 && Number(n) <= 0x10ffff ? String.fromCodePoint(Number(n)) : e))
-    .replace(/&#x([0-9a-f]{1,6});/gi, (e, n: string) => (parseInt(n, 16) > 0 && parseInt(n, 16) <= 0x10ffff ? String.fromCodePoint(parseInt(n, 16)) : e))
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, '&');
+  s.replace(/&(?:#(\d{1,7})|#x([0-9a-f]{1,6})|(lt|gt|quot|apos|amp));/gi, (e, dec?: string, hex?: string, name?: string) => {
+    if (name) return NAMED[name.toLowerCase()] ?? e;
+    const n = dec ? Number(dec) : parseInt(hex!, 16);
+    return n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : e;
+  });
 
+/** Each tag's pattern, made once. */
+const TAG_PATTERNS = new Map<string, RegExp>();
 /** An OFX element's text: <TAG>value (OFX 1, no closing tag) or <TAG>value</TAG> (OFX 2). */
 const ofxTag = (block: string, tag: string): string | null => {
-  const m = new RegExp(`<${tag}>([^<\\r\\n]*)`, 'i').exec(block);
+  let re = TAG_PATTERNS.get(tag);
+  if (!re) TAG_PATTERNS.set(tag, (re = new RegExp(`<${tag}>([^<\\r\\n]*)`, 'i')));
+  const m = re.exec(block);
   return m ? decodeEntities(m[1]!.trim()) : null;
 };
 
@@ -294,6 +296,9 @@ const finder = (upper: string, tag: string) => {
   };
 };
 
+/** OFX transaction types that are money out, for a file whose amounts carry no sign (the rest are money in). */
+const OFX_OUT = new Set(['DEBIT', 'POS', 'FEE', 'SRVCHG', 'ATM', 'CHECK', 'PAYMENT', 'DIRECTDEBIT', 'REPEATPMT', 'CASH']);
+
 /**
  * OFX (QFX is the same): each <STMTTRN> is a transaction with its posted date (YYYYMMDD…), a
  * signed amount (money in positive) and a name and memo. The ledger balance, when given, is the
@@ -305,54 +310,66 @@ export function parseStatementOfx(text: string, opts: { flip?: boolean } = {}): 
   const upper = text.replace(/[a-z]+/g, (w) => w.toUpperCase());
   const statements = (upper.match(/<STMTRS>|<CCSTMTRS>/g) ?? []).length;
   if (statements > 1) throw new Error(ONE_ACCOUNT);
-  const rows: StatementRow[] = [];
-  let skipped = 0;
-  const seen = new Set<string>();
+  type Raw = { fitid: string | null; date: string | null; amount: number | null; type: string; description: string };
+  const raws: Raw[] = [];
   const close = finder(upper, '</STMTTRN>');
   const list = finder(upper, '</BANKTRANLIST>');
   const next = finder(upper, '<STMTTRN>');
   for (let start = next(0); start !== Infinity; ) {
+    // Every transaction counts against the limit, read or not.
+    tooMany(raws.length + 1);
     const from = start + '<STMTTRN>'.length;
     const following = next(from);
     const end = Math.min(close(from), following, list(from), upper.length);
     start = following;
     const b = text.slice(from, end);
-    // The same transaction twice in one file (its bank's id repeated) is brought in once.
-    const fitid = ofxTag(b, 'FITID');
-    if (fitid && seen.has(fitid)) {
+    raws.push({
+      fitid: ofxTag(b, 'FITID'),
+      date: parseStatementDate((ofxTag(b, 'DTPOSTED') ?? '').slice(0, 8)),
+      amount: parseStatementAmount(ofxTag(b, 'TRNAMT') ?? ''),
+      type: (ofxTag(b, 'TRNTYPE') ?? '').toUpperCase(),
+      description: cap(
+        [ofxTag(b, 'NAME'), ofxTag(b, 'MEMO')]
+          .filter((x): x is string => Boolean(x))
+          .filter((x, i, a) => a.indexOf(x) === i)
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim(),
+      ),
+    });
+  }
+  // The amounts' signs say which way the money went. Only a file with no negative amount at all
+  // (some banks write every amount positive) goes by the transaction types instead.
+  const signed = raws.some((r) => r.amount != null && r.amount < 0);
+  const rows: StatementRow[] = [];
+  let skipped = 0;
+  const seen = new Set<string>();
+  for (const r of raws) {
+    let amount = r.amount;
+    if (!signed && amount != null && OFX_OUT.has(r.type)) amount = -amount;
+    if (!r.date || amount == null || amount === 0) {
       skipped++;
       continue;
     }
-    if (fitid) seen.add(fitid);
-    const date = parseStatementDate((ofxTag(b, 'DTPOSTED') ?? '').slice(0, 8));
-    let amount = parseStatementAmount(ofxTag(b, 'TRNAMT') ?? '');
-    // The amount's sign says which way the money went; a bank that writes a debit as a positive
-    // amount still marks it DEBIT (and a credit CREDIT).
-    const type = (ofxTag(b, 'TRNTYPE') ?? '').toUpperCase();
-    if (amount != null && ((type === 'DEBIT' && amount > 0) || (type === 'CREDIT' && amount < 0))) amount = -amount;
-    const description = cap(
-      [ofxTag(b, 'NAME'), ofxTag(b, 'MEMO')]
-        .filter((x): x is string => Boolean(x))
-        .filter((x, i, a) => a.indexOf(x) === i)
-        .join(' ')
-        .replace(/\s+/g, ' ')
-        .trim(),
-    );
-    if (!date || amount == null || amount === 0) {
-      skipped++;
-      continue;
+    // The same transaction twice in one file (its bank's id, day and amount repeated) is brought in once.
+    if (r.fitid) {
+      const key = `${r.fitid}|${r.date}|${amount}`;
+      if (seen.has(key)) {
+        skipped++;
+        continue;
+      }
+      seen.add(key);
     }
-    rows.push({ date, description: description || '(no description)', amountCents: amount, balanceCents: null });
-    tooMany(rows.length);
+    rows.push({ date: r.date, description: r.description || '(no description)', amountCents: amount, balanceCents: null });
   }
   // The ledger balance: the first <LEDGERBAL>, read from the little that follows it.
   const at = upper.indexOf('<LEDGERBAL>');
   let ledger: string | null = null;
   if (at >= 0) {
-    const window = text.slice(at + '<LEDGERBAL>'.length, at + '<LEDGERBAL>'.length + 2000);
-    const w = window.toUpperCase();
+    const from = at + '<LEDGERBAL>'.length;
+    const w = upper.slice(from, from + 2000);
     const ends = ['</LEDGERBAL>', '<AVAILBAL>', '</STMTRS>', '</CCSTMTRS>'].map((t) => w.indexOf(t)).filter((i) => i >= 0);
-    ledger = window.slice(0, ends.length ? Math.min(...ends) : window.length);
+    ledger = text.slice(from, from + (ends.length ? Math.min(...ends) : w.length));
   }
   const parsed = finish(rows, opts, 'dmy', { date: 'the date posted', description: 'the name and memo', amount: 'the amount', balance: ledger ? 'the ledger balance' : null }, skipped);
   if (ledger) {
@@ -373,25 +390,36 @@ export function parseStatementOfx(text: string, opts: { flip?: boolean } = {}): 
 export function parseStatementQif(text: string, opts: { flip?: boolean } = {}): ParsedStatement {
   const recs: { d: string; t: string; p: string; m: string }[] = [];
   let cur = { d: '', t: '', p: '', m: '' };
-  // An !Account block describes an account (its name and type), not a transaction.
+  // An !Account block describes an account (its name and type), not a transaction. Between
+  // !Option:AutoSwitch and !Clear:AutoSwitch is a list of accounts, not the one this file is for.
   let accounts = 0;
   let inAccount = false;
+  let autoSwitch = false;
+  let type: string | null = null;
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trimEnd();
     if (!line) continue;
     if (line.startsWith('!')) {
+      if (/^!Option:AutoSwitch/i.test(line)) autoSwitch = true;
+      else if (/^!Clear:AutoSwitch/i.test(line)) autoSwitch = false;
       inAccount = /^!Account\b/i.test(line);
-      if (inAccount && ++accounts > 1) throw new Error(ONE_ACCOUNT);
+      if (inAccount && !autoSwitch && ++accounts > 1) throw new Error(ONE_ACCOUNT);
+      // Transactions of a second kind of account (a bank's, then a card's) are another account's.
+      const t = /^!Type:(\w+)/i.exec(line)?.[1]?.toLowerCase();
+      if (t && !['class', 'cat', 'memorized', 'invitem', 'prices'].includes(t)) {
+        if (type && type !== t) throw new Error(ONE_ACCOUNT);
+        type = t;
+      }
       continue;
     }
     if (line.startsWith('^')) {
-      if (!inAccount && (cur.d || cur.t)) recs.push(cur);
+      if (!inAccount && !autoSwitch && (cur.d || cur.t)) recs.push(cur);
       inAccount = false;
       cur = { d: '', t: '', p: '', m: '' };
       tooMany(recs.length);
       continue;
     }
-    if (inAccount) continue;
+    if (inAccount || autoSwitch) continue;
     const v = line.slice(1).trim();
     if (line[0] === 'D') cur.d = v.replace(/'\s*(\d{2})$/, '/20$1').replace(/\s+/g, '');
     else if (line[0] === 'T' || (line[0] === 'U' && !cur.t)) cur.t = v;

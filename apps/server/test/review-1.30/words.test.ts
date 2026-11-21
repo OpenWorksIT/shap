@@ -8,7 +8,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { compilerDefaults, LINK_LEVEL_WORDS, LINK_SESSION_HOURS, LINK_STAYS_OWNERS, LINK_WHAT_GOES, LINKED_LEVEL_WORDS, ownName, WHO_OPENS_LINKED } from '@shap/shared';
+import { compilerDefaults, LINK_LEVEL_WORDS, LINK_SESSION_HOURS, LINK_STAYS_OWNERS, LINK_WHAT_GOES, LINK_WHAT_GOES_VERSION, LINKED_LEVEL_WORDS, ownName, WHO_OPENS_LINKED } from '@shap/shared';
 import { LinkError } from '../../src/lib/link-call.js';
 import { healthForLink, type ClientHealth } from '../../src/lib/practice.js';
 import { linkWords } from '../../src/modules/practice.js';
@@ -47,8 +47,8 @@ describe('what the owner is told before linking (words 1, 2, 7, 11; security 4; 
       deadlineInputs: /the kind of business, VAT registration and category, the year-end month, turnover tax, whether you employ people, public benefit organisation approval, the days dividends were paid lately, the date of incorporation, and whether you’re registered with the Compensation Fund/,
     };
     const h: ClientHealth = { at: '2026-11-17T08:00:00.000Z', company: 'Made-up', setupDone: true, vatRegistered: false, audit: { fail: 0, warn: 0, items: [] }, statements: null, lockedThrough: null, pocket: null, deadlineInputs: null };
-    for (const k of Object.keys(healthForLink(h))) expect(goes, k).toMatch(named[k]!);
-    expect(Object.keys(healthForLink(h)).sort()).toEqual(Object.keys(named).sort());
+    for (const k of Object.keys(healthForLink(h, LINK_WHAT_GOES_VERSION))) expect(goes, k).toMatch(named[k]!);
+    expect(Object.keys(healthForLink(h, LINK_WHAT_GOES_VERSION)).sort()).toEqual(Object.keys(named).sort());
   });
 
   it('what happens on unlinking, giving the link, and SARS', () => {

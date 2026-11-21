@@ -382,7 +382,7 @@ export const cutWords = (s: string, n = 500): string => (s.length > n ? `${s.sli
  * nothing else: the same as a kept client's, each text cut to what the practice's list reads, and
  * without anything from Shap Pocket. (Everything named here is in LINK_WHAT_GOES, link.ts.)
  */
-export function healthForLink(h: ClientHealth, whatGoes = LINK_WHAT_GOES_VERSION): ClientHealth {
+export function healthForLink(h: ClientHealth, whatGoes: number): ClientHealth {
   const st = h.statements;
   const d = h.deadlineInputs;
   return {

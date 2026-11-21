@@ -441,7 +441,7 @@ export function cipcAnnualReturns(kind: 'company' | 'cc', incorporatedOn: string
     let anniversary = `${y}${incorporatedOn.slice(4)}`;
     if (Number.isNaN(Date.parse(`${anniversary}T00:00:00Z`)) || new Date(`${anniversary}T00:00:00Z`).toISOString().slice(0, 10) !== anniversary) anniversary = `${y}-02-28`;
     const due = kind === 'company' ? addBusinessDays(anniversary, 30) : addDays(addMonths(`${anniversary.slice(0, 7)}-01`, 2), -1);
-    const when = kind === 'company' ? 'due within 30 business days after it' : 'a close corporation’s: due by the end of the month after it';
+    const when = kind === 'company' ? '30 business days after it' : 'a close corporation’s: by the end of the month after it';
     if (due >= from && due <= until) out.push({ key: `cipc-${y}`, label: `CIPC annual return for the anniversary of incorporation on ${formatDate(anniversary, 'long')} (${when})`, due });
   }
   return out;

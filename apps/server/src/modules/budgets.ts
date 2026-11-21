@@ -66,7 +66,8 @@ async function budgetYear(db: Db, fyEndMonth: number, fyEnd?: string) {
 export async function budgetReport(db: Db, fyEnd?: string) {
   const settings = await getSettings(db);
   const fy = await budgetYear(db, settings.fyEndMonth, fyEnd);
-  const before = financialYear(addMonths(fy.start, -1), settings.fyEndMonth);
+  // The twelve months straight before (whatever the year end is now).
+  const before = { start: addMonths(fy.start, -12), end: addDays(fy.start, -1) };
   const [now, prev] = await Promise.all([actuals(db, fy.start, fy.end), actuals(db, before.start, before.end)]);
   const budgets = await db<{ accountId: string; months: string[] }[]>`select account_id, months::text[] as months from budgets where fy_end = ${fy.end}::date`;
   const byAccount = new Map(budgets.map((b) => [b.accountId, b.months.map(Number)]));
@@ -132,7 +133,20 @@ export function registerBudgetRoutes(app: FastifyInstance, ctx: Ctx): void {
    */
   app.post('/api/budgets/from-last-year', { preHandler: requireRole('owner') }, async (req) => {
     const user = userOrThrow(req);
-    const input = parse(z.object({ fyEnd: fyEndParam, percent: z.number().int().min(-90).max(500).default(0) }), req.body);
+    const input = parse(
+      z.object({
+        fyEnd: fyEndParam,
+        percent: z
+          .number()
+          .min(-90, 'Down by 90% at most')
+          .max(500, 'Up by 500% at most')
+          .refine((v) => Math.abs(v * 10 - Math.round(v * 10)) < 1e-9, 'A percentage to one decimal place at most, such as 3.5')
+          .default(0),
+      }),
+      req.body,
+    );
+    // In tenths of a percent, so the sums are whole numbers.
+    const tenths = Math.round(input.percent * 10);
     const report = await budgetReport(sql, input.fyEnd);
     let filled = 0;
     await sql.begin(async (tx) => {
@@ -140,8 +154,8 @@ export function registerBudgetRoutes(app: FastifyInstance, ctx: Ctx): void {
         if (l.budget || l.lastYear.every((m) => m === 0)) continue;
         // In whole cents, a half cent away from nothing (up for income and costs alike).
         const months = l.lastYear.map((m) => {
-          const q = m * (100 + input.percent);
-          return Math.sign(q) * Math.floor((Math.abs(q) + 50) / 100);
+          const q = m * (1000 + tenths);
+          return Math.sign(q) * Math.floor((Math.abs(q) + 500) / 1000);
         });
         await tx`insert into budgets (account_id, fy_end, months, updated_by) values (${l.id}, ${input.fyEnd}::date, ${months.map(String)}::bigint[], ${user.id}) on conflict do nothing`;
         filled++;

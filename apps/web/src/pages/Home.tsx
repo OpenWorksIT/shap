@@ -20,8 +20,8 @@ import type { ProjectRow } from '../lib/types';
 interface Dashboard {
   today: string;
   financialYear: { start: string; end: string; label: string };
-  thisMonth: { label: string; incomeCents: number; costOfSalesCents: number; expensesCents: number; profitCents: number };
-  yearToDate: { incomeCents: number; revenueCents: number; grossProfitCents: number; expensesCents: number; profitCents: number };
+  thisMonth: { label: string; incomeCents: number; costOfSalesCents: number; expensesCents: number; profitCents: number; revenueCents: number };
+  yearToDate: { incomeCents: number; revenueCents: number; grossProfitCents: number; expensesCents: number; profitCents: number; otherIncomeCents: number; runningCostsCents: number };
   months: { key: string; label: string; incomeCents: number; costOfSalesCents: number; expensesCents: number; revenueCents: number; grossCostCents: number }[];
   owing: { totalCents: number; overdue: number; invoices: { id: string; number: string; issueDate: string; totalCents: number; paidCents: number; clientName: string | null; projectName: string | null; paymentState: string }[] };
   workers: { id: string; name: string; balanceCents: number }[];
@@ -66,8 +66,9 @@ export const MONEY_NOTE = 'Worked out from what’s captured in the books: the b
 
 /** Beside a CIPC or Compensation Fund reminder: where the date comes from, and that filing is theirs. */
 export const RETURN_NOTE = {
-  CIPC: 'worked out from the date of incorporation in Settings, not advice. Shap files nothing with CIPC: you or your accountant file it, with what CIPC asks for with it.',
+  CIPC: 'worked out from the date of incorporation in Settings, not advice. Shap files nothing with CIPC: you or your accountant file it, and what goes with it.',
   'Compensation Fund': 'from the Fund’s dates in Shap’s tables, not advice. Shap files nothing with the Fund: you or your accountant file it.',
+  undated: 'not advice. Shap files nothing with the Fund: you or your accountant file it.',
 } as const;
 
 export default function HomePage() {
@@ -235,7 +236,7 @@ function OwnerHome() {
           {/* Whose return it is: SARS's are named; CIPC's and the Fund's labels name them. */}
           <strong>{t.body === 'SARS' ? `SARS: ${t.label}` : t.label}</strong>
           {t.due && (t.past ? <> was due by {formatDate(t.due)}: Shap can’t tell whether it’s been filed</> : <> due by {formatDate(t.due)}</>)}
-          {t.body !== 'SARS' && <span className="xs muted"> · {RETURN_NOTE[t.body]}</span>}
+          {t.body !== 'SARS' && <span className="xs muted"> · {t.due ? RETURN_NOTE[t.body] : RETURN_NOTE.undated}</span>}
         </span>
         {t.action}
         <Icon name="chevronRight" size={16} />
@@ -419,9 +420,14 @@ function OwnerHome() {
 
       <TestServerPanel />
       <div className="kpis">
-        <Kpi label={`Invoiced ${data.financialYear.label} to date`} value={<Money cents={data.yearToDate.incomeCents} whole />} sub={`${data.thisMonth.label}: ${formatZar(data.thisMonth.incomeCents, { cents: false })}`} />
+        <Kpi label={`Revenue ${data.financialYear.label} to date`} value={<Money cents={data.yearToDate.revenueCents} whole />} sub={`${data.thisMonth.label}: ${formatZar(data.thisMonth.revenueCents, { cents: false })}`} />
         <Kpi label="Gross profit" value={<Money cents={data.yearToDate.grossProfitCents} whole />} sub={ytdMargin == null ? 'no revenue yet this year' : `${formatPercent(ytdMargin)} of revenue`} />
-        <Kpi label="Net profit to date" value={<Money cents={data.yearToDate.profitCents} whole />} sub={`after ${formatZar(data.yearToDate.expensesCents, { cents: false })} running costs`} tone={data.yearToDate.profitCents < 0 ? 'bad' : undefined} />
+        <Kpi
+          label="Net profit to date"
+          value={<Money cents={data.yearToDate.profitCents} whole />}
+          sub={`after ${formatZar(data.yearToDate.runningCostsCents, { cents: false })} running costs${data.yearToDate.otherIncomeCents ? `, with ${formatZar(data.yearToDate.otherIncomeCents, { cents: false })} other income` : ''}`}
+          tone={data.yearToDate.profitCents < 0 ? 'bad' : undefined}
+        />
         <Kpi label="Clients owe you" value={<Money cents={data.owing.totalCents} whole />} sub={data.owing.overdue ? `${data.owing.overdue} overdue` : 'nothing overdue'} tone={data.owing.overdue ? 'warn' : undefined} />
         {has('workers') && <Kpi
           label={data.owedToWorkersCents < 0 ? 'Advanced to workers' : 'You owe workers'}

@@ -36,6 +36,13 @@ describe('budgets after a change of year end, and rounding', () => {
     }
     const old = await owner.get(`/api/budgets?fyEnd=${fy.end}`);
     expect(old.fy).toMatchObject({ start: fy.start, end: fy.end });
+    // Its "last year" is the twelve months straight before it, not a year under the new year end.
+    const bankAcc = await (await ref(env.sql)).acc('bank');
+    await owner.post('/api/journals', { date: addMonths(fy.start, -12), description: 'Made-up cover a year before', lines: [{ accountId: acc!.id, debitCents: 3_000 }, { accountId: bankAcc, creditCents: 3_000 }] });
+    await owner.post('/api/journals', { date: addMonths(fy.start, -1), description: 'Made-up cover the month before', lines: [{ accountId: acc!.id, debitCents: 7_000 }, { accountId: bankAcc, creditCents: 7_000 }] });
+    const again = (await owner.get(`/api/budgets?fyEnd=${fy.end}`)).lines.find((l: { id: string }) => l.id === acc!.id);
+    expect(again.lastYear[0]).toBe(3_000);
+    expect(again.lastYear[11]).toBe(7_000);
     expect(old.lines.find((l: { id: string }) => l.id === acc!.id).budget).toEqual(Array(12).fill(10_000));
     // And it can still be changed.
     expect((await owner.call({ method: 'PUT', url: '/api/budgets', payload: { fyEnd: fy.end, lines: [{ accountId: acc!.id, months: Array(12).fill(20_000) }] } })).statusCode).toBe(200);
@@ -55,7 +62,11 @@ describe('budgets after a change of year end, and rounding', () => {
     const line = (await owner.get(`/api/budgets?fyEnd=${fy.end}`)).lines.find((l: { code: string }) => l.code === '6030');
     // 10 cents up 15% is 11.5 cents: 12.
     expect(line.budget.reduce((t: number, x: number) => t + x, 0)).toBe(12);
-    expect((await owner.call({ method: 'POST', url: '/api/budgets/from-last-year', payload: { fyEnd: fy.end, percent: 2.5 } })).statusCode).toBe(400);
+    // One decimal place is fine (an inflation figure); two aren't, and say so.
+    const two = await owner.call({ method: 'POST', url: '/api/budgets/from-last-year', payload: { fyEnd: fy.end, percent: 2.55 } });
+    expect(two.statusCode).toBe(400);
+    expect(two.json().error).toMatch(/one decimal place at most/);
+    expect((await owner.call({ method: 'POST', url: '/api/budgets/from-last-year', payload: { fyEnd: fy.end, percent: 3.5 } })).statusCode).toBe(200);
     const [a] = await env.sql<{ details: { accounts: string[] } }[]>`select details from audit_log where action = 'save_budget' order by id desc limit 1`;
     expect(a!.details.accounts).toHaveLength(1);
   });

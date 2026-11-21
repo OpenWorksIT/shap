@@ -127,6 +127,20 @@ async function accessFields(db: Db, role: Role, profileId: string | null | undef
   return { profileId: profileId ?? null, accessAdd: add as string[], accessRemove: remove as string[] };
 }
 
+/**
+ * A bank or cash payment source's account is cash (IFRS for SMEs 7.2): one still on the line an
+ * asset starts on goes on the statements' cash line, so Home, the forecast and the cash flow
+ * statement count it. Only while nothing of it is in a closed period: what's closed stays as it was
+ * (the books audit points such an account out instead).
+ */
+async function cashLineFor(db: Ctx['sql'], source: { kind: string; accountId: string }) {
+  if (source.kind !== 'bank' && source.kind !== 'cash') return;
+  await db`
+    update accounts set statement_line = 'cash'
+    where id = ${source.accountId} and type = 'asset' and system_key is null and statement_line = 'other_current_assets'
+      and not exists (select 1 from ledger l where l.account_id = ${source.accountId} and l.date <= (select coalesce(lock_date, '0001-01-01'::date) from settings where id))`;
+}
+
 export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
   // What people of a practice may open among its clients on their own Shap (Shap Accountant), so
@@ -358,6 +372,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
       const input = parse(schema, req.body) as Record<string, unknown>;
       try {
         const [row] = await sql`insert into ${sql(table)} ${sql(input)} returning *`;
+        if (table === 'payment_sources') await cashLineFor(sql, row as { kind: string; accountId: string });
         return row;
       } catch (err) {
         if (pgCode(err) === PG.uniqueViolation) throw conflict('That name is already used');
@@ -381,6 +396,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
       try {
         const [row] = await sql`update ${sql(table)} set ${sql(input)} where id = ${id} returning *`;
         if (!row) throw notFound();
+        if (table === 'payment_sources') await cashLineFor(sql, row as { kind: string; accountId: string });
         return row;
       } catch (err) {
         if (pgCode(err) === PG.uniqueViolation) throw conflict('That name is already used');

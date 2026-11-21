@@ -88,3 +88,60 @@ describe('Home’s words (words review of 1.33)', () => {
     expect(chart).toMatch(/const average = known\.length && revenue > 0 \?/);
   });
 });
+
+// Second round (IFRS): Home's tiles add up, revenue first; and a second bank account is cash.
+describe('Home’s tiles, and a second bank account', () => {
+  let env: TestEnv;
+  let owner: Awaited<ReturnType<typeof login>>;
+  const day = addDays(today(), -5);
+  beforeAll(async () => {
+    env = await setup();
+    owner = await login(env.app, 'owner@example.co.za');
+    const r = await ref(env.sql);
+    const bank = await r.src('Business bank');
+    const bankAccount = await r.acc('bank');
+    const client = await owner.post('/api/clients', { name: 'Made-up Client' });
+    const inv = await owner.post('/api/documents', { kind: 'invoice', clientId: client.id, issueDate: day, lines: [{ category: 'labour', description: 'Work', qty: 1, unitPriceCents: 1_000_000 }] });
+    await owner.post(`/api/documents/${inv.id}/issue`);
+    await owner.post('/api/costs', { date: day, description: 'Made-up parts', supplier: 'Made-up Supplies', amountCents: 300_000, categoryId: await r.cat('Parts'), sourceId: bank });
+    await owner.post('/api/costs', { date: day, description: 'Made-up cover', supplier: 'Made-up Insurer', amountCents: 200_000, categoryId: await r.cat('Insurance'), sourceId: bank });
+    await owner.post('/api/journals', { date: day, description: 'Interest (made up)', lines: [{ accountId: bankAccount, debitCents: 500_000 }, { accountId: await r.acc('interest_income'), creditCents: 500_000 }] });
+    // A savings account added in Settings, with a bank payment source on it, and R4 000 moved in.
+    const acc = await owner.post<{ id: string }>('/api/accounts', { code: '1070', name: 'Made-up Savings', type: 'asset', active: true });
+    await owner.post('/api/sources', { name: 'Made-up savings', kind: 'bank', accountId: acc.id });
+    await owner.post('/api/journals', { date: day, description: 'To savings (made up)', lines: [{ accountId: acc.id, debitCents: 400_000 }, { accountId: bankAccount, creditCents: 400_000 }] });
+  });
+  afterAll(async () => {
+    await expectCleanAudit(env.sql);
+    await env.close();
+  });
+
+  it('shows revenue first, and gross profit, other income and running costs come to net profit', async () => {
+    const d = await owner.get('/api/dashboard');
+    const y = d.yearToDate;
+    expect(y.revenueCents).toBe(1_000_000);
+    expect(y.grossProfitCents).toBe(700_000);
+    expect(y.otherIncomeCents).toBe(500_000);
+    expect(y.runningCostsCents).toBe(200_000);
+    expect(y.grossProfitCents + y.otherIncomeCents - y.runningCostsCents).toBe(y.profitCents);
+    const home = readFileSync(join(WEB, 'pages', 'Home.tsx'), 'utf8');
+    expect(home).toMatch(/label=\{`Revenue \$\{data\.financialYear\.label\} to date`\}/);
+    expect(home).not.toMatch(/`Invoiced \$\{data\.financialYear\.label\} to date`/);
+  });
+
+  it('puts a new bank account behind a payment source on the cash line, so Home counts it', async () => {
+    const [line] = await env.sql<{ statementLine: string }[]>`select statement_line from accounts where code = '1070'`;
+    expect(line!.statementLine).toBe('cash');
+    const d = await owner.get('/api/dashboard');
+    // R10 000 owed by the client isn't cash: R5 000 interest − R3 000 − R2 000 in the bank, R4 000 moved to savings.
+    expect(d.cash.inBankCents).toBe(500_000 - 300_000 - 200_000);
+  });
+
+  it('points out an older one that isn’t, in the books audit', async () => {
+    const [acc] = await env.sql<{ id: string }[]>`insert into accounts (code, name, type, statement_line) values ('1080', 'Made-up Old Savings', 'asset', 'other_current_assets') returning id`;
+    await env.sql`insert into payment_sources (name, kind, account_id, sort) values ('Made-up old savings', 'bank', ${acc!.id}, 99)`;
+    const items = await expectCleanAudit(env.sql);
+    expect(items.some((i) => i.level === 'warn' && /Made-up Old Savings is a bank or cash account you pay from, but not on the statements' cash line/.test(i.text))).toBe(true);
+    await env.sql`delete from payment_sources where account_id = ${acc!.id}`;
+  });
+});

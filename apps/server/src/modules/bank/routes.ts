@@ -632,7 +632,9 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
   /** "A line that says X is this": Shap fills in the cost type (or income) and supplier from it. */
   app.get('/api/bank/rules', { preHandler: requireAccess('bank.reconcile') }, async () => {
     return sql`
-      select r.id, r.match_text, r.direction, r.category_id, c.name as category_name, r.income_account_id, a.name as income_account_name, r.supplier, r.created_at
+      select r.id, r.match_text, r.direction, r.category_id, c.name as category_name, r.income_account_id, a.name as income_account_name, r.supplier, r.created_at,
+        -- Applied only while its cost type (not stock) or income account is in use (as the reconciliation does).
+        coalesce(c.active and c.kind <> 'stock', a.active, false) as usable
       from bank_rules r left join cost_categories c on c.id = r.category_id left join accounts a on a.id = r.income_account_id
       order by lower(r.match_text)`;
   });
@@ -660,20 +662,25 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
       const [a] = await sql<{ type: string; active: boolean }[]>`select type, active from accounts where id = ${r.incomeAccountId}`;
       if (a?.type !== 'income' || !a.active) throw badRequest('Choose an income account');
     }
-    // The rule this one replaces (the same words, the same way), kept in the audit log.
-    const [before] = await sql<{ categoryId: string | null; incomeAccountId: string | null; supplier: string }[]>`
-      select category_id, income_account_id, supplier from bank_rules where lower(match_text) = lower(${r.matchText}) and direction = ${r.direction}`;
-    if (!before) {
-      const [count] = await sql<{ n: number }[]>`select count(*)::int as n from bank_rules`;
-      if (count!.n >= MAX_BANK_RULES) throw badRequest(`There are ${MAX_BANK_RULES} rules already, the most Shap keeps: take one away first`);
-    }
-    const [row] = await sql<{ id: string }[]>`
-      insert into bank_rules (match_text, direction, category_id, income_account_id, supplier, created_by)
-      values (${r.matchText}, ${r.direction}, ${r.categoryId}, ${r.incomeAccountId}, ${r.supplier}, ${user.id})
-      on conflict (lower(match_text), direction) do update set match_text = excluded.match_text, category_id = excluded.category_id, income_account_id = excluded.income_account_id, supplier = excluded.supplier
-      returning id`;
-    await audit(sql, { userId: user.id, action: 'save_bank_rule', entity: 'bank_rule', entityId: row!.id, ip: req.ip, details: { matchText: r.matchText, direction: r.direction, categoryId: r.categoryId, incomeAccountId: r.incomeAccountId, supplier: r.supplier, ...(before ? { replaced: before } : {}) } });
-    return { id: row!.id };
+    // Counted and saved one at a time (under a lock), so rules sent at once can't pass the most.
+    const id = await sql.begin(async (tx) => {
+      await tx`select pg_advisory_xact_lock(hashtext('shap:bank_rules'))`;
+      // The rule this one replaces (the same words, the same way), kept in the audit log.
+      const [before] = await tx<{ categoryId: string | null; incomeAccountId: string | null; supplier: string }[]>`
+        select category_id, income_account_id, supplier from bank_rules where lower(match_text) = lower(${r.matchText}) and direction = ${r.direction}`;
+      if (!before) {
+        const [count] = await tx<{ n: number }[]>`select count(*)::int as n from bank_rules`;
+        if (count!.n >= MAX_BANK_RULES) throw badRequest(`There are ${MAX_BANK_RULES} rules already, the most Shap keeps: take one away first`);
+      }
+      const [row] = await tx<{ id: string }[]>`
+        insert into bank_rules (match_text, direction, category_id, income_account_id, supplier, created_by)
+        values (${r.matchText}, ${r.direction}, ${r.categoryId}, ${r.incomeAccountId}, ${r.supplier}, ${user.id})
+        on conflict (lower(match_text), direction) do update set match_text = excluded.match_text, category_id = excluded.category_id, income_account_id = excluded.income_account_id, supplier = excluded.supplier
+        returning id`;
+      await audit(tx, { userId: user.id, action: 'save_bank_rule', entity: 'bank_rule', entityId: row!.id, ip: req.ip, details: { matchText: r.matchText, direction: r.direction, categoryId: r.categoryId, incomeAccountId: r.incomeAccountId, supplier: r.supplier, ...(before ? { replaced: before } : {}) } });
+      return row!.id;
+    });
+    return { id };
   });
 
   app.delete('/api/bank/rules/:id', { preHandler: requireAccess('bank.reconcile') }, async (req) => {

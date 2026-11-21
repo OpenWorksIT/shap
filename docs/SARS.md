@@ -78,7 +78,7 @@ gazettes each year, is in `tax.ts` `ROE_SEASONS`. Each standard update checks al
 | ITR12 (provisional taxpayers, each partner's), ITR12T, IT3(t), EMP501 interim | 22 January 2027, 22 January 2027, 30 September 2026, 30 October 2026 (31 October a Saturday) | `FILING_SEASON_DATES` | [SARS: tax season 2026](https://www.sars.gov.za/types-of-tax/personal-income-tax/tax-season/), [trust filing season](https://www.sars.gov.za/media-release/trust-filing-season-set-to-open/), [PAYE interim season](https://www.sars.gov.za/latest-news/paye-interim-filing-season-opens-today-21-september-2026/) |
 | A declared public holiday | 4 November 2026 (the local government elections) | `DECLARED_HOLIDAYS` | [SAnews](https://www.sanews.gov.za/node/84344) |
 | CIPC annual return (not SARS's; *Shap only*: on the list and Home since 1.33) | A company (Pty, Inc, NPC): within 30 business days after each anniversary of its incorporation (Companies Act s33(1), reg 30(1)(c); the anniversary itself not counted). A close corporation: by the end of the month after its anniversary month (Close Corporations Act s15A). The first a year after incorporation; from the date of incorporation in Settings → Company (optional). A co-operative files one with CIPC too: Shap doesn't work out its date, and says so (setup, Settings). External and domesticated companies (reg 30(1), 30(6)) aren't a kind of business in Shap. What goes with the return (the statements or the financial accountability supplement, the securities register, beneficial ownership) is the accountant's | `tax.ts` `cipcAnnualReturns`, `addBusinessDays`; `practice.ts` `cipcKind` | [Companies Regulations, 2011, reg 30](https://www.acts.co.za/companies-act-2008/r351_30__company_annual_returns), [Close Corporations Act s15A](https://www.acts.co.za/close-corporations-act-1984/15a__annual_return), [co-operatives: CIPC Notice 67 of 2024 (SA Accounting Academy)](https://accountingacademy.co.za/news/read/cipc-annual-submission-of-reports-and-filling-of-annual-returns-for-co-operatives) |
-| Return of earnings, Compensation Fund (COIDA; not SARS's; *Shap only*: since 1.33) | The season the Fund announces each year for the assessment year just ended: for March 2025 to February 2026, 1 April to 30 June 2026. The Fund may extend a season, and gives final dates for outstanding returns (for 2025 and earlier, 31 October 2026, Notice 4140 of 2026; in 2025 the season was extended to 31 July): the yearly check takes those in too. Only for an employer that says it's registered with the Fund (setup and Settings); a mutual association such as FEM instead isn't the Fund's | `tax.ts` `ROE_SEASONS` | [Notice 3894 of 2026 (GG 54524)](https://www.gov.za/sites/default/files/gcis_document/202604/54524gen3894.pdf), [Notice 4140 of 2026 (GG 55347)](https://www.gov.za/sites/default/files/gcis_document/202609/55347gen4140.pdf), [the 2025 extension](https://acts.co.za/news/blog/2025/06/coida-roe-2024-deadline-extension) |
+| Return of earnings, Compensation Fund (COIDA; not SARS's; *Shap only*: since 1.33) | The season the Fund announces each year for the assessment year just ended: for March 2025 to February 2026, 1 April to 30 June 2026. The Fund may extend a season, and gives final dates for outstanding returns (for 2025 and earlier, 31 October 2026, Notice 4140 of 2026; in 2025 the season was extended to 31 July, Notice 3200 of 2025): the yearly check reads those too, though `ROE_SEASONS` keeps only the season's dates (a later final date isn't shown). Only for an employer that says it's registered with the Fund (setup and Settings); a mutual association such as FEM instead isn't the Fund's | `tax.ts` `ROE_SEASONS` | [Notice 3894 of 2026 (GG 54524)](https://www.gov.za/sites/default/files/gcis_document/202604/54524gen3894.pdf), [Notice 4140 of 2026 (GG 55347)](https://www.gov.za/sites/default/files/gcis_document/202609/55347gen4140.pdf), [the 2025 extension, Notice 3200 of 2025](https://www.acts.co.za/compensation/n3200_notice_no__3200_of_2025) |
 
 Home shows the same CIPC and return of earnings dates, five weeks ahead (`dashboard.ts` `taxDue`),
 with whose return it is (SARS, CIPC or the Compensation Fund); CIPC's stays a month after it's due,
@@ -93,15 +93,20 @@ and each Monday in May.
 The forecast (`apps/server/src/modules/forecast.ts`) puts SARS's payments in the weeks they're
 due. Each is an estimate, said so on screen with who OpenWorks IT are:
 
-- **VAT**: on the invoice basis (Shap's VAT201s are): what's owed for periods that have ended (the
-  VAT account less this period's movement from invoices, costs and assets) on the last period's
-  `vat201Due`, this week when that's past; and this period's so far on its own `vat201Due`. Always
-  eFiling's date (the last business day), never the 25th. A vendor on the payments basis would owe
-  less, sooner or later.
-- **EMP201**: those owed (`payrollAttention`) on their `emp201Due`; then each month after the last
-  pay run's pay month, its PAYE, UIF (both halves) and SDL, by the month paid, as SARS groups them.
-  The employment tax incentive isn't taken off.
-- **DTR01**: dividends tax owed, on its due date.
+- **VAT**: on the invoice basis (Shap's VAT201s are). A period's VAT is the VAT account's movement
+  in it that isn't a payment or refund (an entry with a cash side) or an opening balance: journals
+  by hand and books brought in count in their own period. What's owed for periods that have ended
+  (the VAT account today, less this period's VAT and any payment already booked ahead): the last
+  period's own on its `vat201Due` (this week when that's past), anything older this week. This
+  period's, documents dated ahead in it included, on its own `vat201Due`. Always eFiling's date
+  (the last business day), never the 25th. A vendor on the payments basis would owe less, sooner
+  or later. A business no longer registered still has what's in its VAT account forecast.
+- **EMP201**: those owed (`payrollAttention`) on their `emp201Due`; then each month after the later
+  of the last pay run's pay month and its period (a run paid early isn't repeated), PAYE, UIF (both
+  halves) and SDL as the middle of the last three runs, by the month paid, as SARS groups them.
+  The employment tax incentive isn't taken off. A pay date more than a month from its run's month
+  is refused (it would be taxed on the wrong tables and go on the wrong EMP201).
+- **DTR01**: dividends tax owed, on its due date (`dwtDue`, from the day paid).
 - Not in it: provisional tax and turnover tax (said on screen).
 
 Home's debtor days are now measured against invoices as issued (their VAT in them), not grossed up

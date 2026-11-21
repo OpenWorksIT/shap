@@ -117,6 +117,12 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
   const suspense = await balance('suspense');
   if (suspense === 0) ok('nothing is waiting in suspense');
   else warn(`${rand(suspense)} is in suspense: money not yet put where it belongs (or a change to an agreed year)`);
+  // A bank or cash account the business pays from that the statements don't count as cash.
+  const offCash = await db<{ name: string }[]>`
+    select distinct a.name from payment_sources ps join accounts a on a.id = ps.account_id
+    where ps.kind in ('bank', 'cash') and a.type = 'asset' and a.system_key is distinct from 'owner_loan' and a.statement_line is distinct from 'cash' order by 1`;
+  if (offCash.length)
+    warn(`${few(offCash.map((a) => a.name))} ${offCash.length === 1 ? 'is a bank or cash account' : 'are bank or cash accounts'} you pay from, but not on the statements' cash line: Home, the forecast and the cash flow statement leave ${offCash.length === 1 ? 'it' : 'them'} out of cash. Check the line with your accountant (Settings → Lists → Chart of accounts)`);
 
   // ---------------------------------------------------------------- control accounts
   section = 'Debtors, creditors, VAT and payroll';

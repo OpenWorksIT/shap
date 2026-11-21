@@ -269,6 +269,17 @@ export async function emp501(db: Db, taxYear: number, kind: 'interim' | 'annual'
   };
 }
 
+/**
+ * A pay date in the run's month, the month before or the month after: anything further off is a
+ * slip of the year or month (it would be taxed on the wrong year's tables and go on the wrong
+ * EMP201), so it's refused.
+ */
+export function payDateFits(period: string, payDate: string): void {
+  const from = addMonths(`${period}-01`, -1);
+  const to = addDays(addMonths(`${period}-01`, 2), -1);
+  if (payDate < from || payDate > to) throw badRequest(`The pay date is a long way from ${period}: pay a month’s run in that month, or the month before or after it`);
+}
+
 export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;
   const owner = { preHandler: requireRole('owner') };
@@ -311,6 +322,7 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/pay-runs', { preHandler: requireAccess('payroll.run') }, async (req) => {
     const user = userOrThrow(req);
     const input = parse(payRunInput, req.body);
+    payDateFits(input.period, input.payDate);
     await sourceAccount(sql, input.sourceId);
     const monthEnd = new Date(Date.UTC(Number(input.period.slice(0, 4)), Number(input.period.slice(5, 7)), 0)).toISOString().slice(0, 10);
     const monthStart = `${input.period}-01`;
@@ -351,6 +363,8 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.put('/api/pay-runs/:id', { preHandler: requireAccess('payroll.run') }, async (req) => {
     const { id } = parse(idParam, req.params);
     const input = parse(payRunInput.omit({ period: true }), req.body);
+    const [run] = await sql<{ period: string }[]>`select period from pay_runs where id = ${id}`;
+    if (run) payDateFits(run.period, input.payDate);
     await draft(sql, id);
     await sourceAccount(sql, input.sourceId);
     await sql.begin(async (tx) => {
