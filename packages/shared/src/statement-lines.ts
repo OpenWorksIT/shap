@@ -215,3 +215,16 @@ export const SECTION_LABELS: Record<StatementSection, string> = {
   finance_costs: 'Finance costs',
   income_tax: 'Income tax expense',
 };
+
+/**
+ * Said under the money on hand (Home, the forecast) when a bank or cash account the business pays
+ * from isn't on the statements' cash lines: what's in it, and that Shap doesn't count it or move
+ * it. Whether it's cash is a judgement (IFRS for SMEs 7.2) for the owner and their accountant.
+ */
+export function offCashNote(off: readonly { name: string; cents: number }[] | undefined, formatWhole: (cents: number) => string): string | null {
+  if (!off?.length) return null;
+  const parts = off.map((o) => (o.cents < 0 ? `${formatWhole(-o.cents)} owed on ${o.name}` : `${formatWhole(o.cents)} in ${o.name}`));
+  const listed = parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+  const one = off.length === 1;
+  return `Not counted here: ${listed}, as the statements don’t count ${one ? 'that account' : 'those accounts'} as cash (${one ? 'its line' : 'their lines'} in the chart of accounts). Whether ${one ? 'it is' : 'they are'} cash is for you and your accountant to judge: the books audit says more.`;
+}

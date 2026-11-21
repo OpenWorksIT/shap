@@ -158,6 +158,30 @@ export async function importedVat(db: Db, start: string, end: string): Promise<{
   return { lines: r?.n ?? 0, cents: Number(r?.t ?? 0) };
 }
 
+/**
+ * VAT on journals typed in (by hand, or an adjustment) in a period, other than a payment or refund
+ * (VAT against money, with at most an expense smaller than it beside it: SARS's interest): Shap's
+ * VAT201 boxes are worked out from documents, so these aren't in them. Where they go on the return
+ * (a cash sale journalled, a correction) is the business's or their accountant's to say.
+ */
+export async function handVat(db: Db, start: string, end: string): Promise<{ lines: number; cents: number }> {
+  const [r] = await db<{ n: number; t: string }[]>`
+    select count(*)::int as n, coalesce(sum(jl.credit_cents - jl.debit_cents), 0)::bigint as t
+    from journal_lines jl join journals j on j.id = jl.journal_id join accounts a on a.id = jl.account_id
+    where a.system_key = 'vat' and j.kind in ('manual', 'adjustment') and j.date between ${start}::date and ${end}::date
+      and not (
+        exists (select 1 from journal_lines m join accounts ma on ma.id = m.account_id
+                where m.journal_id = j.id and (ma.statement_line in ('cash', 'bank_overdraft') or ma.system_key = 'owner_loan'))
+        and not exists (select 1 from journal_lines o join accounts oa on oa.id = o.account_id
+                        where o.journal_id = j.id and oa.type <> 'expense'
+                          and coalesce(oa.system_key, '') not in ('vat', 'owner_loan') and coalesce(oa.statement_line, '') not in ('cash', 'bank_overdraft'))
+        and coalesce((select sum(o.debit_cents + o.credit_cents) from journal_lines o join accounts oa on oa.id = o.account_id
+                      where o.journal_id = j.id and oa.type = 'expense'
+                        and coalesce(oa.system_key, '') not in ('vat', 'owner_loan') and coalesce(oa.statement_line, '') not in ('cash', 'bank_overdraft')), 0)
+            < abs(jl.credit_cents - jl.debit_cents))`;
+  return { lines: r?.n ?? 0, cents: Number(r?.t ?? 0) };
+}
+
 export async function getSettings(db: Db): Promise<SettingsRow> {
   const [s] = await db<SettingsRow[]>`select * from settings where id`;
   return s!;

@@ -138,7 +138,7 @@ export const CIPC_HINT =
 export const COOP_CIPC = 'A co-operative files an annual return with CIPC each year. Shap doesn’t work out its date or show it on Home: filing it is yours or your accountant’s.';
 /** Registered with the Compensation Fund: what Shap shows, and when it can't. */
 export const COIDA_REMINDER =
-  'Shap shows the return of earnings on Home only for a season whose dates are in this version’s tables, so it may not have the Fund’s latest. Even with no reminder, a return may be due: watch for the Fund’s notice in the Government Gazette (usually March or April), or ask your accountant.';
+  'Shap shows the return of earnings on Home only for a season whose dates are in this version’s tables, so it may not have the Fund’s latest dates. Even with no reminder, a return may be due: watch for the Fund’s notice in the Government Gazette (usually March or April), or ask your accountant.';
 /** Not (or not sure if) registered with the Compensation Fund. */
 export const COIDA_NOTE =
   'Most employers, casual workers included, must register under COIDA (cover for injuries at work) with the Compensation Fund, or with a licensed mutual association such as FEM, and send a return of earnings each year. Registering and filing are yours: check with your accountant or a labour practitioner. Once you’re registered with the Fund, tick it in Settings → Company.';

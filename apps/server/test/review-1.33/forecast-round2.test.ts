@@ -140,7 +140,7 @@ describe('salaries paid early, VAT journals and older returns, and a business no
   it('refuses a pay date a year off its month, takes one paid late, and says a final run is final', async () => {
     const r = await owner.call({ method: 'POST', url: '/api/pay-runs', payload: { period: addMonths(thisMonth, 2).slice(0, 7), payDate: addMonths(thisMonth, -10), sourceId: bank } });
     expect(r.statusCode).toBe(400);
-    expect(r.json().error).toMatch(/looks like a slip of the year\. For pay outside that, ask your accountant how to record it\./);
+    expect(r.json().error).toMatch(/isn’t, so it may be a slip of the year or month\. For pay that really was that early or late, ask your accountant how to record it\./);
     expect(r.json().error).not.toMatch(/\d{4}-\d{2}:/);
     // A month paid four months late is taken (and goes on the EMP201 of the month it was paid in).
     const late = await owner.call({ method: 'POST', url: '/api/pay-runs', payload: { period: addMonths(thisMonth, -6).slice(0, 7), payDate: addMonths(thisMonth, -2), sourceId: bank } });
@@ -151,6 +151,7 @@ describe('salaries paid early, VAT journals and older returns, and a business no
     const put = await owner.call({ method: 'PUT', url: `/api/pay-runs/${fin!.id}`, payload: { payDate: addMonths(thisMonth, -20), sourceId: bank } });
     expect(put.statusCode).toBe(400);
     expect(put.json().error).not.toMatch(/slip of the year/);
+    expect(put.json().error).toMatch(/^This pay run is final\. Reopen it to change it\.$/);
     await owner.call({ method: 'DELETE', url: `/api/pay-runs/${late.json().id}` });
   });
 

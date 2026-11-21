@@ -23,7 +23,7 @@ Started in November 2026 from the gaps people named, less what Shap already does
 | Bank statements as OFX (and QFX) and QIF as well as CSV; rules that fill in a line ("lines that say ENGEN are Petrol") | 1.33 | Low: the reconciliation was there; two parsers and a table of rules |
 | Scanning barcodes with the phone's camera (Chrome for Android; a scanner or typing works everywhere) | 1.33 | Low: the browser's own BarcodeDetector reads it on the phone; Shap sends the picture nowhere |
 | Home: money in the bank and till, what the cards owe, debtor and creditor days, the gross margin month by month | 1.33 | Low: figures the books already had |
-| CIPC annual return and the Compensation Fund's return of earnings on Home and the practice's list | 1.33 | Low: a date and a yes/no in setup and Settings; the Fund's season added each year (CPDAUDIT.md section 2) |
+| CIPC annual return and the Compensation Fund's return of earnings on Home and the practice's list | 1.33 | Low: a date and a yes/no in setup and Settings; the Fund's season is in a table the standard update keeps (CPDAUDIT.md section 2), with no date promised |
 | A 13-week cash-flow forecast | 1.33 | Medium: from invoices, bills, payroll, day wages, VAT and the monthly costs already found |
 | Budgets, month by month, against actual | 1.33 | Medium: a new table and screen; the actuals are the income statement's |
 

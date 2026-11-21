@@ -4,7 +4,7 @@
  */
 import { useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AGE_BAND_LABELS, formatDate, formatZar, idNumberProblem, taxNumberProblem, todayIso, type AgeBand, entity, paysOutProfit } from '@shap/shared';
+import { AGE_BAND_LABELS, formatDate, formatZar, idNumberProblem, latePayNote, taxNumberProblem, todayIso, type AgeBand, entity, paysOutProfit } from '@shap/shared';
 import { FileButton } from '../components/Files';
 import { PageHead } from '../components/Shell';
 import { Drawer, Empty, ErrorBox, Field, Icon, Loading, Money, MoneyInput, Tabs, useToast } from '../components/ui';
@@ -189,7 +189,7 @@ function RunDrawer({ id, onClose }: { id: string; onClose: () => void }) {
       <div className="stack">
         {draft && (
           <div className="form-grid">
-            <Field label="Pay date">
+            <Field label="Pay date" hint={latePayNote(run.period, run.payDate) ?? undefined}>
               {(p) => <input {...p} className="input" type="date" value={run.payDate} onChange={(e) => void act(() => api(`/api/pay-runs/${id}`, { method: 'PUT', body: { payDate: e.target.value, sourceId: run.sourceId } }))} />}
             </Field>
             <Field label="Paid from">

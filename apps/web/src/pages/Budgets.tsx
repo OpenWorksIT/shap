@@ -129,7 +129,7 @@ export function Budgets() {
 
       {hasBudget && totals.left > 0 && (
         <p className="small muted">
-          {totals.left} account{totals.left === 1 ? ' has' : 's have'} figures in the books this year and no budget: {totals.left === 1 ? 'it isn’t' : 'they aren’t'} in the figures above, so actual profit for the whole business may differ.
+          {totals.left} account{totals.left === 1 ? ' has' : 's have'} figures to the end of {monthWords(data.months[done - 1]!)} and no budget: {totals.left === 1 ? 'it isn’t' : 'they aren’t'} in the figures above, so actual profit for the whole business may differ.
         </p>
       )}
       {GROUPS.map((g) => {

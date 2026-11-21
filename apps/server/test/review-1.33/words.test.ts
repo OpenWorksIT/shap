@@ -14,7 +14,7 @@ describe('CIPC and the Compensation Fund, said as they are', () => {
   it('promises no reminder: Home shows one only for dates in Shap’s tables, and filing is theirs', () => {
     for (const w of [CIPC_HINT, COIDA_REMINDER]) expect(w).not.toMatch(/reminds you .* each year/);
     expect(CIPC_HINT).toMatch(/filing it, with what goes with it, is yours or your accountant’s/);
-    expect(COIDA_REMINDER).toMatch(/only for a season whose dates are in this version’s tables, so it may not have the Fund’s latest/);
+    expect(COIDA_REMINDER).toMatch(/only for a season whose dates are in this version’s tables, so it may not have the Fund’s latest dates\./);
     expect(COIDA_REMINDER).toMatch(/Even with no reminder, a return may be due: watch for the Fund’s notice in the Government Gazette \(usually March or April\), or ask your accountant/);
     // No promise of an update (second round).
     for (const w of [COIDA_REMINDER, read('CHANGELOG.md')]) expect(w).not.toMatch(/each year’s (standard )?update adds/i);
@@ -93,8 +93,10 @@ describe('the second round’s words', () => {
   });
 
   it('the rules list says when a rule isn’t applied, and the forecast names dividends tax', () => {
-    expect(read('apps/web/src/pages/Bank.tsx')).toMatch(/not applied: \{r\.categoryName \?\? r\.incomeAccountName\} isn’t in use \(switch it back on in Settings → Lists, or take the rule away\)/);
-    expect(read('apps/web/src/pages/Bank.tsx')).toMatch(/preview\.format === 'ofx' \? ', or a transaction the bank listed twice' : ''/);
+    // The reason by what changed, and what was left out by the file's kind (fourth round).
+    expect(read('apps/web/src/pages/Bank.tsx')).toMatch(/not applied: \{r\.categoryName \?\? r\.incomeAccountName\} \{ruleNotApplied\(r\.whyNot\)\}/);
+    expect(read('apps/web/src/pages/Bank.tsx')).toMatch(/: 'isn’t in use \(switch it back on in Settings → Lists, or take the rule away\)'/);
+    expect(read('apps/web/src/pages/Bank.tsx')).toMatch(/ofx: 'transactions with no date or amount Shap could read, or one the bank listed twice'/);
     expect(read('apps/web/src/pages/Forecast.tsx')).toMatch(/dividends tax already withheld, on its DTR01 date/);
     expect(read('apps/web/src/components/HowItWorks.tsx')).toMatch(/what’s due to SARS and others/);
   });

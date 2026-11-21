@@ -22,6 +22,9 @@ interface Vat201Data {
   importedVatCents: number;
   /** How many lines on the VAT account came in that way (any at all: the return isn’t Shap’s). */
   importedVatLines?: number;
+  /** VAT on journals typed in during the period (not payments): not in the boxes. */
+  handVatCents?: number;
+  handVatLines?: number;
 }
 
 const periodLabel = (p: { start: string; end: string }) =>
@@ -74,6 +77,11 @@ export function Vat201() {
           ) : (
             'VAT came in on the VAT account in this period (netting to nil) through books brought in from another package (Accounts → From another package).'
           )} Shap can’t split that into the VAT201’s boxes, so the boxes below leave it out and aren’t this period’s return. The return is the business’s, from their own records (or as their package worked it out): Shap doesn’t work it out or check it.
+        </div>
+      ) : null}
+      {data.handVatLines ? (
+        <div className="banner alert small">
+          Journals typed in moved the VAT account by <Money cents={data.handVatCents ?? 0} /> in this period ({data.handVatLines} line{data.handVatLines === 1 ? '' : 's'}, not payments to SARS). The boxes below are worked out from invoices, costs and assets, so they leave these out: whether and where they go on the return (a cash sale, a correction) is yours or your accountant’s to decide before you file.
         </div>
       ) : null}
       <section className="panel">

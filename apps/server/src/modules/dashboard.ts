@@ -26,8 +26,18 @@ export const daysOf = (owed: number, total: number, over = 365): number | null =
  * cash and bank overdraft lines, IFRS for SMEs 7.2), and what the business's cards owe (the card
  * sources' accounts that aren't on those lines: a liability, negative when something's owed). The
  * owner's loan, a card in the owner's own name, isn't the business's.
+ *
+ * And, said plainly rather than moved: what's in a bank or cash account the business pays from
+ * that isn't on those lines (a savings account added later, say). Shap doesn't change its line:
+ * whether it's cash is the owner's and their accountant's judgement, and the books audit says so.
  */
-export async function cashPosition(db: Ctx['sql'], now: string): Promise<{ inBankCents: number; cardsOweCents: number }> {
+export interface CashPosition {
+  inBankCents: number;
+  cardsOweCents: number;
+  /** Bank or cash accounts paid from, with something in them, that the statements don't count as cash. */
+  offCash: { name: string; cents: number }[];
+}
+export async function cashPosition(db: Ctx['sql'], now: string): Promise<CashPosition> {
   const [c] = await db<{ cash: number }[]>`
     select coalesce(sum(l.amount_cents), 0)::bigint as cash from ledger_totals l join accounts a on a.id = l.account_id
     where a.statement_line in ('cash', 'bank_overdraft') and l.date <= ${now}::date`;
@@ -36,7 +46,15 @@ export async function cashPosition(db: Ctx['sql'], now: string): Promise<{ inBan
     where l.date <= ${now}::date and l.account_id in (
       select ps.account_id from payment_sources ps join accounts a on a.id = ps.account_id
       where ps.kind = 'card' and a.statement_line not in ('cash', 'bank_overdraft') and a.system_key is distinct from 'owner_loan')`;
-  return { inBankCents: Number(c!.cash), cardsOweCents: -Number(k!.owed) };
+  const off = await db<{ name: string; cents: number }[]>`
+    select a.name, coalesce(sum(l.amount_cents), 0)::bigint as cents
+    from accounts a join ledger_totals l on l.account_id = a.id and l.date <= ${now}::date
+    where a.system_key is distinct from 'owner_loan'
+      and exists (select 1 from payment_sources ps where ps.account_id = a.id and ps.kind in ('bank', 'cash'))
+      and ((a.type = 'asset' and a.statement_line is distinct from 'cash') or (a.type = 'liability' and coalesce(a.statement_line, '') not in ('cash', 'bank_overdraft')))
+    group by a.id, a.name having coalesce(sum(l.amount_cents), 0) <> 0
+    order by a.name`;
+  return { inBankCents: Number(c!.cash), cardsOweCents: -Number(k!.owed), offCash: off.map((o) => ({ name: o.name, cents: Number(o.cents) })) };
 }
 
 /**

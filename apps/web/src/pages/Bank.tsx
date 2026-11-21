@@ -35,6 +35,7 @@ interface BankRule {
   supplier: string;
   /** Its cost type (or income account) is still in use: a rule whose isn't is kept but not applied. */
   usable: boolean;
+  whyNot: 'off' | 'stock' | 'not_income' | null;
 }
 
 /** What a line becomes when captured: "cat:<cost type>" (a cost, or a refund for money in) or "inc:<income account>". */
@@ -70,6 +71,22 @@ type View = 'todo' | 'matched' | 'ignored' | 'all';
  * add bank fees and debit orders as costs, record client payments, book transfers, or leave
  * lines off (personal spending).
  */
+
+/** What a statement file's lines left out can be, by the file's kind (parse.ts on the server). */
+export const LEFT_OUT: Record<string, string> = {
+  csv: 'balance lines, or lines with no date or amount Shap could read',
+  ofx: 'transactions with no date or amount Shap could read, or one the bank listed twice',
+  qif: 'a balance line, or transactions with no date or amount Shap could read',
+};
+
+/** Why a rule isn't applied, and what to do about it. */
+export const ruleNotApplied = (why: BankRule['whyNot']): string =>
+  why === 'stock'
+    ? 'is a stock type now: stock comes in under Inventory, so change the rule’s cost type or take the rule away'
+    : why === 'not_income'
+      ? 'isn’t an income account now: change the rule or take it away'
+      : 'isn’t in use (switch it back on in Settings → Lists, or take the rule away)';
+
 export function BankRecon() {
   const { ref, can } = useAuthed();
   const isOwner = can('bank.reconcile');
@@ -565,7 +582,7 @@ function BankRules({ onClose, onChanged }: { onClose: () => void; onChanged: () 
                 {!r.usable && (
                   <span className="xs muted">
                     {' '}
-                    · not applied: {r.categoryName ?? r.incomeAccountName} isn’t in use (switch it back on in Settings → Lists, or take the rule away)
+                    · not applied: {r.categoryName ?? r.incomeAccountName} {ruleNotApplied(r.whyNot)}
                   </span>
                 )}
               </span>
@@ -646,8 +663,7 @@ function ImportStatement({ sourceId, sourceName, onDone }: { sourceId: string; s
             <strong>{preview.count}</strong> transactions, {formatDate(preview.from)} to {formatDate(preview.to)}: money in {formatZar(preview.inCents)}, money out{' '}
             {formatZar(preview.outCents)}.{preview.duplicates > 0 && ` ${preview.duplicates} are already imported and will be skipped.`}
             {preview.pending > 0 && ` ${preview.pending} pending (not yet cleared) left out: they come in with a later statement.`}
-            {preview.skipped > 0 &&
-              ` ${preview.skipped} line${preview.skipped === 1 ? '' : 's'} left out (balance lines, or lines with no date or amount Shap could read${preview.format === 'ofx' ? ', or a transaction the bank listed twice' : ''}). Check the totals above against your statement.`}
+            {preview.skipped > 0 && ` ${preview.skipped} line${preview.skipped === 1 ? '' : 's'} left out (${LEFT_OUT[preview.format] ?? LEFT_OUT.csv}). Check these totals against your statement.`}
             <br />
             <span className="xs muted">
               Read from: {preview.columns.date} · {preview.columns.description} · {preview.columns.amount}

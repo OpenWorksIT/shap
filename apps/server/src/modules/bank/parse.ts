@@ -388,8 +388,8 @@ export function parseStatementOfx(text: string, opts: { flip?: boolean } = {}): 
  * only makes sense month first.
  */
 export function parseStatementQif(text: string, opts: { flip?: boolean } = {}): ParsedStatement {
-  const recs: { d: string; t: string; p: string; m: string }[] = [];
-  let cur = { d: '', t: '', p: '', m: '' };
+  const recs: { d: string; t: string; p: string; m: string; l: string }[] = [];
+  let cur = { d: '', t: '', p: '', m: '', l: '' };
   // An !Account block describes an account (its name and type), not a transaction. Between
   // !Option:AutoSwitch and !Clear:AutoSwitch is a list of accounts, not the one this file is for.
   let accounts = 0;
@@ -415,7 +415,7 @@ export function parseStatementQif(text: string, opts: { flip?: boolean } = {}): 
     if (line.startsWith('^')) {
       if (!inAccount && !autoSwitch && (cur.d || cur.t)) recs.push(cur);
       inAccount = false;
-      cur = { d: '', t: '', p: '', m: '' };
+      cur = { d: '', t: '', p: '', m: '', l: '' };
       tooMany(recs.length);
       continue;
     }
@@ -425,6 +425,7 @@ export function parseStatementQif(text: string, opts: { flip?: boolean } = {}): 
     else if (line[0] === 'T' || (line[0] === 'U' && !cur.t)) cur.t = v;
     else if (line[0] === 'P') cur.p = cap(v);
     else if (line[0] === 'M') cur.m = cap(v);
+    else if (line[0] === 'L') cur.l = cap(v);
   }
   if (cur.d || cur.t) recs.push(cur);
   const order = detectDateOrder(recs.map((r) => r.d).filter((d) => /^\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}$/.test(d)));
@@ -433,7 +434,11 @@ export function parseStatementQif(text: string, opts: { flip?: boolean } = {}): 
   for (const r of recs) {
     const date = parseStatementDate(r.d, order);
     const amount = parseStatementAmount(r.t);
-    if (!date || amount == null || amount === 0) {
+    // Quicken starts an account's file with its balance ("Opening Balance", a transfer to the
+    // account itself, [its name]); a bank's file may carry a balance line too. Balances, not money
+    // in or out, as in a CSV.
+    const balance = SKIP.test(r.p.trim()) || (/^opening balance/i.test(r.m.trim()) && /^\[.*\]$/.test(r.l.trim()));
+    if (!date || amount == null || amount === 0 || balance) {
       skipped++;
       continue;
     }

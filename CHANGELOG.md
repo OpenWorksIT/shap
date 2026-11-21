@@ -11,8 +11,11 @@ entries newer than the version you're running before you update.
   week, as if paid now; those more than 90 days overdue shown apart, not counted), supplier bills
   on theirs, what's already in the books for a day to come (a pay run paid on its pay day, a payment
   dated ahead: not counted again), salaries and the EMP201 for everyone in the last pay run at
-  their usual pay, on the usual day (the EMP201 by the month paid), dividends tax on its date, wages and dividends owed now, day wages at the last eight weeks'
-  average, the VAT as invoiced on each VAT201 (an older one this week), and the costs you usually
+  their usual pay while a run would still take them (not someone who has left), on the usual day
+  (the EMP201 by the month paid), dividends tax on its date, wages and dividends owed now (those
+  owed in the books by a journal or balances brought in too), day wages at the last eight weeks'
+  average, the VAT as invoiced on each VAT201 (an older one this week; a trial balance brought in
+  counts as owed for periods gone by, and a refund SARS owes isn't netted off), and the costs you usually
   pay each month (as last paid: not those paid personally or on a card; one that comes as a
   supplier bill on the bill's terms; not a month already captured ahead). Tap a week for what's in it. Sales not made or invoiced yet
   aren't in it, nor are provisional or turnover tax, drawings, or card and loan repayments: an
@@ -26,9 +29,11 @@ entries newer than the version you're running before you update.
   plan, not the books: nothing is posted from it.
 - **More bank statement formats, and rules.** Bank statements come in as OFX (or QFX, as most banks'
   internet banking exports) and QIF as well as CSV, one account a file (a file whose amounts are
-  all positive is read by its transaction types; the preview says how many lines were left out). *Always this* on a line
+  all positive is read by its transaction types; a QIF's opening balance is left out, as a CSV's
+  balance lines are; the preview says how many lines were left out, and what they can be). *Always this* on a line
   saves a rule: lines that say what you choose get the same cost type or income account, and
-  supplier, every time they come in (500 rules at most). Bank → Rules lists them. Nothing posts
+  supplier, every time they come in (500 rules at most). Bank → Rules lists them, and says why one
+  isn't applied (its cost type switched off or now stock, or its account no longer income). Nothing posts
   until you tick it, as before. Amounts written -.50 or 1.234,56 are read right (before, -.50 was
   left out and 1.234,56 read as R1.23: if your bank writes amounts this way, check statements you
   brought in before), and a very long description no longer stops an import.
@@ -41,11 +46,19 @@ entries newer than the version you're running before you update.
   (with bills on), and the gross margin month by month, as the income statement's gross profit.
   Home's first figure is now revenue (it was all income, interest included), gross profit is
   revenue less cost of sales, net profit says the running costs, finance costs, income tax and
-  other income between them, and the year to date runs to today. A new bank or cash payment source
-  on an account with nothing in it yet puts that account on the statements' cash (or bank
-  overdraft) line; the books audit points out one that isn't, for your accountant to judge.
+  other income between them (and says it's before income tax when none is captured), and the year
+  to date runs to today. What's in a bank or cash account you pay from that isn't on the
+  statements' cash line is said under the money in the bank (and on the forecast), not counted:
+  Shap doesn't move its line, and the books audit points it out, with the test, for you and your
+  accountant to judge.
+- **VAT201.** When journals typed in (a cash sale journalled, a correction) moved the VAT account in
+  a period, other than as payments to SARS, the VAT201 screen says by how much, and so does the books
+  audit: the boxes are worked out from invoices, costs and assets, so they leave those out, and
+  where they go on the return is yours or your accountant's to decide.
 - **Payroll.** A pay date before the month before its run's month, or more than six months after
-  it, is refused as a likely slip of the year (it would be taxed on the wrong tables).
+  it, is refused as a likely slip of the year or month (it would be taxed on the wrong tables). A
+  run paid more than a month after its month says that which EMP201 it goes on is your
+  accountant's to check.
 - **CIPC and the Compensation Fund.** The date of incorporation (Settings → Company, and in the
   first-run questions, both optional) gives a company's or close corporation's CIPC annual return
   on Home and the practice's list, from five weeks before it's due to a month after. An employer

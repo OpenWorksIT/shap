@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { formatDate, formatZar } from '@shap/shared';
+import { formatDate, formatZar, offCashNote } from '@shap/shared';
 import { Empty, ErrorBox, Kpi, Loading, Money } from '../components/ui';
 import { useApi } from '../lib/hooks';
 
@@ -14,6 +14,7 @@ interface Forecast {
   asOf: string;
   openingCents: number;
   cardsOweCents: number;
+  offCash?: { name: string; cents: number }[];
   weeks: { start: string; end: string; inCents: number; outCents: number; closingCents: number }[];
   items: ForecastItem[];
   lowest: { week: number; closingCents: number } | null;
@@ -22,7 +23,7 @@ interface Forecast {
 
 /** What the forecast is, and isn't: said where it's shown. */
 export const FORECAST_NOTE =
-  'An estimate from what’s in your books today: the cash as your statements count it; invoices on their due dates (overdue ones this week, as if paid now); supplier bills on theirs; what’s already in the books for a day to come; salaries and the EMP201 as your recent pay runs (the employment tax incentive isn’t taken off); wages owed now; dividends (or distributions) declared and not paid yet, all this week, as if paid in full now; dividends tax already withheld, on its DTR01 date; day wages at their recent average; VAT as invoiced (the invoice basis) on each VAT201; and the costs you usually pay each month. Sales you haven’t made or invoiced yet aren’t in it, nor are provisional or turnover tax, drawings, or card and loan repayments; and clients pay late and new costs come. An aid to plan with, not advice: OpenWorks IT, who make Shap, aren’t accountants or tax practitioners.';
+  'An estimate from what’s in your books today: the cash as your statements count it; invoices on their due dates (overdue ones this week, as if paid now); supplier bills on theirs; what’s already in the books for a day to come; salaries and the EMP201 as your recent pay runs (the employment tax incentive isn’t taken off); wages owed now; dividends (or distributions) declared and not paid yet, all this week, as if paid in full now (any dividends tax on them included); dividends tax already withheld, on its DTR01 date; day wages at their recent average; VAT as invoiced (the invoice basis) on each VAT201; and the costs you usually pay each month. Sales you haven’t made or invoiced yet aren’t in it, nor are provisional or turnover tax, drawings, or card and loan repayments; and clients pay late and new costs come. An aid to plan with, not advice: OpenWorks IT, who make Shap, aren’t accountants or tax practitioners.';
 
 /**
  * The next 13 weeks of money in and out, week by week, from what's in the books (forecast.ts on
@@ -54,6 +55,7 @@ export function CashForecast() {
           Not counted as coming in: {data.longOverdue.count} invoice{data.longOverdue.count === 1 ? '' : 's'} more than {data.longOverdue.days} days overdue ({formatZar(data.longOverdue.cents, { cents: false })}). Whether they’ll be paid is yours to judge.
         </p>
       )}
+      {offCashNote(data.offCash, (c) => formatZar(c, { cents: false })) && <p className="small warn-text">{offCashNote(data.offCash, (c) => formatZar(c, { cents: false }))}</p>}
       <p className="xs muted">{FORECAST_NOTE}</p>
       <div className="panel table-wrap">
         <table className="table">

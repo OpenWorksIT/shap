@@ -83,10 +83,10 @@ gazettes each year, is in `tax.ts` `ROE_SEASONS`. Each standard update checks al
 Home shows the same CIPC and return of earnings dates, five weeks ahead (`dashboard.ts` `taxDue`),
 with whose return it is (SARS, CIPC or the Compensation Fund); CIPC's stays a month after it's due,
 as one that was due. The return of earnings is shown only for a season that's in `ROE_SEASONS`:
-none is guessed, and from April to July Home says when this year's isn't in Shap's tables yet. Each
-standard update adds the Fund's next season once it's in the Gazette (usually in March or April):
-from 1 May of the year after the last season's, the tests fail until it's in, and CI runs on 1 May
-and each Monday in May.
+none is guessed, and from April to July Home says when this year's isn't in this version's tables.
+The standard update is meant to add the Fund's next season once it's in the Gazette (usually in
+March or April; CPDAUDIT.md section 2), but no date is promised: from 1 May of the year after the
+last season's, the tests fail until it's in, and CI runs on 1 May and each Monday in May.
 
 ### The cash-flow forecast's tax figures (Shap only, estimates)
 
@@ -95,22 +95,35 @@ due. Each is an estimate, said so on screen with who OpenWorks IT are:
 
 - **VAT**: on the invoice basis (Shap's VAT201s are). A period's VAT is everything that moves the
   VAT account in it (invoices, costs and assets however they were paid, journals by hand with an
-  income or cost line, books brought in), except payments and refunds (an entry of nothing but VAT
-  against money: the bank, cash, an overdraft or the owner's loan) and opening balances. What's
+  income or cost line, a ledger brought in), except payments and refunds (an entry of VAT against
+  money: the bank, cash, an overdraft or the owner's loan, with at most an expense smaller than
+  the VAT beside it, SARS's interest or a penalty) and balances brought in (opening balances, and a
+  trial balance brought in: its VAT is the balance on its date, not that period's own). What's
   owed for periods that have ended (the VAT account today, less this period's VAT and payments
   already booked ahead): the last period's own on its `vat201Due` (this week when that's past),
-  anything older this week; a payment ahead beyond them comes off this period's. Which period a
+  anything older this week. A payment beyond them comes off this period's, up to what was paid
+  since the period began (one made ahead for it); a refund SARS owes isn't netted off (SARS pays a
+  refund after its checks, and sets refunds off against debts itself: [VAT refunds for
+  vendors](https://www.sars.gov.za/types-of-tax/value-added-tax/vat-refunds-for-vendors/)), nor
+  forecast as money in. A VAT payment by card, or in one journal with PAYE, is taken as that
+  period's VAT: only its timing is off. Which period a
   payment was for is SARS's to say (by its reference, which Shap doesn't keep): the split is an
   estimate. This period's, documents dated ahead in it included, on its own `vat201Due`. Always
   eFiling's date (the last business day), never the 25th. A vendor on the payments basis would owe
   less, sooner or later. A business no longer registered still has what's in its VAT account forecast.
 - **EMP201**: those owed (`payrollAttention`) on their `emp201Due`; then, for each month after the
-  last run's period, each employee in that run at the middle of their last three pay lines, paid as
+  last run's period, each employee in that run whom a run for that month would still take (active,
+  started, not left: as `POST /api/pay-runs` chooses) at the middle of their last three pay lines, paid as
   far into the month as the recent runs were (a December run paid on 2 January isn't January's), and
   its PAYE, UIF (both halves) and SDL on the EMP201 for the month paid, as SARS groups them. The
   employment tax incentive isn't taken off. A pay date before the month before its run's month, or
   more than six months after it, is refused as a likely slip of the year (it would be taxed on the
-  wrong tables and go on the wrong EMP201); pay really that late is the accountant's to record.
+  wrong tables and go on the wrong EMP201); pay really that late is the accountant's to record. A
+  run paid more than a month after its month says, by its pay date, that which EMP201 it belongs on
+  (and across 1 March which year's tables) is the accountant's to check: employees' tax arises when
+  the employer pays or becomes liable to pay ([Fourth Schedule para
+  2](https://www.acts.co.za/income-tax/sch4_2__employers_to_deduct_tax)), and Shap puts it on the
+  month paid (`latePayNote`).
 - **DTR01**: dividends tax owed, on its due date (`dwtDue`, from the day paid).
 - Not in it: provisional tax and turnover tax (said on screen).
 
@@ -200,6 +213,11 @@ Checked 11 November 2026.
   which part is this year's income to residents is the accountant's to work out). A dividend in a
   ledger brought in lists its dividends tax return on the practice list; one inside a trial
   balance can't (it has no day of its own).
+- VAT on journals typed in (a cash sale journalled, a correction): the VAT201's boxes are worked
+  out from invoices, costs and assets, so they leave it out. From 1.33 the VAT201 screen says how
+  much such journals moved the VAT account in the period (payments to SARS, with or without its
+  interest beside them, aren't counted), and the books audit warns: where it goes on the return is
+  the business's or the accountant's (`lib/books.ts` `handVat`).
 - A sole proprietor's estimate leaves out the medical credits and the interest exemption; payroll
   has the credits.
 - VAT category D ending in months other than February and August, and E at a month other than the

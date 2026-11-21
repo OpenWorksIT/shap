@@ -4,7 +4,7 @@ import { requireAccess } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { freshTotals, getSettings, today } from '../lib/books.js';
 import { bills } from './bills.js';
-import { cashPosition } from './dashboard.js';
+import { cashPosition, type CashPosition } from './dashboard.js';
 import { payrollAttention } from './payroll.js';
 import { findRecurring, recurringKey } from './recurring.js';
 
@@ -30,6 +30,8 @@ export interface Forecast {
   openingCents: number;
   /** What the business's cards owe today: not in the weeks (when they're paid off is yours to say). */
   cardsOweCents: number;
+  /** Bank or cash accounts paid from that the statements don't count as cash: not in the opening figure. */
+  offCash: CashPosition['offCash'];
   weeks: { start: string; end: string; inCents: number; outCents: number; closingCents: number }[];
   items: ForecastItem[];
   lowest: { week: number; closingCents: number } | null;
@@ -66,7 +68,7 @@ export async function cashForecast(db: Db, now = today()): Promise<Forecast> {
   };
 
   await freshTotals(db);
-  const { inBankCents: openingCents, cardsOweCents } = await cashPosition(db, now);
+  const { inBankCents: openingCents, cardsOweCents, offCash } = await cashPosition(db, now);
   const balanceOf = async (key: string, upTo = now) => {
     const [b] = await db<{ b: number }[]>`
       select coalesce(sum(l.amount_cents), 0)::bigint as b from ledger_totals l join accounts a on a.id = l.account_id where a.system_key = ${key} and l.date <= ${upTo}::date`;
@@ -109,8 +111,14 @@ export async function cashForecast(db: Db, now = today()): Promise<Forecast> {
 
   // Owed now: casual workers' wages earned and not paid (each worker's, less what's booked to pay
   // them beyond what they'll earn ahead), and dividends (a CC's or trust's distributions) declared
-  // by today and not paid by the forecast's end, in full this week, as if paid now.
-  if (on('workers')) {
+  // by today and not paid by the forecast's end, in full this week, as if paid now. And what the
+  // books owe on those accounts beyond Shap's own records of them (a journal by hand, balances
+  // brought in, a year-end adjustment), less what's booked to pay it ahead: also this week.
+  const beyond = async (rows: Promise<{ owed: number; paidAhead: number }[]>) => {
+    const [b] = await rows;
+    return Math.max(0, Number(b!.owed) - Number(b!.paidAhead));
+  };
+  {
     const [w] = await db<{ owed: number }[]>`
       select coalesce(sum(greatest(0, owed - greatest(0, paid_ahead - earned_ahead))), 0)::bigint as owed from (
         select w.id,
@@ -120,6 +128,12 @@ export async function cashForecast(db: Db, now = today()): Promise<Forecast> {
           coalesce((select sum(wage_cents + allowance_cents) from labour_entries where worker_id = w.id and date > ${now}::date and date <= ${end}::date), 0) as earned_ahead
         from workers w) x`;
     if (Number(w!.owed) > 0) add(now, 'Wages owed to casual workers now', -Number(w!.owed), 'wages_owed');
+    const other = await beyond(db<{ owed: number; paidAhead: number }[]>`
+      select coalesce(-sum(l.amount_cents) filter (where l.date <= ${now}::date), 0)::bigint as owed,
+        coalesce(sum(l.amount_cents) filter (where l.date > ${now}::date and l.date <= ${end}::date and l.amount_cents > 0), 0)::bigint as paid_ahead
+      from ledger l join accounts a on a.id = l.account_id
+      where a.system_key = 'wages_payable' and l.source not in ('labour', 'wage_payment')`);
+    if (other > 0) add(now, 'Other wages owed in the books (a journal, or balances brought in), as if paid now', -other, 'wages_owed');
   }
   const [dv] = await db<{ owed: number }[]>`
     select coalesce(sum(gross_cents), 0)::bigint as owed from dividends
@@ -128,14 +142,23 @@ export async function cashForecast(db: Db, now = today()): Promise<Forecast> {
   // One paid after the forecast's end isn't in its weeks at all.
   const [later] = await db<{ owed: number }[]>`select coalesce(sum(gross_cents), 0)::bigint as owed from dividends where declared_on <= ${now}::date and paid_on > ${end}::date`;
   const dividendsOwed = unpaid - Number(later!.owed);
-  if (dividendsOwed > 0) add(now, `${payoutWord(settings.businessType) === 'dividend' ? 'Dividends' : 'Distributions'} declared and not paid yet (as if paid in full now)`, -dividendsOwed, 'dividends');
+  const Payouts = payoutWord(settings.businessType) === 'dividend' ? 'Dividends' : 'Distributions';
+  if (dividendsOwed > 0) add(now, `${Payouts} declared and not paid yet (as if paid in full now)`, -dividendsOwed, 'dividends');
+  const otherDividends = await beyond(db<{ owed: number; paidAhead: number }[]>`
+    select coalesce(-sum(l.amount_cents) filter (where l.date <= ${now}::date), 0)::bigint as owed,
+      coalesce(sum(l.amount_cents) filter (where l.date > ${now}::date and l.date <= ${end}::date and l.amount_cents > 0), 0)::bigint as paid_ahead
+    from ledger l join accounts a on a.id = l.account_id
+    left join journals j on l.source = 'journal' and j.id = l.source_id
+    where a.system_key = 'dividends_payable' and (j.id is null or j.kind <> 'dividend')`);
+  if (otherDividends > 0) add(now, `Other ${Payouts.toLowerCase()} owed in the books (a journal, or balances brought in), as if paid in full now`, -otherDividends, 'dividends');
 
   // SARS: each EMP201 and DTR01 owed, on its due date (or this week, when it's past).
   const owed = await payrollAttention(db, now);
   for (const d of owed) add(d.dueOn, d.kind === 'emp201' ? `EMP201 for ${monthWords(d.period)}` : `Dividends tax (DTR01) for ${monthWords(d.period)}`, -Number(d.owingCents), d.kind === 'emp201' ? 'emp201' : 'dwt');
 
   // Salaries: each employee in the last pay run at the middle of their last three pay lines (so a
-  // bonus month isn't repeated, and someone new counts in full), for each month after the last
+  // bonus month isn't repeated, and someone new counts in full), while a run for the month would
+  // still take them (active, started, not left), for each month after the last
   // run's period, paid as many days into the month as the recent runs were (a December run paid on
   // 2 January isn't January's), and their PAYE, UIF and SDL on the EMP201 for the month it's paid
   // in (SARS goes by the month paid). The last run itself is in the books (its payment dated on
@@ -149,13 +172,21 @@ export async function cashForecast(db: Db, now = today()): Promise<Forecast> {
         select employee_id, run_id, net_cents::bigint as net, (paye_cents + uif_employee_cents + uif_employer_cents + sdl_cents)::bigint as sars
         from pay_lines where run_id = any(${runs.map((r) => r.id)})`;
       const middle = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor((xs.length - 1) / 2)] ?? 0;
-      let net = 0;
-      let sars = 0;
-      for (const e of new Set(lines.filter((l) => l.runId === last.id).map((l) => l.employeeId))) {
-        const mine = lines.filter((l) => l.employeeId === e);
-        net += middle(mine.map((l) => Number(l.net)));
-        sars += middle(mine.map((l) => Number(l.sars)));
-      }
+      const ids = [...new Set(lines.filter((l) => l.runId === last.id).map((l) => l.employeeId))];
+      const usualPay = new Map(
+        ids.map((e) => {
+          const mine = lines.filter((l) => l.employeeId === e);
+          return [e, { net: middle(mine.map((l) => Number(l.net))), sars: middle(mine.map((l) => Number(l.sars))) }];
+        }),
+      );
+      // Only those a pay run for the month would take (as POST /api/pay-runs does): someone who has
+      // left, or isn't active, isn't paid again.
+      const emps = await db<{ id: string; active: boolean; startDate: string; endDate: string | null }[]>`
+        select id, active, start_date::text, end_date::text from employees where id = any(${ids})`;
+      const paidFor = (m: string) => {
+        const taken = emps.filter((e) => e.active && e.startDate <= monthEnd(m) && (!e.endDate || e.endDate >= m));
+        return { net: taken.reduce((t, e) => t + usualPay.get(e.id)!.net, 0), sars: taken.reduce((t, e) => t + usualPay.get(e.id)!.sars, 0) };
+      };
       // When in relation to its month a run is paid, as the middle of the recent runs had it: the
       // months between the period and the pay day, and the day of the month.
       const usual = [...runs].sort((a, b) => Date.parse(a.payDate) - Date.parse(`${a.period}-01`) - (Date.parse(b.payDate) - Date.parse(`${b.period}-01`)))[Math.floor((runs.length - 1) / 2)]!;
@@ -164,8 +195,9 @@ export async function cashForecast(db: Db, now = today()): Promise<Forecast> {
       for (let m = addMonths(`${last.period}-01`, 1); m <= end; m = addMonths(m, 1)) {
         const payDay = dayOf(addMonths(m, monthsAfter), day);
         if (payDay > end) break;
-        add(payDay, `Salaries (${monthWords(m.slice(0, 7))}, as your recent pay runs)`, -net, 'payroll');
-        add(emp201Due(payDay.slice(0, 7)), `EMP201 for ${monthWords(payDay.slice(0, 7))} (PAYE, UIF and SDL, as your recent pay runs)`, -sars, 'emp201');
+        const { net, sars } = paidFor(m);
+        if (net) add(payDay, `Salaries (${monthWords(m.slice(0, 7))}, as your recent pay runs)`, -net, 'payroll');
+        if (sars) add(emp201Due(payDay.slice(0, 7)), `EMP201 for ${monthWords(payDay.slice(0, 7))} (PAYE, UIF and SDL, as your recent pay runs)`, -sars, 'emp201');
       }
     }
   }
@@ -180,37 +212,51 @@ export async function cashForecast(db: Db, now = today()): Promise<Forecast> {
 
   // VAT, as invoiced (Shap's VAT201s are on the invoice basis). A period's VAT is everything that
   // moves the VAT account in it (invoices, costs and assets however they were paid, journals with an
-  // income or cost line), except payments and refunds (entries of nothing but VAT against money: the
-  // bank, cash, an overdraft, or the owner paying personally) and opening balances. What's owed for
-  // periods that have ended, less payments already booked ahead: the last period's own on its
-  // VAT201 (this week, when that's past), anything older this week; a payment ahead beyond them
-  // comes off this period's. This period's (as far as the books go) on its own VAT201. Which period
-  // a payment was for is SARS's (by its reference, which Shap doesn't keep): an estimate. A business
-  // no longer registered still owes its last returns.
+  // income or cost line), except payments and refunds (entries of VAT against money: the bank, cash,
+  // an overdraft, or the owner paying personally, with at most SARS's interest or a penalty beside
+  // it, smaller than the VAT) and balances brought in (opening balances, a trial balance). What's
+  // owed for periods that have ended, less payments already booked ahead: the last period's own on
+  // its VAT201 (this week, when that's past), anything older this week. A payment beyond them comes
+  // off this period's, up to what was paid since it began (one made ahead for it); a refund SARS
+  // owes doesn't (SARS pays refunds after its checks, and sets them off itself). This period's (as
+  // far as the books go) on its own VAT201. Which period a payment was for is SARS's (by its
+  // reference, which Shap doesn't keep): an estimate. A business no longer registered still owes
+  // its last returns.
   const vatOwedNow = -(await balanceOf('vat'));
   if (settings.vatRegistered || vatOwedNow !== 0) {
     const current = vatPeriod(now, settings.vatCategory, settings.fyEndMonth);
     const last = vatPeriod(addMonths(current.start, -1), settings.vatCategory, settings.fyEndMonth);
-    // Each entry's VAT, and whether it's a payment (nothing but VAT and money in it).
-    const vatEntries = async (from: string, to: string) =>
-      db<{ t: number; payment: boolean }[]>`
-        select l.amount_cents::bigint as t,
-          (exists (select 1 from ledger m join accounts ma on ma.id = m.account_id
-                   where m.source = l.source and m.source_id = l.source_id and (ma.statement_line in ('cash', 'bank_overdraft') or ma.system_key = 'owner_loan'))
-           and not exists (select 1 from ledger o join accounts oa on oa.id = o.account_id
-                           where o.source = l.source and o.source_id = l.source_id
-                             and coalesce(oa.system_key, '') not in ('vat', 'owner_loan') and oa.statement_line not in ('cash', 'bank_overdraft'))) as payment
+    // Each entry's VAT, and whether it's a payment (VAT and money, with nothing else in it but an
+    // expense smaller than the VAT: SARS's interest or a penalty paid with it).
+    // One pass over the books from the last period's start to whichever is later, this period's
+    // end or the forecast's: each VAT line, with what else its entry has on that day (one scan of
+    // the ledger, however many lines: no look-up per line, nothing the planner can turn into one).
+    const upTo = current.end > end ? current.end : end;
+    const entries = await db<{ t: number; date: string; payment: boolean }[]>`
+      select x.t, x.date::text, (x.money and not x.other and x.expense < abs(x.t)) as payment
+      from (
+        select l.source, l.source_id, l.date, l.amount_cents::bigint as t, a.system_key,
+          bool_or(a.statement_line in ('cash', 'bank_overdraft') or a.system_key = 'owner_loan') over w as money,
+          bool_or(a.type <> 'expense' and coalesce(a.system_key, '') not in ('vat', 'owner_loan') and coalesce(a.statement_line, '') not in ('cash', 'bank_overdraft')) over w as other,
+          coalesce(sum(abs(l.amount_cents)) filter (where a.type = 'expense' and coalesce(a.system_key, '') not in ('vat', 'owner_loan') and coalesce(a.statement_line, '') not in ('cash', 'bank_overdraft')) over w, 0) as expense
         from ledger l join accounts a on a.id = l.account_id
-        left join journals j on l.source = 'journal' and j.id = l.source_id
-        where a.system_key = 'vat' and l.date between ${from}::date and ${to}::date and l.source_id is not null and l.source <> 'year_end'
-          and (j.id is null or (j.kind <> 'opening' and not (j.kind = 'import' and j.ledger_import_id is null)))`;
-    const accrued = async (from: string, to: string) => -(await vatEntries(from, to)).filter((e) => !e.payment).reduce((t, e) => t + Number(e.t), 0);
-    const paidAhead = (await vatEntries(addDays(now, 1), end)).filter((e) => e.payment).reduce((t, e) => t + Number(e.t), 0);
+        where l.date between ${last.start}::date and ${upTo}::date and l.source_id is not null and l.source <> 'year_end'
+        window w as (partition by l.source, l.source_id, l.date)
+      ) x
+      left join journals j on x.source = 'journal' and j.id = x.source_id
+      where x.system_key = 'vat'
+        and (j.id is null or (j.kind <> 'opening'
+          and not (j.kind = 'import' and (j.ledger_import_id is null or exists (select 1 from ledger_imports li where li.id = j.ledger_import_id and li.kind = 'trialBalance')))))`;
+    const within = (from: string, to: string) => entries.filter((e) => e.date >= from && e.date <= to);
+    const accrued = async (from: string, to: string) => -within(from, to).filter((e) => !e.payment).reduce((t, e) => t + Number(e.t), 0);
+    const paidAhead = within(addDays(now, 1), end).filter((e) => e.payment).reduce((t, e) => t + Number(e.t), 0);
     const toNow = await accrued(current.start, now);
     let thisPeriod = toNow + (await accrued(addDays(now, 1), current.end));
     let ended = vatOwedNow - toNow - paidAhead;
     if (ended < 0) {
-      thisPeriod = Math.max(0, thisPeriod + ended);
+      // Paid to SARS since this period began (payments, not refunds received).
+      const paidSince = within(current.start, end).filter((e) => e.payment && Number(e.t) > 0).reduce((t, e) => t + Number(e.t), 0);
+      thisPeriod = Math.max(0, thisPeriod - Math.min(-ended, paidSince));
       ended = 0;
     }
     const lastOwn = Math.max(0, await accrued(last.start, last.end));
@@ -274,7 +320,7 @@ export async function cashForecast(db: Db, now = today()): Promise<Forecast> {
     return { start: addDays(now, i * 7), end: addDays(now, i * 7 + 6), inCents, outCents, closingCents: running };
   });
   const lowest = weeks.reduce<{ week: number; closingCents: number } | null>((lo, w, i) => (!lo || w.closingCents < lo.closingCents ? { week: i, closingCents: w.closingCents } : lo), null);
-  return { asOf: now, openingCents, cardsOweCents, weeks, items, lowest, longOverdue };
+  return { asOf: now, openingCents, cardsOweCents, offCash, weeks, items, lowest, longOverdue };
 }
 
 export function registerForecastRoutes(app: FastifyInstance, ctx: Ctx): void {

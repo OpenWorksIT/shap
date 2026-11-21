@@ -1350,6 +1350,85 @@ All five ready: security (the penetration test: nothing to fix), IFRS, SARS and 
 the refusal's words and who's told them, and an error toast's time). Shap Pocket 1.11.3 at
 `701211e`.
 
+### The five reviews of 1.33 and Shap Pocket 1.11.4 (the forecast, budgets, bank formats and rules, Home, CIPC and the Fund; before release)
+
+A 13-week cash-flow forecast and budgets against actual; bank statements as OFX and QIF, and rules
+that fill a line in; the phone's camera for barcodes; Home's cash, debtor and creditor days and
+gross margin; CIPC's annual return and the Compensation Fund's return of earnings on Home and the
+practice's list (056 for what a linked practice is sent). Five separate agents reviewed
+`594f935`, each on its own database, with made-up books through the API. None said it was ready.
+
+- Security and privacy, with the penetration test (0 to fix, 51 OK): an OFX file made to hold the
+  server up (a backtracking pattern): read in one pass, and held to a CSV's limits; a file of two
+  accounts read as one: one account a file; fingerprints longer than the index allows; rules
+  without end: 500, under a lock; a linked practice was sent the date of incorporation and the Fund
+  registration without its owner being told they go: only the fields on the list the link was made
+  under (`accountant_links.what_goes`, 056); the camera was asked for again after closing.
+- IFRS for SMEs: Home's cash was the payment sources' accounts, not the statements' cash (7.2);
+  gross margin and gross profit by account type, not the income statement's lines: both by
+  statement line. Budgets set before a change of year end didn't open; they do.
+- SARS: the forecast put a run's EMP201 twice, all VAT on one return, no DTR01, nothing for wages
+  or dividends owed: by pay date, by period, on its date, owed now; the Fund's season test fails
+  from 1 May, with CI in May.
+- Accounting: debtor days against all income (interest too) over a year whatever the business's
+  age: against invoices (and bills) over the days covered; budgets compared months not yet ended,
+  and rounded a percentage wrong.
+- Words: Home's reminders didn't say whose return each was (SARS, CIPC, the Fund); setup promised a
+  reminder each year that Shap can't always give; COIDA named the Fund only (a mutual association
+  such as FEM too, and a labour practitioner); the forecast's note, the bank and till words.
+
+The second round (`ea0430e`): still to fix, and fixed: payments booked ahead counted again as owed
+(wages, dividends, VAT), and monthly costs captured ahead projected again; a bill's monthly cost on
+its terms; Home's first figure was all income (interest too): revenue, and the tiles add up; a bank
+or cash account added with a payment source wasn't cash (later changed, below); last year in the
+budgets was the last financial year, not the twelve months before; the parser counted only the
+transactions it read against the limit, read a ledger balance after a ß as the available one,
+decoded entities twice, read an unsigned file's debits as money in, dropped a repeated id that was
+another transaction, and read a QIF account list as transactions; a rule for a cost type no longer
+in use was applied; the link's list version could be left out. The penetration test: 0 to fix, 53 OK.
+
+The third round (`d25969f`): still to fix, and fixed: the forecast's VAT left out costs paid from
+the bank and VAT paid personally, and counted a payment ahead twice: a period's VAT is everything
+that moves the VAT account in it, a payment only VAT against money; dividends paid ahead cancelled
+older ones, one worker's advance another's wages, a refund a month's cost: each on its own; someone
+new on the payroll at a third of their pay: at their own; a pay date a month off was refused (a
+December run paid in January): only before the month before or six months after, checked after
+"final"; Home's net profit put finance costs and income tax in running costs, and the year ran to
+the month's end: apart, and to today. Words: no promised update anywhere, the undated Fund note.
+
+The fourth round (`7748b56`): security (the penetration test: 0 to fix, 54 OK) found nothing to
+exploit. Still to fix, and fixed:
+
+- IFRS: the move of a new bank account onto the cash line (round 2) took a used source's history
+  off cash when it was moved to a new account, overrode a line chosen on purpose, and put a
+  liability on the overdraft line, which is cash only when repayable on demand and part of
+  day-to-day cash management (7.2). Shap and Pocket no longer move a line: Home and the forecast
+  say how much is in such an account and that it isn't counted (`offCashNote`), and the books
+  audit names it with the test for an asset and for an overdraft, an inactive one too while it has
+  entries since the comparative year began (one emptied this year still shapes last year's cash).
+  "Income tax as captured in the books", and "before income tax" when none is.
+- SARS: a trial balance brought in counted as its period's VAT (the VAT owed vanished on category
+  D): a balance, owed for periods gone by; a VAT payment with SARS's interest on the journal counted
+  as VAT: a payment, with an expense smaller than the VAT beside it; a refund SARS owes was netted
+  against this period: only payments are; someone who had left was still paid: only those a run
+  would take. Noted and done: journals typed in with VAT aren't on Shap's VAT201 (output VAT could
+  be left out): the VAT201 screen and the books audit say by how much (`handVat`); a run paid more
+  than a month late says which EMP201 is the accountant's to check (`latePayNote`).
+- Accounting: wages and dividends owed in the books beyond Shap's records (a journal, balances
+  brought in) were left out of the forecast: on their own line.
+- Security: the forecast's VAT looked up each line's entry in the ledger view, 20 seconds on 4 000
+  costs just put in (before the planner's counts caught up) and minutes with JIT on: one scan with
+  a window over each entry's day. Tests for round 3's move-only check and the final pay run's
+  words; Pocket's ports each with a test that fails without them.
+- Words: the import preview named balance lines for every format (a QIF's opening balance came in
+  as money in, now left out as a CSV's are); a rule not applied said "switch it back on" when its
+  cost type had become stock; Pocket's audit named a Home figure Pocket hasn't; the docs still
+  promised the Fund's season; smaller words in the forecast, budgets, pay dates and the website.
+
+Tests: `review-1.33/*` (bank, link, home, forecast and its rounds, budgets, words, sars,
+words-round4), `forecast-budgets`, `dashboard-money`, `cipc-coida`, `bank-formats-rules`, and
+Pocket's `review-shap-1.33.test.ts`, each failing without its fix.
+
 ### Code scanning (CodeQL), first run
 
 - The Accounts screen's download links carried the period's dates unencoded (flagged as text

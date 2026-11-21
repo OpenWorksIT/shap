@@ -35,7 +35,7 @@ describe('Home: the money on hand, debtor and creditor days', () => {
 
   it('shows the bank and till, what the cards owe, and how long clients take to pay', async () => {
     const d = await owner.get('/api/dashboard');
-    expect(d.cash).toEqual({ inBankCents: 500_000, cardsOweCents: 100_000 });
+    expect(d.cash).toEqual({ inBankCents: 500_000, cardsOweCents: 100_000, offCash: [] });
     // R5 000 still owed on R10 000 invoiced over the 11 days since the first invoice.
     expect(d.debtorDays).toBe(Math.round((500_000 / 1_000_000) * 11));
     // No supplier bills: nothing to say about paying suppliers.

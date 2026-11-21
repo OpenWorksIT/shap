@@ -635,7 +635,10 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
     return sql`
       select r.id, r.match_text, r.direction, r.category_id, c.name as category_name, r.income_account_id, a.name as income_account_name, r.supplier, r.created_at,
         -- Applied only while its cost type (not stock) or income account is in use (as the reconciliation does).
-        coalesce(c.active and c.kind <> 'stock', a.active and a.type = 'income', false) as usable
+        coalesce(c.active and c.kind <> 'stock', a.active and a.type = 'income', false) as usable,
+        -- Why not, in a word the screen turns into words: switched off, a stock type now, or no longer income.
+        case when c.id is not null and c.kind = 'stock' then 'stock' when c.id is not null and not c.active then 'off'
+             when a.id is not null and a.type <> 'income' then 'not_income' when a.id is not null and not a.active then 'off' end as why_not
       from bank_rules r left join cost_categories c on c.id = r.category_id left join accounts a on a.id = r.income_account_id
       order by lower(r.match_text)`;
   });

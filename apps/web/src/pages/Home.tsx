@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { addDays, formatDate, formatPercent, formatZar, monthLabel, todayIso } from '@shap/shared';
+import { addDays, formatDate, formatPercent, formatZar, monthLabel, offCashNote, todayIso } from '@shap/shared';
 import { MonthChart } from '../components/MonthChart';
 import { MarginChart } from '../components/MarginChart';
 import { PageHead } from '../components/Shell';
@@ -49,7 +49,7 @@ interface Dashboard {
   periods?: { monthDue: string | null; closes?: 'month' | 'vat' | 'year'; next?: { on: string; through: string; closesYears?: string[] } | null; reopened: { relockDate: string; reason: string } | null; lockDate: string | null } | null;
   bankCents: number;
   /** The bank and cash accounts the business pays from, and what its cards owe. */
-  cash?: { inBankCents: number; cardsOweCents: number };
+  cash?: { inBankCents: number; cardsOweCents: number; offCash?: { name: string; cents: number }[] };
   /** About how many days clients take to pay, and the business takes to pay suppliers (null: can't tell). */
   debtorDays?: number | null;
   creditorDays?: number | null;
@@ -62,6 +62,8 @@ interface CaptureDashboard {
 }
 
 /** Under Home's money figures and the margin chart: what they are. */
+/** Rands without cents, as the tiles show them. */
+const whole = (cents: number) => formatZar(cents, { cents: false });
 export const MONEY_NOTE = 'Worked out from what’s captured in the books: the bank and till as the statements count cash, and averages over the last 12 months. Rough guides to plan with, not advice.';
 
 /** Beside a CIPC or Compensation Fund reminder: where the date comes from, and that filing is theirs. */
@@ -421,17 +423,19 @@ function OwnerHome() {
       <TestServerPanel />
       <div className="kpis">
         <Kpi label={`Revenue ${data.financialYear.label} to date`} value={<Money cents={data.yearToDate.revenueCents} whole />} sub={`${data.thisMonth.label}: ${formatZar(data.thisMonth.revenueCents, { cents: false })}`} />
-        <Kpi label="Gross profit" value={<Money cents={data.yearToDate.grossProfitCents} whole />} sub={ytdMargin == null ? 'no revenue yet this year' : `${formatPercent(ytdMargin)} of revenue, as the financial statements count it`} />
+        <Kpi label="Gross profit" value={<Money cents={data.yearToDate.grossProfitCents} whole />} sub={ytdMargin == null ? 'no revenue yet this year' : `${formatPercent(ytdMargin)} of revenue (revenue less cost of sales, as the income statement sets them out)`} />
         <Kpi
           label="Net profit to date"
           value={<Money cents={data.yearToDate.profitCents} whole />}
           sub={[
             `after ${formatZar(data.yearToDate.runningCostsCents, { cents: false })} running costs`,
             data.yearToDate.financeCostsCents ? `${formatZar(data.yearToDate.financeCostsCents, { cents: false })} finance costs` : '',
-            data.yearToDate.incomeTaxCents ? `${formatZar(data.yearToDate.incomeTaxCents, { cents: false })} income tax as booked` : '',
+            data.yearToDate.incomeTaxCents ? `${formatZar(data.yearToDate.incomeTaxCents, { cents: false })} income tax as captured in the books` : '',
           ]
             .filter(Boolean)
-            .join(', ') + (data.yearToDate.otherIncomeCents ? `, with ${formatZar(data.yearToDate.otherIncomeCents, { cents: false })} other income` : '')}
+            .join(', ') +
+            (data.yearToDate.otherIncomeCents ? `, with ${formatZar(data.yearToDate.otherIncomeCents, { cents: false })} other income` : '') +
+            (data.yearToDate.incomeTaxCents ? '' : '; before income tax (none captured yet)')}
           tone={data.yearToDate.profitCents < 0 ? 'bad' : undefined}
         />
         <Kpi label="Clients owe you" value={<Money cents={data.owing.totalCents} whole />} sub={data.owing.overdue ? `${data.owing.overdue} overdue` : 'nothing overdue'} tone={data.owing.overdue ? 'warn' : undefined} />
@@ -466,6 +470,7 @@ function OwnerHome() {
           )}
         </div>
       )}
+      {data.cash && offCashNote(data.cash.offCash, whole) && <p className="xs warn-text">{offCashNote(data.cash.offCash, whole)}</p>}
       {data.cash && <p className="xs muted">{MONEY_NOTE}</p>}
 
       {!testServer?.on && <MarketNote />}

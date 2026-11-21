@@ -279,7 +279,7 @@ export function payDateFits(period: string, payDate: string): void {
   const to = addDays(addMonths(`${period}-01`, 7), -1);
   if (payDate >= from && payDate <= to) return;
   const words = (iso: string) => formatDate(iso, 'long').replace(/^1 /, '');
-  throw badRequest(`Shap takes a pay date for ${words(`${period}-01`)} from ${words(from)} to ${words(`${to.slice(0, 8)}01`)}: ${formatDate(payDate, 'long')} looks like a slip of the year. For pay outside that, ask your accountant how to record it.`);
+  throw badRequest(`Shap takes a pay date for ${words(`${period}-01`)} from ${words(from)} to ${words(`${to.slice(0, 8)}01`)}: ${formatDate(payDate, 'long')} isn’t, so it may be a slip of the year or month. For pay that really was that early or late, ask your accountant how to record it.`);
 }
 
 export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
