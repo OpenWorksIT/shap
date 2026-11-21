@@ -138,7 +138,7 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
   if (assetsOff.length) {
     const many = assetsOff.length > 1;
     warn(
-      `${few(assetsOff)} ${many ? 'are bank or cash accounts' : 'is a bank or cash account'} you pay (or paid) from, but not on the statements' cash line. Whether ${many ? 'each is' : "it's"} cash is a judgement (money that can be drawn at short notice usually is; a deposit fixed for more than about three months usually isn't)${after(many)}`,
+      `${few(assetsOff)} ${many ? 'are bank or cash accounts' : 'is a bank or cash account'} you pay (or paid) from, but not on the statements' cash line. Whether ${many ? 'each is' : "it's"} cash is a judgement (money you can draw on demand is; a deposit of about three months or less from when it was made, kept to pay what's coming, usually counts too; one fixed for longer usually doesn't)${after(many)}`,
     );
   }
   const owingOff = offCash.filter((a) => a.type === 'liability').map((a) => a.name);

@@ -189,7 +189,7 @@ describe('Home’s tiles, and a second bank account', () => {
     const items = await expectCleanAudit(env.sql);
     const warned = items.filter((i) => i.level === 'warn').map((i) => i.text);
     // Several named: each, them, their lines (words review, fifth round).
-    expect(warned.some((t) => /^Made-up Deposit Two, Made-up Savings are bank or cash accounts you pay \(or paid\) from, but not on the statements' cash line\. Whether each is cash is a judgement \(money that can be drawn at short notice usually is; a deposit fixed for more than about three months usually isn't\): Home, the forecast and the cash flow statement leave them out of cash\. Check each with your accountant before changing their lines/.test(t))).toBe(true);
+    expect(warned.some((t) => /^Made-up Deposit Two, Made-up Savings are bank or cash accounts you pay \(or paid\) from, but not on the statements' cash line\. Whether each is cash is a judgement \(money you can draw on demand is; a deposit of about three months or less from when it was made, kept to pay what's coming, usually counts too; one fixed for longer usually doesn't\): Home, the forecast and the cash flow statement leave them out of cash\. Check each with your accountant before changing their lines/.test(t))).toBe(true);
     // One named: it, its line.
     expect(warned.some((t) => /^Made-up Facility is a liability you pay \(or paid\) from as a bank or cash account, but not on the statements' cash or bank overdraft line\. A bank overdraft counts as cash only when it's repayable on demand and part of day-to-day cash management \(otherwise it's borrowing, as a loan is\): Home, the forecast and the cash flow statement leave it out of cash\. Check it with your accountant before changing its line/.test(t))).toBe(true);
     await env.sql`delete from payment_sources where account_id in (${dep.id}, ${other.id}, ${od.id})`;
@@ -227,5 +227,40 @@ describe('Home’s tiles, and a second bank account', () => {
     expect(warned).not.toMatch(/Made-up Long Gone/);
     expect(warned).toMatch(/Made-up Notice Deposit/);
     expect((await owner.get('/api/dashboard')).cash.offCash).toEqual(expect.arrayContaining([{ name: 'Made-up Notice Deposit', cents: 800_000 }]));
+  });
+});
+
+// Fifth round (IFRS): moving a used payment account onto another account takes its history with it;
+// not on or off the statements' cash line by the way. And a change of line or account is logged.
+describe('moving a used payment account', () => {
+  let env: TestEnv;
+  beforeAll(async () => {
+    env = await setup();
+  });
+  afterAll(async () => {
+    await expectCleanAudit(env.sql);
+    await env.close();
+  });
+
+  it('won’t take its history off the cash line, and logs the line and the move', async () => {
+    const owner = await login(env.app, 'owner@example.co.za');
+    const r = await ref(env.sql);
+    const bank = await r.src('Business bank');
+    await owner.post('/api/costs', { date: addDays(today(), -3), description: 'Made-up fuel', supplier: 'Made-up Garage', amountCents: 50_000, categoryId: await r.cat('Petrol'), sourceId: bank });
+    const cashBefore = (await owner.get('/api/dashboard')).cash.inBankCents;
+    const acc = await owner.post<{ id: string }>('/api/accounts', { code: '1078', name: 'Made-up New Bank', type: 'asset', active: true });
+    const move = () => owner.call({ method: 'PUT', url: `/api/sources/${bank}`, payload: { name: 'Business bank', kind: 'bank', accountId: acc.id } });
+    const refused = await move();
+    expect(refused.statusCode).toBe(400);
+    expect(refused.json().error).toBe('What’s already captured with this would move on or off the statements’ cash line with it, last year’s figures too. Put the new account on the same line first (Settings → Lists → Chart of accounts), after checking with your accountant, or make a new one for what’s coming.');
+    expect((await env.sql<{ accountId: string }[]>`select account_id from payment_sources where id = ${bank}`)[0]!.accountId).not.toBe(acc.id);
+    // On the cash line first: then it moves, and Home's cash is as it was.
+    await owner.post(`/api/accounts/${acc.id}`, { code: '1078', name: 'Made-up New Bank', type: 'asset', statementLine: 'cash', active: true }, 'PUT');
+    expect((await move()).statusCode).toBe(200);
+    expect((await owner.get('/api/dashboard')).cash.inBankCents).toBe(cashBefore);
+    const log = await env.sql<{ action: string; details: { name: string; from: unknown; to: unknown } }[]>`select action, details from audit_log where action in ('account_line_changed', 'moved_to_account') order by id`;
+    expect(log.map((l) => l.action)).toEqual(['account_line_changed', 'moved_to_account']);
+    expect(log[0]!.details).toEqual({ name: 'Made-up New Bank', from: { type: 'asset', line: 'other_current_assets' }, to: { type: 'asset', line: 'cash' } });
+    expect(log[1]!.details).toMatchObject({ name: 'Business bank', to: acc.id });
   });
 });

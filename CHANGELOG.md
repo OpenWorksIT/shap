@@ -57,7 +57,10 @@ entries newer than the version you're running before you update.
   to date runs to today. What's in a bank or cash account you pay from that isn't on the
   statements' cash line is said under the money in the bank (and on the forecast), not counted:
   Shap doesn't move its line, and the books audit points it out, with what usually decides it (for
-  a deposit, and for an overdraft), for you and your accountant to judge.
+  a deposit, and for an overdraft), for you and your accountant to judge. Moving a payment account
+  that's been used onto another account is refused when its history would move on or off the cash
+  line with it (set the new account's line first), and a change of an account's line, or of the
+  account behind a payment account or cost type, is in the audit log.
 - **VAT201.** When journals typed in (a cash sale journalled, a correction) moved the VAT account in
   a period, other than as payments to SARS, the VAT201 screen says by how much, and so does the books
   audit: the boxes are worked out from invoices, costs and assets, so they leave those out, and

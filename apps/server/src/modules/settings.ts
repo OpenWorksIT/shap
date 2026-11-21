@@ -334,7 +334,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.put('/api/accounts/:id', { preHandler: requireRole('owner') }, async (req) => {
     const { id } = parse(idParam, req.params);
     const input = parse(accountInput, req.body);
-    const [existing] = await sql<{ systemKey: string | null; type: string }[]>`select system_key, type from accounts where id = ${id}`;
+    const [existing] = await sql<{ systemKey: string | null; type: string; statementLine: string | null; name: string }[]>`select system_key, type, statement_line, name from accounts where id = ${id}`;
     if (!existing) throw notFound('Account');
     if (existing.systemKey && existing.type !== input.type) throw badRequest('Shap posts to this account automatically, so its type can’t change. You can rename it.');
     // Its type decides where its postings land (profit or the balance sheet): not for a closed year's.
@@ -345,6 +345,11 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
       const [row] = input.statementLine
         ? await sql`update accounts set code = ${input.code}, name = ${input.name}, type = ${input.type}, statement_line = ${input.statementLine}, active = ${input.active} where id = ${id} returning *`
         : await sql`update accounts set code = ${input.code}, name = ${input.name}, type = ${input.type}, active = ${input.active} where id = ${id} returning *`;
+      // A change of line or type moves what's in it, last year's figures too: in the audit log, as
+      // the accountant may need to say so in the statements (IFRS for SMEs 3.12).
+      const now = row as { type: string; statementLine: string | null };
+      if (now.type !== existing.type || now.statementLine !== existing.statementLine)
+        await audit(sql, { userId: userOrThrow(req).id, action: 'account_line_changed', entity: 'account', entityId: id, ip: req.ip, details: { name: existing.name, from: { type: existing.type, line: existing.statementLine }, to: { type: now.type, line: now.statementLine } } });
       return row;
     } catch (err) {
       if (pgCode(err) === PG.uniqueViolation) throw conflict('An account with that code already exists');
@@ -379,9 +384,22 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
           throw badRequest('What’s already captured with this goes to its account in a closed year, so the account can’t change. Make a new one for what’s coming instead.');
       }
       try {
-        const [row] = await sql`update ${sql(table)} set ${sql(input)} where id = ${id} returning *`;
-        if (!row) throw notFound();
-        return row;
+        return await sql.begin(async (tx) => {
+          const [was] = input.accountId ? await tx<{ accountId: string }[]>`select account_id from ${tx(table)} where id = ${id} for update` : [];
+          const moving = was && was.accountId !== input.accountId ? [was.accountId, input.accountId as string] : null;
+          // A payment account's history goes with it to its new account: not on or off the
+          // statements' cash line by the way (that's a judgement, made on the account's line).
+          const onCash = async (ids: string[]) =>
+            Number((await tx<{ n: string }[]>`select count(*)::bigint as n from ledger l join accounts a on a.id = l.account_id where l.account_id in ${tx(ids)} and a.statement_line in ('cash', 'bank_overdraft')`)[0]!.n);
+          const before = moving && table === 'payment_sources' ? await onCash(moving) : 0;
+          const [row] = await tx`update ${tx(table)} set ${tx(input)} where id = ${id} returning *`;
+          if (!row) throw notFound();
+          if (moving && table === 'payment_sources' && (await onCash(moving)) !== before)
+            throw badRequest('What’s already captured with this would move on or off the statements’ cash line with it, last year’s figures too. Put the new account on the same line first (Settings → Lists → Chart of accounts), after checking with your accountant, or make a new one for what’s coming.');
+          if (moving)
+            await audit(tx, { userId: userOrThrow(req).id, action: 'moved_to_account', entity: table === 'payment_sources' ? 'payment_source' : 'cost_category', entityId: id, ip: req.ip, details: { name: (row as { name: string }).name, from: moving[0], to: moving[1] } });
+          return row;
+        });
       } catch (err) {
         if (pgCode(err) === PG.uniqueViolation) throw conflict('That name is already used');
         throw err;
