@@ -166,6 +166,14 @@ export async function cashForecast(db: Db, now = today(), opts: { people?: boole
   // SARS: each EMP201 and DTR01 owed, on its due date (or this week, when it's past).
   const owed = await payrollAttention(db, now);
   for (const d of owed) add(d.dueOn, d.kind === 'emp201' ? `EMP201 for ${monthWords(d.period)}` : `Dividends tax (DTR01) for ${monthWords(d.period)}`, -Number(d.owingCents), d.kind === 'emp201' ? 'emp201' : 'dwt');
+  // PAYE, UIF and SDL owed in the books beyond the EMP201s Shap's pay runs leave owing (brought in
+  // when moving in, or a journal by hand): this week, as if paid now.
+  {
+    const [t] = await db<{ owed: number }[]>`select coalesce(-sum(l.amount_cents), 0)::bigint as owed from ledger_totals l join accounts a on a.id = l.account_id where a.system_key in ('paye_payable', 'uif_payable', 'sdl_payable')`;
+    const listed = owed.filter((d) => d.kind === 'emp201').reduce((s, d) => s + Number(d.owingCents), 0);
+    const beyondRuns = Number(t!.owed) - listed;
+    if (beyondRuns > 0) add(now, 'PAYE, UIF and SDL owed in the books beyond your pay runs (brought in, or a journal), as if paid now', -beyondRuns, 'emp201');
+  }
 
   // Salaries: each employee in the last pay run at the middle of their last three pay lines (so a
   // bonus month isn't repeated, and someone new counts in full), while a run for the month would
@@ -251,7 +259,7 @@ export async function cashForecast(db: Db, now = today(), opts: { people?: boole
           bool_or(a.type not in ('expense', 'income') and coalesce(a.system_key, '') <> 'vat' and not m.is_money) over w as other,
           coalesce(sum(abs(l.amount_cents)) filter (where a.type in ('expense', 'income') and not m.is_money) over w, 0) as expense
         from ledger l join accounts a on a.id = l.account_id
-        cross join lateral (select coalesce(a.statement_line, '') in ('cash', 'bank_overdraft') or a.system_key is not distinct from 'owner_loan'
+        cross join lateral (select coalesce(a.statement_line, '') in ('cash', 'bank_overdraft') or coalesce(a.system_key, '') in ('owner_loan', 'paye_payable', 'uif_payable', 'sdl_payable', 'income_tax_payable', 'dwt_payable')
           or exists (select 1 from payment_sources ps where ps.account_id = a.id and ps.kind in ('bank', 'cash', 'card', 'owner')) as is_money) m
         where l.date between ${last.start}::date and ${upTo}::date and l.source_id is not null and l.source <> 'year_end'
         window w as (partition by l.source, l.source_id, l.date)
@@ -265,15 +273,23 @@ export async function cashForecast(db: Db, now = today(), opts: { people?: boole
     const paidAhead = within(addDays(now, 1), end).filter((e) => e.payment).reduce((t, e) => t + Number(e.t), 0);
     const toNow = await accrued(current.start, now);
     let thisPeriod = toNow + (await accrued(addDays(now, 1), current.end));
-    let ended = vatOwedNow - toNow - paidAhead;
+    // A refund SARS still owes for an ended period isn't netted off what's owed for another (SARS
+    // sets off only an authorised refund, against a debt already overdue: TAA ss190(2), 191).
+    const atLastStart = -(await balanceOf('vat', addDays(last.start, -1)));
+    const refundsIn = -within(last.start, end).filter((e) => e.payment && Number(e.t) < 0).reduce((t, e) => t + Number(e.t), 0);
+    const refundsOwed = Math.max(0, Math.max(0, -atLastStart) + Math.max(0, -(await accrued(last.start, last.end))) - refundsIn);
+    let ended = vatOwedNow - toNow - paidAhead + refundsOwed;
     if (ended < 0) {
       // Paid to SARS since this period began (payments, not refunds received), beyond what the
       // ended periods owed when it began (a refund owed counted as nothing): what was paid ahead
       // for this one. Paying last period's on time doesn't let a refund SARS owes come off it.
       const paidSince = within(current.start, end).filter((e) => e.payment && Number(e.t) > 0).reduce((t, e) => t + Number(e.t), 0);
       const lastRaw = await accrued(last.start, last.end);
-      const atStart = -(await balanceOf('vat', addDays(current.start, -1)));
-      const owedAtStart = Math.max(0, lastRaw) + Math.max(0, atStart - lastRaw);
+      // Owed before the last period began (a refund owed as nothing), less what was paid to SARS
+      // during it; what was paid beyond that was paid ahead for the last period's own.
+      const olderAtLastStart = Math.max(0, -(await balanceOf('vat', addDays(last.start, -1))));
+      const paidInLast = within(last.start, last.end).filter((e) => e.payment && Number(e.t) > 0).reduce((t, e) => t + Number(e.t), 0);
+      const owedAtStart = Math.max(0, olderAtLastStart - paidInLast) + Math.max(0, Math.max(0, lastRaw) - Math.max(0, paidInLast - olderAtLastStart));
       thisPeriod = Math.max(0, thisPeriod - Math.min(-ended, Math.max(0, paidSince - owedAtStart)));
       ended = 0;
     }

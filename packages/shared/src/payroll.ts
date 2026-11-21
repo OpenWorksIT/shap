@@ -136,10 +136,15 @@ export function microDividendTax(grossCents: number, paidEarlierThisYearCents: n
 export function latePayNote(period: string, payDate: string): string | null {
   // The tax year a day is in: 1 March to the end of February.
   const taxYear = (iso: string) => Number(iso.slice(0, 4)) - (Number(iso.slice(5, 7)) < 3 ? 1 : 0);
-  const crosses = taxYear(`${period}-01`) !== taxYear(payDate);
+  const year = taxYear(`${period}-01`);
+  const crosses = year !== taxYear(payDate);
   const late = payDate > monthEnd(addMonths(`${period}-01`, 1));
-  if (!late && !(crosses && payDate > monthEnd(`${period}-01`))) return null;
+  if (!late && !crosses) return null;
   const month = formatDate(`${period}-01`, 'long').replace(/^1 /, '');
-  const when = late ? `The pay date is more than a month after ${month}.` : `The pay date is in the tax year after ${month}’s (from 1 March).`;
-  return `${when} Employees’ tax arises when the business pays the salary, or becomes liable to pay it, so which EMP201 this goes on${crosses ? ', and which tax year’s tables,' : ''} is for your accountant to check: Shap puts it on the EMP201 for the month it’s paid.`;
+  const when = late
+    ? `The pay date is more than a month after ${month}.`
+    : payDate > `${period}-01`
+      ? `The pay date is in the next tax year (from 1 March ${year + 1}).`
+      : `The pay date is in the previous tax year (to ${formatDate(monthEnd(`${year}-02-01`), 'long')}).`;
+  return `${when} Employees’ tax arises when the business pays the salary, or becomes liable to pay it, so ${crosses ? 'which EMP201 this goes on and which tax year’s tables apply are' : 'which EMP201 this goes on is'} for your accountant to check: Shap puts it on the EMP201 for the month it’s paid.`;
 }

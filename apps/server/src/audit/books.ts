@@ -42,7 +42,7 @@ export interface AuditItem {
 
 const rand = (cents: number) => formatZar(Math.abs(cents));
 const n = (v: unknown) => Number(v ?? 0);
-const few = (xs: string[], max = 5) => (xs.length > max ? `${xs.slice(0, max).join(', ')} and ${xs.length - max} more` : xs.join(', '));
+const few = (xs: string[], max = 5) => (xs.length > max ? `${xs.slice(0, max).join(', ')} and ${xs.length - max} more` : xs.length > 1 ? `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}` : xs.join(''));
 
 /** The whole audit, in order. `on`: the day it's run for (today by default). */
 export async function auditBooks(db: Db, on = today(), o: { people?: boolean } = {}): Promise<AuditItem[]> {
@@ -138,7 +138,7 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
   if (assetsOff.length) {
     const many = assetsOff.length > 1;
     warn(
-      `${few(assetsOff)} ${many ? 'are bank or cash accounts' : 'is a bank or cash account'} you pay (or paid) from, but not on the statements' cash line. Whether ${many ? 'each is' : "it's"} cash is a judgement (money you can draw on demand is; a deposit of about three months or less from when it was made, kept to pay what's coming, usually counts too; one fixed for longer usually doesn't)${after(many)}`,
+      `${few(assetsOff)} ${many ? 'are bank or cash accounts' : 'is a bank or cash account'} you pay (or paid) from, but not on the statements' cash line. Whether ${many ? 'each is' : "it's"} cash is a judgement (money you can draw on demand is; a deposit fixed for about three months or less when it was made, for an amount that won't change, kept to pay what's coming, usually counts too; one fixed for longer, or whose value goes up and down (shares, unit trusts), usually doesn't)${after(many)}`,
     );
   }
   const owingOff = offCash.filter((a) => a.type === 'liability').map((a) => a.name);
@@ -207,7 +207,7 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
       ok(brought ? `the VAT account moved by what Shap’s VAT201 shows for the ${periods.size - brought} of the last year’s ${periods.size} periods it works out${notOurs}` : `the VAT account moved by what Shap’s VAT201 shows for each period of the last year (${periods.size} periods)`);
     else fail(`the VAT201 and the VAT account disagree for ${few(off, 3)}`);
     if (typedIn.length)
-      warn(`journals by hand moved the VAT account in ${few(typedIn, 3)}, besides what Shap can tell is a payment to or refund from SARS (VAT against money: one paid with other tax may still be among them): Shap's VAT201 is worked out from invoices, costs and assets, so it leaves them out. Whether and where they go on the return is the business's or their accountant's to decide`);
+      warn(`journals by hand moved the VAT account in ${few(typedIn, 3)}, apart from what Shap can tell is a payment to or refund from SARS (VAT against money or SARS’s other taxes; import VAT journalled against the bank looks the same, so it’s left out too): Shap’s VAT201 is worked out from invoices, costs and assets, so it leaves them out. Whether and where they go on the return is the business’s or their accountant’s to decide`);
   } else ok('not registered for VAT: no VAT201s to check');
 
   const sars = await db<{ owed: number }[]>`

@@ -44,6 +44,7 @@ export function readPocketShare(name: string, bytes: Buffer): PocketShare & { fi
   if (p?.kind === 'rows') throw badRequest(`“${name}” has more records than Shap brings in at once (${MAX_SHARE_ROWS.toLocaleString('en-ZA')}).`);
   if (p?.kind === 'settings') throw badRequest(`“${name}” has no business details in it. ${FAULT}`);
   if (p?.kind === 'twice') throw badRequest(`“${name}” has the same entry twice. ${FAULT}`);
+  if (p?.kind === 'long_journal') throw badRequest(`“${name}” has a journal of more than 1 000 lines, more than Shap takes: ask them to split it into journals that each balance in Shap Pocket, then share their books again.`);
   return { ...s, fileHash: sha256Hex(bytes.toString('latin1')) };
 }
 

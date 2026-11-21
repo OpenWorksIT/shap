@@ -14,7 +14,7 @@ import { confirmPassword, requireRole, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import type { Tx } from '../db/index.js';
 import { audit } from '../lib/audit.js';
-import { applyBusinessType, getSettings, lockAfterSettings, lockSettingsNow, noteShapFigures } from '../lib/books.js';
+import { applyBusinessType, getSettings, lockAfterSettings, lockSettingsNow, moveToAccount, noteShapFigures } from '../lib/books.js';
 import { badRequest } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 import { cleanImage } from '../lib/images.js';
@@ -175,22 +175,39 @@ export async function restoreCompanyFile(tx: Tx, raw: unknown) {
 
   // Accounts and lists
   for (const a of file.accounts) {
-    // (A line that doesn't fit the type, or none, is set by the database's own rules.)
-    await tx`insert into accounts (code, name, type, statement_line, active) values (${a.code}, ${a.name}, ${a.type}, ${a.statementLine ?? null}, ${a.active})
-      on conflict (code) do update set name = excluded.name, active = excluded.active, statement_line = coalesce(excluded.statement_line, accounts.statement_line)`;
+    // (A line that doesn't fit the type, or none, is set by the database's own rules.) A change of
+    // an account's line moves what's in it, last year's figures too: in the audit log, as an
+    // account's PUT logs it (IFRS for SMEs 3.12).
+    const [was] = await tx<{ id: string; name: string; type: string; statementLine: string | null }[]>`select id, name, type, statement_line from accounts where code = ${a.code}`;
+    const [now] = await tx<{ id: string; type: string; statementLine: string | null }[]>`insert into accounts (code, name, type, statement_line, active) values (${a.code}, ${a.name}, ${a.type}, ${a.statementLine ?? null}, ${a.active})
+      on conflict (code) do update set name = excluded.name, active = excluded.active, statement_line = coalesce(excluded.statement_line, accounts.statement_line)
+      returning id, type, statement_line`;
+    if (was && now && (now.type !== was.type || now.statementLine !== was.statementLine))
+      await audit(tx, { actor: 'system', action: 'account_line_changed', entity: 'account', entityId: was.id, details: { name: was.name, from: { type: was.type, line: was.statementLine }, to: { type: now.type, line: now.statementLine }, by: 'the company file' } });
   }
   const acc = async (code: string) => {
     const [r] = await tx<{ id: string }[]>`select id from accounts where code = ${code}`;
     if (!r) throw badRequest(`The company file refers to account ${code}, which isn’t in the chart of accounts`);
     return r.id;
   };
+  // A payment account or cost type already here, on another account: moved as Settings → Lists
+  // moves one (what's captured with it goes too), so refused where that would reach a closed year
+  // or carry entries on or off the cash line, and logged.
   for (const s of file.sources) {
-    await tx`insert into payment_sources (name, kind, account_id, active, sort) values (${s.name}, ${s.kind}, ${await acc(s.account)}, ${s.active}, (select coalesce(max(sort), 0) + 1 from payment_sources))
-      on conflict (name) do update set kind = excluded.kind, account_id = excluded.account_id, active = excluded.active`;
+    const to = await acc(s.account);
+    const [here] = await tx<{ id: string }[]>`select id from payment_sources where name = ${s.name}`;
+    if (here)
+      await moveToAccount(tx, { table: 'payment_sources', id: here.id, to, prefix: `The company file puts the payment account “${s.name}” on another account. ` }, () =>
+        tx`update payment_sources set kind = ${s.kind}, account_id = ${to}, active = ${s.active} where id = ${here.id}`);
+    else await tx`insert into payment_sources (name, kind, account_id, active, sort) values (${s.name}, ${s.kind}, ${to}, ${s.active}, (select coalesce(max(sort), 0) + 1 from payment_sources))`;
   }
   for (const c of file.categories) {
-    await tx`insert into cost_categories (name, kind, account_id, active, sort) values (${c.name}, ${c.kind}, ${await acc(c.account)}, ${c.active}, (select coalesce(max(sort), 0) + 1 from cost_categories))
-      on conflict (name) do update set kind = excluded.kind, account_id = excluded.account_id, active = excluded.active`;
+    const to = await acc(c.account);
+    const [here] = await tx<{ id: string }[]>`select id from cost_categories where name = ${c.name}`;
+    if (here)
+      await moveToAccount(tx, { table: 'cost_categories', id: here.id, to, prefix: `The company file puts the cost type “${c.name}” on another account. ` }, () =>
+        tx`update cost_categories set kind = ${c.kind}, account_id = ${to}, active = ${c.active} where id = ${here.id}`);
+    else await tx`insert into cost_categories (name, kind, account_id, active, sort) values (${c.name}, ${c.kind}, ${to}, ${c.active}, (select coalesce(max(sort), 0) + 1 from cost_categories))`;
   }
   for (const w of file.workTypes) {
     await tx`insert into work_types (name, active, sort) values (${w.name}, ${w.active}, (select coalesce(max(sort), 0) + 1 from work_types)) on conflict (name) do update set active = excluded.active`;

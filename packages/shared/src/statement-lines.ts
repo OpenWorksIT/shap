@@ -221,26 +221,28 @@ export const SECTION_LABELS: Record<StatementSection, string> = {
  * from isn't on the statements' cash lines: what's in it, and that Shap doesn't count it or move
  * it. Whether it's cash is a judgement (IFRS for SMEs 7.2) for the owner and their accountant.
  */
-export function offCashNote(off: readonly { name: string; cents: number }[] | undefined, formatWhole: (cents: number) => string): string | null {
+export function offCashNote(off: readonly { name: string; cents: number }[] | undefined, formatWhole: (cents: number) => string, viewer: { owner?: boolean } = {}): string | null {
   if (!off?.length) return null;
   const parts = off.map((o) => (o.cents < 0 ? `${formatWhole(-o.cents)} owed on ${o.name}` : `${formatWhole(o.cents)} in ${o.name}`));
   const listed = parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
   const one = off.length === 1;
-  return `Not counted here: ${listed}, as the statements don’t count ${one ? 'that account' : 'those accounts'} as cash (by ${one ? 'its line' : 'their lines'} in the chart of accounts). Whether ${one ? 'it is' : 'each is'} cash is for you and your accountant to judge: the books audit (Settings → Updates & backups) says more.`;
+  return `Not counted here: ${listed}, as the statements don’t count ${one ? 'that account' : 'those accounts'} as cash (by ${one ? 'its line' : 'their lines'} in the chart of accounts). Whether ${one ? 'it is' : 'each is'} cash is for you and your accountant to judge: the books audit (${viewer.owner === false ? 'the owner’s, under ' : ''}Settings → Updates & backups) says more.`;
 }
 
 /**
  * Said after Home's net profit when no income tax is captured in the year: by who pays it. A
  * company, CC, NPC or trust pays its own (Shap's statements estimate it apart; the books have none
  * until it's captured); a sole proprietor's or partners' tax is their own, never the business's,
- * so it isn't "not yet" captured; turnover tax, and an approved PBO's exemption, aren't income tax
- * on this profit, so nothing is said.
+ * so it isn't "not yet" captured, turnover tax too; a company's turnover tax is on its turnover,
+ * not this profit (in it only as captured); an approved PBO's trading beyond its partial exemption
+ * is taxed (SARS Interpretation Note 24), so that's what's said.
  */
 export function noIncomeTaxWords(s: { businessType: string; turnoverTax?: boolean; approvedPbo?: boolean }): string {
-  if (s.turnoverTax) return '';
   const { taxedAs } = entity(s.businessType);
-  if (taxedAs === 'individual') return '; the owner’s own income tax isn’t in the business’s books';
-  if (taxedAs === 'partners') return '; the partners’ own income tax isn’t in the business’s books';
-  if (s.businessType === 'npc' && s.approvedPbo) return '';
-  return '; before income tax (none captured in the books: your accountant works it out)';
+  const tax = s.turnoverTax ? 'tax' : 'income tax';
+  if (taxedAs === 'individual') return `; the owner’s own ${tax} isn’t in the business’s books`;
+  if (taxedAs === 'partners') return `; the partners’ own ${tax} isn’t in the business’s books`;
+  if (s.turnoverTax) return '; turnover tax is in it only as far as it’s captured in the books';
+  if (s.businessType === 'npc' && s.approvedPbo) return '; before any income tax on trading beyond the PBO exemption (none captured in the books)';
+  return '; before income tax (none captured in the books)';
 }

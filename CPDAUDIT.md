@@ -1425,9 +1425,31 @@ exploit. Still to fix, and fixed:
   cost type had become stock; Pocket's audit named a Home figure Pocket hasn't; the docs still
   promised the Fund's season; smaller words in the forecast, budgets, pay dates and the website.
 
+The fifth round (`a07f7da`): still to fix, and fixed:
+
+- Security (the penetration test: 0 to fix, 55 OK): one journal of thousands of lines made the
+  VAT201 screen and the books audit take tens of seconds (`handVat` read the journal again for
+  each VAT line): each journal is read once, and a journal takes up to 1 000 lines. The forecast's
+  salaries dropped in the month after a leaving date set ahead, which told someone with the
+  reports but not payroll who was going: for them, as if no one leaves who hasn't yet, and said.
+- IFRS: moving a used payment source onto another account carried its history on or off the cash
+  line, last year's figures too: refused, the new account's line is set first; a change of an
+  account's line or type, or of the account a source or cost type posts to, is in the audit log
+  (3.12); the deposit words follow 7.2 (on demand; about three months from when made).
+- SARS: paying last period's VAT on time let a refund SARS owes come off this period's: only what
+  was paid beyond what the ended periods owed counts as paid ahead; a trial balance's VAT brought in
+  this period is said as such.
+- Accounting: wages and dividends owed beyond Shap's records went out again when a journal had
+  paid them: kept signed; a refund paid with interest counted as this period's VAT; moving in put
+  PAYE, UIF and SDL on wages owed, and VAT payable on creditors: on SARS's own accounts.
+- Words: Home's "before income tax" for a sole proprietor or partners (their own tax isn't the
+  business's), turnover tax and an approved PBO; typed-in VAT added and taken off, apart; a VAT
+  payment by card is a payment; the audit's plurals; the late pay note across 1 March.
+
 Tests: `review-1.33/*` (bank, link, home, forecast and its rounds, budgets, words, sars,
-words-round4), `forecast-budgets`, `dashboard-money`, `cipc-coida`, `bank-formats-rules`, and
-Pocket's `review-shap-1.33.test.ts`, each failing without its fix.
+words-round4, security-round5), `forecast-budgets`, `dashboard-money`, `cipc-coida`,
+`bank-formats-rules`, and Pocket's `review-shap-1.33.test.ts` and
+`review-shap-1.33-security.test.ts`, each failing without its fix.
 
 ### Code scanning (CodeQL), first run
 

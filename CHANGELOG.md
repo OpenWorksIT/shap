@@ -15,9 +15,10 @@ entries newer than the version you're running before you update.
   doesn't see payroll, as if no one leaves who hasn't yet), on the usual day
   (the EMP201 by the month paid), dividends tax on its date, wages and dividends owed now (those
   owed in the books by a journal or balances brought in too; one paid by a journal not counted
-  again), day wages at the last eight weeks'
+  again), PAYE, UIF and SDL owed in the books beyond your pay runs (brought in when moving in, say)
+  this week, day wages at the last eight weeks'
   average, the VAT as invoiced on each VAT201 (an older one this week; a trial balance brought in
-  counts as owed for periods gone by, and a refund SARS owes isn't netted off), and the costs you usually
+  counts as owed for periods gone by, and a refund SARS owes isn't netted off another period's VAT), and the costs you usually
   pay each month (as last paid: not those paid personally or on a card; one that comes as a
   supplier bill on the bill's terms; not a month already captured ahead). Tap a week for what's in it. Sales not made or invoiced yet
   aren't in it, nor are provisional or turnover tax, drawings, or card and loan repayments: an
@@ -54,25 +55,32 @@ entries newer than the version you're running before you update.
   Home's first figure is now revenue (it was all income, interest included), gross profit is
   revenue less cost of sales, net profit says the running costs, finance costs, income tax and
   other income between them (and, when none is captured, says it's before a company's income tax,
-  or that an owner's or partners' own tax isn't in the books), and the year
+  or that an owner's or partners' own tax isn't in the books; on turnover tax, that a company's is
+  in it only as captured; for an approved PBO, before any tax on trading beyond its exemption), and the year
   to date runs to today. What's in a bank or cash account you pay from that isn't on the
   statements' cash line is said under the money in the bank (and on the forecast), not counted:
   Shap doesn't move its line, and the books audit points it out, with what usually decides it (for
-  a deposit, and for an overdraft), for you and your accountant to judge. Moving a payment account
-  that's been used onto another account is refused when its history would move on or off the cash
-  line with it (set the new account's line first), and a change of an account's line, or of the
-  account behind a payment account or cost type, is in the audit log.
+  a deposit, and for an overdraft), for you and your accountant to judge. Moving a payment account (or a cost
+  type) that's been used onto another account is refused when its history would move on or off the cash
+  line with it (change the line of the account that's wrong, with your accountant), from a company
+  file brought in too, and a change of an account's line, or of the account behind a payment
+  account or cost type, is in the audit log, with both accounts' names and lines.
 - **VAT201.** When journals typed in (a cash sale journalled, a correction) moved the VAT account in
-  a period, other than as payments to SARS, the VAT201 screen says by how much, and so does the books
-  audit: the boxes are worked out from invoices, costs and assets, so they leave those out, and
-  where they go on the return is yours or your accountant's to decide.
+  a period, other than as payments to or refunds from SARS (VAT against the bank, cash, a card, your
+  own money or SARS's other taxes), the VAT201 screen says what they added to the VAT owed and what
+  they took off it, and so does the books audit: the boxes are worked out from invoices, costs and
+  assets, so they leave those out, and where they go on the return is yours or your accountant's to
+  decide. Import VAT journalled against the bank looks like a payment, so it isn't counted there
+  either (the screen says so).
 - **Journals.** A journal takes up to 1 000 lines: split a longer one into journals that each
   balance. (One very long journal could make the VAT201 screen and the books audit take minutes:
-  they now read each journal once.)
+  they now read each journal once.) A Shap Pocket share holding a longer one is turned away, saying
+  so.
 - **Payroll.** A pay date before the month before its run's month, or more than six months after
   it, is refused as a likely slip of the year or month (it could be taxed on the wrong year's tables or go on the wrong EMP201). A
-  run paid more than a month after its month says that which EMP201 it goes on is your
-  accountant's to check.
+  run paid more than a month after its month, or in another tax year (a February run paid in
+  March), says that which EMP201 it goes on, and which tax year's tables, are your accountant's to
+  check.
 - **CIPC and the Compensation Fund.** The date of incorporation (Settings → Company, and in the
   first-run questions, both optional) gives a company's or close corporation's CIPC annual return
   on Home and the practice's list, from five weeks before it's due to a month after. An employer

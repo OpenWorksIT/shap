@@ -101,6 +101,6 @@ describe('the forecast and a leaving date still to come', () => {
     expect(new Set(b).size).toBe(1);
     expect(b[0]).toBe(a[0]);
     expect((await reports.call({ method: 'GET', url: '/api/employees' })).statusCode).toBe(403);
-    expect(readFileSync(join(root, 'apps/web/src/pages/Forecast.tsx'), 'utf8')).toMatch(/data\.leavingAhead === false && <p className="xs muted">\{LEAVING_NOTE\}<\/p>/);
+    expect(readFileSync(join(root, 'apps/web/src/pages/Forecast.tsx'), 'utf8')).toMatch(/data\.leavingAhead === false && data\.items\.some\(\(i\) => i\.kind === 'payroll'\) && <p className="xs muted">\{LEAVING_NOTE\}<\/p>/);
   });
 });

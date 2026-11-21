@@ -82,7 +82,25 @@ export function Vat201() {
       ) : null}
       {data.handVatLines ? (
         <div className="banner alert small">
-          Journals typed in added <Money cents={data.handVatAddedCents ?? 0} /> to the VAT owed and took <Money cents={data.handVatOffCents ?? 0} /> off it in this period ({data.handVatLines} line{data.handVatLines === 1 ? '' : 's'}). Shap leaves out what it can tell is a payment to or refund from SARS (VAT against the bank, cash, a card or your own money); one paid together with other tax may still be counted here. The boxes below are worked out from invoices, costs and assets, so they leave these out: whether and where they go on the return (a cash sale, a correction) is yours or your accountant’s to decide before you file.
+          Journals typed in{' '}
+          {(data.handVatAddedCents ?? 0) > 0 ? (
+            <>
+              added <Money cents={data.handVatAddedCents!} /> to the VAT owed
+              {(data.handVatOffCents ?? 0) > 0 ? (
+                <>
+                  {' '}
+                  and took <Money cents={data.handVatOffCents!} /> off it
+                </>
+              ) : null}
+            </>
+          ) : (data.handVatOffCents ?? 0) > 0 ? (
+            <>
+              took <Money cents={data.handVatOffCents!} /> off the VAT owed
+            </>
+          ) : (
+            'moved the VAT account'
+          )}{' '}
+          in this period ({data.handVatLines} line{data.handVatLines === 1 ? '' : 's'}). Shap leaves out what it can tell is a payment to or refund from SARS (VAT against the bank, cash, a card, your own money or SARS’s other taxes, such as PAYE), and import VAT journalled against the bank looks the same, so it isn’t counted here either. The boxes below are worked out from invoices, costs and assets, so they leave these out: whether and where they go on the return (a cash sale, a correction) is yours or your accountant’s to decide before you file.
         </div>
       ) : null}
       <section className="panel">

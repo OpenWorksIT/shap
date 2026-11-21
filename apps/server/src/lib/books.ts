@@ -169,7 +169,7 @@ export async function importedVat(db: Db, start: string, end: string): Promise<{
 export async function handVat(db: Db, start: string, end: string): Promise<{ lines: number; addedCents: number; offCents: number }> {
   const [r] = await db<{ n: number; added: string; off: string }[]>`
     with money as (
-      select id from accounts where statement_line in ('cash', 'bank_overdraft') or system_key = 'owner_loan'
+      select id from accounts where statement_line in ('cash', 'bank_overdraft') or system_key in ('owner_loan', 'paye_payable', 'uif_payable', 'sdl_payable', 'income_tax_payable', 'dwt_payable')
       union select account_id from payment_sources where kind in ('bank', 'cash', 'card', 'owner')
     ), per as (
       -- Each journal's lines read once (not once for each of its VAT lines): whether money is on it,
@@ -186,6 +186,70 @@ export async function handVat(db: Db, start: string, end: string): Promise<{ lin
     from journal_lines jl join per p on p.journal_id = jl.journal_id join accounts a on a.id = jl.account_id
     where a.system_key = 'vat' and not (p.money and not p.other and p.expense < abs(jl.credit_cents - jl.debit_cents))`;
   return { lines: r?.n ?? 0, addedCents: Number(r?.added ?? 0), offCents: Number(r?.off ?? 0) };
+}
+
+/** An account as the audit log names it: its code, name and statement line. */
+async function accountWords(db: Db, id: string) {
+  const [a] = await db<{ code: string; name: string; statementLine: string | null }[]>`select code, name, statement_line from accounts where id = ${id}`;
+  return { id, code: a?.code ?? null, name: a?.name ?? null, line: a?.statementLine ?? null };
+}
+
+/**
+ * Moving a payment account or a cost type onto another account in the books, within a
+ * transaction (the list PUT, a company file brought in): everything already captured with it moves
+ * too. Refused when that reaches into a closed year, or (a payment account) carries entries on or
+ * off the statements' cash line; otherwise done by `update`, and in the audit log with both
+ * accounts' names and lines (IFRS for SMEs 3.12). `prefix` starts a refusal (whose file it is).
+ */
+export async function moveToAccount<T>(
+  tx: Db,
+  o: { table: 'payment_sources' | 'cost_categories'; id: string; to: string; userId?: string | null; ip?: string; prefix?: string },
+  update: () => Promise<T>,
+): Promise<T> {
+  // No key update: a capture against it (its foreign key) isn't held up, nor deadlocked.
+  const [was] = await tx<{ accountId: string; name: string }[]>`select account_id, name from ${tx(o.table)} where id = ${o.id} for no key update`;
+  if (!was || was.accountId === o.to) return update();
+  const refuse = (words: string) => badRequest(`${o.prefix ?? ''}${words}`);
+  const [s] = await tx<{ lockDate: string | null; fyEndMonth: number }[]>`select lock_date::text as lock_date, fy_end_month from settings where id`;
+  if (s?.lockDate) {
+    const [closed] =
+      o.table === 'cost_categories'
+        ? await tx`select 1 from costs where category_id = ${o.id} and date <= ${s.lockDate}::date limit 1`
+        : await tx`select 1 from ledger l where l.account_id = ${was.accountId} and l.date <= ${s.lockDate}::date limit 1`;
+    if (closed) throw refuse('What’s already captured with this goes to its account in a closed year, so the account can’t change. Make a new one for what’s coming instead.');
+  }
+  // Its history goes with it to its new account: not on or off the statements' cash lines by the
+  // way (that's a judgement, made on the account's line). Only when one account is on them and the
+  // other isn't can anything cross: then all of it is counted, and what's from before this
+  // financial year (last year's figures).
+  const sides = await tx<{ cash: boolean }[]>`select coalesce(statement_line in ('cash', 'bank_overdraft'), false) as cash from accounts where id in ${tx([was.accountId, o.to])}`;
+  const crossing = sides.length === 2 && sides[0]!.cash !== sides[1]!.cash;
+  const yearStart = financialYear(today(), s?.fyEndMonth ?? 2).start;
+  const onCash = async () => {
+    const [n] = await tx<{ total: string; lastYear: string }[]>`
+      select count(*)::bigint as total, count(*) filter (where l.date < ${yearStart}::date)::bigint as last_year
+      from ledger l join accounts a on a.id = l.account_id where l.account_id in ${tx([was.accountId, o.to])} and a.statement_line in ('cash', 'bank_overdraft')`;
+    return { all: Number(n!.total), before: Number(n!.lastYear) };
+  };
+  const before = crossing ? await onCash() : null;
+  const row = await update();
+  if (before) {
+    const after = await onCash();
+    if (after.all !== before.all)
+      throw refuse(
+        `What’s already captured with this would move on or off the statements’ cash line with it${after.before !== before.before ? ', last year’s figures too' : ''}. If the account it’s on now is on the wrong line, change that account’s line instead (Settings → Lists → Chart of accounts), after checking with your accountant; if the new account has nothing in it yet, put it on the same line first; otherwise make a new ${o.table === 'payment_sources' ? 'payment account' : 'cost type'} for what’s coming.`,
+      );
+  }
+  await audit(tx, {
+    userId: o.userId ?? null,
+    actor: o.userId ? 'user' : 'system',
+    action: 'moved_to_account',
+    entity: o.table === 'payment_sources' ? 'payment_source' : 'cost_category',
+    entityId: o.id,
+    ip: o.ip,
+    details: { name: was.name, from: await accountWords(tx, was.accountId), to: await accountWords(tx, o.to), ...(o.userId ? {} : { by: 'the company file' }) },
+  });
+  return row;
 }
 
 export async function getSettings(db: Db): Promise<SettingsRow> {

@@ -3,7 +3,7 @@
  * deleted from the app, and it's part of every backup, so the history goes wherever the books go.
  */
 import { useEffect, useState } from 'react';
-import { formatZar } from '@shap/shared';
+import { ACCOUNT_TYPE_LABELS, formatZar, STATEMENT_LINES } from '@shap/shared';
 import { api, ApiError, apiUrl } from '../lib/api';
 import { Field, Loading } from './ui';
 
@@ -51,6 +51,9 @@ const RECORDS: Record<string, string> = {
   books: 'Books',
   audit_log: 'Audit log',
   attachment: 'Attachment',
+  account: 'Account',
+  payment_source: 'Payment account',
+  cost_category: 'Cost type',
 };
 const ACTIONS: Record<string, string> = {
   create: 'added',
@@ -79,6 +82,8 @@ const ACTIONS: Record<string, string> = {
   remove_year_end: 'year end removed',
   wipe_all_data: 'everything wiped',
   restore_company_file: 'company file loaded',
+  account_line_changed: 'line or type changed',
+  moved_to_account: 'moved onto another account',
 };
 export const recordName = (e: string) => RECORDS[e] ?? e.replace(/_/g, ' ');
 const actionName = (a: string) => ACTIONS[a] ?? a.replace(/_/g, ' ');
@@ -105,6 +110,14 @@ const ALONE: Record<string, string> = {
 };
 const describe = (entity: string, action: string) => ALONE[action] ?? `${recordName(entity)} ${actionName(action)}`;
 
+/** An account in a row: its code and name and its statement line (moved), or its type and line (changed). */
+function accountWords(x: unknown): string {
+  const o = (x ?? {}) as { code?: string | null; name?: string | null; type?: string | null; line?: string | null };
+  const line = o.line ? ((STATEMENT_LINES as Record<string, { label: string } | undefined>)[o.line]?.label ?? o.line) : 'no line';
+  if (o.name) return `${o.code ? `${o.code} ` : ''}${o.name} (${line})`;
+  return `${o.type ? `${(ACCOUNT_TYPE_LABELS as Record<string, string | undefined>)[o.type] ?? o.type}, ` : ''}${line}`;
+}
+
 /** The few details worth reading in a row; the rest are in the export. */
 function detailText(d: Record<string, unknown>): string {
   const bits: string[] = [];
@@ -115,6 +128,8 @@ function detailText(d: Record<string, unknown>): string {
   if (typeof d.version === 'string') bits.push(`version ${d.version}`);
   if (typeof d.name === 'string') bits.push(d.name);
   if (typeof d.reason === 'string' && d.reason) bits.push(d.reason);
+  if (d.from && typeof d.from === 'object' && d.to && typeof d.to === 'object') bits.push(`from ${accountWords(d.from)} to ${accountWords(d.to)}`);
+  if (typeof d.by === 'string') bits.push(`by ${d.by}`);
   if (!bits.length) {
     const keys = Object.keys(d).filter((k) => !['ip', 'url'].includes(k));
     if (keys.length) bits.push(keys.slice(0, 4).map((k) => `${k}: ${typeof d[k] === 'object' ? '…' : String(d[k])}`).join(', '));

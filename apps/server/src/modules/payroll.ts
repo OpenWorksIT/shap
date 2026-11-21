@@ -271,7 +271,7 @@ export async function emp501(db: Db, taxYear: number, kind: 'interim' | 'annual'
 
 /**
  * A pay date from the month before the run's month to six months after it: one further off is
- * likely a slip of the year (it would be taxed on the wrong year's tables and go on the wrong
+ * likely a slip of the year (it could be taxed on the wrong year's tables or go on the wrong
  * EMP201), so it's refused. Pay that really was that late is the accountant's to record.
  */
 export function payDateFits(period: string, payDate: string): void {

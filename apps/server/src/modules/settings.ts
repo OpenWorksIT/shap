@@ -6,7 +6,7 @@ import type { Ctx } from '../context.js';
 import { pgCode, PG, type Db } from '../db/index.js';
 import { dbScope } from '../db/routing.js';
 import { audit } from '../lib/audit.js';
-import { applyBusinessType, getSettings, lockAfterSettings, lockSettingsNow, today } from '../lib/books.js';
+import { applyBusinessType, getSettings, lockAfterSettings, lockSettingsNow, moveToAccount, today } from '../lib/books.js';
 import { checkInUsage } from './feedback.js';
 import { linkedLevels, takeOutOfLinked } from './practice.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
@@ -341,16 +341,19 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (existing.type !== input.type && (await postedInClosedYear(sql, () => sql`select 1 from ledger l where l.account_id = ${id} and l.date <= (select lock_date from settings where id) limit 1`)))
       throw badRequest('This account has postings in a closed year, so its type can’t change. Make a new account for what’s coming instead.');
     try {
-      // The line stays as it was unless one is given (or the type changed to one it doesn't fit).
-      const [row] = input.statementLine
-        ? await sql`update accounts set code = ${input.code}, name = ${input.name}, type = ${input.type}, statement_line = ${input.statementLine}, active = ${input.active} where id = ${id} returning *`
-        : await sql`update accounts set code = ${input.code}, name = ${input.name}, type = ${input.type}, active = ${input.active} where id = ${id} returning *`;
-      // A change of line or type moves what's in it, last year's figures too: in the audit log, as
-      // the accountant may need to say so in the statements (IFRS for SMEs 3.12).
-      const now = row as { type: string; statementLine: string | null };
-      if (now.type !== existing.type || now.statementLine !== existing.statementLine)
-        await audit(sql, { userId: userOrThrow(req).id, action: 'account_line_changed', entity: 'account', entityId: id, ip: req.ip, details: { name: existing.name, from: { type: existing.type, line: existing.statementLine }, to: { type: now.type, line: now.statementLine } } });
-      return row;
+      return await sql.begin(async (tx) => {
+        // The line stays as it was unless one is given (or the type changed to one it doesn't fit).
+        const [row] = input.statementLine
+          ? await tx`update accounts set code = ${input.code}, name = ${input.name}, type = ${input.type}, statement_line = ${input.statementLine}, active = ${input.active} where id = ${id} returning *`
+          : await tx`update accounts set code = ${input.code}, name = ${input.name}, type = ${input.type}, active = ${input.active} where id = ${id} returning *`;
+        // A change of line or type moves what's in it, last year's figures too: in the audit log
+        // with it (the same transaction), as the accountant may need to say so in the statements
+        // (IFRS for SMEs 3.12).
+        const now = row as { type: string; statementLine: string | null };
+        if (now.type !== existing.type || now.statementLine !== existing.statementLine)
+          await audit(tx, { userId: userOrThrow(req).id, action: 'account_line_changed', entity: 'account', entityId: id, ip: req.ip, details: { name: existing.name, from: { type: existing.type, line: existing.statementLine }, to: { type: now.type, line: now.statementLine } } });
+        return row;
+      });
     } catch (err) {
       if (pgCode(err) === PG.uniqueViolation) throw conflict('An account with that code already exists');
       throw err;
@@ -372,33 +375,18 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
     app.put(`/api/${path}/:id`, { preHandler: requireRole('owner') }, async (req) => {
       const { id } = parse(idParam, req.params);
       const input = parse(schema, req.body) as Record<string, unknown>;
-      // Moving a cost type or a payment account to another account in the books moves everything
-      // already captured with it: not what's in a closed year.
-      if (input.accountId) {
-        const [old] = await sql<{ accountId: string }[]>`select account_id from ${sql(table)} where id = ${id}`;
-        const used = () =>
-          table === 'cost_categories'
-            ? sql`select 1 from costs where category_id = ${id} and date <= (select lock_date from settings where id) limit 1`
-            : sql`select 1 from ledger l where l.account_id = ${old?.accountId ?? null} and l.date <= (select lock_date from settings where id) limit 1`;
-        if (old && old.accountId !== input.accountId && (await postedInClosedYear(sql, used)))
-          throw badRequest('What’s already captured with this goes to its account in a closed year, so the account can’t change. Make a new one for what’s coming instead.');
-      }
       try {
         return await sql.begin(async (tx) => {
-          const [was] = input.accountId ? await tx<{ accountId: string }[]>`select account_id from ${tx(table)} where id = ${id} for update` : [];
-          const moving = was && was.accountId !== input.accountId ? [was.accountId, input.accountId as string] : null;
-          // A payment account's history goes with it to its new account: not on or off the
-          // statements' cash line by the way (that's a judgement, made on the account's line).
-          const onCash = async (ids: string[]) =>
-            Number((await tx<{ n: string }[]>`select count(*)::bigint as n from ledger l join accounts a on a.id = l.account_id where l.account_id in ${tx(ids)} and a.statement_line in ('cash', 'bank_overdraft')`)[0]!.n);
-          const before = moving && table === 'payment_sources' ? await onCash(moving) : 0;
-          const [row] = await tx`update ${tx(table)} set ${tx(input)} where id = ${id} returning *`;
-          if (!row) throw notFound();
-          if (moving && table === 'payment_sources' && (await onCash(moving)) !== before)
-            throw badRequest('What’s already captured with this would move on or off the statements’ cash line with it, last year’s figures too. Put the new account on the same line first (Settings → Lists → Chart of accounts), after checking with your accountant, or make a new one for what’s coming.');
-          if (moving)
-            await audit(tx, { userId: userOrThrow(req).id, action: 'moved_to_account', entity: table === 'payment_sources' ? 'payment_source' : 'cost_category', entityId: id, ip: req.ip, details: { name: (row as { name: string }).name, from: moving[0], to: moving[1] } });
-          return row;
+          const change = async () => {
+            const [row] = await tx`update ${tx(table)} set ${tx(input)} where id = ${id} returning *`;
+            if (!row) throw notFound();
+            return row;
+          };
+          // Moving a cost type or a payment account to another account in the books moves
+          // everything already captured with it: checked, and logged (lib/books.ts moveToAccount).
+          if (input.accountId && (table === 'payment_sources' || table === 'cost_categories'))
+            return moveToAccount(tx, { table, id, to: input.accountId as string, userId: userOrThrow(req).id, ip: req.ip }, change);
+          return change();
         });
       } catch (err) {
         if (pgCode(err) === PG.uniqueViolation) throw conflict('That name is already used');

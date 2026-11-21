@@ -95,10 +95,13 @@ describe('VAT: a payment with SARS’s interest beside it', () => {
     // Not in the boxes: R1 500 on the invoice only.
     expect(v.fields.field20).toBe(150_000);
     const items = await expectCleanAudit(b.env.sql);
-    expect(items.some((i) => i.level === 'warn' && /^journals by hand moved the VAT account in \S+ to \S+ \(R\s?150\.00 added to the VAT owed, R\s?40\.00 taken off it\), besides what Shap can tell is a payment to or refund from SARS \(VAT against money: one paid with other tax may still be among them\): Shap's VAT201 is worked out from invoices, costs and assets, so it leaves them out/.test(i.text))).toBe(true);
+    expect(items.some((i) => i.level === 'warn' && /^journals by hand moved the VAT account in \S+ to \S+ \(R\s?150\.00 added to the VAT owed, R\s?40\.00 taken off it\), apart from what Shap can tell is a payment to or refund from SARS \(VAT against money or SARS’s other taxes; import VAT journalled against the bank looks the same, so it’s left out too\): Shap’s VAT201 is worked out from invoices, costs and assets, so it leaves them out/.test(i.text))).toBe(true);
     const screen = readFileSync(join(__dirname, '..', '..', '..', 'web', 'src', 'components', 'TaxForms.tsx'), 'utf8');
-    expect(screen).toMatch(/Journals typed in added <Money cents=\{data\.handVatAddedCents \?\? 0\} \/> to the VAT owed and took <Money cents=\{data\.handVatOffCents \?\? 0\} \/> off it in this period/);
-    expect(screen).toMatch(/one paid together with other tax may still be counted here/);
+    expect(screen).toMatch(/added <Money cents=\{data\.handVatAddedCents!\} \/> to the VAT owed/);
+    expect(screen).toMatch(/and took <Money cents=\{data\.handVatOffCents!\} \/> off it/);
+    expect(screen).toMatch(/took <Money cents=\{data\.handVatOffCents!\} \/> off the VAT owed/);
+    expect(screen).toMatch(/\(VAT against the bank, cash, a card, your own money or SARS’s other taxes, such as PAYE\), and import VAT journalled against the bank looks the same, so it isn’t counted here either\./);
+    expect(screen).not.toMatch(/one paid together with other tax may still be counted/);
   });
 });
 
@@ -241,6 +244,7 @@ describe('owed beyond Shap’s records, nothing counted twice (accounting, fifth
       const f = await cashForecast(b.env.sql, now);
       expect(f.items.filter((x) => x.kind === 'dividends')).toEqual([]);
       expect(out(f.items.filter((x) => x.kind === 'booked'))).toBe(1_000_000);
+      await expectCleanAudit(b.env.sql);
     } finally {
       await b.env.close();
     }
@@ -255,6 +259,7 @@ describe('owed beyond Shap’s records, nothing counted twice (accounting, fifth
       const f = await cashForecast(b.env.sql, now);
       expect(f.items.filter((x) => x.kind === 'wages_owed')).toEqual([]);
       expect(out(f.items.filter((x) => x.kind === 'booked'))).toBe(45_000);
+      await expectCleanAudit(b.env.sql);
     } finally {
       await b.env.close();
     }
@@ -269,6 +274,7 @@ describe('owed beyond Shap’s records, nothing counted twice (accounting, fifth
       const f = await cashForecast(b.env.sql, now);
       expect(f.items.filter((x) => x.kind === 'wages_owed')).toEqual([]);
       expect((await b.owner.get('/api/dashboard')).owedToWorkersCents).toBe(0);
+      await expectCleanAudit(b.env.sql);
     } finally {
       await b.env.close();
     }

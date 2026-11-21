@@ -23,6 +23,8 @@ export const POCKET_SHARE_FORMAT = 'shap-pocket-share/1' as const;
 export const MAX_SHARE_NUMBER = 1_000_000;
 /** Rows a share may carry, all tables together (a one-person business's books are far fewer). */
 export const MAX_SHARE_ROWS = 400_000;
+/** The most lines a journal takes (journalInput), in a share too. */
+export const MAX_JOURNAL_LINES = 1000;
 
 /**
  * The tables a share carries, in the order they're put back (each after those it refers to).
@@ -220,7 +222,7 @@ export const MAX_SHARE_FIGURE = 1e13;
  * What's wrong with a share, past its schema, if anything: the limits Shap holds a file to when it
  * reads one, and Pocket checks before it offers one (so a file Shap would refuse is never offered).
  */
-export function shareProblem(s: PocketShare): { kind: 'column' | 'too_big' | 'rows' | 'settings' | 'twice'; table?: string } | null {
+export function shareProblem(s: PocketShare): { kind: 'column' | 'too_big' | 'rows' | 'settings' | 'twice' | 'long_journal'; table?: string } | null {
   let rows = 0;
   for (const [table, list] of Object.entries(s.records)) {
     if (!list) continue;
@@ -237,6 +239,14 @@ export function shareProblem(s: PocketShare): { kind: 'column' | 'too_big' | 'ro
   for (const e of s.entries) {
     if (keys.has(e.key)) return { kind: 'twice' };
     keys.add(e.key);
+  }
+  // A journal takes up to 1 000 lines (journalInput): one from before the cap, or a file made so,
+  // would cost the receiving Shap the square of its length to check, line by line.
+  const perJournal = new Map<unknown, number>();
+  for (const l of s.records.journal_lines ?? []) {
+    const n = (perJournal.get(l.journal_id) ?? 0) + 1;
+    if (n > MAX_JOURNAL_LINES) return { kind: 'long_journal', table: 'journal_lines' };
+    perJournal.set(l.journal_id, n);
   }
   return null;
 }

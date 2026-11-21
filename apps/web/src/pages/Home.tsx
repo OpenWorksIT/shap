@@ -471,7 +471,7 @@ function OwnerHome() {
           )}
         </div>
       )}
-      {data.cash && offCashNote(data.cash.offCash, whole) && <p className="xs warn-text">{offCashNote(data.cash.offCash, whole)}</p>}
+      {data.cash && offCashNote(data.cash.offCash, whole) && <p className="xs warn-text">{offCashNote(data.cash.offCash, whole, { owner: user.role === 'owner' })}</p>}
       {data.cash && <p className="xs muted">{MONEY_NOTE}</p>}
 
       {!testServer?.on && <MarketNote />}
