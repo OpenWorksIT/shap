@@ -33,7 +33,8 @@ entries newer than the version you're running before you update.
   balance lines are; the preview says how many lines were left out, and what they can be). *Always this* on a line
   saves a rule: lines that say what you choose get the same cost type or income account, and
   supplier, every time they come in (500 rules at most). Bank → Rules lists them, and says why one
-  isn't applied (its cost type switched off or now stock, or its account no longer income). Nothing posts
+  isn't applied (its cost type or account switched off, its cost type now stock, or its account no
+  longer income). Nothing posts
   until you tick it, as before. Amounts written -.50 or 1.234,56 are read right (before, -.50 was
   left out and 1.234,56 read as R1.23: if your bank writes amounts this way, check statements you
   brought in before), and a very long description no longer stops an import.
@@ -46,17 +47,18 @@ entries newer than the version you're running before you update.
   (with bills on), and the gross margin month by month, as the income statement's gross profit.
   Home's first figure is now revenue (it was all income, interest included), gross profit is
   revenue less cost of sales, net profit says the running costs, finance costs, income tax and
-  other income between them (and says it's before income tax when none is captured), and the year
+  other income between them (and, when none is captured, says it's before a company's income tax,
+  or that an owner's or partners' own tax isn't in the books), and the year
   to date runs to today. What's in a bank or cash account you pay from that isn't on the
   statements' cash line is said under the money in the bank (and on the forecast), not counted:
-  Shap doesn't move its line, and the books audit points it out, with the test, for you and your
-  accountant to judge.
+  Shap doesn't move its line, and the books audit points it out, with what usually decides it (for
+  a deposit, and for an overdraft), for you and your accountant to judge.
 - **VAT201.** When journals typed in (a cash sale journalled, a correction) moved the VAT account in
   a period, other than as payments to SARS, the VAT201 screen says by how much, and so does the books
   audit: the boxes are worked out from invoices, costs and assets, so they leave those out, and
   where they go on the return is yours or your accountant's to decide.
 - **Payroll.** A pay date before the month before its run's month, or more than six months after
-  it, is refused as a likely slip of the year or month (it would be taxed on the wrong tables). A
+  it, is refused as a likely slip of the year or month (it could be taxed on the wrong year's tables or go on the wrong EMP201). A
   run paid more than a month after its month says that which EMP201 it goes on is your
   accountant's to check.
 - **CIPC and the Compensation Fund.** The date of incorporation (Settings → Company, and in the

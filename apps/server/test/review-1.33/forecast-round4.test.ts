@@ -77,18 +77,27 @@ describe('VAT: a payment with SARS’s interest beside it', () => {
   });
 
   it('the VAT201 and the books audit say when a journal typed in moved VAT otherwise (a cash sale)', async () => {
-    const vat = () => b.owner.get<{ handVatCents: number; handVatLines: number; fields: { field20: number } }>(`/api/vat/return?on=${b.current.start}`);
-    // The payment with interest is a payment: nothing to say.
-    expect(await vat()).toMatchObject({ handVatCents: 0, handVatLines: 0 });
+    const vat = () => b.owner.get<{ handVatAddedCents: number; handVatOffCents: number; handVatLines: number; fields: { field20: number } }>(`/api/vat/return?on=${b.current.start}`);
+    // The payment with interest is a payment: nothing to say. So is one paid by card (fifth round).
+    expect(await vat()).toMatchObject({ handVatAddedCents: 0, handVatOffCents: 0, handVatLines: 0 });
+    const [cardAcc] = await b.env.sql<{ id: string }[]>`insert into accounts (code, name, type) values ('2311', 'Made-up business card', 'liability') returning id`;
+    await b.owner.post('/api/sources', { name: 'Made-up card', kind: 'card', accountId: cardAcc!.id });
+    await b.owner.post('/api/journals', { date: b.current.start, description: 'Made-up VAT paid by card', lines: [{ accountId: await b.r.acc('vat'), debitCents: 50_000 }, { accountId: cardAcc!.id, creditCents: 50_000 }] });
+    expect(await vat()).toMatchObject({ handVatLines: 0 });
+    // And the forecast takes it as a payment (R1 500 less R500 for this period), not input VAT.
+    expect(vatOf(await cashForecast(b.env.sql, now))).toEqual([{ date: vat201Due(b.current.end), cents: -100_000 }]);
     await b.owner.post('/api/journals', { date: b.current.start, description: 'Made-up cash sale', lines: [{ accountId: await b.r.acc('bank'), debitCents: 115_000 }, { accountId: await b.r.acc('revenue_other'), creditCents: 100_000 }, { accountId: await b.r.acc('vat'), creditCents: 15_000 }] });
+    // A correction taking R40 off the VAT owed, against an expense: said apart from what's added.
+    await b.owner.post('/api/journals', { date: b.current.start, description: 'Made-up VAT correction', lines: [{ accountId: await b.r.acc('vat'), debitCents: 4_000 }, { accountId: await b.r.acc('sundry'), creditCents: 4_000 }] });
     const v = await vat();
-    expect(v).toMatchObject({ handVatCents: 15_000, handVatLines: 1 });
+    expect(v).toMatchObject({ handVatAddedCents: 15_000, handVatOffCents: 4_000, handVatLines: 2 });
     // Not in the boxes: R1 500 on the invoice only.
     expect(v.fields.field20).toBe(150_000);
     const items = await expectCleanAudit(b.env.sql);
-    expect(items.some((i) => i.level === 'warn' && /^journals typed in moved the VAT account in .*, other than as payments to SARS: Shap's VAT201 is worked out from invoices, costs and assets, so it leaves them out/.test(i.text))).toBe(true);
+    expect(items.some((i) => i.level === 'warn' && /^journals by hand moved the VAT account in \S+ to \S+ \(R\s?150\.00 added to the VAT owed, R\s?40\.00 taken off it\), besides what Shap can tell is a payment to or refund from SARS \(VAT against money: one paid with other tax may still be among them\): Shap's VAT201 is worked out from invoices, costs and assets, so it leaves them out/.test(i.text))).toBe(true);
     const screen = readFileSync(join(__dirname, '..', '..', '..', 'web', 'src', 'components', 'TaxForms.tsx'), 'utf8');
-    expect(screen).toMatch(/Journals typed in moved the VAT account by <Money cents=\{data\.handVatCents \?\? 0\} \/> in this period/);
+    expect(screen).toMatch(/Journals typed in added <Money cents=\{data\.handVatAddedCents \?\? 0\} \/> to the VAT owed and took <Money cents=\{data\.handVatOffCents \?\? 0\} \/> off it in this period/);
+    expect(screen).toMatch(/one paid together with other tax may still be counted here/);
   });
 });
 
@@ -184,6 +193,8 @@ describe('wages and dividends owed in the books beyond Shap’s own records', ()
     expect(out(f.items.filter((x) => x.kind === 'dividends'))).toBe(5_000_000 + 100_000);
     expect(f.items.filter((x) => x.kind === 'wages_owed' || x.kind === 'dividends').every((x) => x.date === now)).toBe(true);
     expect(f.items.find((x) => x.label.startsWith('Other dividends owed in the books'))!.cents).toBe(-5_000_000);
+    // Named for the account, as a move-in may put PAYE or UIF owed on it (words review, fifth round).
+    expect(f.items.find((x) => x.label.startsWith('Other amounts owed on the wages account'))).toMatchObject({ cents: -30_000, label: 'Other amounts owed on the wages account (from a journal or balances brought in, which may include PAYE or UIF), as if paid now' });
   });
 });
 

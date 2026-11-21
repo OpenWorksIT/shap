@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { addDays, financialYear, formatZar, offCashNote } from '@shap/shared';
+import { addDays, financialYear, formatZar, noIncomeTaxWords, offCashNote } from '@shap/shared';
 import { today } from '../../src/lib/books.js';
 import { buildStatements } from '../../src/statements/build.js';
 import { expectCleanAudit, login, ref, setup, type TestEnv } from '../helpers.js';
@@ -87,7 +87,14 @@ describe('Home’s words (words review of 1.33)', () => {
     // Fourth round (IFRS): the income tax is as captured, and a profit with none captured says it's before tax.
     expect(home).toMatch(/income tax as captured in the books`/);
     expect(home).not.toMatch(/income tax as booked/);
-    expect(home).toMatch(/'; before income tax \(none captured yet\)'/);
+    expect(home).toMatch(/\(data\.yearToDate\.incomeTaxCents \? '' : noIncomeTaxWords\(settings\)\)/);
+    // By who pays it (words review, fifth round): no "yet" for a sole proprietor or partners.
+    expect(noIncomeTaxWords({ businessType: 'company' })).toBe('; before income tax (none captured in the books: your accountant works it out)');
+    expect(noIncomeTaxWords({ businessType: 'sole_prop' })).toBe('; the owner’s own income tax isn’t in the business’s books');
+    expect(noIncomeTaxWords({ businessType: 'partnership' })).toBe('; the partners’ own income tax isn’t in the business’s books');
+    expect(noIncomeTaxWords({ businessType: 'company', turnoverTax: true })).toBe('');
+    expect(noIncomeTaxWords({ businessType: 'npc', approvedPbo: true })).toBe('');
+    for (const t of ['company', 'sole_prop', 'partnership', 'cc', 'trust', 'npc', 'coop', 'inc']) expect(noIncomeTaxWords({ businessType: t })).not.toMatch(/yet/);
     const chart = readFileSync(join(WEB, 'components', 'MarginChart.tsx'), 'utf8');
     expect(chart).toMatch(/const average = known\.length && revenue > 0 \?/);
   });
@@ -155,7 +162,7 @@ describe('Home’s tiles, and a second bank account', () => {
     expect(f.openingCents).toBe(d.cash.inBankCents);
     expect(f.offCash).toEqual(d.cash.offCash);
     const note = offCashNote(d.cash.offCash, (c) => formatZar(c, { cents: false }))!;
-    expect(note).toMatch(/^Not counted here: R\s?4 000 in Made-up Savings, as the statements don’t count that account as cash \(its line in the chart of accounts\)\. Whether it is cash is for you and your accountant to judge: the books audit says more\.$/);
+    expect(note).toMatch(/^Not counted here: R\s?4 000 in Made-up Savings, as the statements don’t count that account as cash \(by its line in the chart of accounts\)\. Whether it is cash is for you and your accountant to judge: the books audit \(Settings → Updates & backups\) says more\.$/);
     const home = readFileSync(join(WEB, 'pages', 'Home.tsx'), 'utf8');
     expect(home).toMatch(/\{data\.cash && offCashNote\(data\.cash\.offCash, whole\) && <p className="xs warn-text">\{offCashNote\(data\.cash\.offCash, whole\)\}<\/p>\}/);
     const forecast = readFileSync(join(WEB, 'pages', 'Forecast.tsx'), 'utf8');
@@ -181,8 +188,10 @@ describe('Home’s tiles, and a second bank account', () => {
     expect(await lineOf('2320')).toBe('trade_payables');
     const items = await expectCleanAudit(env.sql);
     const warned = items.filter((i) => i.level === 'warn').map((i) => i.text);
-    expect(warned.some((t) => /Made-up Deposit Two, Made-up Savings are bank or cash accounts you pay from, but not on the statements' cash line\. Whether it's cash is a judgement \(money that can be drawn at short notice is; a deposit fixed for more than about three months usually isn't\)/.test(t))).toBe(true);
-    expect(warned.some((t) => /Made-up Facility is a liability you pay from as a bank account, but not on the statements' cash or bank overdraft line\. A bank overdraft counts as cash only when it's repayable on demand and part of day-to-day cash management/.test(t))).toBe(true);
+    // Several named: each, them, their lines (words review, fifth round).
+    expect(warned.some((t) => /^Made-up Deposit Two, Made-up Savings are bank or cash accounts you pay \(or paid\) from, but not on the statements' cash line\. Whether each is cash is a judgement \(money that can be drawn at short notice usually is; a deposit fixed for more than about three months usually isn't\): Home, the forecast and the cash flow statement leave them out of cash\. Check each with your accountant before changing their lines/.test(t))).toBe(true);
+    // One named: it, its line.
+    expect(warned.some((t) => /^Made-up Facility is a liability you pay \(or paid\) from as a bank or cash account, but not on the statements' cash or bank overdraft line\. A bank overdraft counts as cash only when it's repayable on demand and part of day-to-day cash management \(otherwise it's borrowing, as a loan is\): Home, the forecast and the cash flow statement leave it out of cash\. Check it with your accountant before changing its line/.test(t))).toBe(true);
     await env.sql`delete from payment_sources where account_id in (${dep.id}, ${other.id}, ${od.id})`;
   });
 
@@ -190,7 +199,7 @@ describe('Home’s tiles, and a second bank account', () => {
     const [acc] = await env.sql<{ id: string }[]>`insert into accounts (code, name, type, statement_line) values ('1080', 'Made-up Old Savings', 'asset', 'other_current_assets') returning id`;
     await env.sql`insert into payment_sources (name, kind, account_id, sort) values ('Made-up old savings', 'bank', ${acc!.id}, 99)`;
     const items = await expectCleanAudit(env.sql);
-    expect(items.some((i) => i.level === 'warn' && /Made-up Old Savings, Made-up Savings are bank or cash accounts you pay from, but not on the statements' cash line/.test(i.text) && /Check it with your accountant before changing its line/.test(i.text))).toBe(true);
+    expect(items.some((i) => i.level === 'warn' && /Made-up Old Savings, Made-up Savings are bank or cash accounts you pay \(or paid\) from, but not on the statements' cash line/.test(i.text) && /Check each with your accountant before changing their lines/.test(i.text))).toBe(true);
     await env.sql`delete from payment_sources where account_id = ${acc!.id}`;
   });
 
@@ -209,8 +218,14 @@ describe('Home’s tiles, and a second bank account', () => {
     // Emptied before last year began: nothing in either year's figures.
     const lastYearStart = financialYear(addDays(fy.start, -1), settings.fyEndMonth).start;
     await closed('1086', 'Made-up Long Gone', addDays(lastYearStart, -20), addDays(lastYearStart, -10));
+    // Switched off, nothing in it since before last year, but money still in it: Home counts it out, so the audit says so.
+    const [notice] = await env.sql<{ id: string }[]>`insert into accounts (code, name, type, statement_line) values ('1087', 'Made-up Notice Deposit', 'asset', 'other_current_assets') returning id`;
+    await env.sql`insert into payment_sources (name, kind, account_id, sort, active) values ('made-up notice deposit', 'bank', ${notice!.id}, 97, false)`;
+    await owner.post('/api/journals', { date: addDays(lastYearStart, -30), description: 'To notice deposit (made up)', lines: [{ accountId: notice!.id, debitCents: 800_000 }, { accountId: bankAccount, creditCents: 800_000 }] });
     const warned = (await expectCleanAudit(env.sql)).filter((i) => i.level === 'warn').map((i) => i.text).join(' ');
     expect(warned).toMatch(/Made-up Closed Savings/);
     expect(warned).not.toMatch(/Made-up Long Gone/);
+    expect(warned).toMatch(/Made-up Notice Deposit/);
+    expect((await owner.get('/api/dashboard')).cash.offCash).toEqual(expect.arrayContaining([{ name: 'Made-up Notice Deposit', cents: 800_000 }]));
   });
 });

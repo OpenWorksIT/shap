@@ -1402,7 +1402,7 @@ exploit. Still to fix, and fixed:
 - IFRS: the move of a new bank account onto the cash line (round 2) took a used source's history
   off cash when it was moved to a new account, overrode a line chosen on purpose, and put a
   liability on the overdraft line, which is cash only when repayable on demand and part of
-  day-to-day cash management (7.2). Shap and Pocket no longer move a line: Home and the forecast
+  day-to-day cash management (7.2). Shap and Pocket no longer move a line: Shap's Home and forecast
   say how much is in such an account and that it isn't counted (`offCashNote`), and the books
   audit names it with the test for an asset and for an overdraft, an inactive one too while it has
   entries since the comparative year began (one emptied this year still shapes last year's cash).

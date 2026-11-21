@@ -11,7 +11,7 @@
  * IFRS for SMEs Accounting Standard: https://www.ifrs.org/issued-standards/ifrs-for-smes/
  */
 import type { AccountType } from './enums.js';
-import type { BusinessType } from './entities.js';
+import { entity, type BusinessType } from './entities.js';
 
 export type StatementSection =
   | 'non_current_assets'
@@ -226,5 +226,21 @@ export function offCashNote(off: readonly { name: string; cents: number }[] | un
   const parts = off.map((o) => (o.cents < 0 ? `${formatWhole(-o.cents)} owed on ${o.name}` : `${formatWhole(o.cents)} in ${o.name}`));
   const listed = parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
   const one = off.length === 1;
-  return `Not counted here: ${listed}, as the statements don’t count ${one ? 'that account' : 'those accounts'} as cash (${one ? 'its line' : 'their lines'} in the chart of accounts). Whether ${one ? 'it is' : 'they are'} cash is for you and your accountant to judge: the books audit says more.`;
+  return `Not counted here: ${listed}, as the statements don’t count ${one ? 'that account' : 'those accounts'} as cash (by ${one ? 'its line' : 'their lines'} in the chart of accounts). Whether ${one ? 'it is' : 'each is'} cash is for you and your accountant to judge: the books audit (Settings → Updates & backups) says more.`;
+}
+
+/**
+ * Said after Home's net profit when no income tax is captured in the year: by who pays it. A
+ * company, CC, NPC or trust pays its own (Shap's statements estimate it apart; the books have none
+ * until it's captured); a sole proprietor's or partners' tax is their own, never the business's,
+ * so it isn't "not yet" captured; turnover tax, and an approved PBO's exemption, aren't income tax
+ * on this profit, so nothing is said.
+ */
+export function noIncomeTaxWords(s: { businessType: string; turnoverTax?: boolean; approvedPbo?: boolean }): string {
+  if (s.turnoverTax) return '';
+  const { taxedAs } = entity(s.businessType);
+  if (taxedAs === 'individual') return '; the owner’s own income tax isn’t in the business’s books';
+  if (taxedAs === 'partners') return '; the partners’ own income tax isn’t in the business’s books';
+  if (s.businessType === 'npc' && s.approvedPbo) return '';
+  return '; before income tax (none captured in the books: your accountant works it out)';
 }

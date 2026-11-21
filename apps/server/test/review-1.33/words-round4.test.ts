@@ -88,8 +88,11 @@ describe('a run paid late (SARS, fourth round)', () => {
     const { latePayNote } = await import('@shap/shared');
     expect(latePayNote('2026-10', '2026-10-25')).toBeNull();
     expect(latePayNote('2026-10', '2026-11-30')).toBeNull();
-    expect(latePayNote('2026-10', '2026-12-01')).toBe('Paid more than a month after October 2026. Employees’ tax arises when the business pays or becomes liable to pay, so which EMP201 this goes on is for your accountant to check: Shap puts it on the EMP201 for the month it’s paid.');
+    expect(latePayNote('2026-10', '2026-12-01')).toBe('The pay date is more than a month after October 2026. Employees’ tax arises when the business pays the salary, or becomes liable to pay it, so which EMP201 this goes on is for your accountant to check: Shap puts it on the EMP201 for the month it’s paid.');
     expect(latePayNote('2027-01', '2027-04-25')).toMatch(/so which EMP201 this goes on, and which tax year’s tables, is for your accountant to check/);
+    // A February run paid in March: the next tax year, though within the month (fifth round).
+    expect(latePayNote('2027-02', '2027-03-05')).toBe('The pay date is in the tax year after February 2027’s (from 1 March). Employees’ tax arises when the business pays the salary, or becomes liable to pay it, so which EMP201 this goes on, and which tax year’s tables, is for your accountant to check: Shap puts it on the EMP201 for the month it’s paid.');
+    expect(latePayNote('2027-02', '2027-02-25')).toBeNull();
     expect(read('apps/web/src/pages/Payroll.tsx')).toMatch(/<Field label="Pay date" hint=\{latePayNote\(run\.period, run\.payDate\) \?\? undefined\}>/);
   });
 });

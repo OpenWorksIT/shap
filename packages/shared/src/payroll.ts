@@ -128,16 +128,18 @@ export function microDividendTax(grossCents: number, paidEarlierThisYearCents: n
 }
 
 /**
- * A run paid more than a month after its month (pay owed, paid late): employees' tax arises when
- * the employer pays or becomes liable to pay (Fourth Schedule, paragraph 2), so which EMP201 it
+ * A run paid more than a month after its month (pay owed, paid late), or in the next tax year (a
+ * February run paid in March): employees' tax arises when the employer pays or becomes liable to pay (Fourth Schedule, paragraph 2), so which EMP201 it
  * belongs on, and across 1 March which year's tables, is the accountant's to check. Shap puts it
- * on the month it's paid. Null for a run paid in or just after its month.
+ * on the month it's paid. Null for a run paid in or just after its month, in the same tax year.
  */
 export function latePayNote(period: string, payDate: string): string | null {
-  if (payDate <= monthEnd(addMonths(`${period}-01`, 1))) return null;
-  const month = formatDate(`${period}-01`, 'long').replace(/^1 /, '');
   // The tax year a day is in: 1 March to the end of February.
   const taxYear = (iso: string) => Number(iso.slice(0, 4)) - (Number(iso.slice(5, 7)) < 3 ? 1 : 0);
-  const tables = taxYear(`${period}-01`) !== taxYear(payDate) ? ', and which tax year’s tables,' : '';
-  return `Paid more than a month after ${month}. Employees’ tax arises when the business pays or becomes liable to pay, so which EMP201 this goes on${tables} is for your accountant to check: Shap puts it on the EMP201 for the month it’s paid.`;
+  const crosses = taxYear(`${period}-01`) !== taxYear(payDate);
+  const late = payDate > monthEnd(addMonths(`${period}-01`, 1));
+  if (!late && !(crosses && payDate > monthEnd(`${period}-01`))) return null;
+  const month = formatDate(`${period}-01`, 'long').replace(/^1 /, '');
+  const when = late ? `The pay date is more than a month after ${month}.` : `The pay date is in the tax year after ${month}’s (from 1 March).`;
+  return `${when} Employees’ tax arises when the business pays the salary, or becomes liable to pay it, so which EMP201 this goes on${crosses ? ', and which tax year’s tables,' : ''} is for your accountant to check: Shap puts it on the EMP201 for the month it’s paid.`;
 }

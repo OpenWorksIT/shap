@@ -126,20 +126,28 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
     select distinct a.name, a.type from payment_sources ps join accounts a on a.id = ps.account_id
     where ps.kind in ('bank', 'cash') and a.system_key is distinct from 'owner_loan'
       and ((a.type = 'asset' and a.statement_line is distinct from 'cash') or (a.type = 'liability' and coalesce(a.statement_line, '') not in ('cash', 'bank_overdraft')))
-      and (ps.active or exists (select 1 from ledger_totals l where l.account_id = a.id and l.date >= ${comparativeStart}::date))
+      and (ps.active
+        or exists (select 1 from ledger_totals l where l.account_id = a.id and l.date >= ${comparativeStart}::date)
+        or exists (select 1 from ledger_totals l where l.account_id = a.id having sum(l.amount_cents) <> 0))
     order by 1`;
   const after = (many: boolean) =>
-    `: Home, the forecast and the cash flow statement leave ${many ? 'them' : 'it'} out of cash. Check it with your accountant before changing its line (Settings → Lists → Chart of accounts): moving it also moves last year's figures, which your accountant may need to explain in the statements`;
+    many
+      ? `: Home, the forecast and the cash flow statement leave them out of cash. Check each with your accountant before changing their lines (Settings → Lists → Chart of accounts): moving one also moves last year's figures, which your accountant may need to explain in the statements`
+      : `: Home, the forecast and the cash flow statement leave it out of cash. Check it with your accountant before changing its line (Settings → Lists → Chart of accounts): moving it also moves last year's figures, which your accountant may need to explain in the statements`;
   const assetsOff = offCash.filter((a) => a.type === 'asset').map((a) => a.name);
-  if (assetsOff.length)
+  if (assetsOff.length) {
+    const many = assetsOff.length > 1;
     warn(
-      `${few(assetsOff)} ${assetsOff.length === 1 ? 'is a bank or cash account' : 'are bank or cash accounts'} you pay from, but not on the statements' cash line. Whether it's cash is a judgement (money that can be drawn at short notice is; a deposit fixed for more than about three months usually isn't)${after(assetsOff.length > 1)}`,
+      `${few(assetsOff)} ${many ? 'are bank or cash accounts' : 'is a bank or cash account'} you pay (or paid) from, but not on the statements' cash line. Whether ${many ? 'each is' : "it's"} cash is a judgement (money that can be drawn at short notice usually is; a deposit fixed for more than about three months usually isn't)${after(many)}`,
     );
+  }
   const owingOff = offCash.filter((a) => a.type === 'liability').map((a) => a.name);
-  if (owingOff.length)
+  if (owingOff.length) {
+    const many = owingOff.length > 1;
     warn(
-      `${few(owingOff)} ${owingOff.length === 1 ? 'is a liability' : 'are liabilities'} you pay from as a bank account, but not on the statements' cash or bank overdraft line. A bank overdraft counts as cash only when it's repayable on demand and part of day-to-day cash management (otherwise it's borrowing, as a loan is)${after(owingOff.length > 1)}`,
+      `${few(owingOff)} ${many ? 'are liabilities' : 'is a liability'} you pay (or paid) from as a bank or cash account, but not on the statements' cash or bank overdraft line. A bank overdraft counts as cash only when it's repayable on demand and part of day-to-day cash management (otherwise it's borrowing, as a loan is)${after(many)}`,
     );
+  }
 
   // ---------------------------------------------------------------- control accounts
   section = 'Debtors, creditors, VAT and payroll';
@@ -184,7 +192,7 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
         continue;
       }
       const hand = await handVat(db, p.start, p.end);
-      if (hand.lines) typedIn.push(`${p.start} to ${p.end} (${rand(hand.cents)})`);
+      if (hand.lines) typedIn.push(`${p.start} to ${p.end} (${[hand.addedCents ? `${rand(hand.addedCents)} added to the VAT owed` : '', hand.offCents ? `${rand(hand.offCents)} taken off it` : ''].filter(Boolean).join(', ')})`);
       const f = await vat201(db, p.start, p.end);
       const [mv] = await db<{ t: number }[]>`
         select coalesce(sum(l.amount_cents), 0)::bigint as t from ledger_totals l join accounts a on a.id = l.account_id
@@ -199,7 +207,7 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
       ok(brought ? `the VAT account moved by what Shap’s VAT201 shows for the ${periods.size - brought} of the last year’s ${periods.size} periods it works out${notOurs}` : `the VAT account moved by what Shap’s VAT201 shows for each period of the last year (${periods.size} periods)`);
     else fail(`the VAT201 and the VAT account disagree for ${few(off, 3)}`);
     if (typedIn.length)
-      warn(`journals typed in moved the VAT account in ${few(typedIn, 3)}, other than as payments to SARS: Shap's VAT201 is worked out from invoices, costs and assets, so it leaves them out. Whether and where they go on the return is the business's or their accountant's to decide`);
+      warn(`journals by hand moved the VAT account in ${few(typedIn, 3)}, besides what Shap can tell is a payment to or refund from SARS (VAT against money: one paid with other tax may still be among them): Shap's VAT201 is worked out from invoices, costs and assets, so it leaves them out. Whether and where they go on the return is the business's or their accountant's to decide`);
   } else ok('not registered for VAT: no VAT201s to check');
 
   const sars = await db<{ owed: number }[]>`

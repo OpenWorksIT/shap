@@ -133,7 +133,7 @@ export async function cashForecast(db: Db, now = today()): Promise<Forecast> {
         coalesce(sum(l.amount_cents) filter (where l.date > ${now}::date and l.date <= ${end}::date and l.amount_cents > 0), 0)::bigint as paid_ahead
       from ledger l join accounts a on a.id = l.account_id
       where a.system_key = 'wages_payable' and l.source not in ('labour', 'wage_payment')`);
-    if (other > 0) add(now, 'Other wages owed in the books (a journal, or balances brought in), as if paid now', -other, 'wages_owed');
+    if (other > 0) add(now, 'Other amounts owed on the wages account (from a journal or balances brought in, which may include PAYE or UIF), as if paid now', -other, 'wages_owed');
   }
   const [dv] = await db<{ owed: number }[]>`
     select coalesce(sum(gross_cents), 0)::bigint as owed from dividends
@@ -226,9 +226,9 @@ export async function cashForecast(db: Db, now = today()): Promise<Forecast> {
   if (settings.vatRegistered || vatOwedNow !== 0) {
     const current = vatPeriod(now, settings.vatCategory, settings.fyEndMonth);
     const last = vatPeriod(addMonths(current.start, -1), settings.vatCategory, settings.fyEndMonth);
-    // Each entry's VAT, and whether it's a payment (VAT and money, with nothing else in it but an
-    // expense smaller than the VAT: SARS's interest or a penalty paid with it).
-    // One pass over the books from the last period's start to whichever is later, this period's
+    // Each entry's VAT, and whether it's a payment (VAT and money: the bank, cash, a card or any
+    // account paid from, or the owner's; with nothing else in it but an expense smaller than the
+    // VAT: SARS's interest or a penalty paid with it). One pass over the books from the last period's start to whichever is later, this period's
     // end or the forecast's: each VAT line, with what else its entry has on that day (one scan of
     // the ledger, however many lines: no look-up per line, nothing the planner can turn into one).
     const upTo = current.end > end ? current.end : end;
@@ -236,10 +236,12 @@ export async function cashForecast(db: Db, now = today()): Promise<Forecast> {
       select x.t, x.date::text, (x.money and not x.other and x.expense < abs(x.t)) as payment
       from (
         select l.source, l.source_id, l.date, l.amount_cents::bigint as t, a.system_key,
-          bool_or(a.statement_line in ('cash', 'bank_overdraft') or a.system_key = 'owner_loan') over w as money,
-          bool_or(a.type <> 'expense' and coalesce(a.system_key, '') not in ('vat', 'owner_loan') and coalesce(a.statement_line, '') not in ('cash', 'bank_overdraft')) over w as other,
-          coalesce(sum(abs(l.amount_cents)) filter (where a.type = 'expense' and coalesce(a.system_key, '') not in ('vat', 'owner_loan') and coalesce(a.statement_line, '') not in ('cash', 'bank_overdraft')) over w, 0) as expense
+          bool_or(m.is_money) over w as money,
+          bool_or(a.type <> 'expense' and coalesce(a.system_key, '') <> 'vat' and not m.is_money) over w as other,
+          coalesce(sum(abs(l.amount_cents)) filter (where a.type = 'expense' and not m.is_money) over w, 0) as expense
         from ledger l join accounts a on a.id = l.account_id
+        cross join lateral (select coalesce(a.statement_line, '') in ('cash', 'bank_overdraft') or a.system_key is not distinct from 'owner_loan'
+          or exists (select 1 from payment_sources ps where ps.account_id = a.id and ps.kind in ('bank', 'cash', 'card', 'owner')) as is_money) m
         where l.date between ${last.start}::date and ${upTo}::date and l.source_id is not null and l.source <> 'year_end'
         window w as (partition by l.source, l.source_id, l.date)
       ) x

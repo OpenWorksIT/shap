@@ -96,7 +96,8 @@ due. Each is an estimate, said so on screen with who OpenWorks IT are:
 - **VAT**: on the invoice basis (Shap's VAT201s are). A period's VAT is everything that moves the
   VAT account in it (invoices, costs and assets however they were paid, journals by hand with an
   income or cost line, a ledger brought in), except payments and refunds (an entry of VAT against
-  money: the bank, cash, an overdraft or the owner's loan, with at most an expense smaller than
+  money: the bank, cash, an overdraft, a card or any account paid from, or the owner's loan, with
+  at most an expense smaller than
   the VAT beside it, SARS's interest or a penalty) and balances brought in (opening balances, and a
   trial balance brought in: its VAT is the balance on its date, not that period's own). What's
   owed for periods that have ended (the VAT account today, less this period's VAT and payments
@@ -105,8 +106,8 @@ due. Each is an estimate, said so on screen with who OpenWorks IT are:
   since the period began (one made ahead for it); a refund SARS owes isn't netted off (SARS pays a
   refund after its checks, and sets refunds off against debts itself: [VAT refunds for
   vendors](https://www.sars.gov.za/types-of-tax/value-added-tax/vat-refunds-for-vendors/)), nor
-  forecast as money in. A VAT payment by card, or in one journal with PAYE, is taken as that
-  period's VAT: only its timing is off. Which period a
+  forecast as money in. A VAT payment in one journal with PAYE is taken as that period's VAT: only
+  its timing is off. Which period a
   payment was for is SARS's to say (by its reference, which Shap doesn't keep): the split is an
   estimate. This period's, documents dated ahead in it included, on its own `vat201Due`. Always
   eFiling's date (the last business day), never the 25th. A vendor on the payments basis would owe
@@ -117,10 +118,11 @@ due. Each is an estimate, said so on screen with who OpenWorks IT are:
   far into the month as the recent runs were (a December run paid on 2 January isn't January's), and
   its PAYE, UIF (both halves) and SDL on the EMP201 for the month paid, as SARS groups them. The
   employment tax incentive isn't taken off. A pay date before the month before its run's month, or
-  more than six months after it, is refused as a likely slip of the year (it would be taxed on the
-  wrong tables and go on the wrong EMP201); pay really that late is the accountant's to record. A
-  run paid more than a month after its month says, by its pay date, that which EMP201 it belongs on
-  (and across 1 March which year's tables) is the accountant's to check: employees' tax arises when
+  more than six months after it, is refused as a likely slip of the year or month (it could be
+  taxed on the wrong year's tables or go on the wrong EMP201); pay really that early or late is the
+  accountant's to record. A run paid more than a month after its month, or in the next tax year (a
+  February run paid in March), says, by its pay date, that which EMP201 it belongs on (and across
+  1 March which year's tables) is the accountant's to check: employees' tax arises when
   the employer pays or becomes liable to pay ([Fourth Schedule para
   2](https://www.acts.co.za/income-tax/sch4_2__employers_to_deduct_tax)), and Shap puts it on the
   month paid (`latePayNote`).
@@ -215,9 +217,10 @@ Checked 11 November 2026.
   balance can't (it has no day of its own).
 - VAT on journals typed in (a cash sale journalled, a correction): the VAT201's boxes are worked
   out from invoices, costs and assets, so they leave it out. From 1.33 the VAT201 screen says how
-  much such journals moved the VAT account in the period (payments to SARS, with or without its
-  interest beside them, aren't counted), and the books audit warns: where it goes on the return is
-  the business's or the accountant's (`lib/books.ts` `handVat`).
+  much such journals added to the VAT owed and took off it in the period (leaving out what Shap
+  can tell is a payment to or refund from SARS: VAT against money, with or without SARS's interest
+  beside it; one paid with other tax may still be counted), and the books audit warns: where it
+  goes on the return is the business's or the accountant's (`lib/books.ts` `handVat`).
 - A sole proprietor's estimate leaves out the medical credits and the interest exemption; payroll
   has the credits.
 - VAT category D ending in months other than February and August, and E at a month other than the

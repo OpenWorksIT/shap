@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { addDays, formatDate, formatPercent, formatZar, monthLabel, offCashNote, todayIso } from '@shap/shared';
+import { addDays, formatDate, formatPercent, formatZar, monthLabel, noIncomeTaxWords, offCashNote, todayIso } from '@shap/shared';
 import { MonthChart } from '../components/MonthChart';
 import { MarginChart } from '../components/MarginChart';
 import { PageHead } from '../components/Shell';
@@ -61,9 +61,10 @@ interface CaptureDashboard {
   recentLabour: { date: string; workerName: string; job: string; days: number }[];
 }
 
-/** Under Home's money figures and the margin chart: what they are. */
 /** Rands without cents, as the tiles show them. */
 const whole = (cents: number) => formatZar(cents, { cents: false });
+
+/** Under Home's money figures and the margin chart: what they are. */
 export const MONEY_NOTE = 'Worked out from what’s captured in the books: the bank and till as the statements count cash, and averages over the last 12 months. Rough guides to plan with, not advice.';
 
 /** Beside a CIPC or Compensation Fund reminder: where the date comes from, and that filing is theirs. */
@@ -435,7 +436,7 @@ function OwnerHome() {
             .filter(Boolean)
             .join(', ') +
             (data.yearToDate.otherIncomeCents ? `, with ${formatZar(data.yearToDate.otherIncomeCents, { cents: false })} other income` : '') +
-            (data.yearToDate.incomeTaxCents ? '' : '; before income tax (none captured yet)')}
+            (data.yearToDate.incomeTaxCents ? '' : noIncomeTaxWords(settings))}
           tone={data.yearToDate.profitCents < 0 ? 'bad' : undefined}
         />
         <Kpi label="Clients owe you" value={<Money cents={data.owing.totalCents} whole />} sub={data.owing.overdue ? `${data.owing.overdue} overdue` : 'nothing overdue'} tone={data.owing.overdue ? 'warn' : undefined} />
