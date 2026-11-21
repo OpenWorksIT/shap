@@ -165,9 +165,10 @@ export async function cashForecast(db: Db, now = today(), opts: { people?: boole
 
   // SARS: each EMP201 and DTR01 owed, on its due date (or this week, when it's past).
   const owed: { kind: 'emp201' | 'dwt'; period: string; owingCents: number; dueOn: string }[] = (await payrollAttention(db, now)).map((d) => ({ ...d, owingCents: Number(d.owingCents) }));
-  // One paid on Payroll → SARS on a day after these weeks is still owed within them.
+  // One paid on Payroll → SARS on a day after these weeks is still owed within them (EMP201s and
+  // DTR01s: provisional tax isn't in the forecast).
   for (const l of await db<{ kind: 'emp201' | 'dwt'; period: string; cents: number }[]>`
-    select kind, period, sum(amount_cents)::bigint as cents from sars_payments where date > ${end}::date group by 1, 2`) {
+    select kind, period, sum(amount_cents)::bigint as cents from sars_payments where kind in ('emp201', 'dwt') and date > ${end}::date group by 1, 2`) {
     const hit = owed.find((d) => d.kind === l.kind && d.period === l.period);
     if (hit) hit.owingCents += Number(l.cents);
     else owed.push({ kind: l.kind, period: l.period, owingCents: Number(l.cents), dueOn: l.kind === 'emp201' ? emp201Due(l.period) : dwtDue(`${l.period}-01`) });

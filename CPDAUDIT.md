@@ -1544,15 +1544,24 @@ The ninth round (`0ac7dd3`, must-fix only): IFRS found nothing to fix. Still to 
 - Noted, not changed: a kind change moving open work in progress into an expense isn't logged; a
   company file's change of year end is logged now, but an agreed year's figures stay as agreed.
 
+The tenth check (`2b7055e`, two reviewers over the five areas): security (the penetration test: 0
+to fix, 55 OK), IFRS and words ready. Fixed: the ninth round's add-back of payments dated after the
+13 weeks read provisional tax as dividends tax (SARS, accounting); two long tracker types sharing
+their first 80 characters broke the import (one cost type now, with a warning); a cost type's kind
+into or out of asset moved a closed period's VAT between boxes 14 and 15 (refused: older, in both
+apps). Noted, not changed: an older refund paid during the last period, netted into the balance
+before it, is taken against last period's refund (the forecast can understate VAT owed for ended
+periods then); a kind change on a big type takes a second or two.
+
 Tests: `review-1.33/*` (bank, link, home, forecast and its rounds, budgets, words, sars,
 words-round4, security-round5, round6, acc-round6, security-round6-lock and -share, round7-ifrs,
 acc-round7, sars-round7, sars-round7-movein, words-round7, security-round7-lock and -share,
 round8-ifrs, acc-round8, sars-round8, words-round8, security-round8-share and -company-file,
-sars-round9, sars-round9-pay, acc-round9, words-round9, security-round9), `forecast-budgets`, `dashboard-money`, `cipc-coida`,
+sars-round9, sars-round9-pay, acc-round9, words-round9, security-round9, round10, sars-round10), `forecast-budgets`, `dashboard-money`, `cipc-coida`,
 `bank-formats-rules`, and Pocket's `review-shap-1.33.test.ts`,
 `review-shap-1.33-security.test.ts`, `review-shap-1.33-round6.test.ts`,
-`review-shap-1.33-round7.test.ts`, and the `review-shap-1.33-round8-*` and `-round9-*` files, each
-failing without its fix.
+`review-shap-1.33-round7.test.ts`, and the `review-shap-1.33-round8-*`, `-round9-*` and
+`-round10` files, each failing without its fix.
 
 ### Code scanning (CodeQL), first run
 

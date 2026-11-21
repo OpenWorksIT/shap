@@ -218,10 +218,6 @@ export function pocketShareMessage(s: { number: number; through: string; previou
 export const MAX_SHARE_TEXT = 50_000;
 export const MAX_SHARE_FIGURE = 1e13;
 
-/**
- * What's wrong with a share, past its schema, if anything: the limits Shap holds a file to when it
- * reads one, and Pocket checks before it offers one (so a file Shap would refuse is never offered).
- */
 /** A value's length as text, the longer of its JSON and its String() (Infinity: it can't be written). */
 function textLength(v: unknown): number {
   try {
@@ -231,6 +227,10 @@ function textLength(v: unknown): number {
   }
 }
 
+/**
+ * What's wrong with a share, past its schema, if anything: the limits Shap holds a file to when it
+ * reads one, and Pocket checks before it offers one (so a file Shap would refuse is never offered).
+ */
 export function shareProblem(s: PocketShare): { kind: 'column' | 'too_big' | 'rows' | 'settings' | 'twice' | 'long_journal'; table?: string } | null {
   let rows = 0;
   for (const [table, list] of Object.entries(s.records)) {

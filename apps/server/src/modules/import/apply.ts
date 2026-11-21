@@ -101,12 +101,13 @@ export async function applyTracker(sql: Sql, plan: TrackerPlan, opts: ImportOpti
         postsTo = 'Bank';
       } else {
         // Cards and accounts in the owner's name: the company owes the owner for these.
-        // (Named as Settings takes a name: 80 characters at most.)
+        // (Named as Settings takes a name: 80 characters at most; two that start the same are one.)
         id = await ensureSource(acc.slice(0, 80).trim(), /cc|card|miles|credit/i.test(acc) ? 'card' : 'owner', loanAcc);
+        if (acc.length > 80) warnings.push(`The account "${acc}" is longer than Shap takes: it's "${acc.slice(0, 80).trim()}" under Paid from / into.`);
         postsTo = 'Owner’s loan';
       }
       sourceFor.set(acc, id);
-      mapping.push({ account: acc || '(blank)', source: acc ? (id === businessBank ? 'Business bank' : acc) : 'Not captured yet', postsTo });
+      mapping.push({ account: acc || '(blank)', source: acc ? (id === businessBank ? 'Business bank' : acc.slice(0, 80).trim()) : 'Not captured yet', postsTo });
     }
 
     // ---------------------------------------------------------- what costs were for
@@ -122,10 +123,17 @@ export async function applyTracker(sql: Sql, plan: TrackerPlan, opts: ImportOpti
       if (hit) return hit;
       // (Named as Settings takes a name: 80 characters at most.)
       const name = (type.trim().toLowerCase() === stockName ? `${type.trim().slice(0, 60)} (from the tracker)` : type.trim().slice(0, 80)).trim();
+      // Two long types that start the same are one cost type (their first 80 characters).
+      const [same] = await tx<{ id: string }[]>`select id from cost_categories where lower(name) = lower(${name})`;
+      if (same) {
+        byName.set(key, same.id);
+        warnings.push(`The cost type "${type.trim()}" is longer than Shap takes: it's put with "${name}", which starts the same.`);
+        return same.id;
+      }
       const [row] = await tx<{ id: string }[]>`
         insert into cost_categories (name, kind, account_id, sort) values (${name}, 'overhead', ${sundryAcc}, (select coalesce(max(sort), 0) + 1 from cost_categories)) returning id`;
       byName.set(key, row!.id);
-      warnings.push(`New cost type "${type.trim()}" was added as a running cost (Sundry). Change where it posts under Settings → Lists.`);
+      warnings.push(`New cost type "${name}" was added as a running cost (Sundry). Change where it posts under Settings → Lists.`);
       return row!.id;
     };
     const personalCat = byName.get('personal (owner)')!;

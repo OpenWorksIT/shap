@@ -233,6 +233,12 @@ export async function moveToAccount<T>(
     hasClosed
       ? JSON.stringify(await tx`select l.account_id, l.date::text, sum(l.amount_cents)::bigint as t from ledger_detail l where l.source = 'cost' and l.source_id in (select id from costs where category_id = ${o.id}) and l.date <= ${s!.lockDate}::date group by 1, 2 order by 1, 2`)
       : '';
+  // Its kind into or out of asset moves its VAT between the VAT201's boxes 14 and 15: not in a
+  // closed period's return (a cost on the asset register is box 14 either way).
+  if (kindChanges && s?.lockDate && (was.kind === 'asset') !== (o.kind === 'asset')) {
+    const [vat] = await tx`select 1 from costs c where c.category_id = ${o.id} and c.vat_cents <> 0 and c.date <= ${s.lockDate}::date and not exists (select 1 from assets a where a.cost_id = c.id) limit 1`;
+    if (vat) throw refuse(closedWords(), 'Make a new one for what’s coming instead.');
+  }
   const ownBefore = await closedOwn();
   if (!moving) {
     const row = await update();
