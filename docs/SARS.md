@@ -93,19 +93,24 @@ and each Monday in May.
 The forecast (`apps/server/src/modules/forecast.ts`) puts SARS's payments in the weeks they're
 due. Each is an estimate, said so on screen with who OpenWorks IT are:
 
-- **VAT**: on the invoice basis (Shap's VAT201s are). A period's VAT is the VAT account's movement
-  in it that isn't a payment or refund (an entry with a cash side) or an opening balance: journals
-  by hand and books brought in count in their own period. What's owed for periods that have ended
-  (the VAT account today, less this period's VAT and any payment already booked ahead): the last
-  period's own on its `vat201Due` (this week when that's past), anything older this week. This
-  period's, documents dated ahead in it included, on its own `vat201Due`. Always eFiling's date
-  (the last business day), never the 25th. A vendor on the payments basis would owe less, sooner
-  or later. A business no longer registered still has what's in its VAT account forecast.
-- **EMP201**: those owed (`payrollAttention`) on their `emp201Due`; then each month after the later
-  of the last pay run's pay month and its period (a run paid early isn't repeated), PAYE, UIF (both
-  halves) and SDL as the middle of the last three runs, by the month paid, as SARS groups them.
-  The employment tax incentive isn't taken off. A pay date more than a month from its run's month
-  is refused (it would be taxed on the wrong tables and go on the wrong EMP201).
+- **VAT**: on the invoice basis (Shap's VAT201s are). A period's VAT is everything that moves the
+  VAT account in it (invoices, costs and assets however they were paid, journals by hand with an
+  income or cost line, books brought in), except payments and refunds (an entry of nothing but VAT
+  against money: the bank, cash, an overdraft or the owner's loan) and opening balances. What's
+  owed for periods that have ended (the VAT account today, less this period's VAT and payments
+  already booked ahead): the last period's own on its `vat201Due` (this week when that's past),
+  anything older this week; a payment ahead beyond them comes off this period's. Which period a
+  payment was for is SARS's to say (by its reference, which Shap doesn't keep): the split is an
+  estimate. This period's, documents dated ahead in it included, on its own `vat201Due`. Always
+  eFiling's date (the last business day), never the 25th. A vendor on the payments basis would owe
+  less, sooner or later. A business no longer registered still has what's in its VAT account forecast.
+- **EMP201**: those owed (`payrollAttention`) on their `emp201Due`; then, for each month after the
+  last run's period, each employee in that run at the middle of their last three pay lines, paid as
+  far into the month as the recent runs were (a December run paid on 2 January isn't January's), and
+  its PAYE, UIF (both halves) and SDL on the EMP201 for the month paid, as SARS groups them. The
+  employment tax incentive isn't taken off. A pay date before the month before its run's month, or
+  more than six months after it, is refused as a likely slip of the year (it would be taxed on the
+  wrong tables and go on the wrong EMP201); pay really that late is the accountant's to record.
 - **DTR01**: dividends tax owed, on its due date (`dwtDue`, from the day paid).
 - Not in it: provisional tax and turnover tax (said on screen).
 

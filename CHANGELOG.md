@@ -10,8 +10,8 @@ entries newer than the version you're running before you update.
   (what the cards owe is shown beside it), with invoices on their due dates (overdue ones this
   week, as if paid now; those more than 90 days overdue shown apart, not counted), supplier bills
   on theirs, what's already in the books for a day to come (a pay run paid on its pay day, a payment
-  dated ahead: not counted again), salaries and the EMP201 as your recent pay runs (by the month
-  paid), dividends tax on its date, wages and dividends owed now, day wages at the last eight weeks'
+  dated ahead: not counted again), salaries and the EMP201 for everyone in the last pay run at
+  their usual pay, on the usual day (the EMP201 by the month paid), dividends tax on its date, wages and dividends owed now, day wages at the last eight weeks'
   average, the VAT as invoiced on each VAT201 (an older one this week), and the costs you usually
   pay each month (as last paid: not those paid personally or on a card; one that comes as a
   supplier bill on the bill's terms; not a month already captured ahead). Tap a week for what's in it. Sales not made or invoiced yet
@@ -40,21 +40,21 @@ entries newer than the version you're running before you update.
   how many days clients take to pay against your invoices, how many you take to pay supplier bills
   (with bills on), and the gross margin month by month, as the income statement's gross profit.
   Home's first figure is now revenue (it was all income, interest included), gross profit is
-  revenue less cost of sales, and net profit says the running costs and other income between
-  them. A bank or cash account added with a payment source goes on the statements' cash line; the
-  books audit points out one that isn't.
-- **Payroll.** A pay date more than a month from its run's month is refused (a slip of the year
-  would be taxed on the wrong tables).
+  revenue less cost of sales, net profit says the running costs, finance costs, income tax and
+  other income between them, and the year to date runs to today. A new bank or cash payment source
+  on an account with nothing in it yet puts that account on the statements' cash (or bank
+  overdraft) line; the books audit points out one that isn't, for your accountant to judge.
+- **Payroll.** A pay date before the month before its run's month, or more than six months after
+  it, is refused as a likely slip of the year (it would be taxed on the wrong tables).
 - **CIPC and the Compensation Fund.** The date of incorporation (Settings → Company, and in the
   first-run questions, both optional) gives a company's or close corporation's CIPC annual return
   on Home and the practice's list, from five weeks before it's due to a month after. An employer
   (casual workers too) is asked whether it's registered with the Compensation Fund (COIDA): if it
   is, the return of earnings shows for a season in Shap's tables (for March 2025 to February 2026,
   1 April to 30 June 2026), and from April to July Home says when the next season's dates aren't in
-  Shap yet: an update adds them once the Fund publishes them. No reminder doesn't mean nothing is
-  due. Shap files nothing with CIPC or the Fund. A
-  client on its own Shap sends these to its practice from 1.33, for a link made from 1.33 on (the
-  owner is told so before linking).
+  this version of Shap. Even with no reminder, a return may be due. Shap files nothing with CIPC or
+  the Fund. A client on its own Shap sends these to its practice from 1.33, for a link made from
+  1.33 on (the owner is told so before linking).
 - docs/GOALPOSTS.md: what's being worked on, how hard it looks and why (also on the website).
 
 ## 1.32.0 (18 November 2026)

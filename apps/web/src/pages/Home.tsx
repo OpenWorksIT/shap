@@ -21,7 +21,7 @@ interface Dashboard {
   today: string;
   financialYear: { start: string; end: string; label: string };
   thisMonth: { label: string; incomeCents: number; costOfSalesCents: number; expensesCents: number; profitCents: number; revenueCents: number };
-  yearToDate: { incomeCents: number; revenueCents: number; grossProfitCents: number; expensesCents: number; profitCents: number; otherIncomeCents: number; runningCostsCents: number };
+  yearToDate: { incomeCents: number; revenueCents: number; grossProfitCents: number; expensesCents: number; profitCents: number; otherIncomeCents: number; runningCostsCents: number; financeCostsCents: number; incomeTaxCents: number };
   months: { key: string; label: string; incomeCents: number; costOfSalesCents: number; expensesCents: number; revenueCents: number; grossCostCents: number }[];
   owing: { totalCents: number; overdue: number; invoices: { id: string; number: string; issueDate: string; totalCents: number; paidCents: number; clientName: string | null; projectName: string | null; paymentState: string }[] };
   workers: { id: string; name: string; balanceCents: number }[];
@@ -68,7 +68,7 @@ export const MONEY_NOTE = 'Worked out from what’s captured in the books: the b
 export const RETURN_NOTE = {
   CIPC: 'worked out from the date of incorporation in Settings, not advice. Shap files nothing with CIPC: you or your accountant file it, and what goes with it.',
   'Compensation Fund': 'from the Fund’s dates in Shap’s tables, not advice. Shap files nothing with the Fund: you or your accountant file it.',
-  undated: 'not advice. Shap files nothing with the Fund: you or your accountant file it.',
+  undated: 'from your answer that you’re registered with the Fund, not advice. Shap files nothing with the Fund: you or your accountant file it.',
 } as const;
 
 export default function HomePage() {
@@ -421,11 +421,17 @@ function OwnerHome() {
       <TestServerPanel />
       <div className="kpis">
         <Kpi label={`Revenue ${data.financialYear.label} to date`} value={<Money cents={data.yearToDate.revenueCents} whole />} sub={`${data.thisMonth.label}: ${formatZar(data.thisMonth.revenueCents, { cents: false })}`} />
-        <Kpi label="Gross profit" value={<Money cents={data.yearToDate.grossProfitCents} whole />} sub={ytdMargin == null ? 'no revenue yet this year' : `${formatPercent(ytdMargin)} of revenue`} />
+        <Kpi label="Gross profit" value={<Money cents={data.yearToDate.grossProfitCents} whole />} sub={ytdMargin == null ? 'no revenue yet this year' : `${formatPercent(ytdMargin)} of revenue, as the financial statements count it`} />
         <Kpi
           label="Net profit to date"
           value={<Money cents={data.yearToDate.profitCents} whole />}
-          sub={`after ${formatZar(data.yearToDate.runningCostsCents, { cents: false })} running costs${data.yearToDate.otherIncomeCents ? `, with ${formatZar(data.yearToDate.otherIncomeCents, { cents: false })} other income` : ''}`}
+          sub={[
+            `after ${formatZar(data.yearToDate.runningCostsCents, { cents: false })} running costs`,
+            data.yearToDate.financeCostsCents ? `${formatZar(data.yearToDate.financeCostsCents, { cents: false })} finance costs` : '',
+            data.yearToDate.incomeTaxCents ? `${formatZar(data.yearToDate.incomeTaxCents, { cents: false })} income tax as booked` : '',
+          ]
+            .filter(Boolean)
+            .join(', ') + (data.yearToDate.otherIncomeCents ? `, with ${formatZar(data.yearToDate.otherIncomeCents, { cents: false })} other income` : '')}
           tone={data.yearToDate.profitCents < 0 ? 'bad' : undefined}
         />
         <Kpi label="Clients owe you" value={<Money cents={data.owing.totalCents} whole />} sub={data.owing.overdue ? `${data.owing.overdue} overdue` : 'nothing overdue'} tone={data.owing.overdue ? 'warn' : undefined} />

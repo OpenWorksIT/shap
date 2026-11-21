@@ -128,17 +128,21 @@ async function accessFields(db: Db, role: Role, profileId: string | null | undef
 }
 
 /**
- * A bank or cash payment source's account is cash (IFRS for SMEs 7.2): one still on the line an
- * asset starts on goes on the statements' cash line, so Home, the forecast and the cash flow
- * statement count it. Only while nothing of it is in a closed period: what's closed stays as it was
- * (the books audit points such an account out instead).
+ * A new bank or cash payment source on an account with nothing in it yet: the account is cash (IFRS
+ * for SMEs 7.2), so one still on the line its type starts on goes on the statements' cash line (an
+ * asset) or bank overdraft line (a liability), and the change is in the audit log. Only then: an
+ * account with anything in it keeps its line, however the source is saved (the owner's or the
+ * accountant's choice, and statements may already rest on it); the books audit points it out.
  */
-async function cashLineFor(db: Ctx['sql'], source: { kind: string; accountId: string }) {
+async function cashLineFor(db: Ctx['sql'], source: { kind: string; accountId: string }, userId: string, ip: string) {
   if (source.kind !== 'bank' && source.kind !== 'cash') return;
-  await db`
-    update accounts set statement_line = 'cash'
-    where id = ${source.accountId} and type = 'asset' and system_key is null and statement_line = 'other_current_assets'
-      and not exists (select 1 from ledger l where l.account_id = ${source.accountId} and l.date <= (select coalesce(lock_date, '0001-01-01'::date) from settings where id))`;
+  const [moved] = await db<{ name: string; statementLine: string }[]>`
+    update accounts set statement_line = case when type = 'asset' then 'cash' else 'bank_overdraft' end
+    where id = ${source.accountId} and system_key is null
+      and ((type = 'asset' and statement_line = 'other_current_assets') or (type = 'liability' and statement_line = 'trade_payables' and ${source.kind} = 'bank'))
+      and not exists (select 1 from ledger l where l.account_id = ${source.accountId})
+    returning name, statement_line`;
+  if (moved) await audit(db, { userId, action: 'account_to_cash_line', entity: 'account', entityId: source.accountId, ip, details: { name: moved.name, statementLine: moved.statementLine } });
 }
 
 export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -372,7 +376,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
       const input = parse(schema, req.body) as Record<string, unknown>;
       try {
         const [row] = await sql`insert into ${sql(table)} ${sql(input)} returning *`;
-        if (table === 'payment_sources') await cashLineFor(sql, row as { kind: string; accountId: string });
+        if (table === 'payment_sources') await cashLineFor(sql, row as { kind: string; accountId: string }, userOrThrow(req).id, req.ip);
         return row;
       } catch (err) {
         if (pgCode(err) === PG.uniqueViolation) throw conflict('That name is already used');
@@ -394,9 +398,11 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: Ctx): void {
           throw badRequest('What’s already captured with this goes to its account in a closed year, so the account can’t change. Make a new one for what’s coming instead.');
       }
       try {
+        const [before] = table === 'payment_sources' ? await sql<{ accountId: string }[]>`select account_id from payment_sources where id = ${id}` : [];
         const [row] = await sql`update ${sql(table)} set ${sql(input)} where id = ${id} returning *`;
         if (!row) throw notFound();
-        if (table === 'payment_sources') await cashLineFor(sql, row as { kind: string; accountId: string });
+        // Only when it's put on another account: a rename leaves the account's line alone.
+        if (table === 'payment_sources' && before && before.accountId !== (row as { accountId: string }).accountId) await cashLineFor(sql, row as { kind: string; accountId: string }, userOrThrow(req).id, req.ip);
         return row;
       } catch (err) {
         if (pgCode(err) === PG.uniqueViolation) throw conflict('That name is already used');

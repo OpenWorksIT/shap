@@ -73,7 +73,7 @@ describe('the Compensation Fund’s return of earnings', () => {
     expect(taxDue({ vatRegistered: false, vatCategory: 'B', turnoverTax: false, fyEndMonth: 2, coidaRegistered: true }, '2026-11-21')).toEqual([]);
     // April to July with no season in Shap's tables: said so, with no date.
     expect(taxDue({ vatRegistered: false, vatCategory: 'B', turnoverTax: false, fyEndMonth: 2, coidaRegistered: true }, '2027-04-15')).toEqual([
-      expect.objectContaining({ key: 'roe-2026-unknown', body: 'Compensation Fund', due: null, label: expect.stringMatching(/^Return of earnings to the Compensation Fund \(March 2026 to February 2027\): its dates aren’t in this version of Shap yet/) }),
+      expect.objectContaining({ key: 'roe-2026-unknown', body: 'Compensation Fund', due: null, label: expect.stringMatching(/^Return of earnings to the Compensation Fund \(March 2026 to February 2027\): its dates aren’t in this version of Shap\./) }),
     ]);
     expect(taxDue({ vatRegistered: false, vatCategory: 'B', turnoverTax: false, fyEndMonth: 2, coidaRegistered: false }, '2027-04-15')).toEqual([]);
   });

@@ -117,12 +117,18 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
   const suspense = await balance('suspense');
   if (suspense === 0) ok('nothing is waiting in suspense');
   else warn(`${rand(suspense)} is in suspense: money not yet put where it belongs (or a change to an agreed year)`);
-  // A bank or cash account the business pays from that the statements don't count as cash.
+  // A bank or cash account the business pays from that the statements don't count as cash (or a
+  // bank overdraft): an active one, or one with money in it.
   const offCash = await db<{ name: string }[]>`
     select distinct a.name from payment_sources ps join accounts a on a.id = ps.account_id
-    where ps.kind in ('bank', 'cash') and a.type = 'asset' and a.system_key is distinct from 'owner_loan' and a.statement_line is distinct from 'cash' order by 1`;
+    where ps.kind in ('bank', 'cash') and a.system_key is distinct from 'owner_loan'
+      and ((a.type = 'asset' and a.statement_line is distinct from 'cash') or (a.type = 'liability' and a.statement_line not in ('cash', 'bank_overdraft')))
+      and (ps.active or exists (select 1 from ledger_totals l where l.account_id = a.id having sum(l.amount_cents) <> 0))
+    order by 1`;
   if (offCash.length)
-    warn(`${few(offCash.map((a) => a.name))} ${offCash.length === 1 ? 'is a bank or cash account' : 'are bank or cash accounts'} you pay from, but not on the statements' cash line: Home, the forecast and the cash flow statement leave ${offCash.length === 1 ? 'it' : 'them'} out of cash. Check the line with your accountant (Settings → Lists → Chart of accounts)`);
+    warn(
+      `${few(offCash.map((a) => a.name))} ${offCash.length === 1 ? 'is a bank or cash account' : 'are bank or cash accounts'} you pay from, but not on the statements' cash or bank overdraft line: Home, the forecast and the cash flow statement leave ${offCash.length === 1 ? 'it' : 'them'} out of cash. Whether it's cash is a judgement (a deposit for more than about three months isn't), so check it with your accountant before changing its line (Settings → Lists → Chart of accounts): moving it also moves last year's figures, which your accountant may need to explain in the statements`,
+    );
 
   // ---------------------------------------------------------------- control accounts
   section = 'Debtors, creditors, VAT and payroll';

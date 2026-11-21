@@ -129,13 +129,29 @@ describe('salaries paid early, VAT journals and older returns, and a business no
   it('doesn’t pay a month’s salaries again when its run was paid early', async () => {
     const f = await cashForecast(env.sql, now);
     const pay = f.items.filter((x) => x.kind === 'payroll');
-    expect(pay.every((x) => x.date >= addMonths(thisMonth, 2))).toBe(true);
+    // Next month's were paid on the 1st of this month: the month after's come next, a month ahead
+    // as these were, and next month's aren't paid again.
+    const words = (d: string) => formatDate(d, 'long').replace(/^1 /, '');
+    expect(pay.some((x) => x.label.startsWith(`Salaries (${words(addMonths(thisMonth, 1))},`))).toBe(false);
+    expect(pay[0]!.label).toMatch(new RegExp(`^Salaries \\(${words(addMonths(thisMonth, 2))},`));
+    expect(pay[0]!.date).toBe(addMonths(thisMonth, 1));
   });
 
-  it('refuses a pay date a year off its month', async () => {
+  it('refuses a pay date a year off its month, takes one paid late, and says a final run is final', async () => {
     const r = await owner.call({ method: 'POST', url: '/api/pay-runs', payload: { period: addMonths(thisMonth, 2).slice(0, 7), payDate: addMonths(thisMonth, -10), sourceId: bank } });
     expect(r.statusCode).toBe(400);
-    expect(r.json().error).toMatch(/The pay date is a long way from/);
+    expect(r.json().error).toMatch(/looks like a slip of the year\. For pay outside that, ask your accountant how to record it\./);
+    expect(r.json().error).not.toMatch(/\d{4}-\d{2}:/);
+    // A month paid four months late is taken (and goes on the EMP201 of the month it was paid in).
+    const late = await owner.call({ method: 'POST', url: '/api/pay-runs', payload: { period: addMonths(thisMonth, -6).slice(0, 7), payDate: addMonths(thisMonth, -2), sourceId: bank } });
+    expect(late.statusCode).toBe(200);
+    // Moved a year off while a draft: refused; a final run says it's final, whatever the date.
+    expect((await owner.call({ method: 'PUT', url: `/api/pay-runs/${late.json().id}`, payload: { payDate: addMonths(thisMonth, 10), sourceId: bank } })).statusCode).toBe(400);
+    const [fin] = await env.sql<{ id: string }[]>`select id from pay_runs where status = 'final' limit 1`;
+    const put = await owner.call({ method: 'PUT', url: `/api/pay-runs/${fin!.id}`, payload: { payDate: addMonths(thisMonth, -20), sourceId: bank } });
+    expect(put.statusCode).toBe(400);
+    expect(put.json().error).not.toMatch(/slip of the year/);
+    await owner.call({ method: 'DELETE', url: `/api/pay-runs/${late.json().id}` });
   });
 
   it('puts the older VAT201 this week, the last on its date, and a journal in its own period', async () => {
@@ -144,7 +160,7 @@ describe('salaries paid early, VAT journals and older returns, and a business no
     const lastEnd = monthEnd(addMonths(thisMonth, -1));
     const lastDue = vat201Due(lastEnd);
     expect(vat).toEqual([
-      expect.objectContaining({ date: now, cents: -60_000, label: `VAT owing for periods before ${formatDate(addMonths(thisMonth, -1))} (VAT201)` }),
+      expect.objectContaining({ date: now, cents: -60_000, label: `VAT owing for periods before ${formatDate(addMonths(thisMonth, -1))} (VAT201, an estimate)` }),
       expect.objectContaining({ date: lastDue < now ? now : lastDue, cents: -30_000 }),
       expect.objectContaining({ date: vat201Due(monthEnd(thisMonth)), cents: -15_000, label: `VAT so far on the period to ${formatDate(monthEnd(thisMonth))} (VAT201)` }),
     ]);

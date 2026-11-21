@@ -52,6 +52,7 @@ interface Preview {
   duplicates: number;
   skipped: number;
   pending: number;
+  format: 'csv' | 'ofx' | 'qif';
   from: string;
   to: string;
   inCents: number;
@@ -560,8 +561,13 @@ function BankRules({ onClose, onChanged }: { onClose: () => void; onChanged: () 
             <li key={r.id} className="list-row">
               <span className="grow small">
                 <strong>“{r.matchText}”</strong> ({r.direction === 'out' ? 'money out' : 'money in'}) → {r.categoryName ? `${r.categoryName}${r.direction === 'in' ? ' (refund)' : ''}` : r.incomeAccountName}
-                {!r.usable && <span className="xs muted"> · not applied: its {r.categoryName ? 'cost type' : 'income account'} isn’t in use</span>}
                 {r.supplier ? `, supplier ${r.supplier}` : ''}
+                {!r.usable && (
+                  <span className="xs muted">
+                    {' '}
+                    · not applied: {r.categoryName ?? r.incomeAccountName} isn’t in use (switch it back on in Settings → Lists, or take the rule away)
+                  </span>
+                )}
               </span>
               <button className="btn quiet small" disabled={busy} onClick={() => void remove(r)}>
                 Take away
@@ -640,7 +646,8 @@ function ImportStatement({ sourceId, sourceName, onDone }: { sourceId: string; s
             <strong>{preview.count}</strong> transactions, {formatDate(preview.from)} to {formatDate(preview.to)}: money in {formatZar(preview.inCents)}, money out{' '}
             {formatZar(preview.outCents)}.{preview.duplicates > 0 && ` ${preview.duplicates} are already imported and will be skipped.`}
             {preview.pending > 0 && ` ${preview.pending} pending (not yet cleared) left out: they come in with a later statement.`}
-            {preview.skipped > 0 && ` ${preview.skipped} line${preview.skipped === 1 ? '' : 's'} left out: balance lines, lines with no date or amount Shap could read, or the same transaction twice in the file. Check them against the statement.`}
+            {preview.skipped > 0 &&
+              ` ${preview.skipped} line${preview.skipped === 1 ? '' : 's'} left out (balance lines, or lines with no date or amount Shap could read${preview.format === 'ofx' ? ', or a transaction the bank listed twice' : ''}). Check the totals above against your statement.`}
             <br />
             <span className="xs muted">
               Read from: {preview.columns.date} · {preview.columns.description} · {preview.columns.amount}

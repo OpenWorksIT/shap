@@ -14,11 +14,14 @@ describe('CIPC and the Compensation Fund, said as they are', () => {
   it('promises no reminder: Home shows one only for dates in Shap’s tables, and filing is theirs', () => {
     for (const w of [CIPC_HINT, COIDA_REMINDER]) expect(w).not.toMatch(/reminds you .* each year/);
     expect(CIPC_HINT).toMatch(/filing it, with what goes with it, is yours or your accountant’s/);
-    expect(COIDA_REMINDER).toMatch(/only for a season in its tables/);
-    expect(COIDA_REMINDER).toMatch(/No reminder doesn’t mean nothing is due: watch for the Fund’s notice, or ask your accountant/);
+    expect(COIDA_REMINDER).toMatch(/only for a season whose dates are in this version’s tables, so it may not have the Fund’s latest/);
+    expect(COIDA_REMINDER).toMatch(/Even with no reminder, a return may be due: watch for the Fund’s notice in the Government Gazette \(usually March or April\), or ask your accountant/);
     // No promise of an update (second round).
     for (const w of [COIDA_REMINDER, read('CHANGELOG.md')]) expect(w).not.toMatch(/each year’s (standard )?update adds/i);
-    expect(CIPC_HINT).toMatch(/No reminder doesn’t mean nothing is due/);
+    expect(CIPC_HINT).toMatch(/Even with no reminder, a return may be due/);
+    // No promise of an update at all (third round).
+    const changelog133 = read('CHANGELOG.md').split('## 1.32.0')[0]!;
+    for (const w of [COIDA_REMINDER, changelog133]) expect(w).not.toMatch(/an update adds|once the Fund publishes|will add|Shap yet/);
     for (const page of ['apps/web/src/pages/Welcome.tsx', 'apps/web/src/pages/Settings.tsx']) expect(read(page)).not.toMatch(/reminds you of (CIPC’s annual return|the return of earnings) each year|remind me of the return of earnings each year/);
   });
 
@@ -35,7 +38,7 @@ describe('CIPC and the Compensation Fund, said as they are', () => {
     expect(setupCautions({ ...base, coidaRegistered: 'no' })).toContain(COIDA_NOTE);
     expect(setupCautions({ ...base, coidaRegistered: 'yes' })).not.toContain(COIDA_NOTE);
     // Registered: told the reminder shows only for a season in Shap's tables (second round).
-    expect(setupCautions({ ...base, coidaRegistered: 'yes' })).toContain(`Compensation Fund: ${COIDA_REMINDER} Filing it is yours.`);
+    expect(setupCautions({ ...base, coidaRegistered: 'yes' })).toContain(`Compensation Fund: ${COIDA_REMINDER} Filing the return of earnings is yours or your accountant’s.`);
     expect(setupCautions({ vatRegistered: false, employees: false, cipc: true, incorporatedOn: null }).join(' ')).toMatch(/Shap won’t show CIPC’s annual return on Home/);
     expect(setupCautions({ vatRegistered: false, employees: false, cipc: true, incorporatedOn: '2020-07-01' }).join(' ')).not.toMatch(/CIPC/);
     expect(setupCautions({ vatRegistered: false, employees: false, coop: true })).toContain(COOP_CIPC);
@@ -77,19 +80,29 @@ describe('the second round’s words', () => {
   it('Home’s undated Fund reminder doesn’t say its dates are in Shap’s tables', () => {
     const home = read('apps/web/src/pages/Home.tsx');
     expect(home).toMatch(/\{t\.due \? RETURN_NOTE\[t\.body\] : RETURN_NOTE\.undated\}/);
-    expect(home).toMatch(/undated: 'not advice\. Shap files nothing with the Fund: you or your accountant file it\.'/);
+    expect(home).toMatch(/undated: 'from your answer that you’re registered with the Fund, not advice\. Shap files nothing with the Fund: you or your accountant file it\.'/);
   });
 
   it('budgets compare the same accounts, and say which aren’t in it', () => {
     const page = read('apps/web/src/pages/Budgets.tsx');
     expect(page).toMatch(/const budgeted = data\.lines\.filter\(\(l\) => l\.budget\);/);
-    expect(page).toMatch(/in the figures above, so actual profit for the whole business differs/);
+    expect(page).toMatch(/in the figures above, so actual profit for the whole business may differ/);
+    expect(page).toMatch(/label="Budgeted for the year"/);
+    expect(page).toMatch(/income less costs, on the \$\{totals\.budgeted\} account/);
     expect(page).not.toMatch(/Budgets are for twelve months/);
   });
 
   it('the rules list says when a rule isn’t applied, and the forecast names dividends tax', () => {
-    expect(read('apps/web/src/pages/Bank.tsx')).toMatch(/not applied: its \{r\.categoryName \? 'cost type' : 'income account'\} isn’t in use/);
-    expect(read('apps/web/src/pages/Forecast.tsx')).toMatch(/dividends tax \(DTR01\) on its date/);
+    expect(read('apps/web/src/pages/Bank.tsx')).toMatch(/not applied: \{r\.categoryName \?\? r\.incomeAccountName\} isn’t in use \(switch it back on in Settings → Lists, or take the rule away\)/);
+    expect(read('apps/web/src/pages/Bank.tsx')).toMatch(/preview\.format === 'ofx' \? ', or a transaction the bank listed twice' : ''/);
+    expect(read('apps/web/src/pages/Forecast.tsx')).toMatch(/dividends tax already withheld, on its DTR01 date/);
     expect(read('apps/web/src/components/HowItWorks.tsx')).toMatch(/what’s due to SARS and others/);
   });
+});
+
+it('Home’s undated Fund reminder names the Fund and promises nothing', async () => {
+  const { taxDue } = await import('../../src/modules/dashboard.js');
+  const [t] = taxDue({ vatRegistered: false, vatCategory: 'B', turnoverTax: false, fyEndMonth: 2, coidaRegistered: true }, '2027-04-15');
+  expect(t!.label).toMatch(/^Return of earnings to the Compensation Fund/);
+  expect(t!.label).not.toMatch(/an update adds|once the Fund publishes|will add|Shap yet/);
 });

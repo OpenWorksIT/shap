@@ -133,12 +133,12 @@ export type EmployerAnswer = 'yes' | 'no' | 'unsure';
 
 /** Beside the date of incorporation (setup and Settings): what Shap does with it, and doesn't. */
 export const CIPC_HINT =
-  'On the registration certificate. Shap shows CIPC’s annual return on Home from five weeks before it’s due, worked out from this date: filing it, with what goes with it, is yours or your accountant’s. No reminder doesn’t mean nothing is due.';
+  'On the registration certificate. Shap shows CIPC’s annual return on Home from five weeks before it’s due, worked out from this date: filing it, with what goes with it, is yours or your accountant’s. Even with no reminder, a return may be due.';
 /** For a co-operative, where a company's date of incorporation would be asked. */
 export const COOP_CIPC = 'A co-operative files an annual return with CIPC each year. Shap doesn’t work out its date or show it on Home: filing it is yours or your accountant’s.';
 /** Registered with the Compensation Fund: what Shap shows, and when it can't. */
 export const COIDA_REMINDER =
-  'Shap shows the return of earnings on Home only for a season in its tables, which an update adds once the Fund publishes its dates in the Government Gazette (usually March or April). No reminder doesn’t mean nothing is due: watch for the Fund’s notice, or ask your accountant.';
+  'Shap shows the return of earnings on Home only for a season whose dates are in this version’s tables, so it may not have the Fund’s latest. Even with no reminder, a return may be due: watch for the Fund’s notice in the Government Gazette (usually March or April), or ask your accountant.';
 /** Not (or not sure if) registered with the Compensation Fund. */
 export const COIDA_NOTE =
   'Most employers, casual workers included, must register under COIDA (cover for injuries at work) with the Compensation Fund, or with a licensed mutual association such as FEM, and send a return of earnings each year. Registering and filing are yours: check with your accountant or a labour practitioner. Once you’re registered with the Fund, tick it in Settings → Company.';
@@ -176,7 +176,7 @@ export function setupCautions(a: {
     out.push('You use casual labour: Shap records their days and pay, but doesn’t work out, deduct or pay PAYE, UIF or the Compensation Fund on day wages, or register you with anyone. Someone you pay by the day is usually your employee in the law, so these may apply: the national minimum wage to every worker, PAYE and the Compensation Fund to employees’ pay, and UIF and the Basic Conditions of Employment Act’s rules on hours and leave from 24 hours a month. Keeping to them is up to you: check with your accountant or a labour practitioner.');
     if (!a.employees) out.push('SDL: once everything you pay employees (day wages included) is expected to pass R500 000 over the next 12 months, SDL (1% of it) is usually due, registered with SARS (some employers, such as qualifying public benefit organisations, are exempt). Shap doesn’t work out SDL on day wages: check with your accountant.');
   }
-  if ((a.employees || a.casual) && a.coidaRegistered != null) out.push(a.coidaRegistered === 'yes' ? `Compensation Fund: ${COIDA_REMINDER} Filing it is yours.` : COIDA_NOTE);
+  if ((a.employees || a.casual) && a.coidaRegistered != null) out.push(a.coidaRegistered === 'yes' ? `Compensation Fund: ${COIDA_REMINDER} Filing the return of earnings is yours or your accountant’s.` : COIDA_NOTE);
   if (a.cipc && !a.incorporatedOn) out.push('You didn’t give the date of incorporation, so Shap won’t show CIPC’s annual return on Home. Filing it each year, with what goes with it, is yours or your accountant’s; add the date in Settings → Company to see it coming.');
   if (a.coop) out.push(COOP_CIPC);
   if (a.turnoverTax) out.push(`You’re on turnover tax: Shap estimates it from your turnover, but the TT01 registration and the TT03 return are yours to file. ${TURNOVER_TAX_PROFESSIONAL}`);

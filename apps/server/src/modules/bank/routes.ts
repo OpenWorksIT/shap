@@ -12,7 +12,7 @@ import { guessCategory, guessIncome, ruleFor, similar, suggestionKey, suggestMat
 
 /** By hand, a match may be out by up to R1 (a supplier's or bank's rounding); the largest item takes the difference. */
 const HAND_ROUNDING_CENTS = 100;
-import { fingerprints, parseStatement } from './parse.js';
+import { fingerprints, parseStatement, statementFormat } from './parse.js';
 
 /** The most rules Shap keeps: each statement line is checked against every one, each time the screen opens. */
 export const MAX_BANK_RULES = 500;
@@ -332,6 +332,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
     return {
       columns: parsed.columns,
       skipped: parsed.skipped,
+      format: statementFormat(input.csv),
       pending: parsed.pending,
       count: parsed.rows.length,
       duplicates: keys.filter((k) => have.has(k)).length,
@@ -634,7 +635,7 @@ export function registerBankRoutes(app: FastifyInstance, ctx: Ctx): void {
     return sql`
       select r.id, r.match_text, r.direction, r.category_id, c.name as category_name, r.income_account_id, a.name as income_account_name, r.supplier, r.created_at,
         -- Applied only while its cost type (not stock) or income account is in use (as the reconciliation does).
-        coalesce(c.active and c.kind <> 'stock', a.active, false) as usable
+        coalesce(c.active and c.kind <> 'stock', a.active and a.type = 'income', false) as usable
       from bank_rules r left join cost_categories c on c.id = r.category_id left join accounts a on a.id = r.income_account_id
       order by lower(r.match_text)`;
   });

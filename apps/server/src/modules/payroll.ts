@@ -13,7 +13,7 @@
  *     SDL owed                             Cr SDL
  *     the bank (or wherever it's paid from) Cr net pay
  */
-import { addDays, addMonths, SDL_THRESHOLD_CENTS, compact, keptNumber, uifSarsRefFor, payeRefProblem, taxNumberProblem, idNumberProblem, sdlRefFor, dividendInput, dividendTax, financialYear, microDividendTax, dwtDue, emp201Due, employeeInput, payLine, payLineInput, payRunInput, sarsPaymentInput, taxYearEnd, type AgeBand, entity, paysOutProfit, payoutWord } from '@shap/shared';
+import { addDays, addMonths, formatDate, SDL_THRESHOLD_CENTS, compact, keptNumber, uifSarsRefFor, payeRefProblem, taxNumberProblem, idNumberProblem, sdlRefFor, dividendInput, dividendTax, financialYear, microDividendTax, dwtDue, emp201Due, employeeInput, payLine, payLineInput, payRunInput, sarsPaymentInput, taxYearEnd, type AgeBand, entity, paysOutProfit, payoutWord } from '@shap/shared';
 import PDFDocument from 'pdfkit';
 import { z } from 'zod';
 import { can, requireAccess, requireRole, userOrThrow } from '../auth.js';
@@ -270,14 +270,16 @@ export async function emp501(db: Db, taxYear: number, kind: 'interim' | 'annual'
 }
 
 /**
- * A pay date in the run's month, the month before or the month after: anything further off is a
- * slip of the year or month (it would be taxed on the wrong year's tables and go on the wrong
- * EMP201), so it's refused.
+ * A pay date from the month before the run's month to six months after it: one further off is
+ * likely a slip of the year (it would be taxed on the wrong year's tables and go on the wrong
+ * EMP201), so it's refused. Pay that really was that late is the accountant's to record.
  */
 export function payDateFits(period: string, payDate: string): void {
   const from = addMonths(`${period}-01`, -1);
-  const to = addDays(addMonths(`${period}-01`, 2), -1);
-  if (payDate < from || payDate > to) throw badRequest(`The pay date is a long way from ${period}: pay a month’s run in that month, or the month before or after it`);
+  const to = addDays(addMonths(`${period}-01`, 7), -1);
+  if (payDate >= from && payDate <= to) return;
+  const words = (iso: string) => formatDate(iso, 'long').replace(/^1 /, '');
+  throw badRequest(`Shap takes a pay date for ${words(`${period}-01`)} from ${words(from)} to ${words(`${to.slice(0, 8)}01`)}: ${formatDate(payDate, 'long')} looks like a slip of the year. For pay outside that, ask your accountant how to record it.`);
 }
 
 export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -363,9 +365,9 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.put('/api/pay-runs/:id', { preHandler: requireAccess('payroll.run') }, async (req) => {
     const { id } = parse(idParam, req.params);
     const input = parse(payRunInput.omit({ period: true }), req.body);
+    await draft(sql, id);
     const [run] = await sql<{ period: string }[]>`select period from pay_runs where id = ${id}`;
     if (run) payDateFits(run.period, input.payDate);
-    await draft(sql, id);
     await sourceAccount(sql, input.sourceId);
     await sql.begin(async (tx) => {
       await tx`update pay_runs set pay_date = ${input.payDate}, source_id = ${input.sourceId} where id = ${id}`;

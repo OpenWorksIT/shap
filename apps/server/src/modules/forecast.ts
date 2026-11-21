@@ -73,20 +73,6 @@ export async function cashForecast(db: Db, now = today()): Promise<Forecast> {
     return Number(b!.b);
   };
 
-  /**
-   * What's been paid off an account (wages owed, dividends owed, VAT) by entries dated after today
-   * that move the cash: those payments are in the weeks already (booked, below), so what's owed now
-   * is less them, or they'd be counted twice.
-   */
-  const settledAhead = async (key: string) => {
-    const [r] = await db<{ s: number }[]>`
-      select coalesce(sum(l.amount_cents), 0)::bigint as s from ledger l join accounts a on a.id = l.account_id
-      where a.system_key = ${key} and l.date > ${now}::date and l.date <= ${end}::date and l.source_id is not null
-        and exists (select 1 from ledger c join accounts ca on ca.id = c.account_id
-                    where c.source = l.source and c.source_id = l.source_id and ca.statement_line in ('cash', 'bank_overdraft'))`;
-    return Number(r!.s);
-  };
-
   // Already in the books for a day to come (a pay run paid on its pay day, a cost or a payment
   // dated ahead): the cash accounts' movements after today, day by day, as they're booked.
   const ahead = await db<{ date: string; cents: number }[]>`
@@ -121,37 +107,65 @@ export async function cashForecast(db: Db, now = today()): Promise<Forecast> {
       add(due, `${due < now ? 'Overdue: ' : ''}${b.supplier || b.description}${b.billNumber ? ` (bill ${b.billNumber})` : ''}`, -Number(b.owingCents), due < now ? 'overdue_bill' : 'bill');
     }
 
-  // Owed now, less what's already booked to pay it: casual workers' wages earned and not paid, and
-  // dividends (a CC's or trust's distributions) declared and not paid, in full this week.
-  const wagesOwed = -(await balanceOf('wages_payable')) - (await settledAhead('wages_payable'));
-  if (wagesOwed > 0) add(now, 'Wages owed to casual workers now', -wagesOwed, 'wages_owed');
-  const dividendsOwed = -(await balanceOf('dividends_payable')) - (await settledAhead('dividends_payable'));
-  if (dividendsOwed > 0) add(now, `${payoutWord(settings.businessType) === 'dividend' ? 'Dividends' : 'Distributions'} declared and not paid yet`, -dividendsOwed, 'dividends');
+  // Owed now: casual workers' wages earned and not paid (each worker's, less what's booked to pay
+  // them beyond what they'll earn ahead), and dividends (a CC's or trust's distributions) declared
+  // by today and not paid by the forecast's end, in full this week, as if paid now.
+  if (on('workers')) {
+    const [w] = await db<{ owed: number }[]>`
+      select coalesce(sum(greatest(0, owed - greatest(0, paid_ahead - earned_ahead))), 0)::bigint as owed from (
+        select w.id,
+          coalesce((select sum(wage_cents + allowance_cents) from labour_entries where worker_id = w.id and date <= ${now}::date), 0)
+            - coalesce((select sum(amount_cents) from wage_payments where worker_id = w.id and date <= ${now}::date), 0) as owed,
+          coalesce((select sum(amount_cents) from wage_payments where worker_id = w.id and date > ${now}::date and date <= ${end}::date), 0) as paid_ahead,
+          coalesce((select sum(wage_cents + allowance_cents) from labour_entries where worker_id = w.id and date > ${now}::date and date <= ${end}::date), 0) as earned_ahead
+        from workers w) x`;
+    if (Number(w!.owed) > 0) add(now, 'Wages owed to casual workers now', -Number(w!.owed), 'wages_owed');
+  }
+  const [dv] = await db<{ owed: number }[]>`
+    select coalesce(sum(gross_cents), 0)::bigint as owed from dividends
+    where declared_on <= ${now}::date and (paid_on is null or paid_on > ${end}::date)`;
+  const unpaid = Number(dv!.owed);
+  // One paid after the forecast's end isn't in its weeks at all.
+  const [later] = await db<{ owed: number }[]>`select coalesce(sum(gross_cents), 0)::bigint as owed from dividends where declared_on <= ${now}::date and paid_on > ${end}::date`;
+  const dividendsOwed = unpaid - Number(later!.owed);
+  if (dividendsOwed > 0) add(now, `${payoutWord(settings.businessType) === 'dividend' ? 'Dividends' : 'Distributions'} declared and not paid yet (as if paid in full now)`, -dividendsOwed, 'dividends');
 
   // SARS: each EMP201 and DTR01 owed, on its due date (or this week, when it's past).
   const owed = await payrollAttention(db, now);
   for (const d of owed) add(d.dueOn, d.kind === 'emp201' ? `EMP201 for ${monthWords(d.period)}` : `Dividends tax (DTR01) for ${monthWords(d.period)}`, -Number(d.owingCents), d.kind === 'emp201' ? 'emp201' : 'dwt');
 
-  // Salaries: the recent pay runs' net pay (the middle of the last three, so a bonus month isn't
-  // repeated), on the same day each month after the last run's month (its pay month, or its period
-  // when it was paid early), and their PAYE, UIF and SDL on the EMP201 for each month paid (SARS
-  // goes by the month paid). The last run itself is in the books (its payment dated on its pay
-  // day, above), and its EMP201 is among those owed.
+  // Salaries: each employee in the last pay run at the middle of their last three pay lines (so a
+  // bonus month isn't repeated, and someone new counts in full), for each month after the last
+  // run's period, paid as many days into the month as the recent runs were (a December run paid on
+  // 2 January isn't January's), and their PAYE, UIF and SDL on the EMP201 for the month it's paid
+  // in (SARS goes by the month paid). The last run itself is in the books (its payment dated on
+  // its pay day, above), and its EMP201 is among those owed.
   if (on('payroll')) {
-    const runs = await db<{ period: string; payDate: string; net: number; sars: number }[]>`
-      select r.period, r.pay_date::text, sum(l.net_cents)::bigint as net, sum(l.paye_cents + l.uif_employee_cents + l.uif_employer_cents + l.sdl_cents)::bigint as sars
-      from pay_runs r join pay_lines l on l.run_id = r.id where r.status = 'final' group by r.id order by r.pay_date desc limit 3`;
+    const runs = await db<{ id: string; period: string; payDate: string }[]>`
+      select id, period, pay_date::text from pay_runs where status = 'final' order by period desc limit 3`;
     const last = runs[0];
     if (last && last.payDate >= addMonths(now, -2)) {
-      const middle = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor((xs.length - 1) / 2)]!;
-      const net = middle(runs.map((r) => Number(r.net)));
-      const sars = middle(runs.map((r) => Number(r.sars)));
-      const day = Number(last.payDate.slice(8, 10));
-      const from = [last.payDate.slice(0, 7), last.period].sort().pop()!;
-      for (let m = addMonths(`${from}-01`, 1); m <= end; m = addMonths(m, 1)) {
-        const month = m.slice(0, 7);
-        add(dayOf(m, day), `Salaries (${monthWords(month)}, as your recent pay runs)`, -net, 'payroll');
-        add(emp201Due(month), `EMP201 for ${monthWords(month)} (PAYE, UIF and SDL, as your recent pay runs)`, -sars, 'emp201');
+      const lines = await db<{ employeeId: string; runId: string; net: number; sars: number }[]>`
+        select employee_id, run_id, net_cents::bigint as net, (paye_cents + uif_employee_cents + uif_employer_cents + sdl_cents)::bigint as sars
+        from pay_lines where run_id = any(${runs.map((r) => r.id)})`;
+      const middle = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor((xs.length - 1) / 2)] ?? 0;
+      let net = 0;
+      let sars = 0;
+      for (const e of new Set(lines.filter((l) => l.runId === last.id).map((l) => l.employeeId))) {
+        const mine = lines.filter((l) => l.employeeId === e);
+        net += middle(mine.map((l) => Number(l.net)));
+        sars += middle(mine.map((l) => Number(l.sars)));
+      }
+      // When in relation to its month a run is paid, as the middle of the recent runs had it: the
+      // months between the period and the pay day, and the day of the month.
+      const usual = [...runs].sort((a, b) => Date.parse(a.payDate) - Date.parse(`${a.period}-01`) - (Date.parse(b.payDate) - Date.parse(`${b.period}-01`)))[Math.floor((runs.length - 1) / 2)]!;
+      const monthsAfter = (Number(usual.payDate.slice(0, 4)) - Number(usual.period.slice(0, 4))) * 12 + Number(usual.payDate.slice(5, 7)) - Number(usual.period.slice(5, 7));
+      const day = Number(usual.payDate.slice(8, 10));
+      for (let m = addMonths(`${last.period}-01`, 1); m <= end; m = addMonths(m, 1)) {
+        const payDay = dayOf(addMonths(m, monthsAfter), day);
+        if (payDay > end) break;
+        add(payDay, `Salaries (${monthWords(m.slice(0, 7))}, as your recent pay runs)`, -net, 'payroll');
+        add(emp201Due(payDay.slice(0, 7)), `EMP201 for ${monthWords(payDay.slice(0, 7))} (PAYE, UIF and SDL, as your recent pay runs)`, -sars, 'emp201');
       }
     }
   }
@@ -164,31 +178,45 @@ export async function cashForecast(db: Db, now = today()): Promise<Forecast> {
     for (let i = 0; i < FORECAST_WEEKS; i++) add(addDays(now, i * 7 + 6), 'Day wages (the last eight weeks’ average)', -weekly, 'day_wages');
   }
 
-  // VAT, as invoiced (Shap's VAT201s are on the invoice basis). What's owed for periods that have
-  // ended, less payments already booked: the last period's on its VAT201 (this week, when that's
-  // past), anything older this week; and this period's (as far as the books go) on its own. A
-  // business no longer registered still owes its last returns. Movements that are payments or
-  // refunds (with a cash side) and opening balances aren't a period's VAT.
+  // VAT, as invoiced (Shap's VAT201s are on the invoice basis). A period's VAT is everything that
+  // moves the VAT account in it (invoices, costs and assets however they were paid, journals with an
+  // income or cost line), except payments and refunds (entries of nothing but VAT against money: the
+  // bank, cash, an overdraft, or the owner paying personally) and opening balances. What's owed for
+  // periods that have ended, less payments already booked ahead: the last period's own on its
+  // VAT201 (this week, when that's past), anything older this week; a payment ahead beyond them
+  // comes off this period's. This period's (as far as the books go) on its own VAT201. Which period
+  // a payment was for is SARS's (by its reference, which Shap doesn't keep): an estimate. A business
+  // no longer registered still owes its last returns.
   const vatOwedNow = -(await balanceOf('vat'));
   if (settings.vatRegistered || vatOwedNow !== 0) {
     const current = vatPeriod(now, settings.vatCategory, settings.fyEndMonth);
     const last = vatPeriod(addMonths(current.start, -1), settings.vatCategory, settings.fyEndMonth);
-    const accrued = async (from: string, to: string) => {
-      const [m] = await db<{ t: number }[]>`
-        select coalesce(sum(l.amount_cents), 0)::bigint as t from ledger l join accounts a on a.id = l.account_id
+    // Each entry's VAT, and whether it's a payment (nothing but VAT and money in it).
+    const vatEntries = async (from: string, to: string) =>
+      db<{ t: number; payment: boolean }[]>`
+        select l.amount_cents::bigint as t,
+          (exists (select 1 from ledger m join accounts ma on ma.id = m.account_id
+                   where m.source = l.source and m.source_id = l.source_id and (ma.statement_line in ('cash', 'bank_overdraft') or ma.system_key = 'owner_loan'))
+           and not exists (select 1 from ledger o join accounts oa on oa.id = o.account_id
+                           where o.source = l.source and o.source_id = l.source_id
+                             and coalesce(oa.system_key, '') not in ('vat', 'owner_loan') and oa.statement_line not in ('cash', 'bank_overdraft'))) as payment
+        from ledger l join accounts a on a.id = l.account_id
         left join journals j on l.source = 'journal' and j.id = l.source_id
-        where a.system_key = 'vat' and l.date between ${from}::date and ${to}::date and l.source <> 'year_end' and j.kind is distinct from 'opening'
-          and not exists (select 1 from ledger c join accounts ca on ca.id = c.account_id
-                          where l.source_id is not null and c.source = l.source and c.source_id = l.source_id and ca.statement_line in ('cash', 'bank_overdraft'))`;
-      return -Number(m!.t);
-    };
+        where a.system_key = 'vat' and l.date between ${from}::date and ${to}::date and l.source_id is not null and l.source <> 'year_end'
+          and (j.id is null or (j.kind <> 'opening' and not (j.kind = 'import' and j.ledger_import_id is null)))`;
+    const accrued = async (from: string, to: string) => -(await vatEntries(from, to)).filter((e) => !e.payment).reduce((t, e) => t + Number(e.t), 0);
+    const paidAhead = (await vatEntries(addDays(now, 1), end)).filter((e) => e.payment).reduce((t, e) => t + Number(e.t), 0);
     const toNow = await accrued(current.start, now);
-    const thisPeriod = toNow + (await accrued(addDays(now, 1), current.end));
-    const ended = vatOwedNow - toNow - (await settledAhead('vat'));
+    let thisPeriod = toNow + (await accrued(addDays(now, 1), current.end));
+    let ended = vatOwedNow - toNow - paidAhead;
+    if (ended < 0) {
+      thisPeriod = Math.max(0, thisPeriod + ended);
+      ended = 0;
+    }
     const lastOwn = Math.max(0, await accrued(last.start, last.end));
-    const forLast = Math.min(Math.max(0, ended), lastOwn);
-    const older = Math.max(0, ended - lastOwn);
-    if (older > 0) add(now, `VAT owing for periods before ${formatDate(last.start)} (VAT201)`, -older, 'vat');
+    const forLast = Math.min(ended, lastOwn);
+    const older = ended - forLast;
+    if (older > 0) add(now, `VAT owing for periods before ${formatDate(last.start)} (VAT201, an estimate)`, -older, 'vat');
     if (forLast > 0) add(vat201Due(last.end), `VAT for the period to ${formatDate(last.end)} (VAT201)`, -forLast, 'vat');
     if (thisPeriod > 0) add(vat201Due(current.end), `VAT so far on the period to ${formatDate(current.end)} (VAT201)`, -thisPeriod, 'vat');
   }
@@ -202,8 +230,10 @@ export async function cashForecast(db: Db, now = today()): Promise<Forecast> {
     (await db<{ id: string }[]>`select ps.id from payment_sources ps join accounts a on a.id = ps.account_id where a.statement_line in ('cash', 'bank_overdraft')`).map((r) => r.id),
   );
   const [billSource] = await db<{ id: string }[]>`select id from payment_sources where role = 'bills'`;
+  // The running costs it's worked out from (as findRecurring reads them: no refunds).
   const dated = await db<{ categoryId: string; supplier: string; description: string; date: string; dueDate: string | null; sourceId: string | null }[]>`
-    select category_id, supplier, description, date::text, due_date::text, source_id from costs where date > ${addDays(now, -280)}::date and date <= ${end}::date`;
+    select c.category_id, c.supplier, c.description, c.date::text, c.due_date::text, c.source_id from costs c join cost_categories k on k.id = c.category_id
+    where k.kind = 'overhead' and c.amount_cents > 0 and c.date > ${addDays(now, -280)}::date and c.date <= ${end}::date`;
   const thisMonth = `${now.slice(0, 7)}-01`;
   for (const r of await findRecurring(db, now)) {
     if (r.status === 'stopped' || !r.sourceId) continue;

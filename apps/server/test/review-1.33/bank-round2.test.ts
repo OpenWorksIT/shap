@@ -28,6 +28,8 @@ describe('reading a statement, second round', () => {
   });
 
   it('decodes entities once', () => {
+    // &#38; is "&": once decoded, "&#38;lt;" is the text "&lt;", not "<".
+    expect(parseStatementOfx(ofx(trn('1', '20260403', '-1.00', '&#38;lt;B&#38;gt;'))).rows[0]!.description).toBe('&lt;B&gt;');
     const p = parseStatementOfx(ofx(trn('1', '20260403', '-1.00', '&amp;#38;lt;B&amp;#38;gt; &amp;#x26;amp;')));
     expect(p.rows[0]!.description).toBe('&#38;lt;B&#38;gt; &#x26;amp;');
   });
@@ -103,4 +105,26 @@ describe('rules, second round', () => {
 it('the reports task says it opens the forecast, with salary totals', () => {
   const reports = ACCESS_GROUPS.flatMap((g) => g.tasks as readonly { key: string; hint?: string }[]).find((t) => t.key === 'reports.view')!;
   expect(reports.hint).toMatch(/the cash-flow forecast \(with salary totals\) and the budgets/);
+});
+
+describe('a rule for an income account that’s no longer income', () => {
+  let env: TestEnv;
+  beforeAll(async () => {
+    env = await setup();
+  });
+  afterAll(async () => {
+    await expectCleanAudit(env.sql);
+    await env.close();
+  });
+
+  it('is listed as not applied', async () => {
+    const owner = await login(env.app, 'owner@example.co.za');
+    const { settings: s } = await owner.get('/api/reference');
+    await owner.post('/api/settings', { ...s, features: { ...s.features, bank: true } }, 'PUT');
+    const [inc] = await env.sql<{ id: string }[]>`insert into accounts (code, name, type) values ('4095', 'Made-up rent received', 'income') returning id`;
+    await owner.post('/api/bank/rules', { matchText: 'MADE-UP TENANT', direction: 'in', incomeAccountId: inc!.id });
+    expect((await owner.get('/api/bank/rules'))[0].usable).toBe(true);
+    await env.sql`update accounts set type = 'liability', statement_line = null where id = ${inc!.id}`;
+    expect((await owner.get('/api/bank/rules'))[0].usable).toBe(false);
+  });
 });

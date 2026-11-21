@@ -56,8 +56,8 @@ export function Budgets() {
     const budgeted = data.lines.filter((l) => l.budget);
     const by = (t: Kind, k: 'budget' | 'actual', n: number) => budgeted.filter((l) => l.type === t).reduce((s, l) => s + sum((k === 'budget' ? l.budget : l.actual) ?? [], n), 0);
     const profit = (k: 'budget' | 'actual', n: number) => by('income', k, n) - by('cost_of_sales', k, n) - by('expense', k, n);
-    // Accounts with figures in the books this year but no budget: not in the comparison.
-    const left = data.lines.filter((l) => !l.budget && l.actual.some(Boolean)).length;
+    // Accounts with figures in the books in the months ended but no budget: not in the comparison.
+    const left = data.lines.filter((l) => !l.budget && l.actual.slice(0, done).some(Boolean)).length;
     return { budgetYear: profit('budget', 12), budgetToDate: profit('budget', done), actualToDate: profit('actual', done), incomeBudget: by('income', 'budget', done), incomeActual: by('income', 'actual', done), budgeted: budgeted.length, left };
   }, [data]);
 
@@ -116,7 +116,7 @@ export function Budgets() {
 
       {hasBudget && (
         <div className="kpis">
-          <Kpi label="Profit budgeted for the year" value={<Money cents={totals.budgetYear} whole />} sub={`on the ${totals.budgeted} account${totals.budgeted === 1 ? '' : 's'} with a budget`} />
+          <Kpi label="Budgeted for the year" value={<Money cents={totals.budgetYear} whole />} sub={`income less costs, on the ${totals.budgeted} account${totals.budgeted === 1 ? '' : 's'} with a budget`} />
           <Kpi label="Budget so far" value={<Money cents={totals.budgetToDate} whole />} sub={done ? `income ${formatZar(totals.incomeBudget, { cents: false })}, to the end of ${monthWords(data.months[done - 1]!)}` : 'no month of the year has ended yet'} />
           <Kpi
             label="Actual so far"
@@ -129,7 +129,7 @@ export function Budgets() {
 
       {hasBudget && totals.left > 0 && (
         <p className="small muted">
-          {totals.left} account{totals.left === 1 ? ' has' : 's have'} figures in the books this year and no budget: {totals.left === 1 ? 'it isn’t' : 'they aren’t'} in the figures above, so actual profit for the whole business differs.
+          {totals.left} account{totals.left === 1 ? ' has' : 's have'} figures in the books this year and no budget: {totals.left === 1 ? 'it isn’t' : 'they aren’t'} in the figures above, so actual profit for the whole business may differ.
         </p>
       )}
       {GROUPS.map((g) => {
