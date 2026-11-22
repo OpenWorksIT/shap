@@ -245,6 +245,7 @@ function LeaveDrawer({ people, employeeId, entry, onClose, onSaved }: { people: 
       toast('Deleted');
       onSaved();
     } catch (err) {
+      if (!(err instanceof ApiError)) console.error(err);
       setError(err instanceof ApiError ? err.message : UNEXPECTED);
     } finally {
       setBusy(false);
@@ -360,6 +361,7 @@ function LeavePayOwed() {
       toast(r.alsoBooked.length ? `Booked, and the later year ends again (${r.alsoBooked.map((d) => formatDate(d)).join(', ')})` : 'Booked: it’s in the books at the year end');
       await reload();
     } catch (err) {
+      if (!(err instanceof ApiError)) console.error(err);
       toast(err instanceof ApiError ? err.message : UNEXPECTED, 'error');
     } finally {
       setBusy(false);
