@@ -29,6 +29,7 @@ type Db = Ctx['sql'];
 /** Journals typed in, not made by the app from a pay run, a SARS payment, a dividend or a profit share. */
 const BY_HAND = ['manual', 'opening', 'import', 'adjustment'];
 import { effectiveLock, freshTotals, getSettings, handVat, importedVat, today } from '../lib/books.js';
+import { leaveOwedAt } from '../lib/leave.js';
 import { FULL_TAX_INVOICE_CENTS } from '../modules/documents.js';
 import { balanceSheet, trialBalance } from '../modules/reports.js';
 import { vat201 } from '../modules/taxforms.js';
@@ -219,6 +220,27 @@ export async function auditBooks(db: Db, on = today(), o: { people?: boolean } =
   const owedSars = -payroll.app;
   if (owedSars === n(sars[0]!.owed)) ok(`PAYE, UIF and SDL owed agree with the pay runs less the EMP201 payments (${rand(owedSars)}${besides(-payroll.byHand, -payroll.brought)})`);
   else fail(`PAYE, UIF and SDL owed in the books (${rand(owedSars)}, not counting journals by hand, books brought in from another package or year-end adjustments) and by the pay runs less the EMP201 payments (${rand(n(sars[0]!.owed))}) differ by ${rand(owedSars - n(sars[0]!.owed))}`);
+
+  // Leave pay owed (IFRS for SMEs 28.6): what each year end booked still agrees with the leave
+  // records and the books, and the last year end has it booked when there's leave owed.
+  const leaveYears = await db<{ fyEnd: string; owedCents: string }[]>`select fy_end::text, owed_cents from leave_pay_years order by fy_end`;
+  const lastEnded = financialYear(addDays(fyNow.start, -1), settings.fyEndMonth);
+  const stale: string[] = [];
+  const offBooks: string[] = [];
+  for (const y of leaveYears) {
+    if (lock && lock >= y.fyEnd) continue;
+    const now = await leaveOwedAt(db, y.fyEnd);
+    if (now.cents !== n(y.owedCents)) stale.push(`${y.fyEnd} (booked ${rand(n(y.owedCents))}, the leave records now ${rand(now.cents)})`);
+    const [b] = await db<{ t: string }[]>`select coalesce(-sum(l.amount_cents), 0)::bigint as t from ledger l join accounts a on a.id = l.account_id where a.system_key = 'leave_payable' and l.date <= ${y.fyEnd}::date`;
+    if (n(b!.t) !== n(y.owedCents)) offBooks.push(`${y.fyEnd} (booked ${rand(n(y.owedCents))}, Leave pay owed in the books ${rand(n(b!.t))})`);
+  }
+  if (stale.length) warn(`leave recorded or changed since the leave pay owed was booked for ${few(stale, 3)}: book it again (Payroll → Leave) so the year end has what’s owed`);
+  if (offBooks.length) warn(`Leave pay owed in the books isn’t what was booked for ${few(offBooks, 3)}: a journal by hand or a year-end figure moved it. Booking it again (Payroll → Leave) puts it right, if that’s what’s owed`);
+  if (!leaveYears.some((y) => y.fyEnd === lastEnded.end) && !(lock && lock >= lastEnded.end)) {
+    const owedThen = await leaveOwedAt(db, lastEnded.end);
+    if (owedThen.cents > 0) warn(`annual leave pay owed at ${lastEnded.end} comes to ${rand(owedThen.cents)} by the leave records, and isn’t in the books for that year end: the owner books it (Payroll → Leave)`);
+  }
+  if (leaveYears.length && !stale.length && !offBooks.length) ok(`Leave pay owed agrees with the leave records at each year end it was booked for (${leaveYears.length})`);
 
   // ---------------------------------------------------------------- agreed years
   section = 'Agreed years';

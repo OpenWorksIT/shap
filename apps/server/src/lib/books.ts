@@ -3,6 +3,7 @@ import { addDays, assessedLossCarried, formatDate, closesBy, entity, featureOn, 
 import type { Db } from '../db/index.js';
 import { audit } from './audit.js';
 import { badRequest } from './errors.js';
+import { leavePayAddBacks } from './leave.js';
 
 export interface SettingsRow {
   companyName: string;
@@ -114,6 +115,8 @@ export async function assessedLossBefore(db: Db, fyStart: string, fyEndMonth: nu
     years.set(end, y);
   };
   for (const r of months) add(r.m, 'profit', -Number(r.cents));
+  // Leave pay owed booked at a year end isn't deductible until paid (s7B): added back.
+  for (const r of await leavePayAddBacks(db, fyStart)) add(r.date.slice(0, 7), 'profit', r.cents);
   if (kind === 'trust') {
     // Only the year's income can be the beneficiaries' (s25B): giving out more doesn't make a loss.
     const given = await db<{ m: string; cents: string }[]>`

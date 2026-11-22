@@ -45,6 +45,7 @@ import {
 } from '@shap/shared';
 import type { Db } from '../db/index.js';
 import { assessedLossBefore, freshTotals, getSettings, sbcAnswer } from '../lib/books.js';
+import { leaveOwedAt, leavePayAddBack } from '../lib/leave.js';
 import { defaultPolicies, directorsReport, governingFor, type StatementDetails, loadDetails } from './details.js';
 
 export interface Amounts {
@@ -531,7 +532,9 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
     const sbc = taxedAs === 'company' && entity(bt).sbcPossible ? sbcApplies(answer.sbc, gross) : false;
     // A trust is taxed on what it keeps: what it gave its beneficiaries in the year is theirs.
     const [given] = taxedAs === 'trust' ? await db<{ t: string }[]>`select coalesce(sum(gross_cents), 0)::bigint as t from dividends where conduit and declared_on between ${start}::date and ${end}::date` : [{ t: '0' }];
-    const est = (onSbc: boolean) => estimateTax({ kind: taxedAs, profitCents: pbt, assessedLossCents, fyEnd: end, sbc: onSbc, approvedPbo: settings.approvedPbo, distributedCents: Number(given!.t) });
+    // Leave pay owed booked at the year end isn't deductible until paid (s7B): added back.
+    const leaveBack = await leavePayAddBack(db, start, end);
+    const est = (onSbc: boolean) => estimateTax({ kind: taxedAs, profitCents: pbt + leaveBack, assessedLossCents, fyEnd: end, sbc: onSbc, approvedPbo: settings.approvedPbo, distributedCents: Number(given!.t) });
     const standard = est(false);
     const onSbc = sbc === false ? standard : est(true);
     // Near enough: within 10% of the estimate (or R100), the accountant's own figure.
@@ -913,8 +916,32 @@ export async function buildStatements(db: Db, fyEnd: string, detailsOverride?: S
       from documents d where d.kind = 'invoice' and d.status = 'issued' and d.issue_date <= ${fyEnd}::date
         and (d.written_off_on is null or d.written_off_on > ${fyEnd}::date) and coalesce(d.due_date, d.issue_date) < (${fyEnd}::date - 365)) x where owing > 0`;
   look('Receivables will be recovered (IFRS for SMEs 11.21)', old!.n === 0, old!.n ? `${old!.n} invoice${old!.n === 1 ? '' : 's'} more than a year overdue at the year end (${formatZar(Number(old!.owing))}): if they won’t be paid, mark them delinquent (written off as bad debts).` : 'nothing more than a year overdue');
-  // Leave pay and bonuses owed at the year end (28.6, 28.8): Shap's payroll doesn't keep leave balances.
-  if (moved(['salaries']) || dayMonths > 0) look('Leave pay and bonuses owed to employees at the year end are provided for (IFRS for SMEs 28.6)', false, `Shap’s payroll doesn’t keep leave balances${dayMonths > 0 ? ', and Workers doesn’t for day labour (from 24 hours a month, the BCEA’s leave applies: s19(1))' : ''}: if employees have leave owing (or a bonus earned) at the year end, your accountant provides for it with a journal.`);
+  // Annual leave pay owed at the year end (28.6): from Shap's leave records (Payroll → Leave), booked
+  // by the owner once the year has ended. Bonuses earned and not yet paid (28.8), and leave on day
+  // labour, are the accountant's to provide for.
+  const salaried = moved(['salaries', 'director_salary']);
+  if (salaried) {
+    const owed = await leaveOwedAt(db, fyEnd);
+    const [booked] = await db<{ owedCents: string }[]>`select owed_cents from leave_pay_years where fy_end = ${fyEnd}`;
+    const bookedCents = booked ? Number(booked.owedCents) : null;
+    look(
+      'Annual leave pay owed to employees at the year end is in the books (IFRS for SMEs 28.6)',
+      bookedCents === owed.cents || (bookedCents == null && owed.cents === 0),
+      bookedCents === owed.cents
+        ? `${formatZar(owed.cents)} of annual leave pay owed, from Shap’s leave records (Payroll → Leave).`
+        : bookedCents == null && owed.cents === 0
+          ? 'Shap’s leave records show no annual leave owed at the year end.'
+          : bookedCents == null
+            ? `Shap’s leave records show ${formatZar(owed.cents)} of annual leave pay owed at the year end, not yet in the books: the owner books it (Payroll → Leave). Check the leave records are complete first.`
+            : `${formatZar(bookedCents)} was booked, but the leave records now show ${formatZar(owed.cents)}: book it again (Payroll → Leave).`,
+    );
+  }
+  if (salaried || dayMonths > 0)
+    look(
+      'Leave pay and bonuses owed to employees at the year end are provided for (IFRS for SMEs 28.6)',
+      false,
+      `${salaried ? 'A bonus earned by the year end and paid after it isn’t in Shap’s leave records' : 'Shap’s leave records are for employees on payroll'}${dayMonths > 0 ? ', and Workers doesn’t for day labour (from 24 hours a month, the BCEA’s leave applies: s19(1))' : ''}: if any is owing at the year end, your accountant provides for it with a journal.`,
+    );
   // Day labour, usually employment in the law, paid outside Payroll (28.4(a)): what's owed on it isn't in the books.
   if (dayEmployees)
     look(

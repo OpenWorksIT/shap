@@ -3,6 +3,25 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## Unreleased (on develop, before the CPD audit)
+
+- **Leave, every kind of it.** Payroll → Leave: annual, sick and family responsibility leave in
+  their BCEA cycles, maternity, parental, adoption and commissioning parental leave (the parents
+  share four months and ten days since the Constitutional Court's Van Wyk order of 3 October 2025),
+  and unpaid or other leave. Each person's balances are worked out from what's recorded and their
+  terms (the days they work in a week, and annual or family responsibility leave beyond the BCEA's
+  least, under Employees), with what to look at: annual leave owed more than six months after its
+  cycle, more sick leave than the cycle gives, sick leave of more than two days without a
+  certificate, leave owed to someone who has left. Someone already on payroll has their leave
+  records start today: give what they were owed then under Employees. Unpaid days come off the
+  month's draft pay run at a day's pay (the month's salary × 3 ÷ 13 ÷ the days worked in a week),
+  and someone leaving is paid the annual leave they're owed, taxed as an annual payment (IRP5 code
+  3605). The payslip shows the leave. Once a year has ended, the owner books the annual leave pay
+  owed at its end (IFRS for SMEs 28.6) against salaries; the books audit and the statements' checks
+  say when it's missing or the records have changed since. It isn't deductible until paid (s7B):
+  the tax pack and the statements' tax estimate add the year's increase back. Figures from the leave
+  records, for you and your accountant to check: Shap isn't a labour adviser. docs/LEAVE.md.
+
 ## 1.33.0 (21 November 2026)
 
 - **A cash-flow forecast.** Accounts → Cash-flow forecast: the next 13 weeks of money in and out,

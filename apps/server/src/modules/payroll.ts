@@ -13,7 +13,7 @@
  *     SDL owed                             Cr SDL
  *     the bank (or wherever it's paid from) Cr net pay
  */
-import { addDays, addMonths, formatDate, SDL_THRESHOLD_CENTS, compact, keptNumber, uifSarsRefFor, payeRefProblem, taxNumberProblem, idNumberProblem, sdlRefFor, dividendInput, dividendTax, financialYear, microDividendTax, dwtDue, emp201Due, employeeInput, payLine, payLineInput, payRunInput, sarsPaymentInput, taxYearEnd, type AgeBand, entity, paysOutProfit, payoutWord } from '@shap/shared';
+import { addDays, addMonths, formatDate, SDL_THRESHOLD_CENTS, compact, keptNumber, uifSarsRefFor, payeRefProblem, taxNumberProblem, idNumberProblem, sdlRefFor, dividendInput, dividendTax, financialYear, microDividendTax, dwtDue, emp201Due, employeeInput, employeeLeaveProblem, payLine, payLineInput, payRunInput, sarsPaymentInput, taxYearEnd, type AgeBand, entity, paysOutProfit, payoutWord, dailyRateCents, daysWithin, monthEnd as endOfMonth, formatDays, LEAVE_KIND_INFO } from '@shap/shared';
 import PDFDocument from 'pdfkit';
 import { z } from 'zod';
 import { can, requireAccess, requireRole, userOrThrow } from '../auth.js';
@@ -25,6 +25,7 @@ import { assertOpen, centsToCsv, getSettings, q, today, toCsv, freshTotals } fro
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 import { shapFooter, usePdfFonts } from './pdf.js';
+import { balancesOn, loadLeave } from '../lib/leave.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 
@@ -75,22 +76,54 @@ function compute(e: EmployeeRow, pay: { salaryCents: number; overtimeCents: numb
   return payLine({ ...pay, payDate, age: e.ageBand, medicalMembers: e.medicalMembers, uif: e.uif, sdl });
 }
 
+/**
+ * The month's leave on a pay line (docs/LEAVE.md): unpaid leave in the run's month comes off the
+ * salary at a day's pay (BCEA s35, never more than the salary), and someone leaving in the month is
+ * paid the annual leave they're owed on their last day (s40), as the leave records have it unless
+ * the owner gave the days.
+ */
+export function leaveOnLine(leave: Awaited<ReturnType<typeof loadLeave>>[number], line: { salaryCents: number; leavePaidOutGiven: number | null }, period: string, runId: string) {
+  const start = `${period}-01`;
+  const end = endOfMonth(start);
+  const dpw = leave.terms.daysPerWeek;
+  const day = dailyRateCents(line.salaryCents, dpw);
+  const unpaidDays = Math.round(leave.entries.filter((x) => !x.paid && !x.adjustment).reduce((t, x) => t + daysWithin(x, start, end, dpw), 0) * 100) / 100;
+  const unpaidCents = Math.min(line.salaryCents, Math.round(unpaidDays * day));
+  const leaving = Boolean(leave.terms.endDate && leave.terms.endDate >= start && leave.terms.endDate <= end);
+  const outDays = !leaving ? 0 : line.leavePaidOutGiven != null ? line.leavePaidOutGiven : Math.max(0, balancesOn(leave, leave.terms.endDate!, runId).annual.owedDays);
+  return { unpaidDays, unpaidCents, leaving, outDays, outCents: Math.round(outDays * day) };
+}
+
 async function recomputeRun(tx: Tx, runId: string) {
-  const [run] = await tx<{ payDate: string }[]>`select pay_date::text from pay_runs where id = ${runId}`;
+  const [run] = await tx<{ payDate: string; period: string }[]>`select pay_date::text, period from pay_runs where id = ${runId}`;
   const settings = await getSettings(tx);
   const yearStart = `${Number(taxYearEnd(run!.payDate).slice(0, 4)) - 1}-03-01`;
-  const lines = await tx<{ id: string; salaryCents: number; overtimeCents: number; commissionCents: number; extraCents: number; employeeId: string }[]>`
-    select id, salary_cents, overtime_cents, commission_cents, extra_cents, employee_id from pay_lines where run_id = ${runId}`;
+  const lines = await tx<{ id: string; salaryCents: number; overtimeCents: number; commissionCents: number; extraCents: number; employeeId: string; leavePaidOutGiven: string | null }[]>`
+    select id, salary_cents, overtime_cents, commission_cents, extra_cents, employee_id, leave_paid_out_given from pay_lines where run_id = ${runId}`;
   for (const l of lines) {
     const [e] = await tx<EmployeeRow[]>`select * from employees where id = ${l.employeeId}`;
-    // Once-off pay already paid to this employee earlier in the tax year (other runs, paid before this one).
+    // Once-off pay already paid to this employee earlier in the tax year (other runs, paid before
+    // this one): bonuses, and leave paid out (an annual payment too).
     const [b] = await tx<{ t: number }[]>`
-      select coalesce(sum(x.extra_cents), 0)::bigint as t from pay_lines x join pay_runs r on r.id = x.run_id
+      select coalesce(sum(x.extra_cents + x.leave_paid_out_cents), 0)::bigint as t from pay_lines x join pay_runs r on r.id = x.run_id
       where x.employee_id = ${l.employeeId} and r.id <> ${runId} and r.pay_date >= ${yearStart}::date and r.pay_date < ${run!.payDate}::date`;
-    const r = compute(e!, { salaryCents: Number(l.salaryCents), overtimeCents: Number(l.overtimeCents), commissionCents: Number(l.commissionCents), extraCents: Number(l.extraCents), extraBeforeCents: Number(b!.t) }, run!.payDate, settings.sdl);
+    const [leave] = await loadLeave(tx, l.employeeId);
+    const lv = leaveOnLine(leave!, { salaryCents: Number(l.salaryCents), leavePaidOutGiven: l.leavePaidOutGiven == null ? null : Number(l.leavePaidOutGiven) }, run!.period, runId);
+    // Leave paid out is taxed as an annual payment (SARS: code 3605), like a bonus.
+    const r = compute(e!, { salaryCents: Number(l.salaryCents) - lv.unpaidCents, overtimeCents: Number(l.overtimeCents), commissionCents: Number(l.commissionCents), extraCents: Number(l.extraCents) + lv.outCents, extraBeforeCents: Number(b!.t) }, run!.payDate, settings.sdl);
     await tx`update pay_lines set is_director = ${e!.isDirector}, gross_cents = ${r.grossCents}, paye_cents = ${r.payeCents}, uif_employee_cents = ${r.uifEmployeeCents},
-      uif_employer_cents = ${r.uifEmployerCents}, sdl_cents = ${r.sdlCents}, net_cents = ${r.netCents} where id = ${l.id}`;
+      uif_employer_cents = ${r.uifEmployerCents}, sdl_cents = ${r.sdlCents}, net_cents = ${r.netCents},
+      unpaid_leave_days = ${lv.unpaidDays}, unpaid_leave_cents = ${lv.unpaidCents}, leave_paid_out_days = ${lv.outDays}, leave_paid_out_cents = ${lv.outCents} where id = ${l.id}`;
   }
+}
+
+/** Draft pay runs whose month a leave entry (or a change to someone's leave) touches pick it up. */
+export async function recomputeDrafts(tx: Tx, employeeId: string, from?: string, to?: string) {
+  const runs = await tx<{ id: string }[]>`
+    select distinct r.id from pay_runs r join pay_lines l on l.run_id = r.id
+    where r.status = 'draft' and l.employee_id = ${employeeId}
+      and (${from ?? null}::date is null or (r.period || '-01')::date <= ${to ?? from ?? null}::date and ((r.period || '-01')::date + interval '1 month' - interval '1 day')::date >= ${from ?? null}::date)`;
+  for (const r of runs) await recomputeRun(tx, r.id);
 }
 
 const runTotals = `
@@ -138,7 +171,7 @@ export async function sdlLine(db: Db, sdlOn: boolean, now: string): Promise<{ pa
   const from = addDays(addMonths(now, -12), 1);
   const [r] = await db<{ payroll: string; day: string }[]>`
     select
-      (select coalesce(sum(l.salary_cents + l.overtime_cents + l.commission_cents + l.extra_cents), 0) from pay_lines l join pay_runs r on r.id = l.run_id
+      (select coalesce(sum(l.salary_cents - l.unpaid_leave_cents + l.overtime_cents + l.commission_cents + l.extra_cents + l.leave_paid_out_cents), 0) from pay_lines l join pay_runs r on r.id = l.run_id
         where r.status = 'final' and r.pay_date between ${from}::date and ${now}::date)::bigint as payroll,
       (select coalesce(sum(e.wage_cents), 0) from labour_entries e join workers w on w.id = e.worker_id
         where w.kind <> 'subcontractor' and e.date between ${from}::date and ${now}::date)::bigint as day`;
@@ -218,7 +251,7 @@ export async function emp501(db: Db, taxYear: number, kind: 'interim' | 'annual'
     from m order by m.period`;
   const people = await db<{ id: string; name: string; idNumber: string; taxNumber: string; startDate: string; endDate: string | null; salary: number; overtime: number; commission: number; bonus: number; gross: number; paye: number; uif: number; sdl: number; first: string; last: string }[]>`
     select e.id, e.name, e.id_number, e.tax_number, e.start_date, e.end_date,
-      sum(l.salary_cents)::bigint as salary, sum(l.overtime_cents)::bigint as overtime, sum(l.commission_cents)::bigint as commission, sum(l.extra_cents)::bigint as bonus,
+      sum(l.salary_cents - l.unpaid_leave_cents)::bigint as salary, sum(l.overtime_cents)::bigint as overtime, sum(l.commission_cents)::bigint as commission, sum(l.extra_cents + l.leave_paid_out_cents)::bigint as bonus,
       sum(l.gross_cents)::bigint as gross, sum(l.paye_cents)::bigint as paye, sum(l.uif_employee_cents + l.uif_employer_cents)::bigint as uif, sum(l.sdl_cents)::bigint as sdl,
       min(r.pay_date)::text as first, max(r.pay_date)::text as last
     from pay_lines l join pay_runs r on r.id = l.run_id join employees e on e.id = l.employee_id
@@ -228,6 +261,7 @@ export async function emp501(db: Db, taxYear: number, kind: 'interim' | 'annual'
   const employees = people.map((p) => {
     const codes = {
       3601: n(p.salary),
+      // Annual payments: bonuses, and leave paid out on leaving (SARS).
       3605: n(p.bonus),
       3606: n(p.commission),
       3607: n(p.overtime),
@@ -292,6 +326,8 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/employees', { preHandler: requireAccess('payroll.run') }, async (req) => {
     const user = userOrThrow(req);
     const input = parse(employeeInput, req.body);
+    const leaveProblem = employeeLeaveProblem(input);
+    if (leaveProblem) throw badRequest(leaveProblem);
     const [row] = await sql<{ id: string }[]>`insert into employees ${sql(input as never)} returning id`;
     await audit(sql, { userId: user.id, action: 'create', entity: 'employee', entityId: row!.id, ip: req.ip });
     return row;
@@ -306,12 +342,15 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
     const body = (req.body ?? {}) as { idNumber?: unknown; taxNumber?: unknown };
     const kept = (k: 'idNumber' | 'taxNumber') => Boolean(was) && compact(String(body[k] ?? '')) === compact(was![k] ?? '');
     const input = parse(employeeInput.extend({ ...(kept('idNumber') ? { idNumber: keptNumber(20) } : {}), ...(kept('taxNumber') ? { taxNumber: keptNumber(20) } : {}) }), req.body);
+    const leaveProblem = employeeLeaveProblem(input);
+    if (leaveProblem) throw badRequest(leaveProblem);
+    // Leave dated before a leave record is refused: the records start on or after the day they did.
+    const [early] = await sql<{ d: string }[]>`select min(from_date)::text as d from leave_entries where employee_id = ${id} and not adjustment`;
+    if (early?.d && early.d < input.startDate) throw badRequest(`Leave is recorded from ${formatDate(early.d, 'long')}, before that start date: change or remove that leave first`);
     const r = await sql`update employees set ${sql(input as never)} where id = ${id}`;
     if (!r.count) throw notFound('Employee');
     // Draft pay runs pick up the change.
-    await sql.begin(async (tx) => {
-      for (const run of await tx<{ id: string }[]>`select r.id from pay_runs r join pay_lines l on l.run_id = r.id where r.status = 'draft' and l.employee_id = ${id}`) await recomputeRun(tx, run.id);
-    });
+    await sql.begin(async (tx) => recomputeDrafts(tx, id));
     await audit(sql, { userId: user.id, action: 'update', entity: 'employee', entityId: id, ip: req.ip });
     return { ok: true };
   });
@@ -350,7 +389,7 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
     );
     if (!run) throw notFound('Pay run');
     const lines = await db<{ employeeId: string; name: string; [k: string]: unknown }[]>`
-      select l.*, e.name, e.id_number, e.tax_number from pay_lines l join employees e on e.id = l.employee_id where l.run_id = ${id} order by e.name`;
+      select l.*, e.name, e.id_number, e.tax_number, e.end_date::text as end_date from pay_lines l join employees e on e.id = l.employee_id where l.run_id = ${id} order by e.name`;
     return { run, lines };
   };
 
@@ -381,7 +420,8 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
     const input = parse(payLineInput, req.body);
     await draft(sql, id);
     await sql.begin(async (tx) => {
-      const r = await tx`update pay_lines set salary_cents = ${input.salaryCents}, overtime_cents = ${input.overtimeCents}, commission_cents = ${input.commissionCents}, extra_cents = ${input.extraCents}, note = ${input.note} where run_id = ${id} and employee_id = ${employeeId}`;
+      const r = await tx`update pay_lines set salary_cents = ${input.salaryCents}, overtime_cents = ${input.overtimeCents}, commission_cents = ${input.commissionCents}, extra_cents = ${input.extraCents}, note = ${input.note},
+        leave_paid_out_given = ${input.leavePaidOutDays} where run_id = ${id} and employee_id = ${employeeId}`;
       if (!r.count) throw notFound('Employee in this pay run');
       await recomputeRun(tx, id);
     });
@@ -460,7 +500,27 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
       from pay_lines l join pay_runs r on r.id = l.run_id
       where l.employee_id = ${employeeId} and r.pay_date between ${yearStart}::date and ${run.payDate}::date and (r.status = 'final' or r.id = ${id})`;
     const settings = await getSettings(sql);
-    const pdf = await renderPayslip({ settings, run, line: line as never, ytd: ytd! });
+    // Leave: what was taken in the month, and the balances at its end (or on the last day worked).
+    const [leave] = await loadLeave(sql, employeeId);
+    const monthStart = `${run.period}-01`;
+    const monthLast = endOfMonth(monthStart);
+    const on = leave!.terms.endDate && leave!.terms.endDate < monthLast ? leave!.terms.endDate : monthLast;
+    const b = balancesOn(leave!, on);
+    const dpw = leave!.terms.daysPerWeek;
+    const taken = Object.entries(
+      leave!.entries.filter((x) => !x.adjustment).reduce<Record<string, number>>((t, x) => {
+        const d = daysWithin(x, monthStart, monthLast, dpw);
+        if (d > 0) t[x.kind] = (t[x.kind] ?? 0) + d;
+        return t;
+      }, {}),
+    ).map(([k, d]) => `${LEAVE_KIND_INFO[k as keyof typeof LEAVE_KIND_INFO].label}: ${formatDays(d)}`);
+    const leaveRows: [string, string][] = [
+      ['Annual leave owed', formatDays(b.annual.owedDays)],
+      [`Sick leave left (cycle to ${formatDate(b.sick.cycle.end)})`, formatDays(b.sick.leftDays)],
+      ...(b.family.eligible ? ([[`Family responsibility leave left (to ${formatDate(b.family.cycle.end)})`, formatDays(b.family.leftDays)]] as [string, string][]) : []),
+      ...(taken.length ? ([['Taken this month', taken.join('; ')]] as [string, string][]) : []),
+    ];
+    const pdf = await renderPayslip({ settings, run, line: line as never, ytd: ytd!, leave: leaveRows, leaveOn: on });
     const name = `Payslip ${run.period} - ${line.name}.pdf`.replace(/[^\w.\- ]/g, '');
     reply.header('content-type', 'application/pdf');
     reply.header('content-disposition', `inline; filename="${name}"`);
@@ -555,7 +615,7 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
     const yearEnd = taxYearEnd(q(req).date ?? today());
     const yearStart = `${Number(yearEnd.slice(0, 4)) - 1}-03-01`;
     const rows = await sql<{ name: string; idNumber: string; taxNumber: string; salary: number; overtime: number; commission: number; bonus: number; gross: number; paye: number; uifEmployee: number; uifEmployer: number; sdl: number; net: number; months: number }[]>`
-      select e.name, e.id_number, e.tax_number, sum(l.salary_cents)::bigint as salary, sum(l.overtime_cents)::bigint as overtime, sum(l.commission_cents)::bigint as commission, sum(l.extra_cents)::bigint as bonus,
+      select e.name, e.id_number, e.tax_number, sum(l.salary_cents - l.unpaid_leave_cents)::bigint as salary, sum(l.overtime_cents)::bigint as overtime, sum(l.commission_cents)::bigint as commission, sum(l.extra_cents + l.leave_paid_out_cents)::bigint as bonus,
         sum(l.gross_cents)::bigint as gross, sum(l.paye_cents)::bigint as paye, sum(l.uif_employee_cents)::bigint as uif_employee,
         sum(l.uif_employer_cents)::bigint as uif_employer, sum(l.sdl_cents)::bigint as sdl, sum(l.net_cents)::bigint as net, count(*)::int as months
       from pay_lines l join pay_runs r on r.id = l.run_id join employees e on e.id = l.employee_id
@@ -566,8 +626,8 @@ export function registerPayrollRoutes(app: FastifyInstance, ctx: Ctx): void {
       reply.header('content-disposition', `attachment; filename="payroll-tax-year-${yearEnd.slice(0, 4)}.csv"`);
       return reply.send(
         toCsv(
-          // IRP5 codes: 3601 salary, 3607 overtime, 3606 commission, 3605 annual payment (bonus).
-          ['Employee', 'ID number', 'Tax number', 'Months', 'Salary (3601)', 'Overtime (3607)', 'Commission (3606)', 'Bonus (3605)', 'Gross pay', 'PAYE', 'UIF (employee)', 'UIF (employer)', 'SDL', 'Net pay'],
+          // IRP5 codes: 3601 salary (less unpaid leave), 3607 overtime, 3606 commission, 3605 annual payments (bonuses, leave paid out).
+          ['Employee', 'ID number', 'Tax number', 'Months', 'Salary (3601)', 'Overtime (3607)', 'Commission (3606)', 'Bonus and leave paid out (3605)', 'Gross pay', 'PAYE', 'UIF (employee)', 'UIF (employer)', 'SDL', 'Net pay'],
           rows.map((r) => [r.name, r.idNumber, r.taxNumber, r.months, centsToCsv(r.salary), centsToCsv(r.overtime), centsToCsv(r.commission), centsToCsv(r.bonus), centsToCsv(r.gross), centsToCsv(r.paye), centsToCsv(r.uifEmployee), centsToCsv(r.uifEmployer), centsToCsv(r.sdl), centsToCsv(r.net)]),
         ),
       );
@@ -701,8 +761,10 @@ const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'Ju
 function renderPayslip(d: {
   settings: Awaited<ReturnType<typeof getSettings>>;
   run: { period: string; payDate: string };
-  line: { name: string; idNumber: string; taxNumber: string; isDirector: boolean; salaryCents: number; overtimeCents: number; commissionCents: number; extraCents: number; grossCents: number; payeCents: number; uifEmployeeCents: number; uifEmployerCents: number; sdlCents: number; netCents: number; note: string };
+  line: { name: string; idNumber: string; taxNumber: string; isDirector: boolean; salaryCents: number; overtimeCents: number; commissionCents: number; extraCents: number; grossCents: number; payeCents: number; uifEmployeeCents: number; uifEmployerCents: number; sdlCents: number; netCents: number; note: string; unpaidLeaveDays: string | number; unpaidLeaveCents: string | number; leavePaidOutDays: string | number; leavePaidOutCents: string | number };
   ytd: { gross: number; paye: number; uif: number };
+  leave: [string, string][];
+  leaveOn: string;
 }): Promise<Buffer> {
   const { settings, run, line, ytd } = d;
   const pdf = new PDFDocument({ size: 'A4', margins: { top: 48, bottom: 48, left: 48, right: 48 }, info: { Title: `Payslip ${run.period} ${line.name}` } });
@@ -733,12 +795,25 @@ function renderPayslip(d: {
     let yy = pdf.y + 6;
     for (const [label, cents] of rows) {
       pdf.font(f.regular).fontSize(10).fillColor('#1d262c').text(label, L, yy, { width: W - 140 });
-      pdf.text(money(cents), L + W - 140, yy, { width: 140, align: 'right' });
+      pdf.text(cents < 0 ? `−${money(-cents)}` : money(cents), L + W - 140, yy, { width: 140, align: 'right' });
       yy += 18;
     }
     return yy + 8;
   };
-  top = table('Earnings', [['Salary', line.salaryCents], ...(line.overtimeCents ? ([['Overtime', line.overtimeCents]] as [string, number][]) : []), ...(line.commissionCents ? ([['Commission', line.commissionCents]] as [string, number][]) : []), ...(line.extraCents ? ([[line.note || 'Bonus', line.extraCents]] as [string, number][]) : [])], top);
+  const unpaid = Number(line.unpaidLeaveCents);
+  const out = Number(line.leavePaidOutCents);
+  top = table(
+    'Earnings',
+    [
+      ['Salary', line.salaryCents],
+      ...(unpaid ? ([[`Unpaid leave (${formatDays(Number(line.unpaidLeaveDays))})`, -unpaid]] as [string, number][]) : []),
+      ...(line.overtimeCents ? ([['Overtime', line.overtimeCents]] as [string, number][]) : []),
+      ...(line.commissionCents ? ([['Commission', line.commissionCents]] as [string, number][]) : []),
+      ...(line.extraCents ? ([[line.note || 'Bonus', line.extraCents]] as [string, number][]) : []),
+      ...(out ? ([[`Annual leave paid out (${formatDays(Number(line.leavePaidOutDays))})`, out]] as [string, number][]) : []),
+    ],
+    top,
+  );
   top = table('Deductions', [['PAYE (income tax)', line.payeCents], ['UIF (1%)', line.uifEmployeeCents]], top);
 
   pdf.rect(L, top, W, 34).fill(accent);
@@ -747,7 +822,16 @@ function renderPayslip(d: {
   top += 52;
 
   top = table('Paid by the employer (not deducted)', [['UIF (employer, 1%)', line.uifEmployerCents], ...(line.sdlCents ? ([['Skills Development Levy (1%)', line.sdlCents]] as [string, number][]) : [])], top);
-  table('This tax year so far', [['Gross pay', ytd.gross], ['PAYE', ytd.paye], ['UIF', ytd.uif]], top);
+  top = table('This tax year so far', [['Gross pay', ytd.gross], ['PAYE', ytd.paye], ['UIF', ytd.uif]], top);
+  // Leave, as Shap's leave records have it on the month's last day (or the last day worked).
+  pdf.font(f.bold).fontSize(8).fillColor('#66737b').text(`LEAVE ON ${formatDate(d.leaveOn, 'long').toUpperCase()}`, L, top, { characterSpacing: 0.8 });
+  let ly = pdf.y + 6;
+  for (const [label, value] of d.leave) {
+    pdf.font(f.regular).fontSize(10).fillColor('#1d262c').text(label, L, ly, { width: W - 200 });
+    const h = pdf.heightOfString(value, { width: 200 });
+    pdf.text(value, L + W - 200, ly, { width: 200, align: 'right' });
+    ly += Math.max(18, h + 4);
+  }
 
   pdf.page.margins.bottom = 0;
   pdf.font(f.regular).fontSize(8).fillColor('#66737b').text(`PAYE on SARS’s tables for the year ending ${taxYearEnd(run.payDate)}.`, L, pdf.page.height - 70, { width: W, align: 'center' });

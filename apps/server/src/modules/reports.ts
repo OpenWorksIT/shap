@@ -169,7 +169,7 @@ function sendCsv(reply: FastifyReply, filename: string, csv: string) {
 /** Journals brought in from another package (books-import.ts): changed by bringing the period in again. */
 const BROUGHT_IN = 'This entry was brought in from another package (Accounts → From another package): change it in their package and bring that file in again, or take that import out. Your own adjustments go in a journal of your own.';
 
-const MADE_BY_APP: Record<string, string> = { payroll: 'a pay run (Payroll)', dividend: 'a dividend (Payroll → Dividends)', sars: 'a payment to SARS (Payroll → SARS)', profit_share: 'the partners’ profit share (Accounts → Year end)' };
+const MADE_BY_APP: Record<string, string> = { payroll: 'a pay run (Payroll)', dividend: 'a dividend (Payroll → Dividends)', sars: 'a payment to SARS (Payroll → SARS)', profit_share: 'the partners’ profit share (Accounts → Year end)', leave_pay: 'the leave pay owed at the year end (Payroll → Leave)' };
 
 export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { sql } = ctx;

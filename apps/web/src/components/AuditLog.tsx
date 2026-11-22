@@ -43,6 +43,8 @@ const RECORDS: Record<string, string> = {
   brand: 'Trading name',
   partner: 'Partner',
   profit_share: 'Profit share',
+  leave: 'Leave',
+  leave_pay: 'Leave pay owed',
   wage_payment: 'Wage payment',
   sars_payment: 'Payment to SARS',
   tax_estimate: 'Tax estimate',
