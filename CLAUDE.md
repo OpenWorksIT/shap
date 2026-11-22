@@ -16,5 +16,9 @@ update (CPDAUDIT.md section 2, docs/SARS.md).
   `.github/hosts.json`, saying what goes there and on whose say-so. Nothing personal leaves the
   server without the owner's yes (`test/privacy.test.ts`).
 - **Never move `stable` by hand**: CI moves it when everything passes. Servers update from it.
+- **Work goes on `develop`**, not main. Its draft pull request into main runs CI on every push. main
+  moves only at a release, once the CPD audit is done: fast-forward it to `develop`'s audited commit
+  (`git push origin <sha>:main`), then open a new draft pull request from `develop`. Plan the
+  release's reviews before starting them.
 - **Shap Pocket** (OpenWorksIT/shap-pocket) shares the accounting code: the same fixes go there.
 - Test and demo data is always made up. Commits are by GoufR42 <tiaan@tedvdm.com>.
