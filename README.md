@@ -7,6 +7,11 @@ Free and open source. It runs on your own VPS, and you open it on your PC or pho
 
 <br clear="left">
 
+Shap is a free service from OpenWorks IT, who are not accountants, auditors or tax practitioners.
+Its tax figures, scores and forecasts are estimates worked out from what's captured, not advice:
+check them with your accountant or SARS. For a one-person business on a phone, there's
+[Shap Pocket](https://github.com/OpenWorksIT/shap-pocket).
+
 Shap replaces the job spreadsheet + invoicing package combination with one place that knows how
 they fit together. When you log a day's work against a job, the job's profit, the worker's pay
 and the books all update. Invoice the job, and its costs move into cost of sales in the same month.
@@ -40,6 +45,8 @@ The name is the shaka: thumb and pinky out, *shap, all good*.
   Compensation Fund on employees' pay; UIF and the BCEA's working-hours and leave rules from 24
   hours a month), but doesn't work out PAYE, UIF or the Compensation Fund on day wages and isn't
   advice: see [docs/CASUAL_LABOUR.md](docs/CASUAL_LABOUR.md).
+- **Payroll** (optional). Employees on a monthly salary: pay runs with PAYE, UIF and SDL on SARS's
+  tables, payslips, the EMP201 each month and paying it, and dividends with dividends tax withheld.
 - **People who sign in.** Everyone signs in as themselves: the owner, the accountant (read only),
   or staff who do only the jobs ticked for them, from a profile (Teller, Admin, Site staff, or one
   you make) changed for them if need be. Change a profile and everyone on it has the change at
@@ -114,6 +121,10 @@ The name is the shaka: thumb and pinky out, *shap, all good*.
   Shap out or checking its figures, and wipes them again ([docs/TEST_SERVER.md](docs/TEST_SERVER.md)).
   A **company file** carries a whole setup (trading names, logos, clients, agreed year ends)
   from one server to another.
+- **Shap Accountant** (optional). For an accounting, bookkeeping or tax practice: the practice's
+  own Shap keeps its clients' books too, each in a database of its own, with one list of the
+  clients, what Shap's checks found in each and some of the returns coming up. It needs a server of
+  its own. See [docs/ACCOUNTANT.md](docs/ACCOUNTANT.md).
 
 ### How the books work
 
@@ -205,9 +216,10 @@ recovery codes, secrets encrypted at rest, Argon2id passwords), and an append-on
 ## How every update is checked
 
 Like an accountant's continuing professional development, every update goes through the CPD
-audit before any server or phone takes it ([CPDAUDIT.md](CPDAUDIT.md)): four reviews (security and
+audit before any server or phone takes it ([CPDAUDIT.md](CPDAUDIT.md)): five reviews (security and
 privacy with a penetration test, IFRS for SMEs and company law, SARS and tax, accounting and
-arithmetic), the tests and CI, each server checking itself, and the books checking themselves.
+arithmetic, and the words on screen and what they promise), each by a reviewer that didn't write the
+change, the tests and CI, each server checking itself, and the books checking themselves.
 Every SARS figure is listed with its source in [docs/SARS.md](docs/SARS.md).
 
 ## Security

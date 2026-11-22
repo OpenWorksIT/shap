@@ -1,8 +1,8 @@
 # Goalposts: what's being worked on
 
 The development list behind the website's goalposts page
-([openworks.co.za/shap/goalposts](https://openworks.co.za/shap/goalposts/)): what's next, what's
-further off, and what isn't planned, each with how hard it looks and why. Keep the two in step:
+([openworks.co.za/shap/goalposts](https://openworks.co.za/shap/goalposts/)): what's being built,
+what's next, what's further off, and what isn't planned, each with how hard it looks and why. Keep the two in step:
 when something here ships or moves, the page moves with it (and the site's FAQ, "What are you
 working on next?"). These are intentions, not promises, and there are no dates.
 
@@ -27,17 +27,22 @@ Started in November 2026 from the gaps people named, less what Shap already does
 | A 13-week cash-flow forecast | 1.33 | Medium: from invoices, bills, payroll, day wages, VAT and the monthly costs already found |
 | Budgets, month by month, against actual | 1.33 | Medium: a new table and screen; the actuals are the income statement's |
 
+## Being built now
+
+| What | How hard | Why |
+| --- | --- | --- |
+| Leave balances in payroll, for every kind of leave | Medium | The BCEA's annual, sick and family responsibility leave in their own cycles, maternity, parental, adoption and commissioning parental leave, and unpaid or other leave the business gives: taken and owed, shown on the payslip, and the annual leave pay owed at the year end as a liability in the books (a short-term compensated absence under the IFRS for SMEs) |
+| The iPhone app for Shap Pocket | Medium | Built and with Apple for review: the iOS build runs in CI and goes to TestFlight |
+
 ## Next
 
 | What | How hard | Why |
 | --- | --- | --- |
 | Progress claims and retention, for contractors | Medium | Jobs and quotes are there. A claim in stages against the quote, and the retention a client holds back as a debtor of its own until it's released, need a new kind of invoice, an account, and the VAT timing for retention checked with the SARS review |
 | Approvals: supplier bills over an amount the owner sets wait for the owner | Low to medium | Bills, roles and access tasks are there; an approval state, a threshold in Settings, and who may approve |
-| Leave balances in payroll | Medium | Annual and sick leave under the BCEA's cycles, shown on the payslip, and leave pay owed at the year end as a liability in the books (a short-term compensated absence) |
 | Purchase orders, turned into supplier invoices when the stock arrives | Medium | Supplier invoices with short supplied are there; an order of its own, in its own numbers, received in part or in full |
 | Stock records in Shap Pocket | Medium | The accounting code is shared; the screens and the weighted average cost on the phone, with the same audit |
 | A wear-and-tear schedule beside the books' depreciation, as an estimate | Medium | SARS's allowances (s11(e) at Interpretation Note 47's rates, s12C, a small business corporation's s12E) are a table to keep current each year, and each asset's tax value; an estimate for the tax practitioner, like the other tax figures |
-| The iPhone app for Shap Pocket | Medium | The iOS build runs in CI already; what's left is mostly Apple's: the developer account, App Store review and the privacy details |
 
 ## Further off
 
