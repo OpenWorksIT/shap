@@ -63,6 +63,9 @@ export const SHARE_TABLES: { table: string; leaveOut?: string[]; later?: string[
   { table: 'employees', leaveOut: ['id_number', 'tax_number', 'bank_details'] },
   { table: 'pay_runs' },
   { table: 'pay_lines' },
+  // What the illness was, or anything else personal, may be in a leave entry's note: it stays.
+  { table: 'leave_entries', leaveOut: ['note'] },
+  { table: 'leave_pay_years' },
   { table: 'dividends' },
   { table: 'sars_payments' },
   { table: 'partners' },

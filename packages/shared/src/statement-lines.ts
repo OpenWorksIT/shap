@@ -145,6 +145,8 @@ export const SYSTEM_LINES: Record<string, StatementLineKey> = {
   uif_payable: 'trade_payables',
   sdl_payable: 'trade_payables',
   dwt_payable: 'trade_payables',
+  // Accrued leave pay: an accrual within trade and other payables, current (IFRS for SMEs 28.6).
+  leave_payable: 'trade_payables',
   income_tax_payable: 'current_tax_liability',
   // No fixed terms of repayment, so repayable on demand: current (IFRS for SMEs 4.7(d)). Moved to
   // non-current when the lenders have agreed in writing not to call it within twelve months.

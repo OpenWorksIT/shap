@@ -3,6 +3,42 @@
 What changed in each version of Shap, newest first. Settings → Updates & backups shows the
 entries newer than the version you're running before you update.
 
+## Unreleased (on develop, before the CPD audit)
+
+- **Leave, every kind of it.** Payroll → Leave: annual, sick and family responsibility leave in
+  their BCEA cycles, maternity, parental, adoption and commissioning parental leave (the parents
+  share four months and ten days since the Constitutional Court's Van Wyk order of 3 October 2025),
+  and unpaid or other leave. Each person's balances are worked out from what's recorded and their
+  terms (the days they work in a week, and annual or family responsibility leave beyond the BCEA's
+  least, under Employees), with what to look at: annual leave owed more than six months after its
+  cycle, more sick leave than the cycle gives, sick leave of more than two days without a
+  certificate, leave owed to someone who has left. Someone already on payroll has their leave
+  records start today: give what they were owed then under Employees. Unpaid days come off the
+  month's draft pay run at a day's pay (the month's salary × 3 ÷ 13 ÷ the days worked in a week),
+  and someone leaving is paid the annual leave they're owed, taxed as an annual payment (IRP5 code
+  3605). The payslip shows the leave. Once a year has ended, the owner books the annual leave pay
+  owed at its end (IFRS for SMEs 28.6) against salaries; the books audit and the statements' checks
+  say when it's missing or the records have changed since. It isn't deductible until paid (s7B):
+  the tax pack and the statements' tax estimate add the year's increase back. Figures from the leave
+  records, for you and your accountant to check: Shap isn't a labour adviser. docs/LEAVE.md.
+- **What 1.33's audit noted, put right:**
+  - The forecast's VAT: a refund that came in during the last period for an older one is taken
+    against the older period only, never against the last period's or this one's (it could
+    understate the VAT owed for an ended period); and when nothing has come in, the overdue debt is
+    as much as the refunds owed, and SARS has had the refund to pay (21 business days after its
+    VAT201 was due), the refund is taken as kept against the debt (TAA s191), and the forecast says
+    so (check your SARS statement).
+  - The forecast takes dividends tax owed in the books beyond your DTR01s (brought in when moving
+    in, or a journal) as going out now, as it does PAYE; and a worker's advance comes off other
+    amounts owed on the wages account only when it was paid since they came onto it.
+  - An asset made from a cost checks that the cost's own period is open (its VAT moves into box
+    14 on the register), and so does changing or deleting it.
+  - A cost type's change of kind is in the audit log, with what it moved between accounts (work in
+    progress into an expense, or back) by financial year.
+  - Moving a used payment account onto an account on another line of the statements is refused
+    (between two lines off cash, or from cash to a bank overdraft), as onto or off the cash line
+    was: change the account's line instead, after checking with your accountant.
+
 ## 1.33.0 (21 November 2026)
 
 - **A cash-flow forecast.** Accounts → Cash-flow forecast: the next 13 weeks of money in and out,

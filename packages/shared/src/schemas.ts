@@ -10,6 +10,7 @@ z.config({
 import { BUSINESS_TYPES } from './entities.js';
 import { clientVatNumberProblem, compact, idNumberProblem, taxNumberProblem } from './ids.js';
 import { PURCHASE_VAT_CODES, SALE_VAT_CODES } from './vat.js';
+import { bceaAnnualDays, FAMILY_REASONS, LEAVE_KINDS, type FamilyReason } from './leave.js';
 import { VAT_CATEGORIES } from './tax.js';
 import {
   ACCOUNT_TYPES,
@@ -510,8 +511,52 @@ export const employeeInput = z.object({
   endDate: isoDate.nullable().default(null),
   bankDetails: text(300).default(''),
   active: z.boolean().default(true),
+  /** Leave (packages/shared leave.ts): the days worked in a usual week, the annual and family responsibility leave in a cycle. */
+  leaveDaysPerWeek: z.number().min(0.5, 'Give the days they work in a usual week').max(7, 'A week has seven days').default(5),
+  /** Null: the BCEA's three weeks for the days they work. */
+  annualLeaveDays: z.number().min(0).max(366).nullable().default(null),
+  familyLeaveDays: z.number().min(0).max(30).default(3),
+  /** When Shap's leave records start, if after the start date, and what was owed or taken by then. */
+  leaveFrom: isoDate.nullable().default(null),
+  leaveOpeningAnnual: z.number().min(-366).max(366).default(0),
+  leaveOpeningSick: z.number().min(0).max(366).default(0),
+  leaveOpeningFamily: z.number().min(0).max(30).default(0),
 });
+/** What's wrong with an employee's leave terms: less annual leave than the BCEA's three weeks (s20(2)), or records starting before they did. */
+export function employeeLeaveProblem(e: { leaveDaysPerWeek: number; annualLeaveDays: number | null; leaveFrom: string | null; startDate: string }): string | null {
+  const least = bceaAnnualDays(e.leaveDaysPerWeek);
+  if (e.annualLeaveDays != null && e.annualLeaveDays < least) return `The BCEA gives at least three weeks’ annual leave a year: ${least} working days for ${e.leaveDaysPerWeek} days a week`;
+  if (e.leaveFrom && e.leaveFrom < e.startDate) return 'Leave records start on or after the day they started';
+  return null;
+}
 export type EmployeeInput = z.infer<typeof employeeInput>;
+
+/** Leave taken (or, for annual leave, added or taken off by an adjustment with its reason). */
+export const leaveInput = z
+  .object({
+    employeeId: uuid,
+    kind: z.enum(LEAVE_KINDS),
+    adjustment: z.boolean().default(false),
+    fromDate: isoDate,
+    toDate: isoDate,
+    days: z.number().min(-366).max(366),
+    paid: z.boolean().optional(),
+    /** Sick leave: a medical certificate was handed in (s23). */
+    certificate: z.boolean().default(false),
+    /** Family responsibility leave: why (s27(2)). */
+    reason: z.enum(['', ...(Object.keys(FAMILY_REASONS) as FamilyReason[])]).default(''),
+    note: text(300).default(''),
+  })
+  .superRefine((l, ctx) => {
+    if (l.toDate < l.fromDate) ctx.addIssue({ code: 'custom', path: ['toDate'], message: 'The last day is before the first' });
+    if (l.adjustment) {
+      if (l.kind !== 'annual') ctx.addIssue({ code: 'custom', path: ['kind'], message: 'Only annual leave is adjusted: record other leave as taken' });
+      if (l.days === 0) ctx.addIssue({ code: 'custom', path: ['days'], message: 'Give the days added (or, with a minus, taken off)' });
+      if (!l.note.trim()) ctx.addIssue({ code: 'custom', path: ['note'], message: 'Say why: an adjustment needs its reason' });
+    } else if (l.days <= 0) ctx.addIssue({ code: 'custom', path: ['days'], message: 'Give the working days taken' });
+    if (l.kind === 'family' && !l.adjustment && !l.reason) ctx.addIssue({ code: 'custom', path: ['reason'], message: 'Say what it was for: a sick child, or a death in the family' });
+  });
+export type LeaveInput = z.infer<typeof leaveInput>;
 
 export const payRunInput = z.object({
   period: z.string().regex(/^\d{4}-\d{2}$/, 'Choose the month'),
@@ -527,6 +572,8 @@ export const payLineInput = z.object({
   /** A bonus or other once-off payment. */
   extraCents: positiveCents.default(0),
   note: text(200).default(''),
+  /** Annual leave paid out on leaving (s40): null for the days Shap works out from the leave records. */
+  leavePaidOutDays: z.number().min(0).max(366).nullable().default(null),
 });
 
 export const dividendInput = z.object({

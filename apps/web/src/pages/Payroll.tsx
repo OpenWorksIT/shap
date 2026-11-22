@@ -4,7 +4,8 @@
  */
 import { useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AGE_BAND_LABELS, formatDate, formatZar, idNumberProblem, latePayNote, taxNumberProblem, todayIso, type AgeBand, entity, paysOutProfit } from '@shap/shared';
+import { AGE_BAND_LABELS, formatDate, formatZar, idNumberProblem, latePayNote, taxNumberProblem, todayIso, type AgeBand, entity, paysOutProfit, bceaAnnualDays, formatDays } from '@shap/shared';
+import { LeaveTab } from './Leave';
 import { FileButton } from '../components/Files';
 import { PageHead } from '../components/Shell';
 import { Drawer, Empty, ErrorBox, Field, Icon, Loading, Money, MoneyInput, Tabs, useToast } from '../components/ui';
@@ -14,7 +15,7 @@ import { useAuthed } from '../lib/session';
 import { UNEXPECTED } from '../lib/words';
 import { EstimateNote } from '../components/EstimateNote';
 
-type Tab = 'runs' | 'people' | 'sars' | 'dividends';
+type Tab = 'runs' | 'people' | 'leave' | 'sars' | 'dividends';
 
 interface Employee {
   id: string;
@@ -30,6 +31,13 @@ interface Employee {
   endDate: string | null;
   bankDetails: string;
   active: boolean;
+  leaveDaysPerWeek: number | string;
+  annualLeaveDays: number | string | null;
+  familyLeaveDays: number | string;
+  leaveFrom: string | null;
+  leaveOpeningAnnual: number | string;
+  leaveOpeningSick: number | string;
+  leaveOpeningFamily: number | string;
 }
 interface RunRow {
   id: string;
@@ -58,6 +66,12 @@ interface Line {
   sdlCents: number;
   netCents: number;
   note: string;
+  endDate: string | null;
+  unpaidLeaveDays: number | string;
+  unpaidLeaveCents: number | string;
+  leavePaidOutDays: number | string;
+  leavePaidOutGiven: number | string | null;
+  leavePaidOutCents: number | string;
 }
 
 const monthName = (period: string) => new Date(`${period}-01T00:00:00Z`).toLocaleDateString('en-ZA', { month: 'long', year: 'numeric', timeZone: 'UTC' });
@@ -75,6 +89,7 @@ export default function PayrollPage() {
       ? [
           { value: 'runs' as Tab, label: 'Pay runs' },
           { value: 'people' as Tab, label: 'Employees' },
+          { value: 'leave' as Tab, label: 'Leave' },
         ]
       : []),
     { value: 'sars' as Tab, label: 'SARS' },
@@ -86,6 +101,7 @@ export default function PayrollPage() {
       <Tabs<Tab> value={tab} onChange={(t) => setParams({ tab: t }, { replace: true })} tabs={tabs} />
       {tab === 'runs' && payroll && <Runs />}
       {tab === 'people' && payroll && <Employees />}
+      {tab === 'leave' && payroll && <LeaveTab />}
       {tab === 'sars' && <Sars />}
       {tab === 'dividends' && dividends && <Dividends />}
     </div>
@@ -231,6 +247,8 @@ function RunDrawer({ id, onClose }: { id: string; onClose: () => void }) {
                     {l.overtimeCents > 0 && <div className="xs muted">+ {formatZar(l.overtimeCents)} overtime</div>}
                     {l.commissionCents > 0 && <div className="xs muted">+ {formatZar(l.commissionCents)} commission</div>}
                     {l.extraCents > 0 && <div className="xs muted">+ {formatZar(l.extraCents)} {l.note || 'bonus'}</div>}
+                    {Number(l.unpaidLeaveCents) > 0 && <div className="xs muted">− {formatZar(Number(l.unpaidLeaveCents))} unpaid leave ({formatDays(Number(l.unpaidLeaveDays))})</div>}
+                    {Number(l.leavePaidOutCents) > 0 && <div className="xs muted">+ {formatZar(Number(l.leavePaidOutCents))} annual leave paid out ({formatDays(Number(l.leavePaidOutDays))})</div>}
                   </td>
                   <td className="num hide-sm"><Money cents={l.grossCents} /></td>
                   <td className="num"><Money cents={l.payeCents} /></td>
@@ -279,6 +297,7 @@ function RunDrawer({ id, onClose }: { id: string; onClose: () => void }) {
       {edit && (
         <LineDrawer
           line={edit}
+          period={run.period}
           onClose={() => setEdit(null)}
           onSave={(body) =>
             void act(() => api(`/api/pay-runs/${id}/lines/${edit.employeeId}`, { method: 'PUT', body })).then(() => setEdit(null))
@@ -290,20 +309,36 @@ function RunDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   );
 }
 
-function LineDrawer({ line, onClose, onSave, onRemove }: { line: Line; onClose: () => void; onSave: (b: { salaryCents: number; overtimeCents: number; commissionCents: number; extraCents: number; note: string }) => void; onRemove: () => void }) {
+function LineDrawer({ line, period, onClose, onSave, onRemove }: { line: Line; period: string; onClose: () => void; onSave: (b: { salaryCents: number; overtimeCents: number; commissionCents: number; extraCents: number; note: string; leavePaidOutDays: number | null }) => void; onRemove: () => void }) {
   const [salary, setSalary] = useState<number | null>(line.salaryCents);
   const [overtime, setOvertime] = useState<number | null>(line.overtimeCents || null);
   const [commission, setCommission] = useState<number | null>(line.commissionCents || null);
   const [extra, setExtra] = useState<number | null>(line.extraCents || null);
   const [note, setNote] = useState(line.note);
+  // Leaving this month: the annual leave owed on the last day is paid out (BCEA s40), as the leave records have it unless changed here.
+  const leaving = Boolean(line.endDate && line.endDate.slice(0, 7) === period);
+  const [outDays, setOutDays] = useState<string>(line.leavePaidOutGiven == null ? '' : String(Number(line.leavePaidOutGiven)));
   return (
     <Drawer title={line.name} sub="This month only" onClose={onClose}>
-      <form className="stack" onSubmit={(e) => (e.preventDefault(), onSave({ salaryCents: salary ?? 0, overtimeCents: overtime ?? 0, commissionCents: commission ?? 0, extraCents: extra ?? 0, note }))}>
-        <Field label="Salary this month" hint="Less for a part month or unpaid leave">{(p) => <MoneyInput {...p} value={salary} onChange={setSalary} />}</Field>
+      <form className="stack" onSubmit={(e) => (e.preventDefault(), onSave({ salaryCents: salary ?? 0, overtimeCents: overtime ?? 0, commissionCents: commission ?? 0, extraCents: extra ?? 0, note, leavePaidOutDays: leaving && outDays.trim() !== '' ? Number(outDays) : null }))}>
+        <Field label="Salary this month" hint="The full month’s salary: less only for a part month. Unpaid leave recorded under Leave comes off by itself">{(p) => <MoneyInput {...p} value={salary} onChange={setSalary} />}</Field>
+        {Number(line.unpaidLeaveCents) > 0 && (
+          <p className="xs muted">
+            Unpaid leave this month: {formatDays(Number(line.unpaidLeaveDays))}, {formatZar(Number(line.unpaidLeaveCents))} off the salary at a day’s pay (BCEA s35: the month’s salary × 3 ÷ 13 ÷ the days they work in a week), from the leave records.
+          </p>
+        )}
         <Field label="Overtime (optional)" hint="Taxed with the salary, as SARS’s tables do">{(p) => <MoneyInput {...p} value={overtime} onChange={setOvertime} />}</Field>
         <Field label="Commission (optional)" hint="Taxed with the salary; no UIF on commission">{(p) => <MoneyInput {...p} value={commission} onChange={setCommission} />}</Field>
         <Field label="Bonus or other once-off pay (optional)" hint="Taxed as the tax it adds to the year, on top of any earlier bonus">{(p) => <MoneyInput {...p} value={extra} onChange={setExtra} />}</Field>
         {Boolean(extra) && <Field label="What it’s for">{(p) => <input {...p} className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Year-end bonus" />}</Field>}
+        {leaving && (
+          <Field
+            label="Annual leave paid out on leaving (days)"
+            hint={`They leave on ${formatDate(line.endDate)}: the leave records have ${formatDays(Number(line.leavePaidOutDays))} owed then (${formatZar(Number(line.leavePaidOutCents))}), taxed as an annual payment. Leave it empty for that; give the days if they differ.`}
+          >
+            {(p) => <input {...p} className="input" type="number" min={0} step={0.5} value={outDays} onChange={(e) => setOutDays(e.target.value)} placeholder={String(Number(line.leavePaidOutDays))} />}
+          </Field>
+        )}
         <button className="btn primary big block">Work it out</button>
         <button type="button" className="btn quiet danger" onClick={onRemove}>
           Not paid this month
@@ -372,12 +407,19 @@ function EmployeeDrawer({ employee: e, onClose, onSaved }: { employee: Employee 
     endDate: e?.endDate ?? '',
     bankDetails: e?.bankDetails ?? '',
     active: e?.active ?? true,
+    leaveDaysPerWeek: e ? Number(e.leaveDaysPerWeek) : 5,
+    annualLeaveDays: e?.annualLeaveDays == null ? '' : String(Number(e.annualLeaveDays)),
+    familyLeaveDays: e ? Number(e.familyLeaveDays) : 3,
+    leaveFrom: e?.leaveFrom ?? '',
+    leaveOpeningAnnual: e ? Number(e.leaveOpeningAnnual) : 0,
+    leaveOpeningSick: e ? Number(e.leaveOpeningSick) : 0,
+    leaveOpeningFamily: e ? Number(e.leaveOpeningFamily) : 0,
   });
   const [error, setError] = useState('');
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((x) => ({ ...x, [k]: v }));
   const save = async (ev: FormEvent) => {
     ev.preventDefault();
-    const body = { ...f, salaryCents: f.salaryCents ?? 0, endDate: f.endDate || null };
+    const body = { ...f, salaryCents: f.salaryCents ?? 0, endDate: f.endDate || null, annualLeaveDays: f.annualLeaveDays.trim() === '' ? null : Number(f.annualLeaveDays), leaveFrom: f.leaveFrom || null };
     try {
       if (e) await api(`/api/employees/${e.id}`, { method: 'PUT', body });
       else await api('/api/employees', { body });
@@ -432,6 +474,34 @@ function EmployeeDrawer({ employee: e, onClose, onSaved }: { employee: Employee 
             <div className="xs muted">Untick for someone working under 24 hours a month, or a non-executive director. Ask your accountant if unsure.</div>
           </span>
         </label>
+        <h3>Leave</h3>
+        <div className="form-grid">
+          <Field label="Days they work in a usual week" hint="For a day’s pay and the leave a week gives">
+            {(p) => <input {...p} className="input" type="number" min={0.5} max={7} step={0.5} value={f.leaveDaysPerWeek} onChange={(x) => set('leaveDaysPerWeek', Number(x.target.value))} />}
+          </Field>
+          <Field label="Annual leave a year (working days)" hint={`At least the BCEA’s three weeks: ${bceaAnnualDays(f.leaveDaysPerWeek || 5)}. More if their contract gives more`}>
+            {(p) => <input {...p} className="input" type="number" min={0} step={0.5} value={f.annualLeaveDays} placeholder={String(bceaAnnualDays(f.leaveDaysPerWeek || 5))} onChange={(x) => set('annualLeaveDays', x.target.value)} />}
+          </Field>
+          <Field label="Family responsibility leave a year (days)" hint="Three in the BCEA; a sectoral determination or the contract may give more">
+            {(p) => <input {...p} className="input" type="number" min={0} max={30} step={0.5} value={f.familyLeaveDays} onChange={(x) => set('familyLeaveDays', Number(x.target.value))} />}
+          </Field>
+          <Field label="Leave records start (if after they started)" hint="When you start keeping their leave in Shap">
+            {(p) => <input {...p} className="input" type="date" value={f.leaveFrom} onChange={(x) => set('leaveFrom', x.target.value)} />}
+          </Field>
+        </div>
+        {f.leaveFrom && f.leaveFrom > f.startDate && (
+          <div className="form-grid">
+            <Field label={`Annual leave owed on ${formatDate(f.leaveFrom)} (days)`}>
+              {(p) => <input {...p} className="input" type="number" step={0.5} value={f.leaveOpeningAnnual} onChange={(x) => set('leaveOpeningAnnual', Number(x.target.value))} />}
+            </Field>
+            <Field label="Paid sick days already taken in that sick leave cycle" hint="Their 36-month cycle from the day they started">
+              {(p) => <input {...p} className="input" type="number" min={0} step={0.5} value={f.leaveOpeningSick} onChange={(x) => set('leaveOpeningSick', Number(x.target.value))} />}
+            </Field>
+            <Field label="Family responsibility days already taken that year" hint="Their leave year runs from the day they started">
+              {(p) => <input {...p} className="input" type="number" min={0} step={0.5} value={f.leaveOpeningFamily} onChange={(x) => set('leaveOpeningFamily', Number(x.target.value))} />}
+            </Field>
+          </div>
+        )}
         <Field label="Their bank details (optional)">{(p) => <textarea {...p} className="textarea" rows={2} value={f.bankDetails} onChange={(x) => set('bankDetails', x.target.value)} />}</Field>
         {e && (
           <label className="check">

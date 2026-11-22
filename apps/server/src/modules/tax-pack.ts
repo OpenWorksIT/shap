@@ -16,6 +16,7 @@ import { z } from 'zod';
 import { requireAccess, can, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { assessedLossBefore, broughtInThrough, freshTotals, getSettings, importedVat, sbcAnswer, today } from '../lib/books.js';
+import { leavePayAddBack } from '../lib/leave.js';
 import { parse } from '../lib/validate.js';
 import { usePdfFonts } from './pdf.js';
 import { vat201 } from './taxforms.js';
@@ -53,7 +54,9 @@ export async function taxPack(db: Db, fyEnd: string, o: { people?: boolean } = {
   // The small business corporation table if the company says it qualifies for the year and its
   // gross income is within the limit; not said, both figures (the company rate's as the estimate).
   const sbc = kind === 'company' && entity(s.businessType).sbcPossible ? sbcApplies((await sbcAnswer(db, fy.end, s.businessType)).sbc, income) : false;
-  const est = (onSbc: boolean) => estimateTax({ kind, profitCents: profitBeforeTax, assessedLossCents, fyEnd: fy.end, sbc: onSbc, approvedPbo: s.approvedPbo, distributedCents: extra.distributedCents, partners: extra.partners } as Parameters<typeof estimateTax>[0]);
+  // Leave pay owed booked at the year end: deductible only once paid (s7B), so added back.
+  const leaveAddBackCents = await leavePayAddBack(db, fy.start, fy.end);
+  const est = (onSbc: boolean) => estimateTax({ kind, profitCents: profitBeforeTax + leaveAddBackCents, assessedLossCents, fyEnd: fy.end, sbc: onSbc, approvedPbo: s.approvedPbo, distributedCents: extra.distributedCents, partners: extra.partners } as Parameters<typeof estimateTax>[0]);
   const estimate = est(sbc === true);
   const sbcTaxCents = sbc === null ? est(true).taxCents : null;
   // Paid to SARS: each payment off what's owed (posting by posting, not the day's net, which a
@@ -100,6 +103,7 @@ export async function taxPack(db: Db, fyEnd: string, o: { people?: boolean } = {
     incomeCents: income,
     costsCents: costs,
     profitBeforeTax,
+    leaveAddBackCents,
     assessedLossCents,
     estimate: { ...estimate, sbc, sbcTaxCents },
     estimates,
@@ -208,6 +212,7 @@ export function renderTaxPack(t: Awaited<ReturnType<typeof taxPack>>): Promise<B
     ['', 'R'],
     [
       ['Profit (loss) before tax, from the books', t.profitBeforeTax],
+      ...(t.leaveAddBackCents ? [[t.leaveAddBackCents > 0 ? 'Leave pay owed at the year end, added back (deductible when paid: s7B)' : 'Leave pay owed at the start of the year, paid or taken in it (s7B)', t.leaveAddBackCents] as [string, number]] : []),
       ...(t.assessedLossCents ? [['Assessed loss brought forward (earlier years’ losses in the books)', -t.assessedLossCents] as [string, number]] : []),
       ['Taxable income (estimate)', t.estimate.taxableCents],
       [`Tax (estimate${t.kind === 'company' ? (t.estimate.sbc ? ', small business corporation rates' : ', company rate') : ''})`, t.estimate.taxCents],

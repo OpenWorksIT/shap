@@ -3,7 +3,7 @@
  * deleted from the app, and it's part of every backup, so the history goes wherever the books go.
  */
 import { useEffect, useState } from 'react';
-import { ACCOUNT_TYPE_LABELS, formatDate, formatZar, STATEMENT_LINES } from '@shap/shared';
+import { ACCOUNT_TYPE_LABELS, CATEGORY_KIND_LABELS, formatDate, formatZar, STATEMENT_LINES } from '@shap/shared';
 import { api, ApiError, apiUrl } from '../lib/api';
 import { Field, Loading } from './ui';
 
@@ -43,6 +43,8 @@ const RECORDS: Record<string, string> = {
   brand: 'Trading name',
   partner: 'Partner',
   profit_share: 'Profit share',
+  leave: 'Leave',
+  leave_pay: 'Leave pay owed',
   wage_payment: 'Wage payment',
   sars_payment: 'Payment to SARS',
   tax_estimate: 'Tax estimate',
@@ -84,6 +86,7 @@ const ACTIONS: Record<string, string> = {
   restore_company_file: 'company file loaded',
   account_line_changed: 'line or type changed',
   moved_to_account: 'moved onto another account',
+  kind_changed: 'kind changed',
 };
 export const recordName = (e: string) => RECORDS[e] ?? e.replace(/_/g, ' ');
 const actionName = (a: string) => ACTIONS[a] ?? a.replace(/_/g, ' ');
@@ -124,6 +127,13 @@ function movedWords(x: unknown): string {
   return years.length ? `, with ${years.map((y) => `${formatZar(Math.abs(y.cents!))} ${y.cents! > 0 ? 'debit' : 'credit'} of the year to ${formatDate(y.fyEnd!, 'long')}`).join(', ')}` : '';
 }
 
+/** What a cost type's change of kind moved between accounts (its costs' work in progress), by financial year. */
+function postedWords(x: unknown): string {
+  const rows = Array.isArray(x) ? (x as { fyEnd?: string; account?: unknown; cents?: number }[]).filter((y) => y.fyEnd && y.cents) : [];
+  return rows.length ? `; ${rows.map((y) => `${formatZar(Math.abs(y.cents!))} ${y.cents! > 0 ? 'debit' : 'credit'} to ${accountWords(y.account)} in the year to ${formatDate(y.fyEnd!, 'long')}`).join(', ')}` : '';
+}
+const kindLabel = (k: unknown) => (typeof k === 'string' ? ((CATEGORY_KIND_LABELS as Record<string, string | undefined>)[k] ?? k) : '');
+
 /** The few details worth reading in a row; the rest are in the export. */
 function detailText(d: Record<string, unknown>): string {
   const bits: string[] = [];
@@ -137,6 +147,8 @@ function detailText(d: Record<string, unknown>): string {
   // A move or a change of line names both sides, and what did it (a company file): only there, as
   // other rows' "by" (a lock's, an import's ids) reads badly alone, and would hide their details.
   if (d.from && typeof d.from === 'object' && d.to && typeof d.to === 'object') bits.push(`from ${accountWords(d.from)} to ${accountWords(d.to)}${movedWords(d.moved)}${typeof d.by === 'string' ? ` · by ${d.by}` : ''}`);
+  // A cost type's change of kind: what it moved (its "by" said once, above when it moved too).
+  if (typeof d.kindTo === 'string') bits.push(`kind ${kindLabel(d.kindFrom)} to ${kindLabel(d.kindTo)}${postedWords(d.posted)}${typeof d.by === 'string' && !(d.from && d.to) ? ` · by ${d.by}` : ''}`);
   if (!bits.length) {
     const keys = Object.keys(d).filter((k) => !['ip', 'url'].includes(k));
     if (keys.length) bits.push(keys.slice(0, 4).map((k) => `${k}: ${typeof d[k] === 'object' ? '…' : String(d[k])}`).join(', '));
