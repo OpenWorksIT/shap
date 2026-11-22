@@ -1,5 +1,5 @@
 import type { FastifyRequest } from 'fastify';
-import { addDays, assessedLossCarried, formatDate, closesBy, entity, featureOn, financialYear, periodLockDue, safeText, standardNames, todayIso, type BusinessType, type TaxEstimateFigures, type VatCategory } from '@shap/shared';
+import { addDays, assessedLossCarried, formatDate, closesBy, entity, featureOn, financialYear, periodLockDue, safeText, standardNames, STATEMENT_LINES, todayIso, type BusinessType, type TaxEstimateFigures, type VatCategory } from '@shap/shared';
 import type { Db } from '../db/index.js';
 import { audit } from './audit.js';
 import { badRequest } from './errors.js';
@@ -243,9 +243,47 @@ export async function moveToAccount<T>(
     if (vat) throw refuse(closedWords(), 'Make a new one for what’s coming instead.');
   }
   const ownBefore = await closedOwn();
+  // What the cost type's own costs post, by account and financial year: a change of kind moves
+  // open work in progress into an expense (or back), which the log keeps with the amounts (3.12).
+  const ownPostings = async () => {
+    const rows = await tx<{ accountId: string; m: string; t: string }[]>`
+      select l.account_id, to_char(l.date, 'YYYY-MM') as m, sum(l.amount_cents)::bigint as t from ledger_detail l
+      where l.source = 'cost' and l.source_id in (select id from costs where category_id = ${o.id}) group by 1, 2`;
+    const out = new Map<string, number>();
+    for (const r of rows) {
+      const key = `${r.accountId}|${financialYear(`${r.m}-01`, fyEndMonth).end}`;
+      out.set(key, (out.get(key) ?? 0) + Number(r.t));
+    }
+    return out;
+  };
+  const postedBefore = kindChanges ? await ownPostings() : null;
+  const kindMoved = async () => {
+    if (!postedBefore) return null;
+    const after = await ownPostings();
+    const moved: { fyEnd: string; account: { code: string | null; name: string | null; line: string | null }; cents: number }[] = [];
+    for (const key of new Set([...postedBefore.keys(), ...after.keys()])) {
+      const cents = (after.get(key) ?? 0) - (postedBefore.get(key) ?? 0);
+      if (!cents) continue;
+      const [accountId, fyEnd] = key.split('|') as [string, string];
+      const w = await accountWords(tx, accountId);
+      moved.push({ fyEnd, account: { code: w.code, name: w.name, line: w.line }, cents });
+    }
+    return { kindFrom: was.kind, kindTo: o.kind, posted: moved.sort((x, y) => y.fyEnd.localeCompare(x.fyEnd) || String(x.account.code).localeCompare(String(y.account.code))) };
+  };
   if (!moving) {
     const row = await update();
     if ((await closedOwn()) !== ownBefore) throw refuse(closedWords(), 'Make a new one for what’s coming instead.');
+    const k = await kindMoved();
+    if (k)
+      await audit(tx, {
+        userId: o.userId ?? null,
+        actor: o.userId ? 'user' : 'system',
+        action: 'kind_changed',
+        entity: 'cost_category',
+        entityId: o.id,
+        ip: o.ip,
+        details: { name: was.name, ...k, ...(o.file ? { by: 'the company file' } : {}) },
+      });
     return row;
   }
   // What's on the old account, before and after (its entries, not an agreed year's adjustments):
@@ -260,8 +298,14 @@ export async function moveToAccount<T>(
   // way (that's a judgement, made on the account's line). Only when one account is on them and the
   // other isn't can anything cross: then all of it is counted, and what's from before this
   // financial year (last year's figures).
-  const sides = await tx<{ cash: boolean }[]>`select coalesce(statement_line in ('cash', 'bank_overdraft'), false) as cash from accounts where id in ${tx([was.accountId, o.to])}`;
+  const sides = await tx<{ id: string; cash: boolean; line: string | null }[]>`select id, coalesce(statement_line in ('cash', 'bank_overdraft'), false) as cash, statement_line as line from accounts where id in ${tx([was.accountId, o.to])}`;
   const crossing = sides.length === 2 && sides[0]!.cash !== sides[1]!.cash;
+  // A payment account's history moving to another line of the statements at all (between two
+  // lines off cash, or from cash to a bank overdraft) is the same judgement, made on the account's
+  // line: refused when anything already captured would move. (A cost type's costs moving between
+  // the income statement's lines is a reclassification, logged.)
+  const lineOf = (id: string) => sides.find((x) => x.id === id)?.line ?? null;
+  const relined = !costType && !crossing && sides.length === 2 && lineOf(was.accountId) !== lineOf(o.to);
   const onCash = async () => {
     const [n] = await tx<{ total: string; lastYear: string }[]>`
       select count(*)::bigint as total, count(*) filter (where l.date < ${year.start}::date)::bigint as last_year
@@ -274,6 +318,17 @@ export async function moveToAccount<T>(
   const row = await update();
   const oldAfter = await onOld();
   if (oldAfter.closed !== oldBefore.closed || (await closedOwn()) !== ownBefore) throw refuse(closedWords(), 'Make a new one for what’s coming instead.');
+  if (relined) {
+    const left = [...new Set([...oldBefore.months.keys(), ...oldAfter.months.keys()])].filter((m) => (oldBefore.months.get(m) ?? 0) !== (oldAfter.months.get(m) ?? 0));
+    if (left.length) {
+      const label = (l: string | null) => (l ? ((STATEMENT_LINES as Record<string, { label: string } | undefined>)[l]?.label ?? l) : 'no line');
+      throw refuse(
+        `What’s already captured with this would move from the statements’ ${label(lineOf(was.accountId))} line to ${label(lineOf(o.to))} with it${left.some((m) => `${m}-01` < year.start) ? ', last year’s figures too' : ''}.`,
+        `If the account it’s on now is on the wrong line, change that account’s line instead (Settings → Lists → Chart of accounts: that moves everything in it, last year’s figures too), after checking with your accountant; if the new account has nothing in it yet, put it on the same line first; otherwise add a new one under Paid from / into for what’s coming.`,
+        `${changeFile} Or, if the new account has nothing in it yet, put it on the same line in the file, after checking with your accountant.`,
+      );
+    }
+  }
   if (before) {
     const after = await onCash();
     if (after.all !== before.all)
@@ -303,6 +358,8 @@ export async function moveToAccount<T>(
       from: fromWords,
       to: await accountWords(tx, o.to),
       moved: [...byYear].filter(([, c]) => c !== 0).sort(([x], [y]) => y.localeCompare(x)).map(([fyEnd, cents]) => ({ fyEnd, cents })),
+      // Its kind changed with it: what that moved between accounts too (work in progress).
+      ...((await kindMoved()) ?? {}),
       ...(o.file ? { by: 'the company file' } : {}),
     },
   });

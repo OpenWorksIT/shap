@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { addDays, addMonths, dwtDue, emp201Due, featureOn, formatDate, monthEnd, payoutWord, vat201Due, vatPeriod } from '@shap/shared';
+import { addBusinessDays, addDays, addMonths, dwtDue, emp201Due, featureOn, formatDate, formatZar, monthEnd, payoutWord, vat201Due, vatPeriod } from '@shap/shared';
 import { can, requireAccess, userOrThrow } from '../auth.js';
 import type { Ctx } from '../context.js';
 import { freshTotals, getSettings, today } from '../lib/books.js';
@@ -119,17 +119,24 @@ export async function cashForecast(db: Db, now = today(), opts: { people?: boole
   // by today and not paid by the forecast's end, in full this week, as if paid now. And what the
   // books owe on those accounts beyond Shap's own records of them (a journal by hand, balances
   // brought in, a year-end adjustment), less what's booked to pay it ahead, signed: what's owed
-  // beyond goes out this week too (less workers' advances, which may have paid it); a journal that
-  // paid what Shap's records still show owed comes off them (never below nothing).
+  // beyond goes out this week too (less workers' advances paid since it came onto the account,
+  // which may have paid it: an advance from before then can't have); a journal that paid what
+  // Shap's records still show owed comes off them (never below nothing).
   const beyond = async (rows: Promise<{ owed: number; paidAhead: number }[]>) => {
     const [b] = await rows;
     return Number(b!.owed) - Number(b!.paidAhead);
   };
   {
+    // The first day an amount owed came onto the wages account from outside Shap's records.
+    const [first] = await db<{ d: string | null }[]>`
+      select min(l.date)::text as d from ledger l join accounts a on a.id = l.account_id
+      where a.system_key = 'wages_payable' and l.source not in ('labour', 'wage_payment') and l.amount_cents < 0 and l.date <= ${now}::date`;
+    const since = first?.d ?? addDays(now, 1);
     const [w] = await db<{ owed: number; advances: number }[]>`
       select coalesce(sum(greatest(0, owed - greatest(0, paid_ahead - earned_ahead))), 0)::bigint as owed,
-        coalesce(sum(greatest(0, -owed)), 0)::bigint as advances from (
+        coalesce(sum(case when owed < 0 then least(-owed, paid_since) else 0 end), 0)::bigint as advances from (
         select w.id,
+          coalesce((select sum(amount_cents) from wage_payments where worker_id = w.id and date >= ${since}::date and date <= ${now}::date), 0) as paid_since,
           coalesce((select sum(wage_cents + allowance_cents) from labour_entries where worker_id = w.id and date <= ${now}::date), 0)
             - coalesce((select sum(amount_cents) from wage_payments where worker_id = w.id and date <= ${now}::date), 0) as owed,
           coalesce((select sum(amount_cents) from wage_payments where worker_id = w.id and date > ${now}::date and date <= ${end}::date), 0) as paid_ahead,
@@ -200,6 +207,11 @@ export async function cashForecast(db: Db, now = today(), opts: { people?: boole
     if (cents > 0) add(d.dueOn, d.kind === 'emp201' ? `EMP201 for ${monthWords(d.period)}` : `Dividends tax (DTR01) for ${monthWords(d.period)}`, -cents, d.kind === 'emp201' ? 'emp201' : 'dwt');
   }
   if (beyondRuns > 0) add(now, `${listed > 0 ? 'Other PAYE' : 'PAYE'}, UIF and SDL owed in the books (a journal, balances brought in, or a payment dated after these weeks), as if paid now`, -beyondRuns, 'emp201');
+  // Dividends tax owed in the books beyond the DTR01s listed (brought in when moving in, or a
+  // journal by hand): this week, as if paid now, as PAYE's is.
+  const listedDwt = owed.filter((d) => d.kind === 'dwt').reduce((s, d) => s + Number(d.owingCents), 0);
+  const dwtBeyond = Number(dwtBooks!.owed) - listedDwt;
+  if (dwtBeyond > 0) add(now, `${listedDwt > 0 ? 'Other dividends tax' : 'Dividends tax'} owed in the books (a journal, balances brought in, or a payment dated after these weeks), as if paid now`, -dwtBeyond, 'dwt');
 
   // Salaries: each employee in the last pay run at the middle of their last three pay lines (so a
   // bonus month isn't repeated, and someone new counts in full), while a run for the month would
@@ -304,7 +316,15 @@ export async function cashForecast(db: Db, now = today(), opts: { people?: boole
     const atLastStart = -(await balanceOf('vat', addDays(last.start, -1)));
     const refundsIn = -within(last.start, end).filter((e) => e.payment && Number(e.t) < 0).reduce((t, e) => t + Number(e.t), 0);
     const lastNet = await accrued(last.start, last.end);
-    const refundsDue = Math.max(0, -atLastStart) + Math.max(0, -lastNet);
+    // The balance before the last period nets the older periods' debts and refunds. A refund that
+    // came in during the last period was an older one (the last period's own can't be paid before
+    // its VAT201 is filed): the older refunds were at least that, and the older debts that much more
+    // than the balance shows. So what came in then clears older refunds, never the last period's or
+    // this one's, and the older debt it uncovers is still owed (or was set off).
+    const inDuringLast = -within(last.start, last.end).filter((e) => e.payment && Number(e.t) < 0).reduce((t, e) => t + Number(e.t), 0);
+    const olderRefunds = Math.max(0, -atLastStart, inDuringLast);
+    const olderDebts = atLastStart + olderRefunds;
+    const refundsDue = olderRefunds + Math.max(0, -lastNet);
     // SARS must set a refund off against VAT already overdue before it pays the rest (TAA
     // s191(1)), and clears the whole overdue debt before paying anything: once a refund has come in
     // (by today: one booked ahead hasn't), VAT overdue for an ended period (older periods', last
@@ -313,11 +333,17 @@ export async function cashForecast(db: Db, now = today(), opts: { people?: boole
     // What's still overdue: less what was paid to SARS since the last period began. A set-off only
     // when some of what came in came after the debt fell due (one paid before couldn't be net of it).
     const paidSinceLast = within(last.start, now).filter((e) => e.payment && Number(e.t) > 0).reduce((t, e) => t + Number(e.t), 0);
-    const overdue = Math.max(0, Math.max(0, atLastStart) + (vat201Due(last.end) < now ? Math.max(0, lastNet) : 0) - paidSinceLast);
-    const fellDue = atLastStart > 0 ? vat201Due(addDays(last.start, -1)) : vat201Due(last.end);
+    const overdue = Math.max(0, olderDebts + (vat201Due(last.end) < now ? Math.max(0, lastNet) : 0) - paidSinceLast);
+    const fellDue = olderDebts > 0 ? vat201Due(addDays(last.start, -1)) : vat201Due(last.end);
     const cameIn = -within(last.start, now).filter((e) => e.payment && Number(e.t) < 0).reduce((t, e) => t + Number(e.t), 0);
     const cameInAfter = -within(addDays(fellDue, 1), now).filter((e) => e.payment && Number(e.t) < 0).reduce((t, e) => t + Number(e.t), 0);
-    const setOff = cameInAfter > 0 && overdue > 0 && cameIn + overdue <= refundsDue ? overdue : 0;
+    // The last period is a refund, the older VAT was already overdue when it arose and is as much or
+    // more, and nothing has come in: SARS keeps the whole refund against that debt. Taken as kept
+    // once the refund would have been paid (21 business days after its VAT201 was due: VAT Act
+    // s45(1)). (An older refund not paid while a later debt fell due may still be under SARS's
+    // checks: not taken as set off.)
+    const wholeKept = refundsIn === 0 && cameIn === 0 && lastNet < 0 && olderRefunds === 0 && overdue >= -lastNet && addBusinessDays(vat201Due(last.end), 21) < now;
+    const setOff = wholeKept ? refundsDue : cameInAfter > 0 && overdue > 0 && cameIn + overdue <= refundsDue ? overdue : 0;
     const refundsOwed = Math.max(0, refundsDue - refundsIn - setOff);
     // A refund received (booked ahead) beyond what the ended periods were owed is this period's own,
     // when this period is a refund: not owed for an ended one.
@@ -331,7 +357,7 @@ export async function cashForecast(db: Db, now = today(), opts: { people?: boole
       const lastRaw = await accrued(last.start, last.end);
       // Owed before the last period began (a refund owed as nothing), less what was paid to SARS
       // during it; what was paid beyond that was paid ahead for the last period's own.
-      const olderAtLastStart = Math.max(0, -(await balanceOf('vat', addDays(last.start, -1))));
+      const olderAtLastStart = olderDebts;
       const paidInLast = within(last.start, last.end).filter((e) => e.payment && Number(e.t) > 0).reduce((t, e) => t + Number(e.t), 0);
       const owedAtStart = Math.max(0, olderAtLastStart - paidInLast) + Math.max(0, Math.max(0, lastRaw) - Math.max(0, paidInLast - olderAtLastStart));
       thisPeriod = Math.max(0, thisPeriod - Math.min(-ended, Math.max(0, paidSince - owedAtStart)));
@@ -346,9 +372,10 @@ export async function cashForecast(db: Db, now = today(), opts: { people?: boole
       select count(*)::int as n from ledger l join accounts a on a.id = l.account_id
       join journals j on l.source = 'journal' and j.id = l.source_id join ledger_imports li on li.id = j.ledger_import_id
       where a.system_key = 'vat' and li.kind = 'trialBalance' and l.date between ${last.start}::date and ${now}::date`;
+    const kept = wholeKept ? `, less the refund of ${formatZar(refundsDue)} SARS keeps against it (it sets a refund off against VAT overdue: TAA s191; check your SARS statement)` : '';
     if (older > 0)
-      add(now, `VAT owing for periods before ${formatDate(last.start)}${tb!.n ? ', or brought in with a trial balance' : ''} (VAT201, an estimate, as if paid now)`, -older, 'vat');
-    if (forLast > 0) add(vat201Due(last.end), `VAT for the period to ${formatDate(last.end)} (VAT201)`, -forLast, 'vat');
+      add(now, `VAT owing for periods before ${formatDate(last.start)}${tb!.n ? ', or brought in with a trial balance' : ''}${kept} (VAT201, an estimate, as if paid now)`, -older, 'vat');
+    if (forLast > 0) add(vat201Due(last.end), `VAT for the period to ${formatDate(last.end)} (VAT201${older > 0 ? '' : kept})`, -forLast, 'vat');
     if (thisPeriod > 0) add(vat201Due(current.end), `VAT so far on the period to ${formatDate(current.end)} (VAT201)`, -thisPeriod, 'vat');
   }
 

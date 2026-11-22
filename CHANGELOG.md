@@ -21,6 +21,23 @@ entries newer than the version you're running before you update.
   say when it's missing or the records have changed since. It isn't deductible until paid (s7B):
   the tax pack and the statements' tax estimate add the year's increase back. Figures from the leave
   records, for you and your accountant to check: Shap isn't a labour adviser. docs/LEAVE.md.
+- **What 1.33's audit noted, put right:**
+  - The forecast's VAT: a refund that came in during the last period for an older one is taken
+    against the older period only, never against the last period's or this one's (it could
+    understate the VAT owed for an ended period); and when nothing has come in, the overdue debt is
+    as much as the refunds owed, and SARS has had the refund to pay (21 business days after its
+    VAT201 was due), the refund is taken as kept against the debt (TAA s191), and the forecast says
+    so (check your SARS statement).
+  - The forecast takes dividends tax owed in the books beyond your DTR01s (brought in when moving
+    in, or a journal) as going out now, as it does PAYE; and a worker's advance comes off other
+    amounts owed on the wages account only when it was paid since they came onto it.
+  - An asset made from a cost checks that the cost's own period is open (its VAT moves into box
+    14 on the register), and so does changing or deleting it.
+  - A cost type's change of kind is in the audit log, with what it moved between accounts (work in
+    progress into an expense, or back) by financial year.
+  - Moving a used payment account onto an account on another line of the statements is refused
+    (between two lines off cash, or from cash to a bank overdraft), as onto or off the cash line
+    was: change the account's line instead, after checking with your accountant.
 
 ## 1.33.0 (21 November 2026)
 

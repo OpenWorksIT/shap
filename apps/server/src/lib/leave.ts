@@ -70,11 +70,11 @@ export async function loadLeave(db: Db, employeeId?: string): Promise<EmployeeLe
   const ids = people.map((p) => p.id);
   const entries = await db<LeaveEntryRow[]>`
     select id, employee_id, kind, adjustment, from_date::text, to_date::text, days::float8 as days, paid, certificate, reason, note
-    from leave_entries where employee_id = any(${ids}) order by from_date, created_at`;
+    from leave_entries where employee_id = any(${ids}::uuid[]) order by from_date, created_at`;
   const out = await db<{ employeeId: string; date: string; days: number; runId: string }[]>`
     select l.employee_id, r.pay_date::text as date, l.leave_paid_out_days::float8 as days, r.id as run_id
     from pay_lines l join pay_runs r on r.id = l.run_id
-    where r.status = 'final' and l.employee_id = any(${ids}) and l.leave_paid_out_days > 0`;
+    where r.status = 'final' and l.employee_id = any(${ids}::uuid[]) and l.leave_paid_out_days > 0`;
   return people.map((p) => ({
     employee: p,
     terms: leaveTerms(p),

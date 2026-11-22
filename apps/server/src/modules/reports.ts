@@ -425,8 +425,10 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!input.costId && !input.sourceId) throw badRequest('Say how it was paid for');
     await assertOpen(sql, input.purchaseDate, input.disposedOn);
     if (input.costId) {
-      const [c] = await sql<{ amountCents: number; vatCents: number }[]>`select amount_cents, vat_cents from costs where id = ${input.costId}`;
+      const [c] = await sql<{ amountCents: number; vatCents: number; date: string }[]>`select amount_cents, vat_cents, date::text from costs where id = ${input.costId}`;
       if (!c) throw notFound('Cost');
+      // The cost's own period too: on the register, its VAT is a capital good's (VAT201 box 14).
+      await assertOpen(sql, c.date);
       input.costCents = c.amountCents - c.vatCents; // the cost entry is what posts; keep them equal
       if (input.inputVatDenied && Number(c.vatCents)) throw badRequest('SARS gives no VAT back on a motor car: take the VAT off the cost first (the whole amount is its cost).');
     }
@@ -445,6 +447,12 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
     // its cost and depreciation feed a signed-off balance sheet. (POST and DELETE already do this.)
     await assertOpen(sql, old.purchaseDate, input.purchaseDate, input.disposedOn);
     const costId = input.costId ?? old.costId;
+    // A cost taken onto (or off) the register in a closed period moves its VAT between boxes: the
+    // costs' own dates, the old one and the new.
+    if (costId !== old.costId) {
+      const dates = await sql<{ date: string }[]>`select date::text from costs where id in ${sql([costId, old.costId].filter(Boolean) as string[])}`;
+      await assertOpen(sql, ...dates.map((d) => d.date));
+    }
     if (costId) {
       const [c] = await sql<{ amountCents: number; vatCents: number }[]>`select amount_cents, vat_cents from costs where id = ${costId}`;
       if (c) input.costCents = c.amountCents - c.vatCents;
@@ -458,9 +466,10 @@ export function registerReportRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.delete('/api/assets/:id', { preHandler: requireAccess('books.adjust') }, async (req) => {
     const user = userOrThrow(req);
     const { id } = parse(idParam, req.params);
-    const [old] = await sql<{ purchaseDate: string }[]>`select purchase_date from assets where id = ${id}`;
+    const [old] = await sql<{ purchaseDate: string; costDate: string | null }[]>`select a.purchase_date, c.date::text as cost_date from assets a left join costs c on c.id = a.cost_id where a.id = ${id}`;
     if (!old) throw notFound('Asset');
-    await assertOpen(sql, old.purchaseDate);
+    // Taking a cost off the register moves its VAT out of box 14: not in a closed period.
+    await assertOpen(sql, old.purchaseDate, old.costDate);
     await sql`delete from assets where id = ${id}`;
     await audit(sql, { userId: user.id, action: 'delete', entity: 'asset', entityId: id, ip: req.ip });
     return { ok: true };
